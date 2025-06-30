@@ -1,14 +1,24 @@
-from toolz import pipe
 from .parsing import extract_text
 from .splitter import semantic_split
 from .utils import clean_text, enrich_metadata
 
-def chunk_pdf(filepath, chunk_size=1000, overlap=100): # Note: chunk_size default is now 700 due to previous change in scripts/chunk_pdf.py, but this function's signature can remain as is.
-    return pipe(
-        filepath,
-        extract_text,
-        clean_text,
-        lambda text: semantic_split(text, chunk_size, overlap),
-        enrich_metadata(filepath)
-    )
+def chunk_pdf(filepath, chunk_size=1000, overlap=100):
+    """
+    Core pipeline for processing a document.
+    Extracts, cleans, chunks, and formats the text.
+    """
+    # Direct function calls to avoid any potential caching issues with `pipe`.
+    
+    # 1. Extract text from the source file
+    raw_text = extract_text(filepath)
 
+    # 2. Clean the extracted text
+    cleaned_text = clean_text(raw_text)
+
+    # 3. Split the cleaned text into chunks
+    chunks = semantic_split(cleaned_text, chunk_size, overlap)
+
+    # 4. Process metadata (currently removes it)
+    final_chunks = enrich_metadata(filepath)(chunks)
+
+    return final_chunks

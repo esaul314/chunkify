@@ -2,18 +2,37 @@
 
 ## Project Intent
 
-This project aims to construct a robust, reusable, standalone Python library specifically for chunking large PDF documents, preparing them for training and further interactions within a local LLM environment. The implementation emphasizes declarative and functional programming principles, with clear adherence to Unix philosophy—creating simple, focused modules communicating through structured interfaces.
+This project aims to construct a robust, reusable, standalone Python library for chunking large **PDF and EPUB** documents, preparing them for training and further interactions within a local LLM environment. The implementation emphasizes declarative and functional programming principles, with clear adherence to Unix philosophy—creating simple, focused modules communicating through structured interfaces.
 
 ## Project State
 
-* Core PDF chunking logic and initial pipeline are defined and functional.
-* Initial data preparation scripts exist and are functioning in prototype mode.
+*   The core chunking pipeline is defined and functional for both **PDF and EPUB** documents.
+*   **Intelligent text cleaning** has been implemented to normalize extracted text, handle paragraph breaks, and clean up whitespace.
+*   The output format is a clean **JSONL**, suitable for LoRA training pipelines.
+*   The `_apply.sh` script has been enhanced into a versatile testing tool for validating both PDF and EPUB processing.
 
 ## Desired End-State
 
-* Highly reliable and modular chunking library specialized for large PDF documents.
-* Semantic-aware chunking capability integrated where beneficial (leveraging Haystack or RecursiveCharacterTextSplitter).
-* Simple, clear CLI-based workflow facilitating rapid iteration and testing via shell scripts.
+*   Highly reliable and modular chunking library specialized for multiple large document formats.
+*   Robust text processing heuristics to handle a variety of document layouts and formatting artifacts.
+*   Simple, clear CLI-based workflow facilitating rapid iteration and testing via shell scripts.
+
+## Core Functionality
+
+### Multi-Format Document Parsing
+The library can process both PDF and EPUB files seamlessly. The `parsing.py` module automatically detects the file type based on its extension and dispatches to the appropriate extractor.
+- **PDF Parsing**: Uses `pdfplumber` to extract text. It is optimized for documents that use visual layout to separate paragraphs.
+- **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup4` to parse EPUB container files, extract content from their internal HTML documents, and cleanly convert it to plain text.
+
+### Intelligent Text Cleaning
+The `utils.py` module contains a sophisticated `clean_text` function that applies a series of heuristics to normalize extracted content before chunking. This is crucial for creating high-quality, coherent chunks.
+- **Paragraph Normalization**: The function identifies paragraph breaks (double newlines) and cleans the text within them by merging single line breaks and normalizing whitespace. This ensures that the logical structure of the text is preserved.
+- **Standardization**: It produces a consistent output format (`\n\n` between paragraphs), which is what the downstream chunking module expects.
+
+### Configurable, Training-Ready Output
+The final output is a JSONL (JSON Lines) file, where each line is a JSON object representing a single text chunk.
+- **LoRA-Ready**: By default, the output is configured for LoRA training, containing only a `"text"` field for each chunk.
+- **Metadata Control**: The `enrich_metadata` function in `utils.py` can be easily toggled to include or exclude detailed metadata (like source file, split IDs, etc.) as needed.
 
 ## Project Architecture
 
@@ -23,9 +42,9 @@ The library is organized into clearly defined modules and scripts:
 pdf_chunker/
 ├── pdf_chunker/
 │   ├── core.py          # Pure chunking logic and main pipeline definition
-│   ├── parsing.py       # Extracting raw text from PDF documents
-│   ├── splitter.py      # Semantic or structural chunking logic (Haystack or LangChain)
-│   └── utils.py         # Pure utility functions (text cleaning, metadata handling)
+│   ├── parsing.py       # Extracting raw text from PDF and EPUB documents
+│   ├── splitter.py      # Passage-based structural chunking logic using Haystack
+│   └── utils.py         # Advanced text cleaning heuristics and metadata handling
 ├── scripts/
 │   └── chunk_pdf.py     # Command-line interface for triggering chunking operations
 ├── tests/               # doesn't exist yet
@@ -36,63 +55,55 @@ pdf_chunker/
 
 ### File Purposes and Evolution
 
-* **core.py**: Currently handles pipeline orchestration. This file will evolve to include more advanced pipeline control and improved functional composition.
-* **parsing.py**: Handles PDF text extraction. Enhancements will focus on supporting various PDF complexities and formats.
-* **splitter.py**: Implements chunking logic. Initially simple, will evolve towards sophisticated semantic-aware methods.
-* **utils.py**: Manages common reusable functions. Future versions will incorporate improved metadata tagging and richer context management.
-* **chunk\_pdf.py**: CLI script ensuring usability and integration with shell-based workflows. This will be extended to include more flexible user input handling and detailed logging.
-* **test\_core.py**: Implements rigorous testing strategies to guarantee reliability. This will expand to cover all aspects of the pipeline comprehensively.
+*   **core.py**: Handles pipeline orchestration, feeding the text from parsing to cleaning to splitting.
+*   **parsing.py**: **Handles text extraction for both PDF and EPUB formats.** Its modular design allows for easy addition of other document types in the future.
+*   **splitter.py**: Implements chunking logic using Haystack's `PreProcessor`, **configured to split by "passage" (paragraph)** to respect the document's structure.
+*   **utils.py**: **Manages advanced, heuristic-based text cleaning.** This is the core of the text normalization process and can be iteratively improved to handle more complex documents. Also controls metadata formatting.
+*   **chunk\_pdf.py**: CLI script ensuring usability and integration with shell-based workflows.
+*   **test\_core.py**: Implements rigorous testing strategies to guarantee reliability.
+
+## Usage and Testing
+
+### Command-Line Usage
+To process a document, run the following command from the project root:
+```shell
+./pdf-env/bin/python -m scripts.chunk_pdf path/to/your/document.pdf > output.jsonl
+```
+This command works for both `.pdf` and `.epub` files. You can also provide optional arguments like `--chunk_size` and `--overlap`.
+
+### Validation with `_apply.sh`
+The `_apply.sh` script is the primary tool for testing and validating functionality. It has been enhanced to test both PDF and EPUB files.
+
+-   **Test the default PDF (`sample-local-pdf.pdf`):**
+    ```shell
+    ./_apply.sh pdf
+    ```
+-   **Test the default EPUB (`accessible_epub_3.epub`):**
+    ```shell
+    ./_apply.sh epub
+    ```
+The script will generate `output_chunks_pdf.jsonl` and `output_chunks_epub.jsonl` respectively.
 
 ## Coding Principles & Style Guide
 
-1. **Declarative & Functional Paradigm**
-
-   * Implement pure functions wherever practical.
-   * Clearly define inputs and outputs without side effects.
-
-2. **Unix Philosophy**
-
-   * "Do one thing and do it well." Keep modules small, focused, and composable.
-   * Design modules to interact through simple textual or structured JSON outputs.
-
-3. **Clear Interfaces & Data Flow**
-
-   * Explicit input/output boundaries for predictable, testable behavior.
-   * Avoid stateful or implicit behaviors; prefer explicit parameter passing.
-
-4. **Testing**
-
-   * Structure code to allow testing via simple shell scripts (`_apply.sh`).
-   * Shell scripts should clearly indicate success, system state, or immediate problems.
-
-5. **Iterative Refinement**
-
-   * Provide a `_apply.sh` script at each checkpoint, validating functionality and correctness.
-   * Shell scripts serve as self-documenting test and deployment aids.
-
-6. **Metadata & Context Preservation**
-
-   * Capture comprehensive metadata (document name, page number, section identifiers).
-   * Metadata must clearly accompany data chunks for full traceability and debugging.
+1.  **Declarative & Functional Paradigm**: Implement pure functions wherever practical. Clearly define inputs and outputs without side effects.
+2.  **Unix Philosophy**: "Do one thing and do it well." Keep modules small, focused, and composable. Design modules to interact through simple textual or structured JSON outputs.
+3.  **Clear Interfaces & Data Flow**: Explicit input/output boundaries for predictable, testable behavior. Avoid stateful or implicit behaviors; prefer explicit parameter passing.
+4.  **Testing**: Structure code to allow testing via simple shell scripts (`_apply.sh`). Shell scripts should clearly indicate success, system state, or immediate problems.
+5.  **Iterative Refinement**: Provide a `_apply.sh` script at each checkpoint, validating functionality and correctness. Shell scripts serve as self-documenting test and deployment aids.
+6.  **Metadata & Context Preservation**: The pipeline is capable of capturing comprehensive metadata. This functionality is currently turned off in `utils.py` for LoRA training but can be re-enabled.
 
 ## Recommended Checkpoint Procedure
 
-* At every iteration:
-
-  1. Verify and validate outputs via the `_apply.sh` script.
-  2. Confirm stable functional behavior after changes.
-  3. Ensure seamless integration of new functionality with existing modules.
-
-## Next Immediate Steps
-
-1. Integrate and evaluate semantic-aware chunking (using Haystack).
-2. Empirically validate semantic improvements through `_apply.sh` scripts.
-3. Finalize metadata handling strategies for comprehensive downstream context capture.
+*   At every iteration:
+    1.  Verify and validate outputs via the `_apply.sh` script for all supported formats.
+    2.  Confirm stable functional behavior after changes.
+    3.  Ensure seamless integration of new functionality with existing modules.
 
 ## Constraints & Preferences
 
-* Follow pure, explicit, and clean coding practices inspired by Bruce Eckel, Tom Gilb, and Bob Martin.
-* Prioritize simplicity, clarity, modularity, and explicitness.
+*   Follow pure, explicit, and clean coding practices inspired by Bruce Eckel, Tom Gilb, and Bob Martin.
+*   Prioritize simplicity, clarity, modularity, and explicitness.
 
 ---
 
