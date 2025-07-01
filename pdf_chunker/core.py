@@ -1,24 +1,23 @@
-from .parsing import extract_text
-from .splitter import semantic_split
-from .utils import clean_text, enrich_metadata
+from .parsing import extract_structured_text
+from .splitter import semantic_chunker
+from .utils import clean_structured_text
 
-def chunk_pdf(filepath, chunk_size=1000, overlap=100):
+def process_document(filepath: str, chunk_size: int, overlap: int) -> list[dict]:
     """
     Core pipeline for processing a document.
-    Extracts, cleans, chunks, and formats the text.
-    """
-    # Direct function calls to avoid any potential caching issues with `pipe`.
     
-    # 1. Extract text from the source file
-    raw_text = extract_text(filepath)
-
-    # 2. Clean the extracted text
-    cleaned_text = clean_text(raw_text)
-
-    # 3. Split the cleaned text into chunks
-    chunks = semantic_split(cleaned_text, chunk_size, overlap)
-
-    # 4. Process metadata (currently removes it)
-    final_chunks = enrich_metadata(filepath)(chunks)
-
-    return final_chunks
+    1. Performs a "Structural Pass" to extract text blocks with their type.
+    2. Cleans the text within each structured block.
+    3. Performs a "Semantic Pass" by combining the text and chunking it
+       while respecting sentence boundaries.
+    """
+    # 1. Structural Pass
+    structured_blocks = extract_structured_text(filepath)
+    
+    # 2. Clean the text within the blocks
+    cleaned_blocks = clean_structured_text(structured_blocks)
+    
+    # 3. Semantic Pass (Chunking)
+    chunks = semantic_chunker(cleaned_blocks, chunk_size, overlap)
+    
+    return chunks
