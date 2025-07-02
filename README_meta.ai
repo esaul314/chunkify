@@ -1,0 +1,73 @@
+Here's the **Markdown version** of the structured JSONL example with explanatory context for each field. You can use this as a spec or prompt for the other AI agent:
+
+---
+
+## 🧾 Sample RAG Chunk with Rich Metadata (in JSON format)
+
+```json
+{
+  "text": "Kubernetes is an open-source system for automating deployment, scaling, and management of containerized applications. It groups containers into logical units for easy management and discovery.",
+  "meta": {
+    "source": "kubernetes-basics.pdf",
+    "chunk_id": "kubernetes-basics-p3-c2",
+    "page": 3,
+    "section": "Introduction",
+    "title": "What is Kubernetes?",
+    "utterance_type": "definition",
+    "tone": "formal",
+    "importance": "high",
+    "sentiment": "neutral",
+    "readability": {
+      "flesch_kincaid_grade": 11.2,
+      "difficulty": "intermediate"
+    },
+    "embedding_density": 0.73,
+    "timestamp": "2023-12-01T14:30:00Z",
+    "language": "en",
+    "domain": "cloud-computing",
+    "tags": ["kubernetes", "containers", "orchestration", "devops"],
+    "author": "Cloud Native Computing Foundation"
+  }
+}
+```
+
+---
+
+## 🛠️ Metadata Field Descriptions & Guidance
+
+| Field                              | Type            | Description                                                              | Extraction Method                     |
+| ---------------------------------- | --------------- | ------------------------------------------------------------------------ | ------------------------------------- |
+| `source`                           | `string`        | Original file or document name                                           | From input file                       |
+| `chunk_id`                         | `string`        | Unique ID for chunk (useful for traceability)                            | During chunking                       |
+| `page`                             | `int`           | Page number from source document                                         | From PDF/HTML parsing                 |
+| `section`                          | `string`        | Section or heading name                                                  | Structural parser or heuristic        |
+| `title`                            | `string`        | Title of the current section or chunk                                    | Structural parser or inferred         |
+| `utterance_type`                   | `string`        | Type of content: `definition`, `instruction`, `example`, `opinion`, etc. | LLM classifier or prompt              |
+| `tone`                             | `string`        | Perceived tone: `formal`, `casual`, `sarcastic`, etc.                    | LLM or rule-based                     |
+| `importance`                       | `string`        | Heuristic content weight: `low`, `medium`, `high`                        | TF-IDF, entropy, key phrase detection |
+| `sentiment`                        | `string`        | Sentiment polarity: `positive`, `negative`, `neutral`                    | Sentiment classifier                  |
+| `readability.flesch_kincaid_grade` | `float`         | Grade-level score for text                                               | Use `textstat` or similar             |
+| `readability.difficulty`           | `string`        | Label based on grade: `beginner`, `intermediate`, `advanced`             | Map grade ranges to labels            |
+| `embedding_density`                | `float`         | Numeric proxy for vector concentration or info density                   | Norm or spread of embedding vector    |
+| `timestamp`                        | `string`        | Ingestion or source timestamp (ISO 8601)                                 | From file system or metadata          |
+| `language`                         | `string`        | Language code (e.g., `en`, `de`, `fr`)                                   | Use `langdetect`, `fasttext`, etc.    |
+| `domain`                           | `string`        | High-level topic or domain                                               | Inferred from filename or LLM         |
+| `tags`                             | `array[string]` | Keywords or tags for fast filtering                                      | LLM, tf-idf, key phrase extractor     |
+| `author`                           | `string`        | Document author or origin                                                | From metadata or config               |
+
+---
+
+## ✅ Notes for Implementation
+
+* The `text` field is the **chunked body content** for RAG indexing and vector embedding.
+* The `meta` object enriches the chunk with structured fields that can be used for:
+
+  * Filtering (e.g., only definitions)
+  * Boosting (e.g., `importance = high`)
+  * Reranking results
+  * Displaying citations
+  * Evaluating retrieval quality
+* Fields like `utterance_type`, `tone`, and `importance` are ideally generated using lightweight LLM prompts or classifiers for high consistency.
+
+---
+

@@ -4,6 +4,14 @@ import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
 import fitz  # PyMuPDF
+from langdetect import detect, LangDetectException
+
+def _detect_language(text: str) -> str:
+    """Detects language of a text block, defaults to 'un' (unknown) on failure."""
+    try:
+        return detect(text)
+    except LangDetectException:
+        return "un"
 
 def _clean_paragraph(paragraph: str) -> str:
     """Replaces all whitespace characters (space, tab, newline, etc.) with a single space."""
@@ -47,9 +55,11 @@ def _extract_text_blocks_from_pdf(filepath: str) -> list[dict]:
                         is_heading = True
                 
                 block_type = "heading" if is_heading else "paragraph"
+                lang = _detect_language(block_text)
                 structured_blocks.append({
                     "type": block_type,
                     "text": block_text,
+                    "language": lang,
                     "source": {"filename": os.path.basename(filepath), "page": page_num + 1}
                 })
     return structured_blocks
@@ -75,9 +85,11 @@ def _extract_text_blocks_from_epub(filepath: str) -> list[dict]:
             
             if block_text:
                 block_type = "heading" if element.name.startswith('h') else "paragraph"
+                lang = _detect_language(block_text)
                 structured_blocks.append({
                     "type": block_type,
                     "text": block_text,
+                    "language": lang,
                     "source": {"filename": os.path.basename(filepath), "location": item.get_name()}
                 })
     return structured_blocks
