@@ -6,10 +6,12 @@ This project aims to construct a robust, reusable, standalone Python library for
 
 ## Project State
 
-*   The pipeline has been refactored to a **two-pass (Structural -> Semantic) architecture**, improving modularity and the quality of the output.
+*   The pipeline is successfully refactored to a **two-pass (Structural -> Semantic) architecture**, improving modularity and the quality of the output.
 *   The **Structural Pass** is implemented, using **PyMuPDF** for advanced layout-aware PDF parsing and a refined BeautifulSoup strategy for EPUBs.
 *   The **Semantic Pass** is implemented using Haystack's sentence-aware chunker to produce coherent text chunks.
-*   The output format is a clean **JSONL**, suitable for LoRA training pipelines.
+*   **Traceable Metadata** is generated for each chunk, linking it back to its source file, page/location, and structural type (e.g., heading, paragraph).
+*   The output format is a clean **JSONL**, with a **`--no-metadata` flag** for users who only require plain text chunks.
+*   A declarative, functional approach to text cleaning is now implemented in the parsing module, ensuring consistent and robust whitespace handling.
 *   The `_apply.sh` script is a robust testing tool for validating both PDF and EPUB processing.
 
 ## Desired End-State
@@ -28,14 +30,15 @@ The library is designed around a two-pass philosophy to maximize the semantic in
 This pass is handled by the `parsing.py` module. It analyzes the source file and converts it into an intermediate representation: a list of structured text blocks (e.g., `[{'type': 'heading', 'text': '...'}, {'type': 'paragraph', 'text': '...'}]`).
 
 -   **PDF Parsing**: Uses **`PyMuPDF` (`fitz`)** for its ability to provide detailed layout information. A heuristic based on font flags (e.g., bold) is used to distinguish headings from regular paragraphs.
--   **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup` to parse HTML content, identifying paragraphs and headings based on their tags (`<p>`, `<h1>`, etc.).
+-   **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup` to parse HTML content, identifying paragraphs and headings based on their block-level tags (`<p>`, `<h1>`, etc.).
 
 ### 2. The Semantic Pass
-**Intention: Refine the structurally extracted text blocks into semantically cohesive chunks.**
+**Intention: Refine the structurally extracted text blocks into semantically cohesive chunks with traceable metadata.**
 
-This pass is handled by the `splitter.py` module. It takes the cleaned, structured blocks, combines them into a single text document, and then uses a sophisticated chunker to create the final output.
+This pass is handled by the `splitter.py` and `utils.py` modules.
 
--   **Semantic Chunking**: Uses **Haystack's `PreProcessor`** configured to be sentence-aware (`split_by="word"`, `split_respect_sentence_boundary=True`). This ensures that chunks do not end in the middle of a sentence, which is critical for preserving meaning for LLM training.
+-   **Semantic Chunking (`splitter.py`)**: Takes all the structured blocks, combines their text into a single document, and uses **Haystack's `PreProcessor`** configured to be sentence-aware (`split_by="word"`, `split_respect_sentence_boundary=True`). This ensures that chunks do not end in the middle of a sentence, which is critical for preserving meaning for LLM training.
+-   **Metadata Mapping (`utils.py`)**: This is the crucial final step. It takes the chunks produced by Haystack and, using a character-offset map, links each chunk back to the original structured block it started in. This allows it to stitch the correct source metadata (file, page, location, block type) to the final output chunk.
 
 ## Project Architecture
 
@@ -45,42 +48,39 @@ The library is organized into clearly defined modules and scripts:
 pdf_chunker/
 ├── pdf_chunker/
 │   ├── core.py          # Orchestrates the two-pass pipeline
-│   ├── parsing.py       # Structural Pass: Extracts structured text blocks from source files
-│   ├── splitter.py      # Semantic Pass: Chunks text using a sentence-aware strategy
-│   └── utils.py         # Cleans text within the structured blocks
+│   ├── parsing.py       # Structural Pass: Extracts structured text blocks
+│   ├── splitter.py      # Semantic Pass: Chunks combined text
+│   └── utils.py         # Cleans text and maps final metadata
 ├── scripts/
-│   └── chunk_pdf.py     # Command-line interface for triggering chunking operations
+│   └── chunk_pdf.py     # Command-line interface for the pipeline
 ...
 ```
 
 ### File Purposes and Evolution
 
-*   **core.py**: Orchestrates the pipeline, passing data from the structural pass (parsing) to cleaning and then to the semantic pass (splitting).
-*   **parsing.py**: **(Structural Pass)** Handles layout-aware text extraction for PDF (PyMuPDF) and EPUB (BeautifulSoup) into a common structured format.
-*   **splitter.py**: **(Semantic Pass)** Implements sentence-aware chunking using Haystack's PreProcessor.
-*   **utils.py**: Contains utility functions, primarily for cleaning the text content within the structured blocks generated by the parser.
-*   **chunk\_pdf.py**: CLI script ensuring usability and integration with shell-based workflows.
+*   **core.py**: Orchestrates the pipeline, passing data from the structural pass to the semantic pass.
+*   **parsing.py**: **(Structural Pass)** Handles layout-aware text extraction and cleaning for both PDF (PyMuPDF) and EPUB (BeautifulSoup). It now contains pure, declarative functions for whitespace management.
+*   **splitter.py**: **(Semantic Pass)** Implements sentence-aware chunking on the combined text from the structural pass.
+*   **utils.py**: Contains helpers for **mapping metadata** from the original structured blocks onto the final chunks. The cleaning function has been removed from this module.
+*   **chunk\_pdf.py**: CLI script that now includes a **`--no-metadata` flag** for flexible output.
 
 ## Usage and Testing
 
 ### Command-Line Usage
 To process a document, run the following command from the project root:
 ```shell
+# With metadata (default)
 ./pdf-env/bin/python -m scripts.chunk_pdf path/to/your/document.pdf > output.jsonl
+
+# Without metadata
+./pdf-env/bin/python -m scripts.chunk_pdf --no-metadata path/to/your/document.pdf > output_text_only.jsonl
 ```
-This command works for both `.pdf` and `.epub` files. You can also provide optional arguments like `--chunk_size` and `--overlap`.
 
 ### Validation with `_apply.sh`
-The `_apply.sh` script is the primary tool for testing and validating functionality.
+The `_apply.sh` script is the primary tool for testing functionality.
 
--   **Test the default PDF (`sample-local-pdf.pdf`):**
-    ```shell
-    ./_apply.sh pdf
-    ```
--   **Test the default EPUB (`accessible_epub_3.epub`):**
-    ```shell
-    ./_apply.sh epub
-    ```
+-   **Test PDF**: `./_apply.sh pdf`
+-   **Test EPUB**: `./_apply.sh epub`
 
 ## Coding Principles & Style Guide
 
@@ -88,8 +88,8 @@ The `_apply.sh` script is the primary tool for testing and validating functional
 2.  **Unix Philosophy**: "Do one thing and do it well." Keep modules small, focused, and composable.
 3.  **Clear Interfaces & Data Flow**: The new two-pass architecture exemplifies this, with a clear, structured data format passing between the stages.
 4.  **Testing**: The `_apply.sh` script is used at each checkpoint to validate functionality and correctness.
-5.  **Iterative Refinement**: The evolution of the pipeline from a simple script to a two-pass architecture demonstrates this principle in action.
-6.  **Metadata & Context Preservation**: The structural pass in `parsing.py` now extracts useful metadata (source page, location, block type) which can be used in the future.
+5.  **Iterative Refinement**: The evolution of the pipeline through several major refactors to arrive at this robust solution demonstrates this principle.
+6.  **Metadata & Context Preservation**: The pipeline now excels at this, providing traceable and useful metadata for each chunk.
 
 ## Recommended Checkpoint Procedure
 
