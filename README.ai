@@ -98,9 +98,10 @@ pdf_chunker/
 ```
 
 ### Validation with `_apply.sh`
-The `_apply.sh` script remains the primary tool for testing functionality.
+The `_apply.sh` script remains the primary tool for testing functionality, although you should feel free to build on it.
 -   **Test PDF**: `./_apply.sh pdf`
 -   **Test EPUB**: `./_apply.sh epub`
+For the purposes of testing, sample EPUB and PDF files are provided: `./accessible_epub_3.epub` and `./sample.pdf`
 
 ## Coding Principles & Style Guide
 
@@ -119,3 +120,7 @@ The `_apply.sh` script remains the primary tool for testing functionality.
 ---
 
 This document provides guidance for effectively achieving the outlined objectives through structured checkpoints, clear testing protocols, and disciplined coding practices.
+The purpose of this file is to provide good understanding on the technical level, sufficient to continue the development. This document will serve as the starting point 
+for another AI agent. Put yourself in their shoes. What do they need?
+It follows then that you must enrich this document, not re-write it. Please, make sure you keep the details on the coding style and the philosophy, that is, 
+Coding Principles & Style Guide and Constraints & Preferences (at least). Also, feel free to provide a lot of detail on programming patterns and techniques that you used.

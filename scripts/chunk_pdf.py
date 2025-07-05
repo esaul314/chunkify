@@ -23,8 +23,20 @@ def main():
         args.overlap, 
         generate_metadata=generate_metadata
     )
-    for chunk in chunks:
-        print(json.dumps(chunk, ensure_ascii=False))
+    
+    # Filter out any None or empty chunks
+    valid_chunks = [chunk for chunk in chunks if chunk]
+    
+    # Use a more robust approach for JSONL output
+    for chunk in valid_chunks:
+        try:
+            # Ensure we have a clean, complete JSON object per line
+            json_str = json.dumps(chunk, ensure_ascii=False)
+            print(json_str)
+        except Exception as e:
+            # Skip problematic chunks to maintain JSONL integrity
+            import sys
+            print(f"Error serializing chunk: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
