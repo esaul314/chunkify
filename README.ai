@@ -4,53 +4,67 @@
 
 This project aims to construct a robust, reusable, standalone Python library for chunking large **PDF and EPUB** documents, preparing them for training and further interactions within a local LLM environment. The implementation emphasizes declarative and functional programming principles, with clear adherence to Unix philosophy—creating simple, focused modules communicating through structured interfaces.
 
-## Project State
+## Project State: Enhanced for RAG
 
-*   The pipeline is successfully refactored to a **two-pass (Structural -> Semantic) architecture**, improving modularity and the quality of the output.
-*   The **Structural Pass** is implemented, using **PyMuPDF** for advanced layout-aware PDF parsing and a refined BeautifulSoup strategy for EPUBs.
-*   The **Semantic Pass** is implemented using Haystack's sentence-aware chunker to produce coherent text chunks.
-*   **Traceable Metadata** is generated for each chunk, linking it back to its source file, page/location, and structural type (e.g., heading, paragraph).
-*   The output format is a clean **JSONL**, with a **`--no-metadata` flag** for users who only require plain text chunks.
-*   A declarative, functional approach to text cleaning is now implemented in the parsing module, ensuring consistent and robust whitespace handling.
-*   The `_apply.sh` script is a robust testing tool for validating both PDF and EPUB processing.
+The project has undergone a significant evolution to produce RAG-supportive, context-aware metadata.
+
+*   **Three-Pass Architecture**: The pipeline now follows a **three-pass (Structural -> Semantic -> AI Enrichment) architecture**, adding a new layer of intelligent metadata generation.
+*   **Modernized Core**: The entire processing backend has been upgraded to the modern **`haystack-ai`** framework, resolving critical dependency conflicts (`Pydantic V1 vs V2`) and ensuring future compatibility.
+*   **Rich Metadata Generation**: The pipeline now generates a suite of RAG-supportive metadata for each chunk, including:
+    *   **Language Detection**: Using `langdetect` on a per-block basis.
+    *   **Readability Scores**: Calculated using `textstat` to provide Flesch-Kincaid grade levels.
+    *   **AI-Powered Utterance Type**: A new, third pass uses an LLM (via `litellm`) to classify the semantic function of each chunk (e.g., `definition`, `instruction`, `example`).
+*   **Robust Text Extraction**: EPUB parsing has been significantly improved to correctly handle inline formatting (`<i>`, `<b>`, etc.) and to strip invisible Unicode characters like the Byte Order Mark (`U+FEFF`), ensuring clean text for processing.
+*   **Declarative & Functional Style**: The codebase has been refactored to more closely follow functional programming principles, using list comprehensions and generator expressions for data transformation where appropriate.
 
 ## Desired End-State
 
 *   A highly reliable chunking library that understands the semantic structure of various document formats.
-*   A clear, multi-stage pipeline that separates structural analysis from semantic chunking.
+*   A clear, multi-stage pipeline that separates structural analysis from semantic chunking and AI enrichment.
 *   A simple, clear CLI-based workflow facilitating rapid iteration and testing via shell scripts.
 
-## Core Architecture: A Two-Pass Approach
+## Core Architecture: A Three-Pass Approach
 
-The library is designed around a two-pass philosophy to maximize the semantic integrity of the final text chunks.
+The library is now designed around a three-pass philosophy to maximize the semantic integrity and usefulness of the final text chunks.
 
 ### 1. The Structural Pass
-**Intention: Extract text while respecting and capturing the document's intrinsic structural logic.**
+**Intention: Extract clean, structured text from the source document.**
 
-This pass is handled by the `parsing.py` module. It analyzes the source file and converts it into an intermediate representation: a list of structured text blocks (e.g., `[{'type': 'heading', 'text': '...'}, {'type': 'paragraph', 'text': '...'}]`).
+This pass is handled by the `parsing.py` module. It analyzes the source file and converts it into an intermediate representation: a list of structured text blocks.
 
--   **PDF Parsing**: Uses **`PyMuPDF` (`fitz`)** for its ability to provide detailed layout information. A heuristic based on font flags (e.g., bold) is used to distinguish headings from regular paragraphs.
--   **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup` to parse HTML content, identifying paragraphs and headings based on their block-level tags (`<p>`, `<h1>`, etc.).
+*   **PDF Parsing**: Uses **`PyMuPDF` (`fitz`)** for layout-aware parsing.
+*   **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup`. The text extraction logic has been rewritten using a functional approach (`_get_element_text_content`) to correctly process text containing inline formatting tags (`<i>`, `<em>`, etc.) without introducing erroneous newlines or separators.
+*   **Text Cleaning**: A low-level cleaning function (`_clean_paragraph`) now strips the Unicode BOM (`\uFEFF`) character and consolidates all whitespace, ensuring data purity from the very start.
+*   **Language Detection**: `langdetect` is applied to each text block to determine its language.
 
 ### 2. The Semantic Pass
-**Intention: Refine the structurally extracted text blocks into semantically cohesive chunks with traceable metadata.**
+**Intention: Refine the structurally extracted text into semantically cohesive chunks.**
 
-This pass is handled by the `splitter.py` and `utils.py` modules.
+This pass is handled by the `splitter.py` module. It takes the text from all structured blocks, combines it, and splits it into appropriately sized chunks.
 
--   **Semantic Chunking (`splitter.py`)**: Takes all the structured blocks, combines their text into a single document, and uses **Haystack's `PreProcessor`** configured to be sentence-aware (`split_by="word"`, `split_respect_sentence_boundary=True`). This ensures that chunks do not end in the middle of a sentence, which is critical for preserving meaning for LLM training.
--   **Metadata Mapping (`utils.py`)**: This is the crucial final step. It takes the chunks produced by Haystack and, using a character-offset map, links each chunk back to the original structured block it started in. This allows it to stitch the correct source metadata (file, page, location, block type) to the final output chunk.
+*   **Technology Upgrade**: The chunker was upgraded from the legacy `farm-haystack` to the modern **`haystack-ai`**. This resolved a `Pydantic` version conflict and modernized the stack.
+*   **Sentence-Aware Chunking**: The implementation now uses `haystack.components.preprocessors.DocumentSplitter`, configured with `split_by="word"` and `respect_sentence_boundary=True`. This is the core of the sentence-aware chunking, ensuring that chunks are never ended mid-sentence.
+
+### 3. The AI Enrichment Pass
+**Intention: Add a layer of semantic understanding to each chunk for advanced RAG applications.**
+
+This pass is handled by `ai_enrichment.py` and is orchestrated by `utils.py`.
+
+*   **Utterance Type Classification**: For each chunk, a call is made to an LLM (e.g., GPT-3.5-Turbo via `litellm`) to classify its function. The prompt asks the model to choose from a list of types like `definition`, `explanation`, `instruction`, `example`, etc. This provides powerful metadata for filtering and routing in a RAG system.
+*   **Flexible LLM Provider**: The use of `litellm` provides a consistent interface to over 100 LLM providers, making it easy to switch models or use local instances. API keys are managed securely via a `.env` file.
+*   **Parallel Processing**: To handle the latency of LLM calls efficiently, the enrichment process is parallelized using a `ThreadPoolExecutor` in the `format_chunks_with_metadata` function.
 
 ## Project Architecture
 
-The library is organized into clearly defined modules and scripts:
-
 ```
 pdf_chunker/
+├── .env               # Holds API keys for AI services
 ├── pdf_chunker/
-│   ├── core.py          # Orchestrates the two-pass pipeline
-│   ├── parsing.py       # Structural Pass: Extracts structured text blocks
-│   ├── splitter.py      # Semantic Pass: Chunks combined text
-│   └── utils.py         # Cleans text and maps final metadata
+│   ��── core.py          # Orchestrates the three-pass pipeline
+│   ├── parsing.py       # Structural Pass: Extracts and cleans text
+│   ├── splitter.py      # Semantic Pass: Chunks text using Haystack
+│   ├── utils.py         # Maps metadata and orchestrates AI enrichment
+│   └── ai_enrichment.py # AI Pass: Classifies chunk utterance type
 ├── scripts/
 │   └── chunk_pdf.py     # Command-line interface for the pipeline
 ...
@@ -58,45 +72,41 @@ pdf_chunker/
 
 ### File Purposes and Evolution
 
-*   **core.py**: Orchestrates the pipeline, passing data from the structural pass to the semantic pass.
-*   **parsing.py**: **(Structural Pass)** Handles layout-aware text extraction and cleaning for both PDF (PyMuPDF) and EPUB (BeautifulSoup). It now contains pure, declarative functions for whitespace management.
-*   **splitter.py**: **(Semantic Pass)** Implements sentence-aware chunking on the combined text from the structural pass.
-*   **utils.py**: Contains helpers for **mapping metadata** from the original structured blocks onto the final chunks. The cleaning function has been removed from this module.
-*   **chunk\_pdf.py**: CLI script that now includes a **`--no-metadata` flag** for flexible output.
+*   **core.py**: Orchestrates the pipeline, now with logic to initialize the LLM and control the AI enrichment pass.
+*   **parsing.py**: Enhanced with robust, functional text extraction for EPUBs and more thorough text cleaning (`\uFEFF` removal).
+*   **splitter.py**: Upgraded to use the modern `haystack-ai`'s `DocumentSplitter`, ensuring correct, sentence-aware chunking.
+*   **utils.py**: Now orchestrates the AI enrichment pass, calling the classifier in parallel and mapping all rich metadata (`language`, `readability`, `utterance_type`) to the final chunks.
+*   **ai_enrichment.py**: A new, self-contained module responsible for all LLM-related logic. It's designed to be easily swappable or upgradable.
+*   **.env**: A new file for securely storing the `OPENAI_API_KEY`, loaded via `python-dotenv`.
 
 ## Usage and Testing
 
+### Setup
+1.  Install dependencies: `./pdf-env/bin/pip install -r requirements.txt`
+2.  Create a `.env` file in the project root and add your API key: `OPENAI_API_KEY='your-key-here'`
+
 ### Command-Line Usage
-To process a document, run the following command from the project root:
 ```shell
-# With metadata (default)
+# With AI-enriched metadata (default)
 ./pdf-env/bin/python -m scripts.chunk_pdf path/to/your/document.pdf > output.jsonl
 
-# Without metadata
+# Without any metadata
 ./pdf-env/bin/python -m scripts.chunk_pdf --no-metadata path/to/your/document.pdf > output_text_only.jsonl
 ```
 
 ### Validation with `_apply.sh`
-The `_apply.sh` script is the primary tool for testing functionality.
-
+The `_apply.sh` script remains the primary tool for testing functionality.
 -   **Test PDF**: `./_apply.sh pdf`
 -   **Test EPUB**: `./_apply.sh epub`
 
 ## Coding Principles & Style Guide
 
-1.  **Declarative & Functional Paradigm**: Implement pure functions wherever practical. Clearly define inputs and outputs without side effects.
-2.  **Unix Philosophy**: "Do one thing and do it well." Keep modules small, focused, and composable.
-3.  **Clear Interfaces & Data Flow**: The new two-pass architecture exemplifies this, with a clear, structured data format passing between the stages.
+1.  **Declarative & Functional Paradigm**: Pure functions are preferred. Side effects are isolated. Data transformation is achieved through comprehensions and generator expressions, as seen in the EPUB parsing logic in `parsing.py`.
+2.  **Unix Philosophy**: "Do one thing and do it well." The new `ai_enrichment.py` module is a prime example, encapsulating all AI-related logic.
+3.  **Clear Interfaces & Data Flow**: The three-pass architecture maintains a clear, structured data flow, passing data between well-defined stages.
 4.  **Testing**: The `_apply.sh` script is used at each checkpoint to validate functionality and correctness.
-5.  **Iterative Refinement**: The evolution of the pipeline through several major refactors to arrive at this robust solution demonstrates this principle.
-6.  **Metadata & Context Preservation**: The pipeline now excels at this, providing traceable and useful metadata for each chunk.
-
-## Recommended Checkpoint Procedure
-
-*   At every iteration:
-    1.  Verify and validate outputs via the `_apply.sh` script for all supported formats.
-    2.  Confirm stable functional behavior after changes.
-    3.  Ensure seamless integration of new functionality with existing modules.
+5.  **Iterative Refinement**: The evolution from a two-pass to a three-pass system, and the upgrade of the core Haystack library, demonstrate this principle.
+6.  **Metadata & Context Preservation**: The pipeline now excels at this, providing traceable and semantically rich metadata for each chunk, making the output highly valuable for RAG systems.
 
 ## Constraints & Preferences
 

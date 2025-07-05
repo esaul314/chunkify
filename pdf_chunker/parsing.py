@@ -14,8 +14,13 @@ def _detect_language(text: str) -> str:
         return "un"
 
 def _clean_paragraph(paragraph: str) -> str:
-    """Replaces all whitespace characters (space, tab, newline, etc.) with a single space."""
-    return re.sub(r'\s+', ' ', paragraph).strip()
+    """
+    Replaces all whitespace characters with a single space and removes the BOM character.
+    """
+    # Remove the BOM character (U+FEFF) which can appear in source files
+    cleaned_text = paragraph.replace('\ufeff', '').replace('\u200b', '')
+    # Consolidate all other whitespace into single spaces
+    return re.sub(r'\s+', ' ', cleaned_text).strip()
 
 def _clean_text(text: str) -> str:
     """
@@ -64,34 +69,56 @@ def _extract_text_blocks_from_pdf(filepath: str) -> list[dict]:
                 })
     return structured_blocks
 
+def _get_element_text_content(element) -> str:
+    """
+    A functional approach to extract text from a BeautifulSoup element,
+    correctly handling inline tags without adding extra separators.
+    It processes an element's contents and joins them into a single string.
+    """
+    return ' '.join(
+        ' '.join(child.stripped_strings) if hasattr(child, 'stripped_strings') else child
+        for child in element.contents
+    )
+
 def _extract_text_blocks_from_epub(filepath: str) -> list[dict]:
     """
-    Extracts structured text blocks from an EPUB file, correctly preserving
-    paragraph breaks and structure.
+    Extracts structured text blocks from an EPUB file, using a functional
+    approach to gracefully handle inline formatting.
     """
     book = epub.read_epub(filepath)
-    structured_blocks = []
-
-    for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+    
+    def process_item(item):
         soup = BeautifulSoup(item.get_content(), 'html.parser')
         body = soup.find('body')
         if not body:
-            continue
+            return []
+
+        # Find all block-level text elements
+        elements = body.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
         
-        for element in body.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
-            # Preserve paragraph breaks by using a separator
-            raw_text = element.get_text(separator='\n\n', strip=True)
-            block_text = _clean_text(raw_text)
+        # Process each element into a structured block
+        blocks = []
+        for element in elements:
+            raw_text = _get_element_text_content(element)
+            block_text = _clean_paragraph(raw_text)
             
             if block_text:
                 block_type = "heading" if element.name.startswith('h') else "paragraph"
                 lang = _detect_language(block_text)
-                structured_blocks.append({
+                blocks.append({
                     "type": block_type,
                     "text": block_text,
                     "language": lang,
                     "source": {"filename": os.path.basename(filepath), "location": item.get_name()}
                 })
+        return blocks
+
+    # Process all document items and flatten the resulting list of lists
+    structured_blocks = [
+        block for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)
+        for block in process_item(item)
+    ]
+    
     return structured_blocks
 
 def extract_structured_text(filepath: str) -> list[dict]:

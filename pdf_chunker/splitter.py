@@ -1,32 +1,38 @@
-from haystack.nodes import PreProcessor
-from haystack.schema import Document
+import logging
+from typing import List
+from haystack.components.preprocessors import DocumentSplitter
+from haystack.dataclasses import Document
 
-preprocessor = PreProcessor(
-    clean_empty_lines=True,
-    clean_whitespace=False,
-    split_by="word",
-    split_length=400,
-    split_overlap=50,
-    split_respect_sentence_boundary=True,
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def semantic_chunker(structured_blocks: list[dict], chunk_size: int, overlap: int) -> list[Document]:
     """
-    Takes a list of structured text blocks, combines them, and splits them
-    into semantically coherent chunks using Haystack.
+    Chunks the document using Haystack's DocumentSplitter, configured to split by
+    word while respecting sentence boundaries. This is the most robust method.
     """
     full_text = "\n\n".join(block["text"] for block in structured_blocks)
-    
     if not full_text:
         return []
 
-    # Pass data as a list of dictionaries, which Haystack handles
-    docs_to_process = [{"content": full_text}]
-    
-    split_docs = preprocessor.process(
-        docs_to_process,
+    logging.info(f"Starting chunking with DocumentSplitter: chunk_size={chunk_size} words, overlap={overlap} words.")
+
+    # Configure the DocumentSplitter to function like the original PreProcessor
+    splitter = DocumentSplitter(
+        split_by="word",
         split_length=chunk_size,
-        split_overlap=overlap
+        split_overlap=overlap,
+        respect_sentence_boundary=True # Corrected parameter name
     )
+
+    # The splitter needs to be warmed up before running
+    splitter.warm_up()
     
+    # Create a single document to be split
+    doc_to_split = [Document(content=full_text)]
+    
+    result = splitter.run(documents=doc_to_split)
+    
+    split_docs = result.get("documents", [])
+    logging.info(f"DocumentSplitter created {len(split_docs)} chunks.")
+
     return split_docs
