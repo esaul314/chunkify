@@ -77,43 +77,125 @@ def format_chunks_with_metadata(
 
     return [chunk for chunk in processed_chunks if chunk]
 
-def _build_char_map(blocks: list[dict]) -> list[dict]:
-    """Builds a character map to link chunks back to original blocks."""
-    char_map, current_pos = [], 0
+def _build_char_map(blocks: list[dict]) -> dict:
+    """
+    Builds an enhanced mapping structure for the new block-aware chunks.
+    
+    Since the new chunking algorithm preserves block metadata directly in chunks,
+    this function creates a comprehensive mapping that supports both traditional
+    character-based lookup and the new metadata-based approach.
+    """
+    if not blocks:
+        return {"char_positions": [], "block_lookup": {}}
+    
+    char_map = []
+    block_lookup = {}
+    current_pos = 0
+    
     for i, block in enumerate(blocks):
         text_len = len(block["text"])
-        char_map.append({"start": current_pos, "end": current_pos + text_len, "original_index": i})
+        
+        # Traditional character position mapping
+        char_entry = {
+            "start": current_pos, 
+            "end": current_pos + text_len, 
+            "original_index": i
+        }
+        char_map.append(char_entry)
+        
+        # Enhanced block lookup with multiple access patterns
+        block_lookup[i] = {
+            "block": block,
+            "char_start": current_pos,
+            "char_end": current_pos + text_len,
+            "text_preview": block["text"][:100] + "..." if len(block["text"]) > 100 else block["text"],
+            "page": block.get("page"),
+            "bbox": block.get("bbox")
+        }
+        
+        # Create text-based lookup for faster searching
+        text_key = block["text"][:50].strip().lower()
+        if text_key and text_key not in block_lookup:
+            block_lookup[f"text_{text_key}"] = i
+        
         current_pos += text_len + 2  # Account for '\n\n' separator
-    return char_map
+    
+    return {
+        "char_positions": char_map,
+        "block_lookup": block_lookup,
+        "total_blocks": len(blocks)
+    }
 
-def _find_source_block(chunk: Document, char_map: list[dict], original_blocks: list[dict]) -> dict | None:
+def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[dict]) -> dict | None:
     """
-    Finds the original source block for a given chunk using a more reliable method.
-    Since chunk boundaries may cross block boundaries, this looks for the first
-    30 characters of the chunk in all blocks and chooses the earliest match.
+    Finds the original source block for a chunk using the enhanced metadata approach.
+    
+    The new paragraph-aware chunking algorithm stores source block information
+    directly in chunk metadata, making this lookup much more reliable than
+    the previous text-search approach.
     """
-    if not chunk.content or not original_blocks:
+    if not chunk or not chunk.content or not original_blocks:
         return None
     
-    # Extract the first 30 characters (or less if shorter) of the chunk
-    # for a more reliable search
-    chunk_start = chunk.content.strip()[:30]
+    # First, try to use the enhanced metadata from paragraph-aware chunking
+    if hasattr(chunk, 'meta') and chunk.meta:
+        source_blocks = chunk.meta.get("source_blocks", [])
+        
+        if source_blocks:
+            # Use the first source block as the primary source
+            primary_source = source_blocks[0]
+            block_index = primary_source.get("block_index")
+            
+            # Validate the block index
+            if block_index is not None and 0 <= block_index < len(original_blocks):
+                return original_blocks[block_index]
+            
+            # If block_index is invalid, try to find by bbox or text preview
+            for source_info in source_blocks:
+                bbox = source_info.get("bbox")
+                text_preview = source_info.get("text_preview", "")
+                
+                if bbox:
+                    # Find block with matching bbox
+                    for i, block in enumerate(original_blocks):
+                        if block.get("bbox") == bbox:
+                            return block
+                
+                if text_preview:
+                    # Find block with matching text preview
+                    preview_start = text_preview[:30].strip()
+                    for i, block in enumerate(original_blocks):
+                        if block["text"].strip().startswith(preview_start):
+                            return block
     
-    # Look for this text in each original block
+    # Fallback to the enhanced character map approach
+    block_lookup = char_map.get("block_lookup", {})
+    chunk_start = chunk.content.strip()[:50].lower()
+    
+    # Try text-based lookup first
+    text_key = f"text_{chunk_start}"
+    if text_key in block_lookup:
+        block_index = block_lookup[text_key]
+        if isinstance(block_index, int) and 0 <= block_index < len(original_blocks):
+            return original_blocks[block_index]
+    
+    # Fallback to the original text search method with improvements
+    chunk_start_search = chunk.content.strip()[:30]
     candidates = []
+    
     for i, block in enumerate(original_blocks):
-        if chunk_start in block["text"]:
-            # Save the index and position where the text was found
-            position = block["text"].find(chunk_start)
+        block_text = block["text"]
+        if chunk_start_search in block_text:
+            position = block_text.find(chunk_start_search)
             candidates.append({
                 "block_index": i,
-                "position": position
+                "position": position,
+                "confidence": len(chunk_start_search) / len(block_text)  # Simple confidence score
             })
     
-    # If we found matches, use the one that appears earliest in the document
     if candidates:
-        # Sort by block index first, then by position within the block
-        candidates.sort(key=lambda c: (c["block_index"], c["position"]))
+        # Sort by confidence (higher is better), then by block index, then by position
+        candidates.sort(key=lambda c: (-c["confidence"], c["block_index"], c["position"]))
         best_match = candidates[0]
         return original_blocks[best_match["block_index"]]
     
