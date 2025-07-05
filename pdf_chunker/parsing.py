@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
@@ -42,8 +43,11 @@ def _extract_text_blocks_from_pdf(filepath: str) -> list[dict]:
     """
     doc = fitz.open(filepath)
     structured_blocks = []
+    
+    print(f"PDF has {len(doc)} pages", file=sys.stderr)
 
     for page_num, page in enumerate(doc):
+        print(f"Processing page {page_num+1}", file=sys.stderr)
         page_blocks = page.get_text("blocks", flags=fitz.TEXT_INHIBIT_SPACES)
         for b in page_blocks:
             raw_text = b[4]

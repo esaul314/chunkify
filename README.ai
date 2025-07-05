@@ -8,6 +8,9 @@ This project aims to construct a robust, reusable, standalone Python library for
 
 The project has undergone a significant evolution to produce RAG-supportive, context-aware metadata.
 
+> **⚠️ Known Issue:** There are edge cases relating to page numbering in multi-page PDFs with repeating content across pages, where chunk-to-source block mapping may assign incorrect page numbers. This can lead to chunks appearing in a non-intuitive order in the output JSONL. A potential solution would involve implementing a more sophisticated page-aware heuristic in the `_find_source_block` function in `utils.py`.
+=======
+
 *   **Three-Pass Architecture**: The pipeline now follows a **three-pass (Structural -> Semantic -> AI Enrichment) architecture**, adding a new layer of intelligent metadata generation.
 *   **Modernized Core**: The entire processing backend has been upgraded to the modern **`haystack-ai`** framework, resolving critical dependency conflicts (`Pydantic V1 vs V2`) and ensuring future compatibility.
 *   **Rich Metadata Generation**: The pipeline now generates a suite of RAG-supportive metadata for each chunk, including:

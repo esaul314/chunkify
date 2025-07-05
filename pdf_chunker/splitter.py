@@ -34,5 +34,10 @@ def semantic_chunker(structured_blocks: list[dict], chunk_size: int, overlap: in
     
     split_docs = result.get("documents", [])
     logging.info(f"DocumentSplitter created {len(split_docs)} chunks.")
-
+    
+    # Debug: Let's log the first few words of each chunk
+    for i, doc in enumerate(split_docs[:5]):  # First 5 chunks
+        preview = doc.content[:50] if doc.content else "Empty content"
+        logging.info(f"Chunk {i}: {preview}...")
+    
     return split_docs

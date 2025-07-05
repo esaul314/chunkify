@@ -3,6 +3,8 @@ from .splitter import semantic_chunker
 from .utils import format_chunks_with_metadata
 from .ai_enrichment import init_llm
 
+import sys
+
 def process_document(
     filepath: str,
     chunk_size: int,
@@ -25,6 +27,13 @@ def process_document(
 
     # 1. Structural Pass: Extract text into structured blocks
     structured_blocks = extract_structured_text(filepath)
+    
+    # Debug: Show what we got from the structural pass
+    print(f"Extracted {len(structured_blocks)} structured blocks", file=sys.stderr)
+    for i, block in enumerate(structured_blocks[:5]):  # First 5 blocks
+        preview = block["text"][:50] if "text" in block and block["text"] else "Empty text"
+        page_info = f"page {block.get('source', {}).get('page', 'unknown')}" if "source" in block else "unknown page"
+        print(f"Block {i} ({page_info}): {preview}...", file=sys.stderr)
     
     # 2. Semantic Pass: Chunk the blocks into coherent documents
     haystack_chunks = semantic_chunker(structured_blocks, chunk_size, overlap)

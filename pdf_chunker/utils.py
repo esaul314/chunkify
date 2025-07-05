@@ -87,22 +87,34 @@ def _build_char_map(blocks: list[dict]) -> list[dict]:
     return char_map
 
 def _find_source_block(chunk: Document, char_map: list[dict], original_blocks: list[dict]) -> dict | None:
-    """Finds the original source block for a given Haystack chunk."""
-    # The new Haystack Document doesn't have the same char offset metadata.
-    # We must find the source block by matching the start of the chunk content.
-    # This is less precise but works for this implementation.
-    chunk_content_start = chunk.content.strip()
-    full_text = "\n\n".join(b["text"] for b in original_blocks)
+    """
+    Finds the original source block for a given chunk using a more reliable method.
+    Since chunk boundaries may cross block boundaries, this looks for the first
+    30 characters of the chunk in all blocks and chooses the earliest match.
+    """
+    if not chunk.content or not original_blocks:
+        return None
     
-    # Find the character position of our chunk in the full text
-    chunk_start_char = full_text.find(chunk_content_start)
-
-    if chunk_start_char == -1:
-        return None # Chunk not found in original text
-
-    for mapping in char_map:
-        # If the chunk's starting position falls within a block's range
-        if mapping["start"] <= chunk_start_char < mapping["end"]:
-            return original_blocks[mapping["original_index"]]
-            
+    # Extract the first 30 characters (or less if shorter) of the chunk
+    # for a more reliable search
+    chunk_start = chunk.content.strip()[:30]
+    
+    # Look for this text in each original block
+    candidates = []
+    for i, block in enumerate(original_blocks):
+        if chunk_start in block["text"]:
+            # Save the index and position where the text was found
+            position = block["text"].find(chunk_start)
+            candidates.append({
+                "block_index": i,
+                "position": position
+            })
+    
+    # If we found matches, use the one that appears earliest in the document
+    if candidates:
+        # Sort by block index first, then by position within the block
+        candidates.sort(key=lambda c: (c["block_index"], c["position"]))
+        best_match = candidates[0]
+        return original_blocks[best_match["block_index"]]
+    
     return None

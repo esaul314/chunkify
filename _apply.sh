@@ -45,7 +45,10 @@ if [ ! -x "$PYTHON_INTERPRETER" ]; then
 fi
 
 # --- Execution ---
+# Ensure we're overwriting any existing file by truncating it before we start
 echo "Running: $PYTHON_INTERPRETER -m $SCRIPT_MODULE \"$INPUT_FILE\""
+# Clear output file first to avoid appending to old results
+> "$OUTPUT_FILE"
 "$PYTHON_INTERPRETER" -m "$SCRIPT_MODULE" "$INPUT_FILE" > "$OUTPUT_FILE"
 EXIT_CODE=$?
 
