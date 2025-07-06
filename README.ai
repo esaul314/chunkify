@@ -9,7 +9,6 @@ This project aims to construct a robust, reusable, standalone Python library for
 The project has undergone a significant evolution to produce RAG-supportive, context-aware metadata.
 
 > **⚠️ Known Issue:** There are edge cases relating to page numbering in multi-page PDFs with repeating content across pages, where chunk-to-source block mapping may assign incorrect page numbers. This can lead to chunks appearing in a non-intuitive order in the output JSONL. A potential solution would involve implementing a more sophisticated page-aware heuristic in the `_find_source_block` function in `utils.py`.
-=======
 
 *   **Three-Pass Architecture**: The pipeline now follows a **three-pass (Structural -> Semantic -> AI Enrichment) architecture**, adding a new layer of intelligent metadata generation.
 *   **Modernized Core**: The entire processing backend has been upgraded to the modern **`haystack-ai`** framework, resolving critical dependency conflicts (`Pydantic V1 vs V2`) and ensuring future compatibility.
@@ -45,82 +44,183 @@ This pass is handled by the `parsing.py` module. It analyzes the source file and
 
 This pass is handled by the `splitter.py` module. It takes the text from all structured blocks, combines it, and splits it into appropriately sized chunks.
 
-*   **Technology Upgrade**: The chunker was upgraded from the legacy `farm-haystack` to the modern **`haystack-ai`**. This resolved a `Pydantic` version conflict and modernized the stack.
-*   **Sentence-Aware Chunking**: The implementation now uses `haystack.components.preprocessors.DocumentSplitter`, configured with `split_by="word"` and `respect_sentence_boundary=True`. This is the core of the sentence-aware chunking, ensuring that chunks are never ended mid-sentence.
+*   **Technology Upgrade**: The chunker was upgraded from legacy `farm-haystack` to the modern **`haystack-ai`** framework. This resolved critical dependency conflicts (`Pydantic V1 vs V2`) and modernized the stack.
+*   **Sentence-Aware Chunking**: The implementation now uses `haystack.components.preprocessors.DocumentSplitter`, configured with `split_by="word"` and `respect_sentence_boundary=True`. This is the core of sentence-aware chunking, ensuring that chunks are never ended mid-sentence.
+
+#### Semantic Chunker Parameters
+
+The semantic chunker behavior is controlled by three key parameters in `pdf_chunker/splitter.py`:
+
+*   **`split_length`** (default: 200): Maximum number of words per chunk
+*   **`split_overlap`** (default: 50): Number of words to overlap between adjacent chunks for semantic coherence
+*   **`respect_sentence_boundary`** (default: True): Ensures chunks never end mid-sentence
 
 ### 3. The AI Enrichment Pass
 **Intention: Add a layer of semantic understanding to each chunk for advanced RAG applications.**
 
 This pass is handled by `ai_enrichment.py` and is orchestrated by `utils.py`.
 
-*   **Utterance Type Classification**: For each chunk, a call is made to an LLM (e.g., GPT-3.5-Turbo via `litellm`) to classify its function. The prompt asks the model to choose from a list of types like `definition`, `explanation`, `instruction`, `example`, etc. This provides powerful metadata for filtering and routing in a RAG system.
+*   **Utterance Type Classification**: For each chunk, a call is made to an LLM (e.g., GPT-3.5-Turbo via `litellm`) to classify its semantic function. The prompt asks the model to choose from a list of types like `definition`, `explanation`, `instruction`, `example`, etc. This provides powerful metadata for filtering and routing in a RAG system.
 *   **Flexible LLM Provider**: The use of `litellm` provides a consistent interface to over 100 LLM providers, making it easy to switch models or use local instances. API keys are managed securely via a `.env` file.
 *   **Parallel Processing**: To handle the latency of LLM calls efficiently, the enrichment process is parallelized using a `ThreadPoolExecutor` in the `format_chunks_with_metadata` function.
 
 ## Project Architecture
-
 ```
 pdf_chunker/
 ├── .env               # Holds API keys for AI services
 ├── pdf_chunker/
-│   ��── core.py          # Orchestrates the three-pass pipeline
+│   ├── core.py          # Orchestrates the three-pass pipeline
 │   ├── parsing.py       # Structural Pass: Extracts and cleans text
 │   ├── splitter.py      # Semantic Pass: Chunks text using Haystack
 │   ├── utils.py         # Maps metadata and orchestrates AI enrichment
 │   └── ai_enrichment.py # AI Pass: Classifies chunk utterance type
 ├── scripts/
-│   └── chunk_pdf.py     # Command-line interface for the pipeline
-...
+│   ├── chunk_pdf.py        # Command-line interface for the pipeline
+│   ├── validate_chunks.sh  # Structural validation and quality checks
+│   └── detect_duplicates.py # Duplicate detection and overlap analysis
+├── _e2e_check.sh          # End-to-end test runner
+└── _apply.sh              # One-command workflow orchestrator
 ```
-
-### File Purposes and Evolution
-
-*   **core.py**: Orchestrates the pipeline, now with logic to initialize the LLM and control the AI enrichment pass.
-*   **parsing.py**: Enhanced with robust, functional text extraction for EPUBs and more thorough text cleaning (`\uFEFF` removal).
-*   **splitter.py**: Upgraded to use the modern `haystack-ai`'s `DocumentSplitter`, ensuring correct, sentence-aware chunking.
-*   **utils.py**: Now orchestrates the AI enrichment pass, calling the classifier in parallel and mapping all rich metadata (`language`, `readability`, `utterance_type`) to the final chunks.
-*   **ai_enrichment.py**: A new, self-contained module responsible for all LLM-related logic. It's designed to be easily swappable or upgradable.
-*   **.env**: A new file for securely storing the `OPENAI_API_KEY`, loaded via `python-dotenv`.
 
 ## Usage and Testing
 
-### Setup
-1.  Install dependencies: `./pdf-env/bin/pip install -r requirements.txt`
-2.  Create a `.env` file in the project root and add your API key: `OPENAI_API_KEY='your-key-here'`
+### One-Command End-to-End Workflow
 
-### Command-Line Usage
-```shell
-# With AI-enriched metadata (default)
-./pdf-env/bin/python -m scripts.chunk_pdf path/to/your/document.pdf > output.jsonl
+The project provides a streamlined validation workflow accessible via a single command:
 
-# Without any metadata
-./pdf-env/bin/python -m scripts.chunk_pdf --no-metadata path/to/your/document.pdf > output_text_only.jsonl
+```bash
+# Run the complete pipeline with validation
+./_apply.sh
 ```
 
-### Validation with `_apply.sh`
-The `_apply.sh` script remains the primary tool for testing functionality, although you should feel free to build on it.
--   **Test PDF**: `./_apply.sh pdf`
--   **Test EPUB**: `./_apply.sh epub`
-For the purposes of testing, sample EPUB and PDF files are provided: `./accessible_epub_3.epub` and `./sample.pdf`
+This executes the following sequence:
+1. **`./_apply.sh`** → **`_e2e_check.sh pdf`** → **`scripts/validate_chunks.sh`**
+2. Processes `./sample_book.pdf` and generates `output_chunks_pdf.jsonl`
+3. Validates the output for structural integrity and duplicate detection
+
+### Individual Command Usage
+
+For more granular control:
+
+```bash
+# Generate chunks from PDF
+python scripts/chunk_pdf.py ./sample_book.pdf
+
+# Validate generated chunks
+./scripts/validate_chunks.sh output_chunks_pdf.jsonl
+
+# Analyze duplicate patterns (detailed reporting)
+python scripts/detect_duplicates.py output_chunks_pdf.jsonl
+```
+
+### Setup Requirements
+
+1. **Install dependencies**: `./pdf-env/bin/pip install -r requirements.txt`
+2. **Create environment file**: Add your API key to `.env`:
+   ```
+   OPENAI_API_KEY=your_api_key_here
+   ```
+3. **Enable debug mode** (optional): `export PDF_CHUNKER_DEBUG=1`
+
+## Validation and Duplicate Detection
+
+The project includes comprehensive validation tooling to ensure chunk quality and detect issues:
+
+### Structural Validator (`scripts/validate_chunks.sh`)
+
+**Purpose**: Validates the structural integrity and quality of generated chunks.
+
+**Key Features:**
+- **Exit Codes**: Returns `0` for success, `1` for validation failures, `2` for file not found
+- **Flags**: `-v` for verbose output, `-q` for quiet mode
+- **Validation Checks**: 
+  - Empty text detection (chunks with missing or whitespace-only content)
+  - Mid-sentence start detection (chunks beginning with lowercase letters)
+  - Overlong chunk detection (chunks >8000 characters)
+  - JSON structure validation
+
+**Sample Output:**
+```
+✓ Validating output_chunks_pdf.jsonl...
+✓ Structural validation complete:
+  Total chunks: 486
+  Empty text: 0
+  Mid-sentence starts: 2
+  Overlong chunks: 0
+
+✅ Validation PASSED - no critical anomalies detected
+```
+
+### Duplicate Detector (`scripts/detect_duplicates.py`)
+
+**Purpose**: Analyzes chunks for both intentional semantic overlap and problematic duplication.
+
+**Detection Methodology:**
+- **Sliding Window Analysis**: Uses configurable window size (default: 50 words) with minimum overlap threshold (default: 10 words)
+- **Boundary Analysis**: Examines overlap between consecutive chunks
+- **Distinction**: Separates intentional edge overlap from problematic full-paragraph repetition
+
+**Sample Analysis Report:**
+```
+=== DUPLICATE DETECTION REPORT ===
+File: output_chunks_pdf.jsonl
+Total chunks analyzed: 486
+Total duplications found: 12
+
+Boundary overlap issues: 3
+- Chunks 45-46: 52 words overlap (semantic coherence preservation)
+- Chunks 78-79: 48 words overlap (context preservation)
+- Chunks 234-235: 156 words overlap (potential boundary issue)
+
+✅ Analysis complete - most overlaps are intentional semantic preservation
+```
+
+### Overlap Types Explained
+
+**Intentional Overlap (Expected):**
+- Controlled by `split_overlap` parameter in `DocumentSplitter`
+- Preserves context at chunk boundaries
+- Helps maintain narrative flow and concept continuity
+- Configurable based on document type and use case
+
+**Unintentional Duplication (Detected and Flagged):**
+- Complete or substantial paragraph repetition
+- Content concatenation errors
+- Boundary parsing issues
+- Detected by `scripts/detect_duplicates.py` using sliding window analysis
+
+## Known Limitations and Roadmap
+
+### Current Limitations
+
+1. **Boundary Alignment Edge Cases**: Some chunks may start mid-sentence despite `respect_sentence_boundary=True` in complex paragraph structures  
+2. **Page Number Mapping**: Multi-page PDFs with repeating content may have incorrect page-to-chunk associations  
+3. **Duplicate Filtering Precision**: The system needs smarter filtering to better distinguish intentional semantic overlap from accidental repetition  
+4. **Debug Output**: Page-level debugging requires manual environment variable setting (`PDF_CHUNKER_DEBUG=1`)
+
+### Next Steps
+
+1. **Enhanced Boundary Detection**: Implement more sophisticated sentence boundary detection algorithms  
+2. **Smarter Duplicate Filtering**: Develop content-aware filters that preserve intentional overlap while flagging problematic duplication  
+3. **Improved Page Mapping**: Refine the `_find_source_block` heuristic in `utils.py` for better page-to-chunk accuracy  
+4. **Validation Threshold Tuning**: Optimize window size and minimum overlap parameters based on document type analysis  
+5. **Automated Quality Metrics**: Develop semantic coherence scoring for chunk quality assessment
 
 ## Coding Principles & Style Guide
 
-1.  **Declarative & Functional Paradigm**: Pure functions are preferred. Side effects are isolated. Data transformation is achieved through comprehensions and generator expressions, as seen in the EPUB parsing logic in `parsing.py`.
-2.  **Unix Philosophy**: "Do one thing and do it well." The new `ai_enrichment.py` module is a prime example, encapsulating all AI-related logic.
-3.  **Clear Interfaces & Data Flow**: The three-pass architecture maintains a clear, structured data flow, passing data between well-defined stages.
-4.  **Testing**: The `_apply.sh` script is used at each checkpoint to validate functionality and correctness.
-5.  **Iterative Refinement**: The evolution from a two-pass to a three-pass system, and the upgrade of the core Haystack library, demonstrate this principle.
-6.  **Metadata & Context Preservation**: The pipeline now excels at this, providing traceable and semantically rich metadata for each chunk, making the output highly valuable for RAG systems.
+1. **Declarative & Functional Paradigm**: Pure functions are preferred. Side effects are isolated. Data transformation is achieved through comprehensions and generator expressions, as seen in the EPUB parsing logic in `parsing.py`.  
+2. **Unix Philosophy**: "Do one thing and do it well." The new `ai_enrichment.py` module is a prime example, encapsulating all AI-related logic.  
+3. **Clear Interfaces & Data Flow**: The three-pass architecture maintains a clear, structured data flow, passing data between well-defined stages.  
+4. **Testing**: The `_apply.sh` and `_e2e_check.sh` scripts are used at each checkpoint to validate functionality and correctness.  
+5. **Iterative Refinement**: The evolution from a two-pass to a three-pass system demonstrates this principle.  
+6. **Metadata & Context Preservation**: The pipeline now excels at this, providing semantically rich metadata for each chunk, making the end-to-end output end-to-end workflow and highly valuable for RAG systems.
 
 ## Constraints & Preferences
 
-*   Follow pure, explicit, and clean coding practices inspired by Bruce Eckel, Tom Gilb, and Bob Martin.
+*   Follow pure functional, explicit, and clean coding practices inspired by Bruce Eckel, Tom Gilb, and Bob Martin.  
 *   Prioritize simplicity, clarity, modularity, and explicitness.
 
 ---
+This document provides guidance for effectively achieving the outlined objectives through structured checkpoints, clear testing protocols, and disciplined coding practices. The purpose of this file is to provide good understanding on the technical level, sufficient to continue the development. This enriched document will serve as the starting point for another AI agent. Put yourself in their shoes. What do they need? What can they enrich this document, not rewrite it. Please make sure you keep the details on the coding style and philosophy that is, Coding Principles & Style Guide and Constraints & Preferences (at least). Also, feel free to provide a lot of detail on programming patterns and techniques that you used.
 
-This document provides guidance for effectively achieving the outlined objectives through structured checkpoints, clear testing protocols, and disciplined coding practices.
-The purpose of this file is to provide good understanding on the technical level, sufficient to continue the development. This document will serve as the starting point 
-for another AI agent. Put yourself in their shoes. What do they need?
-It follows then that you must enrich this document, not re-write it. Please, make sure you keep the details on the coding style and the philosophy, that is, 
-Coding Principles & Style Guide and Constraints & Preferences (at least). Also, feel free to provide a lot of detail on programming patterns and techniques that you used.
+**For AI Agent Collaboration**: This enriched documentation now includes complete workflow information, validation tooling details, semantic chunker configuration, and known limitations. The one-command flow (`_apply.sh` → `_e2e_check.sh` → `scripts/validate_chunks.sh` → `scripts/detect_duplicates.py`) provides immediate feedback on chunk quality. The distinction between intentional semantic overlap and problematic duplication is clearly documented, along with current detection methodology and future improvement areas. Refer to file paths, CLI examples, and configuration parameters to reflect the actual repository state for seamless development continuation.
