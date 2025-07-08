@@ -33,6 +33,17 @@ def format_chunks_with_metadata(
         if not final_text:
             return None
 
+        # Validate chunk size before processing
+        if len(final_text) > 50000:  # 50k character limit
+            print(f"WARNING: Chunk {chunk_index} is oversized ({len(final_text)} chars), truncating", file=sys.stderr)
+            # Truncate at a sentence boundary if possible
+            truncate_point = 45000  # Leave some buffer
+            last_sentence = final_text.rfind('. ', 0, truncate_point)
+            if last_sentence > truncate_point // 2:
+                final_text = final_text[:last_sentence + 1]
+            else:
+                final_text = final_text[:truncate_point]
+
         if not generate_metadata:
             return {"text": final_text}
 
