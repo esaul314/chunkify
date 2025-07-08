@@ -25,9 +25,15 @@ def _detect_language(text: str) -> str:
 def _clean_paragraph(paragraph: str) -> str:
     """
     Replaces all whitespace characters with a single space and removes the BOM character.
+    Also fixes hyphenated word breaks from PDF line wrapping.
     """
     # Remove the BOM character (U+FEFF) which can appear in source files
     cleaned_text = paragraph.replace('\ufeff', '').replace('\u200b', '')
+    
+    # Fix hyphenated word breaks (e.g., "itera-tion" -> "iteration")
+    # Pattern matches: word character + hyphen + whitespace
+    cleaned_text = re.sub(r'(\w)-\s+', r'\1', cleaned_text)
+    
     # Consolidate all other whitespace into single spaces
     return re.sub(r'\s+', ' ', cleaned_text).strip()
 
