@@ -79,6 +79,45 @@ def _assess_text_quality(text: str) -> dict:
         "quality_score": quality_score
     }
 
+def _detect_heading_fallback(text: str) -> bool:
+    """
+    Fallback heading detection using text characteristics when font analysis fails.
+    Uses heuristics like text length, capitalization patterns, and punctuation.
+    """
+    if not text or not text.strip():
+        return False
+    
+    text = text.strip()
+    words = text.split()
+    
+    # Very short text (1-3 words) is likely a heading
+    if len(words) <= 3:
+        return True
+    
+    # Text that's all uppercase might be a heading
+    if text.isupper() and len(words) <= 8:
+        return True
+    
+    # Title case text without ending punctuation might be a heading
+    if (text.istitle() and 
+        len(words) <= 10 and 
+        not text.endswith(('.', '!', '?', ';', ':'))):
+        return True
+    
+    # Text that starts with common heading patterns
+    heading_starters = ['chapter', 'section', 'part', 'appendix', 'introduction', 'conclusion']
+    first_word = words[0].lower() if words else ''
+    if first_word in heading_starters and len(words) <= 8:
+        return True
+    
+    # Text that's mostly numbers (like "1.2.3 Some Topic")
+    if len(words) >= 2:
+        first_part = words[0]
+        if re.match(r'^[\d\.\-]+$', first_part) and len(words) <= 8:
+            return True
+    
+    return False
+
 def _extract_text_blocks_from_pdf(filepath: str) -> list[dict]:
     """
     Extracts text blocks from a PDF file using PyMuPDF with fallback strategies,
@@ -103,11 +142,27 @@ def _extract_text_blocks_from_pdf(filepath: str) -> list[dict]:
                 # To determine if a block is a heading, we need to check its font flags.
                 # A simple heuristic is to check if the text is short and bold.
                 is_heading = False
+
                 if len(block_text.split()) < 15: # Arbitrary short length for a heading
-                    block_dict = page.get_text("dict", clip=b[:4])["blocks"]
-                    if (block_dict and block_dict[0]['lines'] and 
-                        any(s['flags'] & 2 for s in block_dict[0]['lines'][0]['spans'])):
-                        is_heading = True
+                    try:
+                        block_dict = page.get_text("dict", clip=b[:4])["blocks"]
+                        # Defensive checks for block structure
+                        if (block_dict and 
+                            len(block_dict) > 0 and 
+                            isinstance(block_dict[0], dict) and
+                            'lines' in block_dict[0] and 
+                            block_dict[0]['lines'] and
+                            len(block_dict[0]['lines']) > 0 and
+                            isinstance(block_dict[0]['lines'][0], dict) and
+                            'spans' in block_dict[0]['lines'][0] and
+                            block_dict[0]['lines'][0]['spans']):
+                            # Check font flags for bold text (flag 2 = bold)
+                            is_heading = any(s.get('flags', 0) & 2 for s in block_dict[0]['lines'][0]['spans'])
+                    except (KeyError, IndexError, TypeError) as e:
+                        print(f"Warning: Unexpected block structure on page {page_num+1}, using fallback heading detection: {e}", file=sys.stderr)
+                        # Fallback heading detection heuristics
+                        is_heading = _detect_heading_fallback(block_text)
+    
                 
                 block_type = "heading" if is_heading else "paragraph"
                 lang = _detect_language(block_text)
