@@ -33,16 +33,42 @@ def format_chunks_with_metadata(
         if not final_text:
             return None
 
-        # Validate chunk size before processing
-        if len(final_text) > 50000:  # 50k character limit
-            print(f"WARNING: Chunk {chunk_index} is oversized ({len(final_text)} chars), truncating", file=sys.stderr)
-            # Truncate at a sentence boundary if possible
-            truncate_point = 45000  # Leave some buffer
-            last_sentence = final_text.rfind('. ', 0, truncate_point)
-            if last_sentence > truncate_point // 2:
-                final_text = final_text[:last_sentence + 1]
+
+        # Strict chunk size validation before processing
+        max_chunk_size = 8000  # Strict 8k character limit
+        if len(final_text) > max_chunk_size:
+            print(f"WARNING: Chunk {chunk_index} is oversized ({len(final_text)} chars), applying strict truncation", file=sys.stderr)
+
+            # Try to truncate at sentence boundary first
+            truncate_point = max_chunk_size - 100  # Leave buffer for clean ending
+
+            # Look for sentence endings within the truncation zone
+            sentence_endings = ['. ', '.\n', '! ', '!\n', '? ', '?\n']
+            best_break = -1
+
+            for ending in sentence_endings:
+                last_occurrence = final_text.rfind(ending, 0, truncate_point)
+                if last_occurrence > truncate_point * 0.7:  # Don't truncate too early
+                    best_break = max(best_break, last_occurrence + len(ending))
+
+            if best_break > 0:
+                final_text = final_text[:best_break].strip()
             else:
-                final_text = final_text[:truncate_point]
+                # Look for paragraph breaks
+                last_paragraph = final_text.rfind('\n\n', 0, truncate_point)
+                if last_paragraph > truncate_point * 0.7:
+                    final_text = final_text[:last_paragraph].strip()
+                else:
+                    # Last resort: word boundary
+                    last_space = final_text.rfind(' ', 0, truncate_point)
+                    if last_space > truncate_point * 0.8:
+                        final_text = final_text[:last_space].strip()
+                    else:
+                        # Emergency character truncation
+                        final_text = final_text[:truncate_point].strip()
+
+            print(f"Truncated chunk {chunk_index} to {len(final_text)} characters", file=sys.stderr)
+    
 
         if not generate_metadata:
             return {"text": final_text}
