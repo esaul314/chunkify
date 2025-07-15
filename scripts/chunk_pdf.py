@@ -8,8 +8,13 @@ def main():
     parser.add_argument("--chunk_size", type=int, default=400)
     parser.add_argument("--overlap", type=int, default=50)
     parser.add_argument(
-        "--no-metadata", 
-        action="store_true", 
+        "--exclude-pages",
+        type=str,
+        help="Page ranges to exclude from processing (e.g., '1,3,5-10,15-20'). Only applies to PDF files."
+    )
+    parser.add_argument(
+        "--no-metadata",
+        action="store_true",
         help="Set this flag to exclude metadata from the output."
     )
     args = parser.parse_args()
@@ -18,10 +23,11 @@ def main():
     generate_metadata = not args.no_metadata
 
     chunks = process_document(
-        args.document_file, 
-        args.chunk_size, 
-        args.overlap, 
-        generate_metadata=generate_metadata
+        args.document_file,
+        args.chunk_size,
+        args.overlap,
+        generate_metadata=generate_metadata,
+        exclude_pages=args.exclude_pages
     )
     
     # Filter out any None or empty chunks
@@ -40,4 +46,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -56,18 +56,41 @@ def _assess_text_quality(text: str) -> dict:
         "quality_score": quality_score
     }
 
-def _extract_with_pdftotext(filepath: str) -> list[dict]:
+
+def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[dict]:
     """
     Fallback extraction using pdftotext with layout preservation.
+
+    Args:
+        filepath: Path to the PDF file
+        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
     """
     try:
+        # Parse page exclusions if provided
+        excluded_pages = set()
+        if exclude_pages:
+            from .page_utils import parse_page_ranges
+            try:
+                excluded_pages = parse_page_ranges(exclude_pages)
+            except ValueError as e:
+                print(f"Error parsing page exclusions in pdftotext fallback: {e}", file=sys.stderr)
+
+        # Build pdftotext command with page exclusions if needed
+        cmd = ['pdftotext', '-layout']
+
+        # pdftotext doesn't have built-in page exclusion, so we'll extract all pages
+        # and filter the results afterward
+        cmd.extend([filepath, '-'])
+
         # Try pdftotext with -layout flag
         result = subprocess.run(
-            ['pdftotext', '-layout', filepath, '-'],
+            cmd,
             capture_output=True,
             text=True,
             timeout=60
         )
+    # ... existing code ...
+    
         
         if result.returncode != 0:
             print(f"pdftotext failed with return code {result.returncode}", file=sys.stderr)
@@ -113,17 +136,32 @@ def _extract_with_pdftotext(filepath: str) -> list[dict]:
         print(f"pdftotext extraction failed: {e}", file=sys.stderr)
         return []
 
-def _extract_with_pdfminer(filepath: str) -> list[dict]:
+
+def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dict]:
     """
     Final fallback extraction using pdfminer.six with tunable LAParams.
+
+    Args:
+        filepath: Path to the PDF file
+        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
     """
     try:
+        # Parse page exclusions if provided
+        excluded_pages = set()
+        if exclude_pages:
+            from .page_utils import parse_page_ranges
+            try:
+                excluded_pages = parse_page_ranges(exclude_pages)
+            except ValueError as e:
+                print(f"Error parsing page exclusions in pdfminer fallback: {e}", file=sys.stderr)
+
         # Try different LAParams configurations
         configs = [
             LAParams(char_margin=1.5, word_margin=0.5, line_margin=0.5),
             LAParams(char_margin=2.0, word_margin=0.3, line_margin=0.3),
             LAParams(char_margin=1.0, word_margin=0.8, line_margin=0.8)
         ]
+    
         
         for i, laparams in enumerate(configs):
             print(f"Trying pdfminer config {i+1}/3", file=sys.stderr)

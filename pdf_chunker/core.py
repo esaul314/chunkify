@@ -10,10 +10,19 @@ def process_document(
     chunk_size: int,
     overlap: int,
     generate_metadata: bool = True,
-    ai_enrichment: bool = True  # New flag to control AI calls
+    ai_enrichment: bool = True,  # New flag to control AI calls
+    exclude_pages: str = None  # New parameter for page exclusion
 ) -> list[dict]:
     """
     Core pipeline for processing a document with optional AI enrichment.
+
+    Args:
+        filepath: Path to the document to process
+        chunk_size: Target chunk size in words
+        overlap: Overlap size in words
+        generate_metadata: Whether to generate metadata
+        ai_enrichment: Whether to perform AI enrichment
+        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
     """
     # Determine if AI enrichment should be performed
     perform_ai_enrichment = generate_metadata and ai_enrichment
@@ -26,7 +35,9 @@ def process_document(
             perform_ai_enrichment = False
 
     # 1. Structural Pass: Extract text into structured blocks
-    structured_blocks = extract_structured_text(filepath)
+
+    structured_blocks = extract_structured_text(filepath, exclude_pages=exclude_pages)
+    
     
     # Debug: Show what we got from the structural pass
     print(f"Extracted {len(structured_blocks)} structured blocks", file=sys.stderr)
