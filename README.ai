@@ -10,19 +10,23 @@ The project has undergone significant evolution to produce RAG-supportive, conte
 
 > **⚠️ Known Issue:** There are edge cases relating to page numbering in multi-page PDFs with repeating content across pages, where chunk-to-source block mapping may assign incorrect page numbers. This can lead to chunks appearing in a non-intuitive order in the output JSONL. A potential solution would involve implementing a more sophisticated page-aware heuristic in the `_find_source_block` function in `utils.py`.
 
+
 *   **Three-Pass Architecture**: The pipeline follows a **three-pass (Structural → Semantic → AI Enrichment) architecture**, adding intelligent metadata generation with external configuration support.
 *   **Enhanced PDF Extraction**: Implements a **three-tier fallback strategy** (PyMuPDF → pdftotext → pdfminer.six) with quality assessment and automatic fallback logic to handle problematic PDFs.
+*   **Page Exclusion Support**: Flexible page filtering functionality allows excluding specific pages or ranges (e.g., "1,3,5-10,15-20") to skip tables of contents, bibliographies, and other non-content pages.
 *   **Modernized Core**: The entire processing backend has been upgraded to the modern **`haystack-ai`** framework, resolving critical dependency conflicts (`Pydantic V1 vs V2`) and ensuring future compatibility.
 *   **Strict Semantic Chunking**: Implements comprehensive chunk size validation with force-splitting logic to prevent oversized chunks (8k character limit per chunk, emergency truncation at 25k characters).
 *   **External Tag Configuration**: Uses **YAML-based tag vocabularies** for domain-specific AI enrichment, supporting generic tags plus specialized domains (philosophy, psychology, technical, project management).
-*   **Modular Code Organization**: Refactored into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`) following Unix philosophy principles.
+*   **Modular Code Organization**: Refactored into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`) following Unix philosophy principles.
 *   **Rich Metadata Generation**: The pipeline generates comprehensive RAG-supportive metadata for each chunk, including:
     *   **Language Detection**: Using `langdetect` on a per-block basis.
     *   **Readability Scores**: Calculated using `textstat` to provide Flesch-Kincaid grade levels.
     *   **AI-Powered Classification**: LLM-based utterance type classification (e.g., `definition`, `instruction`, `example`).
     *   **Domain-Specific Tags**: Configurable tag vocabularies for specialized content domains.
 *   **Robust Text Extraction**: EPUB parsing handles inline formatting (`<i>`, `<b>`, etc.) and strips invisible Unicode characters like the Byte Order Mark (`U+FEFF`), with hyphenated word rejoining for clean text processing.
-*   **Comprehensive Testing**: Integrated testing infrastructure in `_apply.sh` validates extraction quality, chunk sizes, AI enrichment, and module functionality.
+*   **Comprehensive Testing**: Integrated testing infrastructure in `_apply.sh` validates extraction quality, chunk sizes, AI enrichment, page exclusion, and module functionality.
+
+    
 
 ## Desired End-State
 
@@ -107,6 +111,9 @@ This pass is handled by `ai_enrichment.py` with external YAML configuration supp
 *   **Structured Responses**: JSON-like format parsing with error handling
 
 ## Project Architecture (Modular Organization)
+
+The codebase has been refactored into focused, single-responsibility modules following Unix philosophy principles:
+
 ```
 pdf_chunker/
 ├── .env                           # API keys for AI services
@@ -123,6 +130,7 @@ pdf_chunker/
 │   ├── text_cleaning.py           # Text cleaning and preprocessing utilities
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── extraction_fallbacks.py    # Fallback extraction strategies (pdftotext, pdfminer)
+│   ├── page_utils.py              # Page range parsing and validation utilities
 │   ├── splitter.py                # Semantic Pass: Chunks text with strict validation
 │   ├── utils.py                   # Maps metadata and orchestrates AI enrichment
 │   └── ai_enrichment.py           # AI Pass: Classification and tagging with external configs
@@ -133,6 +141,20 @@ pdf_chunker/
 ├── _e2e_check.sh                  # End-to-end test runner
 └── _apply.sh                      # Comprehensive testing and validation workflow
 ```
+
+### Modular Design Benefits
+
+**Focused Responsibilities:**
+- `text_cleaning.py`: Pure text preprocessing functions (BOM removal, hyphenated word rejoining, whitespace normalization)
+- `heading_detection.py`: Fallback heuristics for heading detection when font analysis fails
+- `extraction_fallbacks.py`: Alternative PDF extraction strategies with quality assessment
+- `page_utils.py`: Page range parsing and validation with flexible syntax support
+
+**Clear Interfaces:**
+Each module exposes simple, testable functions with explicit inputs and outputs, making the codebase easier to understand, test, and maintain.
+
+**Unix Philosophy Adherence:**
+Small, composable modules that do one thing well and communicate through structured data interfaces.
 
 ## Usage and Testing
 
@@ -162,12 +184,45 @@ For more granular control:
 # Generate chunks from PDF
 python scripts/chunk_pdf.py ./sample_book.pdf
 
+# Generate chunks with page exclusions
+python scripts/chunk_pdf.py ./sample_book.pdf --exclude-pages "1,3,5-10,15-20"
+
 # Validate generated chunks
 ./scripts/validate_chunks.sh output_chunks_pdf.jsonl
 
 # Analyze duplicate patterns (detailed reporting)
 python scripts/detect_duplicates.py output_chunks_pdf.jsonl
 ```
+
+### Page Exclusion Functionality
+
+The PDF chunker supports flexible page exclusion to skip non-content pages like tables of contents, bibliographies, and front/back matter.
+
+**Supported Syntax:**
+- Individual pages: "1,3,5"
+- Page ranges: "1-5" or "10-15"
+- Mixed format: "1,3,5-10,15-20"
+
+**Command-Line Usage:**
+```bash
+# Exclude first page and bibliography (pages 45-50)
+python scripts/chunk_pdf.py document.pdf --exclude-pages "1,45-50"
+
+# Exclude table of contents and index
+python scripts/chunk_pdf.py book.pdf --exclude-pages "1-3,200-205"
+```
+
+**Features:**
+- **Validation**: Automatically validates page ranges against document length
+- **Error Handling**: Graceful handling of invalid syntax or out-of-bounds pages
+- **Fallback Support**: Works consistently across all three extraction methods (PyMuPDF, pdftotext, pdfminer.six)
+- **Logging**: Clear feedback about which pages were excluded during processing
+
+**Edge Case Handling:**
+- Pages beyond document bounds are automatically filtered out with warnings
+- Invalid syntax (e.g., "1-2-3") is rejected with clear error messages
+- Empty or malformed specifications are safely ignored
+- Attempts to exclude all pages are prevented with warnings
 
 ### Setup Requirements
 
@@ -214,7 +269,6 @@ concepts:
   - metaphysics
 ```
 
-
 ## Validation and Quality Assurance
 
 The project includes comprehensive validation tooling to ensure chunk quality and detect issues:
@@ -249,7 +303,6 @@ Each line in the output JSONL file contains a chunk with the following structure
 ```
 
 **Key Schema Details:**
-
 - **`text`**: The actual chunk content (guaranteed ≤ 8,000 characters with force-splitting)
 - **`metadata.source`**: Original filename
 - **`metadata.chunk_id`**: Unique identifier following pattern `{filename}_p{page}_c{chunk_index}`
@@ -262,14 +315,12 @@ Each line in the output JSONL file contains a chunk with the following structure
 - **`metadata.importance`**: Currently defaults to "medium" (placeholder for future enhancement)
 
 **Configuration Impact on Output:**
-
 - With AI enrichment disabled: `utterance_type.classification` will be "disabled" and `tags` array will be empty
 - Tag vocabularies are loaded from external YAML files in `config/tags/` and validated against LLM responses
 - Each JSONL line is validated to be ≤ 10,000 characters to prevent oversized output
 
 ### Structural Validator (`scripts/validate_chunks.sh`)
     
-
 **Purpose**: Validates the structural integrity and quality of generated chunks.
 
 **Key Features:**
@@ -312,8 +363,28 @@ Each line in the output JSONL file contains a chunk with the following structure
 - **AI Enrichment**: Validates tag loading, LLM integration, and tag validation
 - **Module Integration**: Tests refactored module imports and functionality
 - **Error Handling**: Validates KeyError fixes and graceful degradation
+- **Page Exclusion**: Comprehensive testing of page filtering functionality
 - **JSONL Compatibility**: Ensures output meets line length requirements
 
+**Page Exclusion Testing:**
+The testing infrastructure includes comprehensive validation of the page exclusion feature:
+- **Baseline vs. Excluded**: Compares extraction with and without page exclusions
+- **Single Page Exclusion**: Tests excluding individual pages (e.g., page 1)
+- **Multiple Page Exclusion**: Tests excluding multiple pages (e.g., "1,3")
+- **Range Exclusion**: Tests excluding page ranges (e.g., "1-2")
+- **Edge Cases**: Tests invalid page numbers, out-of-bounds ranges, and malformed syntax
+- **Full Pipeline**: Validates page exclusion works through the complete processing pipeline
+- **Fallback Methods**: Ensures all three extraction methods respect page exclusions
+
+**Test Execution Flow:**
+1. Dependency installation and tool verification
+2. PDF extraction testing with quality assessment
+3. AI enrichment testing with tag configuration validation
+4. KeyError fix validation for unusual PDF structures
+5. Chunk size validation with force-splitting verification
+6. Module integration testing for refactored components
+7. Page exclusion functionality testing with comprehensive edge cases
+8. Final JSONL output validation for size compliance
 ## Known Limitations and Recent Fixes
 
 ### Current Limitations
@@ -321,13 +392,18 @@ Each line in the output JSONL file contains a chunk with the following structure
 1. **Page Number Mapping**: Multi-page PDFs with repeating content may have incorrect page-to-chunk associations  
 2. **Debug Output**: Page-level debugging requires manual environment variable setting (`PDF_CHUNKER_DEBUG=1`)
 
+
 ### Recent Fixes and Enhancements
 
-1. **KeyError Handling**: Added defensive checks for unusual PDF block structures with fallback heading detection
-2. **Chunk Size Validation**: Implemented strict size limits with multi-stage force-splitting logic
-3. **Hyphenated Word Rejoining**: Fixed line-break hyphens (e.g., "itera-tion" → "iteration")
-4. **Dependency Conflicts**: Resolved pdfminer.six version conflicts with pdfplumber
-5. **Modular Organization**: Refactored large files into focused modules for better maintainability
+1. **Page Exclusion Functionality**: Added comprehensive page filtering support with flexible range syntax ("1,3,5-10,15-20") for excluding non-content pages
+2. **Modular Code Organization**: Refactored large files into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`) for better maintainability
+3. **Enhanced Chunk Size Validation**: Implemented strict size limits with multi-stage force-splitting logic to prevent oversized JSONL lines
+4. **KeyError Handling**: Added defensive checks for unusual PDF block structures with fallback heading detection
+5. **Hyphenated Word Rejoining**: Fixed line-break hyphens (e.g., "itera-tion" → "iteration") in text cleaning
+6. **Dependency Conflicts**: Resolved pdfminer.six version conflicts with pdfplumber
+7. **Command-Line Interface**: added `--exclude-pages` parameter with comprehensive validation and error handling
+8. **Testing Infrastructure**: Enhanced `_apply.sh` with comprehensive validation covering all functionality including page exclusion edge cases
+    
 
 ### Quality Assurance Metrics
 
