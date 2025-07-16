@@ -33,36 +33,18 @@ def _merge_continuation_blocks(structured_blocks: list[dict]) -> list[dict]:
     """
     if not structured_blocks or len(structured_blocks) < 2:
         return structured_blocks
-
-    print(f"DEBUG: Processing {len(structured_blocks)} blocks for continuation merging", file=sys.stderr)
     
     # Create pairs of consecutive blocks with their indices
     block_pairs = list(enumerate(zip(structured_blocks, structured_blocks[1:] + [None])))
     
     # Determine which blocks should be merged with their next block
-    merge_indices = set()
-    for i, (current, next_block) in block_pairs:
-        if next_block is not None:
-            current_text = current.get('text', '').strip()
-            next_text = next_block.get('text', '').strip()
-            
-            print(f"DEBUG: Block {i}: '{current_text[:50]}...' -> Block {i+1}: '{next_text[:50]}...'", file=sys.stderr)
-            
-            if (current_text.endswith('-') and 
-                next_text and 
-                next_text[0].islower()):
-                print(f"DEBUG: MERGE DETECTED - Block {i} ends with hyphen, Block {i+1} starts lowercase", file=sys.stderr)
-                merge_indices.add(i)
-            else:
-                # Debug why merge didn't happen
-                if not current_text.endswith('-'):
-                    print(f"DEBUG: No merge - Block {i} doesn't end with hyphen (ends with: '{current_text[-5:] if current_text else 'EMPTY'}')", file=sys.stderr)
-                elif not next_text:
-                    print(f"DEBUG: No merge - Block {i+1} is empty", file=sys.stderr)
-                elif not next_text[0].islower():
-                    print(f"DEBUG: No merge - Block {i+1} doesn't start with lowercase (starts with: '{next_text[0] if next_text else 'EMPTY'}')", file=sys.stderr)
-    
-    print(f"DEBUG: Found {len(merge_indices)} blocks to merge: {merge_indices}", file=sys.stderr)
+    merge_indices = {
+        i for i, (current, next_block) in block_pairs
+        if (next_block is not None and
+            current.get('text', '').strip().endswith('-') and
+            next_block.get('text', '').strip() and
+            next_block['text'].strip()[0].islower())
+    }
     
     # Build the result by processing blocks and applying merges
     merged_blocks = []

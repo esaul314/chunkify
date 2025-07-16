@@ -100,41 +100,9 @@ def _cleanup_residual_continuations(text: str) -> str:
     if not text:
         return text
     
-    print(f"DEBUG: Cleanup input text length: {len(text)}", file=sys.stderr)
+
+    # General pattern: word fragment + \n\n + lowercase continuation
+    # This catches cases like "circum\n\nstances", "an\n\naudience", "govern\n\nment"
+    return re.sub(r'([a-zA-Z]+)\n\n([a-z]+)', r'\1\2', text)
     
-    # Pattern 1: word fragment + \n\n + word fragment (likely split words)
-    # Look for patterns like "circum\n\nstances", "an\n\naudience"
-    pattern1_matches = re.findall(r'([a-zA-Z]+)\n\n([a-z]+)', text)
-    if pattern1_matches:
-        print(f"DEBUG: Found {len(pattern1_matches)} potential word splits: {pattern1_matches[:5]}", file=sys.stderr)
-    
-    cleaned_text = re.sub(r'([a-zA-Z]+)\n\n([a-z]+)', r'\1\2', text)
-    
-    # Pattern 2: More aggressive - any word + \n\n + lowercase continuation
-    # This catches cases where the first part might be longer
-    pattern2_matches = re.findall(r'([a-zA-Z]{2,})\n\n([a-z]{1,10}(?:\s|$))', cleaned_text)
-    if pattern2_matches:
-        print(f"DEBUG: Found {len(pattern2_matches)} additional continuations: {pattern2_matches[:5]}", file=sys.stderr)
-    
-    cleaned_text = re.sub(r'([a-zA-Z]{2,})\n\n([a-z]{1,10}(?:\s|$))', r'\1\2', cleaned_text)
-    
-    # Pattern 3: Handle specific problematic patterns we've seen
-    # "Sci\n\nentific", "circum\n\nstances", etc.
-    specific_patterns = [
-        (r'([a-zA-Z]{3,})\n\n([a-z]{3,})', r'\1\2'),  # General case
-        (r'(Sci)\n\n(entific)', r'\1\2'),  # Scientific
-        (r'(circum)\n\n(stances)', r'\1\2'),  # circumstances
-        (r'(govern)\n\n(ment)', r'\1\2'),  # government
-    ]
-    
-    for pattern, replacement in specific_patterns:
-        before_count = len(re.findall(pattern, cleaned_text))
-        if before_count > 0:
-            print(f"DEBUG: Applying specific pattern '{pattern}' - found {before_count} matches", file=sys.stderr)
-            cleaned_text = re.sub(pattern, replacement, cleaned_text)
-    
-    if len(cleaned_text) != len(text):
-        print(f"DEBUG: Cleanup changed text length from {len(text)} to {len(cleaned_text)}", file=sys.stderr)
-    
-    return cleaned_text
     
