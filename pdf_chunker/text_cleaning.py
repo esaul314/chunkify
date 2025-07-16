@@ -1,9 +1,10 @@
+# text_cleaning.py
+
 import re
-import sys
+from functools import reduce
 
 # Unicode ligature to ASCII mapping for common typographic ligatures
 LIGATURE_MAP = {
-    # Latin ligatures
     '\ufb01': 'fi',    # ﬁ (U+FB01)
     '\ufb02': 'fl',    # ﬂ (U+FB02)
     '\ufb03': 'ffi',   # ﬃ (U+FB03)
@@ -11,98 +12,77 @@ LIGATURE_MAP = {
     '\ufb00': 'ff',    # ﬀ (U+FB00)
     '\ufb05': 'ft',    # ﬅ (U+FB05)
     '\ufb06': 'st',    # ﬆ (U+FB06)
-
-    # Additional common ligatures
     '\u0152': 'OE',    # Œ (U+0152)
     '\u0153': 'oe',    # œ (U+0153)
     '\u00c6': 'AE',    # Æ (U+00C6)
     '\u00e6': 'ae',    # æ (U+00E6)
     '\u0132': 'IJ',    # Ĳ (U+0132)
     '\u0133': 'ij',    # ĳ (U+0133)
-
-    # German eszett (though not technically a ligature, often needs normalization)
     '\u00df': 'ss',    # ß (U+00DF)
 }
 
-def _normalize_ligatures(text: str) -> str:
+
+def normalize_ligatures(text: str) -> str:
+    """Normalize Unicode ligatures to ASCII equivalents."""
+    return reduce(
+        lambda acc, item: acc.replace(item[0], item[1]),
+        LIGATURE_MAP.items(),
+        text
+    )
+
+
+def remove_special_chars(text: str) -> str:
+    """Remove BOM and zero-width/special characters."""
+    return re.sub(r'[\ufeff\u200b\u008b\u0089\u0097]', '', text)
+
+
+def fix_hyphenated_breaks(text: str) -> str:
+    """Fix hyphenated word breaks from PDF line wrapping."""
+    text = re.sub(r'(\w)-\n+', r'\1', text)
+    return re.sub(r'(\w)-\s*\n+\s*', r'\1', text)
+
+
+def consolidate_whitespace(text: str) -> str:
+    """Consolidate all whitespace into single spaces and trim."""
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def cleanup_residual_continuations(text: str) -> str:
+    """Merge residual paragraph breaks that likely represent continuations."""
+    return re.sub(r'([a-zA-Z]+)\n\n([a-z]+)', r'\1\2', text)
+
+
+def clean_paragraph(paragraph: str) -> str:
     """
-    Normalize Unicode ligatures to their ASCII equivalents.
-    
-    Args:
-        text: Input text that may contain Unicode ligatures
-        
-    Returns:
-        Text with ligatures replaced by ASCII equivalents
+    Clean a single paragraph: remove special chars, normalize ligatures,
+    fix hyphen breaks, and consolidate whitespace.
     """
-    if not text:
-        return text
+    transformations = [
+        remove_special_chars,
+        normalize_ligatures,
+        fix_hyphenated_breaks,
+        consolidate_whitespace,
+    ]
+    return reduce(lambda txt, fn: fn(txt), transformations, paragraph)
 
-    # Apply ligature replacements
-    normalized_text = text
-    for ligature, replacement in LIGATURE_MAP.items():
-        normalized_text = normalized_text.replace(ligature, replacement)
 
-    return normalized_text
-
-def _clean_paragraph(paragraph: str) -> str:
+def clean_text(text: str) -> str:
     """
-    Replaces all whitespace characters with a single space and removes the BOM character.
-    Also fixes hyphenated word breaks from PDF line wrapping and normalizes Unicode ligatures.
-    """
-    # Remove the BOM character (U+FEFF) which can appear in source files
-
-    cleaned_text = paragraph.replace('\ufeff', '').replace('\u200b', '').replace('\u008b', '').replace('\u0089', '').replace('\u0097', '')
-    
-
-    # Normalize Unicode ligatures to ASCII equivalents
-    cleaned_text = _normalize_ligatures(cleaned_text)
-
-
-    # Fix hyphenated word breaks (e.g., "itera-tion" -> "iteration")
-    # Enhanced pattern to handle hyphens followed by various newline combinations
-    cleaned_text = re.sub(r'(\w)-\n+', r'\1', cleaned_text)
-    cleaned_text = re.sub(r'(\w)-\s*\n+\s*', r'\1', cleaned_text)
-    
-
-    # Consolidate all other whitespace into single spaces
-    return re.sub(r'\s+', ' ', cleaned_text).strip()
-
-def _clean_text(text: str) -> str:
-    """
-    Cleans a block of text by preserving paragraph breaks and cleaning each paragraph.
-    This function is designed to be pure and declarative.
+    Clean a text block by paragraph, preserving meaningful breaks and
+    cleaning residual continuations.
     """
     if not text or not text.strip():
-        return ""
+        return ''
 
-    # Split by paragraph, clean each one, filter out empty ones, and rejoin.
+    paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
+    cleaned = '\n\n'.join(p for p in paragraphs if p)
+    return cleanup_residual_continuations(cleaned)
 
-    paragraphs = text.split('\n\n')
-    cleaned_paragraphs = (_clean_paragraph(p) for p in paragraphs)
-    cleaned_text = '\n\n'.join(p for p in cleaned_paragraphs if p)
-    # Post-processing cleanup for residual continuation patterns
-    return _cleanup_residual_continuations(cleaned_text)
-    
-def _cleanup_residual_continuations(text: str) -> str:
-    """
-    Clean up residual patterns like 'word\n\nword' that likely represent
-    continuations from line breaks rather than actual paragraph breaks.
-    
-    This is a conservative cleanup that only merges when the pattern
-    strongly suggests a continuation.
-    
-    Args:
-        text: Input text that may contain residual continuation patterns
-        
-    Returns:
-        Text with likely continuation patterns cleaned up
-    """
-    if not text:
-        return text
-    
-
-    # General pattern: word fragment + \n\n + lowercase continuation
-    # This catches cases like "circum\n\nstances", "an\n\naudience", "govern\n\nment"
-    return re.sub(r'([a-zA-Z]+)\n\n([a-z]+)', r'\1\2', text)
-    
-    
+# Alias original underscored names for backward compatibility
+_normalize_ligatures = normalize_ligatures
+_remove_special_chars = remove_special_chars
+_fix_hyphenated_breaks = fix_hyphenated_breaks
+_consolidate_whitespace = consolidate_whitespace
+_cleanup_residual_continuations = cleanup_residual_continuations
+_clean_paragraph = clean_paragraph
+_clean_text = clean_text
