@@ -20,61 +20,82 @@ from .extraction_fallbacks import (
 def _merge_continuation_blocks(structured_blocks: list[dict]) -> list[dict]:
     """
     Merge text blocks that appear to be continuations of hyphenated words.
-
+    
     This function detects cases where one block ends with a hyphen and the next
     starts with a lowercase letter, indicating a word that was split across
     visual lines in the PDF.
-
+    
     Args:
         structured_blocks: List of structured text blocks from PDF extraction
-
+        
     Returns:
         List of blocks with continuation blocks merged
     """
     if not structured_blocks or len(structured_blocks) < 2:
         return structured_blocks
 
+    print(f"DEBUG: Processing {len(structured_blocks)} blocks for continuation merging", file=sys.stderr)
+    
     # Create pairs of consecutive blocks with their indices
     block_pairs = list(enumerate(zip(structured_blocks, structured_blocks[1:] + [None])))
-
+    
     # Determine which blocks should be merged with their next block
-    merge_indices = {
-        i for i, (current, next_block) in block_pairs
-        if next_block is not None
-           and current.get('text', '').strip().endswith('-')
-           and next_block.get('text', '').strip()
-           and next_block['text'].strip()[0].islower()
-    }
-
+    merge_indices = set()
+    for i, (current, next_block) in block_pairs:
+        if next_block is not None:
+            current_text = current.get('text', '').strip()
+            next_text = next_block.get('text', '').strip()
+            
+            print(f"DEBUG: Block {i}: '{current_text[:50]}...' -> Block {i+1}: '{next_text[:50]}...'", file=sys.stderr)
+            
+            if (current_text.endswith('-') and 
+                next_text and 
+                next_text[0].islower()):
+                print(f"DEBUG: MERGE DETECTED - Block {i} ends with hyphen, Block {i+1} starts lowercase", file=sys.stderr)
+                merge_indices.add(i)
+            else:
+                # Debug why merge didn't happen
+                if not current_text.endswith('-'):
+                    print(f"DEBUG: No merge - Block {i} doesn't end with hyphen (ends with: '{current_text[-5:] if current_text else 'EMPTY'}')", file=sys.stderr)
+                elif not next_text:
+                    print(f"DEBUG: No merge - Block {i+1} is empty", file=sys.stderr)
+                elif not next_text[0].islower():
+                    print(f"DEBUG: No merge - Block {i+1} doesn't start with lowercase (starts with: '{next_text[0] if next_text else 'EMPTY'}')", file=sys.stderr)
+    
+    print(f"DEBUG: Found {len(merge_indices)} blocks to merge: {merge_indices}", file=sys.stderr)
+    
     # Build the result by processing blocks and applying merges
     merged_blocks = []
     skip_next = False
-
+    
     for i, block in enumerate(structured_blocks):
         if skip_next:
             skip_next = False
             continue
-
+            
         if i in merge_indices:
             # Merge current block with next block
             next_block = structured_blocks[i + 1]
             current_text = block['text'].strip()
             next_text = next_block['text'].strip()
-
+            
             # Remove the hyphen and join
             merged_text = current_text[:-1] + next_text
-
+            
+            print(f"DEBUG: MERGING '{current_text}' + '{next_text}' -> '{merged_text}'", file=sys.stderr)
+            
             # Create merged block using current block as base
             merged_block = block.copy()
             merged_block['text'] = merged_text
-
+            
             merged_blocks.append(merged_block)
             skip_next = True
         else:
             merged_blocks.append(block)
-
-    return merged_blocks
     
+    print(f"DEBUG: Merge complete. Original blocks: {len(structured_blocks)}, Final blocks: {len(merged_blocks)}", file=sys.stderr)
+    return merged_blocks
+
 
 def _extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
     """

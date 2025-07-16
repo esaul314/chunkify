@@ -1,4 +1,5 @@
 import re
+import sys
 
 # Unicode ligature to ASCII mapping for common typographic ligatures
 LIGATURE_MAP = {
@@ -82,32 +83,58 @@ def _clean_text(text: str) -> str:
     # Post-processing cleanup for residual continuation patterns
     return _cleanup_residual_continuations(cleaned_text)
     
-
-
 def _cleanup_residual_continuations(text: str) -> str:
     """
     Clean up residual patterns like 'word\n\nword' that likely represent
     continuations from line breaks rather than actual paragraph breaks.
-
+    
     This is a conservative cleanup that only merges when the pattern
     strongly suggests a continuation.
-
+    
     Args:
         text: Input text that may contain residual continuation patterns
-
+        
     Returns:
         Text with likely continuation patterns cleaned up
     """
     if not text:
         return text
-
-    # Pattern: lowercase word + \n\n + lowercase word (likely continuation)
-    # Only merge if both sides are lowercase words (conservative approach)
-    cleaned_text = re.sub(r'([a-z]+)\n\n([a-z]+)', r'\1\2', text)
-
-    # Pattern: word ending + \n\n + word beginning (more conservative)
-    # Only merge if the second part starts with lowercase and is short
-    cleaned_text = re.sub(r'([a-zA-Z]+)\n\n([a-z]{1,8}(?:\s|$))', r'\1\2', cleaned_text)
-
+    
+    print(f"DEBUG: Cleanup input text length: {len(text)}", file=sys.stderr)
+    
+    # Pattern 1: word fragment + \n\n + word fragment (likely split words)
+    # Look for patterns like "circum\n\nstances", "an\n\naudience"
+    pattern1_matches = re.findall(r'([a-zA-Z]+)\n\n([a-z]+)', text)
+    if pattern1_matches:
+        print(f"DEBUG: Found {len(pattern1_matches)} potential word splits: {pattern1_matches[:5]}", file=sys.stderr)
+    
+    cleaned_text = re.sub(r'([a-zA-Z]+)\n\n([a-z]+)', r'\1\2', text)
+    
+    # Pattern 2: More aggressive - any word + \n\n + lowercase continuation
+    # This catches cases where the first part might be longer
+    pattern2_matches = re.findall(r'([a-zA-Z]{2,})\n\n([a-z]{1,10}(?:\s|$))', cleaned_text)
+    if pattern2_matches:
+        print(f"DEBUG: Found {len(pattern2_matches)} additional continuations: {pattern2_matches[:5]}", file=sys.stderr)
+    
+    cleaned_text = re.sub(r'([a-zA-Z]{2,})\n\n([a-z]{1,10}(?:\s|$))', r'\1\2', cleaned_text)
+    
+    # Pattern 3: Handle specific problematic patterns we've seen
+    # "Sci\n\nentific", "circum\n\nstances", etc.
+    specific_patterns = [
+        (r'([a-zA-Z]{3,})\n\n([a-z]{3,})', r'\1\2'),  # General case
+        (r'(Sci)\n\n(entific)', r'\1\2'),  # Scientific
+        (r'(circum)\n\n(stances)', r'\1\2'),  # circumstances
+        (r'(govern)\n\n(ment)', r'\1\2'),  # government
+    ]
+    
+    for pattern, replacement in specific_patterns:
+        before_count = len(re.findall(pattern, cleaned_text))
+        if before_count > 0:
+            print(f"DEBUG: Applying specific pattern '{pattern}' - found {before_count} matches", file=sys.stderr)
+            cleaned_text = re.sub(pattern, replacement, cleaned_text)
+    
+    if len(cleaned_text) != len(text):
+        print(f"DEBUG: Cleanup changed text length from {len(text)} to {len(cleaned_text)}", file=sys.stderr)
+    
     return cleaned_text
     
