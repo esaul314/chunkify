@@ -16,6 +16,66 @@ from .extraction_fallbacks import (
     PDFMINER_AVAILABLE
 )
 
+
+def _merge_continuation_blocks(structured_blocks: list[dict]) -> list[dict]:
+    """
+    Merge text blocks that appear to be continuations of hyphenated words.
+
+    This function detects cases where one block ends with a hyphen and the next
+    starts with a lowercase letter, indicating a word that was split across
+    visual lines in the PDF.
+
+    Args:
+        structured_blocks: List of structured text blocks from PDF extraction
+
+    Returns:
+        List of blocks with continuation blocks merged
+    """
+    if not structured_blocks or len(structured_blocks) < 2:
+        return structured_blocks
+
+    # Create pairs of consecutive blocks with their indices
+    block_pairs = list(enumerate(zip(structured_blocks, structured_blocks[1:] + [None])))
+
+    # Determine which blocks should be merged with their next block
+    merge_indices = {
+        i for i, (current, next_block) in block_pairs
+        if next_block is not None
+           and current.get('text', '').strip().endswith('-')
+           and next_block.get('text', '').strip()
+           and next_block['text'].strip()[0].islower()
+    }
+
+    # Build the result by processing blocks and applying merges
+    merged_blocks = []
+    skip_next = False
+
+    for i, block in enumerate(structured_blocks):
+        if skip_next:
+            skip_next = False
+            continue
+
+        if i in merge_indices:
+            # Merge current block with next block
+            next_block = structured_blocks[i + 1]
+            current_text = block['text'].strip()
+            next_text = next_block['text'].strip()
+
+            # Remove the hyphen and join
+            merged_text = current_text[:-1] + next_text
+
+            # Create merged block using current block as base
+            merged_block = block.copy()
+            merged_block['text'] = merged_text
+
+            merged_blocks.append(merged_block)
+            skip_next = True
+        else:
+            merged_blocks.append(block)
+
+    return merged_blocks
+    
+
 def _extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
     """
     Extracts text blocks from a PDF file using PyMuPDF with fallback strategies,
@@ -94,6 +154,9 @@ def _extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> l
                 })
     doc.close()
     
+    # Merge continuation blocks before quality assessment
+    structured_blocks = _merge_continuation_blocks(structured_blocks)
+    
     # Assess quality of PyMuPDF extraction
     quality = _assess_text_quality(all_text)
     print(f"PyMuPDF extraction quality: {quality['quality_score']:.2f} (avg_line_length: {quality['avg_line_length']:.1f}, space_density: {quality['space_density']:.3f})", file=sys.stderr)
@@ -103,17 +166,123 @@ def _extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> l
         print("PyMuPDF quality poor, trying pdftotext fallback...", file=sys.stderr)
 
         fallback_blocks = _extract_with_pdftotext(filepath, exclude_pages=exclude_pages)
-    
         if fallback_blocks:
-            return fallback_blocks
+            # Apply block merging to fallback results as well
+            return _merge_continuation_blocks(fallback_blocks)
         
         if PDFMINER_AVAILABLE:
             print("pdftotext failed, trying pdfminer.six fallback...", file=sys.stderr)
 
             fallback_blocks = _extract_with_pdfminer(filepath, exclude_pages=exclude_pages)
-    
             if fallback_blocks:
-                return fallback_blocks
+                # Apply block merging to fallback results as well
+                return _merge_continuation_blocks(fallback_blocks)
+        else:
+            print("pdfminer.six not available, skipping fallback", file=sys.stderr)
+    
+    return structured_blocks
+
+def _extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
+    """
+    Extracts text blocks from a PDF file using PyMuPDF with fallback strategies,
+    classifying them as 'heading' or 'paragraph' based on simple heuristics.
+    
+    Args:
+        filepath: Path to the PDF file
+        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
+    """
+    doc = fitz.open(filepath)
+    structured_blocks = []
+    
+    print(f"PDF has {len(doc)} pages", file=sys.stderr)
+    
+    # Parse and validate page exclusions
+    excluded_pages = set()
+    if exclude_pages:
+        try:
+            excluded_pages = parse_page_ranges(exclude_pages)
+            excluded_pages = validate_page_exclusions(excluded_pages, len(doc), os.path.basename(filepath))
+        except ValueError as e:
+            print(f"Error parsing page exclusions: {e}", file=sys.stderr)
+            print("Continuing without page exclusions", file=sys.stderr)
+            excluded_pages = set()
+
+    # First, try PyMuPDF without TEXT_INHIBIT_SPACES
+    all_text = ""
+
+    for page_num, page in enumerate(doc):
+        current_page_number = page_num + 1  # Convert to 1-based page numbering
+
+        # Skip excluded pages
+        if current_page_number in excluded_pages:
+            print(f"Skipping excluded page {current_page_number}", file=sys.stderr)
+            continue
+
+        print(f"Processing page {current_page_number}", file=sys.stderr)
+        page_blocks = page.get_text("blocks")
+    
+        for b in page_blocks:
+            raw_text = b[4]
+            block_text = _clean_text(raw_text)
+            all_text += block_text + "\n"
+            
+            if block_text:
+                # To determine if a block is a heading, we need to check its font flags.
+                # A simple heuristic is to check if the text is short and bold.
+                is_heading = False
+                if len(block_text.split()) < 15: # Arbitrary short length for a heading
+                    try:
+                        block_dict = page.get_text("dict", clip=b[:4])["blocks"]
+                        # Defensive checks for block structure
+                        if (block_dict and 
+                            len(block_dict) > 0 and 
+                            isinstance(block_dict[0], dict) and
+                            'lines' in block_dict[0] and 
+                            block_dict[0]['lines'] and
+                            len(block_dict[0]['lines']) > 0 and
+                            isinstance(block_dict[0]['lines'][0], dict) and
+                            'spans' in block_dict[0]['lines'][0] and
+                            block_dict[0]['lines'][0]['spans']):
+                            # Check font flags for bold text (flag 2 = bold)
+                            is_heading = any(s.get('flags', 0) & 2 for s in block_dict[0]['lines'][0]['spans'])
+                    except (KeyError, IndexError, TypeError) as e:
+                        print(f"Warning: Unexpected block structure on page {page_num+1}, using fallback heading detection: {e}", file=sys.stderr)
+                        # Fallback heading detection heuristics
+                        is_heading = _detect_heading_fallback(block_text)
+                
+                block_type = "heading" if is_heading else "paragraph"
+                lang = _detect_language(block_text)
+                structured_blocks.append({
+                    "type": block_type,
+                    "text": block_text,
+                    "language": lang,
+                    "source": {"filename": os.path.basename(filepath), "page": current_page_number}
+                })
+    doc.close()
+    
+    # Merge continuation blocks before quality assessment
+    structured_blocks = _merge_continuation_blocks(structured_blocks)
+    
+    # Assess quality of PyMuPDF extraction
+    quality = _assess_text_quality(all_text)
+    print(f"PyMuPDF extraction quality: {quality['quality_score']:.2f} (avg_line_length: {quality['avg_line_length']:.1f}, space_density: {quality['space_density']:.3f})", file=sys.stderr)
+    
+    # If quality is poor, try fallback methods
+    if quality['quality_score'] < 0.7:
+        print("PyMuPDF quality poor, trying pdftotext fallback...", file=sys.stderr)
+
+        fallback_blocks = _extract_with_pdftotext(filepath, exclude_pages=exclude_pages)
+        if fallback_blocks:
+            # Apply block merging to fallback results as well
+            return _merge_continuation_blocks(fallback_blocks)
+        
+        if PDFMINER_AVAILABLE:
+            print("pdftotext failed, trying pdfminer.six fallback...", file=sys.stderr)
+
+            fallback_blocks = _extract_with_pdfminer(filepath, exclude_pages=exclude_pages)
+            if fallback_blocks:
+                # Apply block merging to fallback results as well
+                return _merge_continuation_blocks(fallback_blocks)
         else:
             print("pdfminer.six not available, skipping fallback", file=sys.stderr)
     
