@@ -10,23 +10,21 @@ The project has undergone significant evolution to produce RAG-supportive, conte
 
 > **⚠️ Known Issue:** There are edge cases relating to page numbering in multi-page PDFs with repeating content across pages, where chunk-to-source block mapping may assign incorrect page numbers. This can lead to chunks appearing in a non-intuitive order in the output JSONL. A potential solution would involve implementing a more sophisticated page-aware heuristic in the `_find_source_block` function in `utils.py`.
 
-
 *   **Three-Pass Architecture**: The pipeline follows a **three-pass (Structural → Semantic → AI Enrichment) architecture**, adding intelligent metadata generation with external configuration support.
 *   **Enhanced PDF Extraction**: Implements a **three-tier fallback strategy** (PyMuPDF → pdftotext → pdfminer.six) with quality assessment and automatic fallback logic to handle problematic PDFs.
-*   **Page Exclusion Support**: Flexible page filtering functionality allows excluding specific pages or ranges (e.g., "1,3,5-10,15-20") to skip tables of contents, bibliographies, and other non-content pages.
+*   **Page and Spine Exclusion Support**: Flexible filtering functionality allows excluding specific pages or ranges for PDFs (e.g., "1,3,5-10,15-20") and spine items for EPUBs to skip tables of contents, bibliographies, and other non-content sections.
 *   **Modernized Core**: The entire processing backend has been upgraded to the modern **`haystack-ai`** framework, resolving critical dependency conflicts (`Pydantic V1 vs V2`) and ensuring future compatibility.
 *   **Strict Semantic Chunking**: Implements comprehensive chunk size validation with force-splitting logic to prevent oversized chunks (8k character limit per chunk, emergency truncation at 25k characters).
 *   **External Tag Configuration**: Uses **YAML-based tag vocabularies** for domain-specific AI enrichment, supporting generic tags plus specialized domains (philosophy, psychology, technical, project management).
 *   **Modular Code Organization**: Refactored into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`) following Unix philosophy principles.
+*   **Modular Test Architecture**: Comprehensive test suite refactored from monolithic script into focused, reusable test modules with shared utilities and lightweight orchestration.
 *   **Rich Metadata Generation**: The pipeline generates comprehensive RAG-supportive metadata for each chunk, including:
     *   **Language Detection**: Using `langdetect` on a per-block basis.
     *   **Readability Scores**: Calculated using `textstat` to provide Flesch-Kincaid grade levels.
     *   **AI-Powered Classification**: LLM-based utterance type classification (e.g., `definition`, `instruction`, `example`).
     *   **Domain-Specific Tags**: Configurable tag vocabularies for specialized content domains.
 *   **Robust Text Extraction**: EPUB parsing handles inline formatting (`<i>`, `<b>`, etc.) and strips invisible Unicode characters like the Byte Order Mark (`U+FEFF`), with hyphenated word rejoining for clean text processing.
-*   **Comprehensive Testing**: Integrated testing infrastructure in `_apply.sh` validates extraction quality, chunk sizes, AI enrichment, page exclusion, and module functionality.
-
-    
+*   **Enhanced Text Processing**: Advanced Unicode ligature normalization, hyphen handling for line breaks, and block-level merging for improved text continuity.
 
 ## Desired End-State
 
@@ -46,46 +44,45 @@ The library is designed around an enhanced three-pass philosophy to maximize sem
 This pass is handled by the `parsing.py` module with support from specialized modules. It analyzes the source file and converts it into an intermediate representation: a list of structured text blocks.
 
 #### Enhanced PDF Extraction with Three-Tier Fallback
-*   **Primary Method**: **`PyMuPDF` (`fitz`)** for layout-aware parsing with quality assessment
-*   **Fallback Method 1**: **`pdftotext -layout`** for layout preservation when PyMuPDF quality is poor
-*   **Fallback Method 2**: **`pdfminer.six`** with tunable LAParams as final option
-*   **Quality Assessment**: Automatic evaluation of extraction quality using average line length, space density, and combined quality scores
-*   **Automatic Fallback Logic**: Tries methods in order based on quality thresholds (quality score < 0.7 triggers fallback)
+*   **Primary Method**: **`PyMuPDF` (`fitz`)** for layout-aware parsing with quality assessment  
+*   **Fallback Method 1**: **`pdftotext -layout`** for layout preservation when PyMuPDF quality is poor  
+*   **Fallback Method 2**: **`pdfminer.six`** with tunable LAParams as final option  
+*   **Quality Assessment**: Automatic evaluation of extraction quality using average line length, space density, and combined quality scores  
+*   **Automatic Fallback Logic**: Tries methods in order based on quality thresholds (quality score < 0.7 triggers fallback)  
 
 #### Robust Text Processing
-*   **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup` with functional approach (`_get_element_text_content`) for inline formatting handling
-*   **Text Cleaning**: Enhanced `_clean_paragraph` function strips Unicode BOM (`\uFEFF`) and fixes hyphenated word breaks (e.g., "itera-tion" → "iteration")
-*   **Heading Detection**: Font flag analysis with defensive error handling and fallback heuristics for unusual PDF structures
-*   **Language Detection**: `langdetect` applied to each text block with graceful error handling
+*   **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup` with functional approach (`_get_element_text_content`) for inline formatting handling  
+*   **Text Cleaning**: Enhanced `_clean_paragraph` function strips Unicode BOM (`\uFEFF`) and fixes hyphenated word breaks (e.g., "itera-tion" → "iteration")  
+*   **Heading Detection**: Font flag analysis with defensive error handling and fallback heuristics for unusual PDF structures  
+*   **Language Detection**: `langdetect` applied to each text block with graceful error handling  
 
 ### 2. The Semantic Pass (Strict Size Validation)
 **Intention: Refine the structurally extracted text into semantically cohesive chunks with strict size controls.**
 
 This pass is handled by the `splitter.py` module with comprehensive validation and force-splitting logic.
 
-*   **Technology**: Modern **`haystack-ai`** framework with `DocumentSplitter`
-*   **Conservative Configuration**: 
-    *   Target: 500-800 words per chunk (configurable)
-    *   Overlap: 50 words (25% maximum)
-    *   Sentence boundary respect enabled
-*   **Strict Size Validation**: 
-    *   8,000 character limit per chunk
-    *   10,000 character limit for JSONL lines
-    *   Emergency truncation at 25,000 characters
-*   **Multi-Stage Force-Splitting**:
-    *   Paragraph-based splitting for oversized chunks
-    *   Sentence-based splitting for large paragraphs
-    *   Character-based splitting as last resort
-    *   Sentence boundary preservation where possible
+*   **Technology**: Modern **`haystack-ai`** framework with `DocumentSplitter`  
+*   **Conservative Configuration**:  
+    *   Target: 500-800 words per chunk (configurable)  
+    *   Overlap: 50 words (25% maximum)  
+    *   Sentence boundary respect enabled  
+*   **Strict Size Validation**:  
+    *   8,000 character limit per chunk  
+    *   10,000 character limit for JSONL lines  
+    *   Emergency truncation at 25,000 characters  
+*   **Multi-Stage Force-Splitting**:  
+    *   Paragraph-based splitting for oversized chunks  
+    *   Sentence-based splitting for large paragraphs  
+    *   Character-based splitting as last resort  
+    *   Sentence boundary preservation where possible  
 
 #### Semantic Chunker Parameters
-
 The semantic chunker behavior is controlled by key parameters in `pdf_chunker/splitter.py`:
 
-*   **`split_length`** (default: 500-800): Maximum number of words per chunk
-*   **`split_overlap`** (default: 50): Number of words to overlap between adjacent chunks
-*   **`respect_sentence_boundary`** (default: True): Ensures chunks never end mid-sentence
-*   **`max_chars_per_chunk`** (default: 8000): Strict character limit with force-splitting
+*   **`split_length`** (default: 500-800): Maximum number of words per chunk  
+*   **`split_overlap`** (default: 50): Number of words to overlap between adjacent chunks  
+*   **`respect_sentence_boundary`** (default: True): Ensures chunks never end mid-sentence  
+*   **`max_chars_per_chunk`** (default: 8000): Strict character limit with force-splitting  
 
 ### 3. The AI Enrichment Pass (External Configuration Support)
 **Intention: Add semantic understanding and domain-specific tags to each chunk for advanced RAG applications.**
@@ -93,22 +90,22 @@ The semantic chunker behavior is controlled by key parameters in `pdf_chunker/sp
 This pass is handled by `ai_enrichment.py` with external YAML configuration support.
 
 #### External Tag Configuration System
-*   **Configuration Structure**: YAML files in `config/tags/` directory
-*   **Generic Tags**: Base categories (content_type, complexity, actionability) in `config/tags/generic.yaml`
-*   **Domain-Specific Tags**: Specialized vocabularies for:
-    *   Philosophy (`config/tags/philosophy.yaml`): Schools, concepts, thinkers, methods
-    *   Psychology (`config/tags/psychology.yaml`): Schools, concepts, research methods, applications
-    *   Technical (`config/tags/technical.yaml`): Languages, technologies, concepts, levels
-    *   Project Management (`config/tags/project_management.yaml`): Methodologies, phases, concepts, tools
-*   **Tag Loading**: Automatic merging of multiple YAML files with duplicate removal
-*   **Tag Validation**: LLM responses validated against available tag vocabulary
+*   **Configuration Structure**: YAML files in `config/tags/` directory  
+*   **Generic Tags**: Base categories (content_type, complexity, actionability) in `config/tags/generic.yaml`  
+*   **Domain-Specific Tags**: Specialized vocabularies for:  
+    *   Philosophy (`config/tags/philosophy.yaml`): Schools, concepts, thinkers, methods  
+    *   Psychology (`config/tags/psychology.yaml`): Schools, concepts, research methods, applications  
+    *   Technical (`config/tags/technical.yaml`): Languages, technologies, concepts, levels  
+    *   Project Management (`config/tags/project_management.yaml`): Methodologies, phases, concepts, tools  
+*   **Tag Loading**: Automatic merging of multiple YAML files with duplicate removal  
+*   **Tag Validation**: LLM responses validated against available tag vocabulary  
 
 #### AI Processing Features
-*   **Utterance Type Classification**: LLM-based classification (definition, explanation, instruction, etc.)
-*   **Domain-Specific Tagging**: 2-4 relevant tags selected from configured vocabularies
-*   **Flexible LLM Provider**: Uses `litellm` for 100+ LLM provider support
-*   **Parallel Processing**: `ThreadPoolExecutor` for efficient LLM call handling
-*   **Structured Responses**: JSON-like format parsing with error handling
+*   **Utterance Type Classification**: LLM-based classification (definition, explanation, instruction, etc.)  
+*   **Domain-Specific Tagging**: 2-4 relevant tags selected from configured vocabularies  
+*   **Flexible LLM Provider**: Uses `litellm` for 100+ LLM provider support  
+*   **Parallel Processing**: `ThreadPoolExecutor` for efficient LLM call handling  
+*   **Structured Responses**: JSON-like format parsing with error handling  
 
 ## Project Architecture (Modular Organization)
 
@@ -131,6 +128,7 @@ pdf_chunker/
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── extraction_fallbacks.py    # Fallback extraction strategies (pdftotext, pdfminer)
 │   ├── page_utils.py              # Page range parsing and validation utilities
+│   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── splitter.py                # Semantic Pass: Chunks text with strict validation
 │   ├── utils.py                   # Maps metadata and orchestrates AI enrichment
 │   └── ai_enrichment.py           # AI Pass: Classification and tagging with external configs
@@ -138,10 +136,18 @@ pdf_chunker/
 │   ├── chunk_pdf.py               # Command-line interface for the pipeline
 │   ├── validate_chunks.sh         # Structural validation and quality checks
 │   └── detect_duplicates.py       # Duplicate detection and overlap analysis
-├── _e2e_check.sh                  # End-to-end test runner
-└── _apply.sh                      # Comprehensive testing and validation workflow
+├── tests/                         # Modular test architecture
+│   ├── utils/
+│   │   └── common.sh              # Shared test utilities and formatting functions
+│   ├── pdf_extraction_test.py     # Focused PDF extraction testing with fallback validation
+│   ├── ai_enrichment_test.py      # AI enrichment and tag configuration testing
+│   ├── semantic_chunking_test.py  # Chunk size validation and module integration testing
+│   ├── page_exclusion_test.py     # PDF page exclusion functionality testing
+│   ├── epub_spine_test.py         # EPUB spine exclusion functionality testing
+│   └── run_all_tests.sh           # Test orchestrator that coordinates all test modules
+└── _apply.sh                      # Lightweight dependency installer and test launcher
 ```
-
+    
 ### Modular Design Benefits
 
 **Focused Responsibilities:**
@@ -167,32 +173,40 @@ The project provides a streamlined validation workflow accessible via a single c
 ./_apply.sh
 ```
 
-This executes the following comprehensive sequence:
+This executes the following lightweight sequence:
 1. **Dependency Installation**: Installs Python dependencies and system tools (poppler-utils)
-2. **PDF Extraction Testing**: Tests three-tier fallback strategy with quality metrics
-3. **AI Enrichment Testing**: Validates tag configuration loading and LLM integration
-4. **KeyError Fix Validation**: Ensures robust handling of unusual PDF structures
-5. **Chunk Size Validation**: Verifies strict size limits and force-splitting logic
-6. **Module Integration Testing**: Validates refactored module imports and functionality
-7. **JSONL Output Validation**: Ensures no oversized lines in final output
+2. **Test Orchestration**: Delegates to `tests/run_all_tests.sh` for comprehensive validation
+3. **Modular Test Execution**: Runs focused test modules for each feature area
 
-### Individual Command Usage
+### Modular Test Architecture
 
-For more granular control:
+The test suite has been refactored into focused, reusable modules:
 
-```bash
-# Generate chunks from PDF
-python scripts/chunk_pdf.py ./sample_book.pdf
+**Test Orchestrator (`tests/run_all_tests.sh`):**
+- Coordinates execution of all test modules
+- Aggregates results and provides overall success/failure status
+- Uses shared utilities for consistent reporting
 
-# Generate chunks with page exclusions
-python scripts/chunk_pdf.py ./sample_book.pdf --exclude-pages "1,3,5-10,15-20"
+**Individual Test Modules:**
+- `tests/pdf_extraction_test.py`: Tests three-tier fallback strategy with quality metrics
+- `tests/ai_enrichment_test.py`: Validates tag configuration loading and LLM integration
+- `tests/semantic_chunking_test.py`: Verifies strict size limits and force-splitting logic
+- `tests/page_exclusion_test.py`: Tests PDF page filtering functionality with edge cases
+- `tests/epub_spine_test.py`: Tests EPUB spine exclusion with comprehensive validation
 
-# Validate generated chunks
-./scripts/validate_chunks.sh output_chunks_pdf.jsonl
+**Shared Utilities (`tests/utils/common.sh`):**
+- File discovery functions for consistent test file handling
+- Result formatting utilities for standardized output
+- Error handling patterns for robust test execution
 
-# Analyze duplicate patterns (detailed reporting)
-python scripts/detect_duplicates.py output_chunks_pdf.jsonl
-```
+**Testing Coverage:**
+- **PDF Extraction Quality**: Tests three-tier fallback strategy with quality metrics
+- **Chunk Size Validation**: Ensures strict adherence to size limits (8k chars, 10k JSONL lines)
+- **AI Enrichment**: Validates tag loading, LLM integration, and tag validation
+- **Module Integration**: Tests refactored module imports and functionality
+- **Error Handling**: Validates KeyError fixes and graceful degradation
+- **Page/Spine Exclusion**: Comprehensive testing of filtering functionality for both PDFs and EPUBs
+- **JSONL Compatibility**: Ensures output meets line length requirements
 
 ### Page Exclusion Functionality
 
@@ -271,9 +285,33 @@ concepts:
 
 ## Validation and Quality Assurance
 
-The project includes comprehensive validation tooling to ensure chunk quality and detect issues:
+
+The project includes comprehensive validation tooling with a modular test architecture to ensure chunk quality and detect issues:
+
+### Modular Test Infrastructure
+
+**Focused Test Modules**: Each test module concentrates on a specific feature area with consistent patterns:
+- **Isolated Testing**: Individual modules can be run independently for targeted validation
+- **Consistent Reporting**: Standardized success/failure reporting across all test modules
+- **Reusable Utilities**: Shared functions in `tests/utils/common.sh` eliminate code duplication
+- **Comprehensive Coverage**: Each module tests both unit-level functionality and end-to-end pipeline behavior
+
+**Test Orchestration**: The `tests/run_all_tests.sh` script provides:
+- **Sequential Execution**: Runs all test modules in logical order
+- **Aggregated Results**: Combines individual test results into overall success/failure status
+- **Early Termination**: Stops on critical failures while allowing non-critical warnings
+- **Lightweight Coordination**: Minimal orchestration logic that delegates to focused test modules
+
+**Enhanced Test Coverage**:
+- **PDF Extraction Testing**: Validates three-tier fallback strategy with quality assessment metrics
+- **AI Enrichment Testing**: Tests tag configuration loading, LLM integration, and tag validation
+- **Semantic Chunking Testing**: Verifies strict size limits, force-splitting logic, and JSONL compatibility
+- **Page Exclusion Testing**: Comprehensive validation of PDF page filtering with edge case handling
+- **EPUB Spine Testing**: Tests spine exclusion functionality with range parsing and validation
+- **Module Integration Testing**: Validates refactored module imports and cross-module functionality
 
 ## JSONL Output Schema
+    
 
 **Important Note**: This documentation reflects the actual JSON structure produced by the code. It's crucial that documentation matches implementation to prevent confusion for downstream consumers.
 
@@ -320,13 +358,13 @@ Each line in the output JSONL file contains a chunk with the following structure
 - Each JSONL line is validated to be ≤ 10,000 characters to prevent oversized output
 
 ### Structural Validator (`scripts/validate_chunks.sh`)
-    
+
 **Purpose**: Validates the structural integrity and quality of generated chunks.
 
 **Key Features:**
 - **Exit Codes**: Returns `0` for success, `1` for validation failures, `2` for file not found
 - **Flags**: `-v` for verbose output, `-q` for quiet mode
-- **Validation Checks**: 
+- **Validation Checks**:
   - Empty text detection (chunks with missing or whitespace-only content)
   - Mid-sentence start detection (chunks beginning with lowercase letters)
   - Overlong chunk detection (chunks >8000 characters)
@@ -385,6 +423,7 @@ The testing infrastructure includes comprehensive validation of the page exclusi
 6. Module integration testing for refactored components
 7. Page exclusion functionality testing with comprehensive edge cases
 8. Final JSONL output validation for size compliance
+
 ## Known Limitations and Recent Fixes
 
 ### Current Limitations
@@ -392,18 +431,16 @@ The testing infrastructure includes comprehensive validation of the page exclusi
 1. **Page Number Mapping**: Multi-page PDFs with repeating content may have incorrect page-to-chunk associations  
 2. **Debug Output**: Page-level debugging requires manual environment variable setting (`PDF_CHUNKER_DEBUG=1`)
 
-
 ### Recent Fixes and Enhancements
 
 1. **Page Exclusion Functionality**: Added comprehensive page filtering support with flexible range syntax ("1,3,5-10,15-20") for excluding non-content pages
-2. **Modular Code Organization**: Refactored large files into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`) for better maintainability
+2. **Modular Code Organization**: Refactored into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`) for better maintainability
 3. **Enhanced Chunk Size Validation**: Implemented strict size limits with multi-stage force-splitting logic to prevent oversized JSONL lines
 4. **KeyError Handling**: Added defensive checks for unusual PDF block structures with fallback heading detection
 5. **Hyphenated Word Rejoining**: Fixed line-break hyphens (e.g., "itera-tion" → "iteration") in text cleaning
 6. **Dependency Conflicts**: Resolved pdfminer.six version conflicts with pdfplumber
 7. **Command-Line Interface**: added `--exclude-pages` parameter with comprehensive validation and error handling
 8. **Testing Infrastructure**: Enhanced `_apply.sh` with comprehensive validation covering all functionality including page exclusion edge cases
-    
 
 ### Quality Assurance Metrics
 
@@ -415,24 +452,28 @@ The testing infrastructure includes comprehensive validation of the page exclusi
 ## Coding Principles & Style Guide
 
 ### Declarative & Functional Paradigm
-*   **Pure Functions**: Implement pure functions wherever practical with clearly defined inputs and outputs without side effects.
-*   **Functional Techniques**: Lean towards using functional programming concepts and techniques. When appropriate, use Python comprehensions and generator expressions.
+*   **Pure Functions**: Implement pure functions wherever practical with clearly defined inputs and outputs without side effects. This is the foundation of the codebase architecture.
+*   **Functional Techniques**: Lean heavily towards functional programming concepts and techniques. Prioritize Python comprehensions, generator expressions, and functional composition over imperative loops and stateful operations.
 *   **Data Transformation**: Achieve data transformation through comprehensions and generator expressions, as seen in the EPUB parsing logic in `parsing.py` and tag configuration loading in `ai_enrichment.py`.
-*   **Immutable Data Flow**: Prefer immutable data structures and avoid stateful operations where possible.
+*   **Immutable Data Flow**: Prefer immutable data structures and avoid stateful operations wherever possible. Pass data through transformation pipelines rather than modifying objects in place.
+*   **Functional Composition**: Build complex operations by composing simple, pure functions. Each function should do one thing well and be easily testable in isolation.
+*   **Declarative Style**: Write code that expresses *what* should happen rather than *how* it should happen. Use descriptive function names and clear data transformations.
 
 ### Unix Philosophy
 *   **Single Responsibility**: "Do one thing and do it well." Keep modules small, focused, and composable. The refactored modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`) exemplify this principle.
 *   **Composable Interfaces**: Design modules to interact through simple textual or structured JSON outputs.
 *   **Pipeline Architecture**: The three-pass architecture demonstrates clear separation of concerns with well-defined interfaces.
+*   **Modular Testing**: The refactored test architecture follows the same principles—focused test modules that do one thing well and compose into a comprehensive test suite.
 
 ### Clear Interfaces & Data Flow
 *   **Explicit Boundaries**: Maintain explicit input/output boundaries for predictable, testable behavior.
 *   **Parameter Passing**: Avoid stateful or implicit behaviors; prefer explicit parameter passing.
 *   **Structured Data**: Use consistent data structures (dictionaries with standardized keys) throughout the pipeline.
 *   **Error Handling**: Implement graceful error handling with clear error messages and fallback strategies.
+*   **Functional Error Handling**: Use functional patterns for error handling where appropriate (e.g., returning Result-like structures rather than raising exceptions for expected failures).
 
 ### Code Structure and Organization
-*   **Small, Focused Files**: Break down large methods into smaller, more focused ones. Extract reusable code into separate methods or classes.
+*   **Small, Focused Files**: Break down large methods into smaller, more focused methods. Extract reusable code into separate methods or classes.
 *   **Design Patterns**: Implement design patterns where appropriate (e.g., Strategy pattern for extraction fallbacks).
 *   **Module Separation**: Separate concerns into focused modules:
     *   `text_cleaning.py`: Text preprocessing and cleaning utilities
@@ -454,36 +495,44 @@ The testing infrastructure includes comprehensive validation of the page exclusi
 
 ## Constraints & Preferences
 
+
 ### Programming Paradigm Adherence
-*   **Functional Style**: Follow pure functional, explicit, and clean coding practices inspired by Bruce Eckel, Tom Gilb, and Bob Martin.
-*   **Simplicity First**: Prioritize simplicity, clarity, modularity, and explicitness over clever or complex solutions.
-*   **Code Smell Elimination**: Identify and remove code smells, such as duplicate code, long methods, and complex conditional statements.
-*   **SOLID Principles**: Apply SOLID principles to enhance the overall design and maintainability of the code.
+*   **Functional Style**: Follow pure functional, explicit, and clean coding practices inspired by Bruce Eckel, Tom Gilb, and Bob Martin. Prioritize functional programming techniques over object-oriented or imperative approaches.
+*   **Simplicity First**: Prioritize simplicity, clarity, modularity, and explicitness over clever or complex solutions. Choose the most straightforward functional approach.
+*   **Code Smell Elimination**: Identify and remove code smells, such as duplicate code, long methods, complex conditional statements, and stateful operations.
+*   **SOLID Principles**: Apply SOLID principles to enhance the overall design and maintainability of the code, with particular emphasis on Single Responsibility and Dependency Inversion.
+*   **Functional Composition**: Build complex functionality by composing simple, pure functions rather than creating large, monolithic functions or classes.
 
 ### Performance and Optimization
-*   **Efficiency**: Optimize performance where applicable, considering time and space complexity.
-*   **Memory Management**: Be mindful of memory usage, especially when processing large documents.
-*   **Parallel Processing**: Use parallel processing for I/O-bound operations (LLM calls, file processing).
-*   **Lazy Evaluation**: Use generator expressions and lazy evaluation where appropriate.
+*   **Efficiency**: Optimize performance where applicable, considering time and space complexity while maintaining functional purity.
+*   **Memory Management**: Be mindful of memory usage, especially when processing large documents. Use generators and lazy evaluation where appropriate.
+*   **Parallel Processing**: Use parallel processing for I/O-bound operations (LLM calls, file processing) while maintaining functional principles.
+*   **Lazy Evaluation**: Use generator expressions and lazy evaluation extensively to improve memory efficiency and performance.
 
 ### Error Handling and Robustness
 *   **Graceful Degradation**: Implement fallback strategies that allow the system to continue functioning when components fail.
 *   **Comprehensive Validation**: Validate data at each stage of the pipeline with clear error messages.
-*   **Defensive Programming**: Add defensive checks for unexpected inputs and edge cases.
+*   **Defensive Programming**: Add defensive checks for unexpected inputs and edge cases using functional validation patterns.
 *   **Logging Strategy**: Implement structured logging for debugging and monitoring without cluttering the output.
+*   **Functional Error Patterns**: Use functional error handling patterns (Option/Maybe types, Result types) where appropriate instead of exception-heavy code.
 
 ### Documentation and Maintainability
-*   **Self-Documenting Code**: Write code that is self-explanatory through good naming and clear structure.
-*   **Minimal Comments**: Lean towards no comments as much as possible. Include comments only when necessary for understanding complex logic.
+*   **Self-Documenting Code**: Write code that is self-explanatory through good naming and clear functional structure.
+*   **Minimal Comments**: Lean towards no comments as much as possible. Include comments only when necessary for understanding complex functional transformations.
 *   **Configuration Documentation**: Provide clear examples and documentation for external configuration files.
-*   **Testing Documentation**: Document testing procedures and validation criteria.
+*   **Testing Documentation**: Document testing procedures and validation criteria, emphasizing the modular test architecture.
+*   **Functional Documentation**: Document the data flow and transformations clearly, showing how data moves through the functional pipeline.
 
 ### External Dependencies and Configuration
-*   **Minimal Dependencies**: Use well-established, maintained libraries with permissive licenses.
+*   **Minimal Dependencies**: Use well-established, maintained libraries with permissive licenses that support functional programming patterns.
 *   **External Configuration**: Prefer external configuration files (YAML) over hard-coded values for domain-specific settings.
 *   **Environment Management**: Use environment variables for sensitive configuration (API keys).
 *   **Dependency Management**: Maintain clean, conflict-free dependency specifications.
+*   **Modular Architecture**: Design systems as collections of small, focused modules that can be easily tested, understood, and maintained independently.
 
----
-
-**For AI Agent Collaboration**: This enriched documentation provides complete workflow information, architectural details, configuration examples, validation procedures, and coding philosophy. The comprehensive testing infrastructure in `_apply.sh` provides immediate feedback on system health. The modular organization with clear separation of concerns (text cleaning, heading detection, extraction fallbacks, AI enrichment) follows Unix philosophy principles. The external tag configuration system allows domain-specific customization without code changes. Use the documented quality metrics, size limits, and validation procedures to maintain system reliability. The coding principles and constraints sections provide essential guidance for maintaining code quality and architectural consistency during future development.
+### Test Architecture and Quality Assurance
+*   **Modular Testing**: Follow the established pattern of focused test modules with shared utilities rather than monolithic test scripts.
+*   **Functional Testing**: Write tests that validate functional transformations and data flow rather than implementation details.
+*   **Test Composition**: Build comprehensive test suites by composing focused test modules, following the same principles as the main codebase.
+*   **Shared Utilities**: Extract common test patterns into reusable utilities to eliminate duplication and ensure consistency.
+*   **Declarative Test Logic**: Write tests that clearly express what is being validated rather than how the validation is performed.
