@@ -11,7 +11,7 @@ def extract_structured_text(filepath: str, exclude_pages: str = None) -> list[di
 
     Args:
         filepath: Path to the input file
-        exclude_pages: Pages to exclude (PDF only)
+        exclude_pages: Pages to exclude (PDF only) or spine indices to exclude (EPUB only)
 
     Returns:
         List of structured text blocks
@@ -25,6 +25,6 @@ def extract_structured_text(filepath: str, exclude_pages: str = None) -> list[di
         case ".pdf":
             return extract_text_blocks_from_pdf(filepath, exclude_pages)
         case ".epub":
-            return extract_text_blocks_from_epub(filepath)
+            return extract_text_blocks_from_epub(filepath, exclude_spines=exclude_pages)
         case _:
             raise ValueError(f"Unsupported file type: '{extension}'")

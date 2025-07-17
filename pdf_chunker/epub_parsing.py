@@ -1,6 +1,7 @@
 # epub_parsing.py
 
 import os
+import sys
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
@@ -46,18 +47,45 @@ def process_epub_item(item, filename):
     return blocks
 
 
-def extract_text_blocks_from_epub(filepath: str) -> list[dict]:
+def extract_text_blocks_from_epub(filepath: str, exclude_spines: str = None) -> list[dict]:
     """
     Extracts structured text blocks from an EPUB file.
 
     Uses ebooklib.ITEM_DOCUMENT to enumerate document items.
+    
+    Args:
+        filepath: Path to the EPUB file
+        exclude_spines: Spine ranges to exclude (e.g., "1,3,5-10,15-20")
     """
     book = epub.read_epub(filepath)
     filename = os.path.basename(filepath)
 
-    # ITEM_DOCUMENT constant represents the content documents
-    return [
-        block
-        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)
-        for block in process_epub_item(item, filename)
-    ]
+    # Get spine items (ordered content documents)
+    spine_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+    
+    print(f"EPUB has {len(spine_items)} spine items", file=sys.stderr)
+    
+    # Parse and validate spine exclusions
+    excluded_spines = set()
+    if exclude_spines:
+        try:
+            from .page_utils import parse_page_ranges, validate_page_exclusions
+            excluded_spines = parse_page_ranges(exclude_spines)
+            excluded_spines = validate_page_exclusions(excluded_spines, len(spine_items), filename)
+        except ValueError as e:
+            print(f"Error parsing spine exclusions: {e}", file=sys.stderr)
+            print("Continuing without spine exclusions", file=sys.stderr)
+            excluded_spines = set()
+
+    # Process spine items with exclusion filtering
+    all_blocks = []
+    for spine_index, item in enumerate(spine_items, 1):  # 1-based indexing like PDF pages
+        if spine_index in excluded_spines:
+            print(f"Skipping excluded spine item {spine_index}: {item.get_name()}", file=sys.stderr)
+            continue
+            
+        print(f"Processing spine item {spine_index}: {item.get_name()}", file=sys.stderr)
+        blocks = process_epub_item(item, filename)
+        all_blocks.extend(blocks)
+    
+    return all_blocks

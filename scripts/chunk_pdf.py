@@ -10,7 +10,7 @@ def main():
     parser.add_argument(
         "--exclude-pages",
         type=str,
-        help="Page ranges to exclude from processing (e.g., '1,3,5-10,15-20'). Only applies to PDF files."
+        help="Page ranges to exclude from processing (e.g., '1,3,5-10,15-20'). For PDF files, excludes pages. For EPUB files, excludes spine indices."
     )
     parser.add_argument(
         "--no-metadata",
