@@ -26,6 +26,18 @@ def format_chunks_with_metadata(
     """
     Formats final chunks, enriching them in parallel with detailed metadata.
     """
+    import sys
+    
+    print(f"DEBUG: format_chunks_with_metadata called with {len(haystack_chunks)} chunks and {len(original_blocks)} original blocks", file=sys.stderr)
+    
+    # Debug: Check what pages are in the original blocks
+    original_pages = set()
+    for block in original_blocks:
+        page = block.get('source', {}).get('page')
+        if page:
+            original_pages.add(page)
+    print(f"DEBUG: Original blocks contain pages: {sorted(original_pages)}", file=sys.stderr)
+    
     char_map = _build_char_map(original_blocks)
     
     def process_chunk(chunk, chunk_index):
@@ -33,6 +45,7 @@ def format_chunks_with_metadata(
         if not final_text:
             return None
 
+        print(f"DEBUG: Processing chunk {chunk_index} with {len(final_text)} characters", file=sys.stderr)
 
         # Strict chunk size validation before processing
         max_chunk_size = 8000  # Strict 8k character limit
@@ -118,14 +131,30 @@ def _build_char_map(blocks: list[dict]) -> dict:
     """
     Builds a character position mapping for locating chunks in original blocks.
     """
+    import sys
+    
     if not blocks:
+        print(f"DEBUG: _build_char_map called with empty blocks list", file=sys.stderr)
         return {"char_positions": []}
+    
+    print(f"DEBUG: Building character map for {len(blocks)} blocks", file=sys.stderr)
+    
+    # Debug: Check what pages are in the blocks being mapped
+    block_pages = set()
+    for block in blocks:
+        page = block.get('source', {}).get('page')
+        if page:
+            block_pages.add(page)
+    print(f"DEBUG: Character map includes pages: {sorted(block_pages)}", file=sys.stderr)
     
     char_map = []
     current_pos = 0
     
     for i, block in enumerate(blocks):
         text_len = len(block["text"])
+        page = block.get('source', {}).get('page', 'unknown')
+        print(f"DEBUG: Block {i} (page {page}): {text_len} chars at position {current_pos}-{current_pos + text_len}", file=sys.stderr)
+        
         char_entry = {
             "start": current_pos, 
             "end": current_pos + text_len, 
@@ -134,20 +163,28 @@ def _build_char_map(blocks: list[dict]) -> dict:
         char_map.append(char_entry)
         current_pos += text_len + 2  # Account for '\n\n' separator
     
+    print(f"DEBUG: Character map built with {len(char_map)} entries", file=sys.stderr)
     return {"char_positions": char_map}
 
 def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[dict]) -> dict | None:
     """
     Finds the original source block for a chunk using simple text search.
     """
+    import sys
+    
     if not chunk or not chunk.content or not original_blocks:
+        print(f"DEBUG: _find_source_block early return - chunk: {bool(chunk)}, content: {bool(chunk.content if chunk else False)}, blocks: {len(original_blocks) if original_blocks else 0}", file=sys.stderr)
         return None
     
     # Simple approach: find the block that contains the start of this chunk
     chunk_start = chunk.content.strip()[:30]
+    print(f"DEBUG: Looking for source block for chunk starting with: '{chunk_start}...'", file=sys.stderr)
     
     for i, block in enumerate(original_blocks):
         if chunk_start in block["text"]:
+            page = block.get('source', {}).get('page', 'unknown')
+            print(f"DEBUG: Found matching source block {i} on page {page}", file=sys.stderr)
             return block
     
+    print(f"DEBUG: No matching source block found for chunk starting with: '{chunk_start}...'", file=sys.stderr)
     return None

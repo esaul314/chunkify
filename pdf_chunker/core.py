@@ -92,6 +92,38 @@ def process_document(
         perform_ai_enrichment=perform_ai_enrichment
     )
     
+    # Debug: Validate that excluded pages don't appear in final chunks
+    if exclude_pages and generate_metadata:
+        print(f"DEBUG: Validating page exclusions in final chunks...", file=sys.stderr)
+        
+        # Parse the excluded pages for validation
+        try:
+            from .page_utils import parse_page_ranges
+            excluded_pages = parse_page_ranges(exclude_pages)
+            print(f"DEBUG: Should exclude pages: {sorted(excluded_pages)}", file=sys.stderr)
+            
+            # Check what pages appear in final chunks
+            final_chunk_pages = set()
+            for i, chunk in enumerate(final_chunks):
+                if chunk and 'metadata' in chunk:
+                    page = chunk['metadata'].get('page')
+                    if page:
+                        final_chunk_pages.add(page)
+                        if page in excluded_pages:
+                            print(f"DEBUG: ERROR - Excluded page {page} found in final chunk {i}!", file=sys.stderr)
+            
+            print(f"DEBUG: Final chunks contain pages: {sorted(final_chunk_pages)}", file=sys.stderr)
+            
+            # Check for intersection
+            leaked_pages = final_chunk_pages.intersection(excluded_pages)
+            if leaked_pages:
+                print(f"DEBUG: CRITICAL ERROR - Excluded pages leaked into final output: {sorted(leaked_pages)}", file=sys.stderr)
+            else:
+                print(f"DEBUG: SUCCESS - No excluded pages found in final output", file=sys.stderr)
+                
+        except Exception as e:
+            print(f"DEBUG: Error validating page exclusions: {e}", file=sys.stderr)
+    
     # Final validation of chunk sizes
     print(f"Final pipeline output: {len(final_chunks)} chunks", file=sys.stderr)
     
