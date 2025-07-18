@@ -89,3 +89,23 @@ def extract_text_blocks_from_epub(filepath: str, exclude_spines: str = None) -> 
         all_blocks.extend(blocks)
     
     return all_blocks
+
+
+def list_epub_spines(filepath: str) -> list[dict]:
+    """
+    Lists spine items from an EPUB file with their indices and filenames.
+    
+    Args:
+        filepath: Path to the EPUB file
+        
+    Returns:
+        List of dictionaries containing spine information:
+        [{"index": 1, "filename": "cover.xhtml"}, ...]
+    """
+    book = epub.read_epub(filepath)
+    spine_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+    
+    return [
+        {"index": index, "filename": item.get_name()}
+        for index, item in enumerate(spine_items, 1)
+    ]

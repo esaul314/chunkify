@@ -17,7 +17,31 @@ def main():
         action="store_true",
         help="Set this flag to exclude metadata from the output."
     )
+    parser.add_argument(
+        "--list-spines",
+        action="store_true",
+        help="List EPUB spine items with their indices and filenames (EPUB files only)."
+    )
     args = parser.parse_args()
+
+    # Handle spine listing for EPUB files
+    if args.list_spines:
+        if not args.document_file.lower().endswith('.epub'):
+            print("Error: --list-spines can only be used with EPUB files.")
+            return 1
+        
+        try:
+            from pdf_chunker.epub_parsing import list_epub_spines
+            spine_items = list_epub_spines(args.document_file)
+            
+            print(f"EPUB Spine Structure ({len(spine_items)} items):")
+            for item in spine_items:
+                print(f"{item['index']:3d}. {item['filename']}")
+            
+            return 0
+        except Exception as e:
+            print(f"Error listing spine items: {e}")
+            return 1
 
     # The flag is --no-metadata, so we pass the inverse to generate_metadata
     generate_metadata = not args.no_metadata
