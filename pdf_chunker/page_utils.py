@@ -27,9 +27,15 @@ def parse_page_ranges(page_spec: str) -> set:
     # Split by commas and process each part
     parts = [part.strip() for part in page_spec.split(',')]
     
+    # Debug logging
+    print(f"DEBUG: Parsing page specification: '{page_spec}'", file=sys.stderr)
+    print(f"DEBUG: Split into parts: {parts}", file=sys.stderr)
+    
     for part in parts:
         if not part:
             continue
+            
+        print(f"DEBUG: Processing part: '{part}'", file=sys.stderr)
             
         # Check if it's a range (contains hyphen)
         if '-' in part:
@@ -44,6 +50,8 @@ def parse_page_ranges(page_spec: str) -> set:
             except ValueError:
                 raise ValueError(f"Invalid page numbers in range: '{part}'. Page numbers must be integers")
             
+            print(f"DEBUG: Range '{part}' parsed as start={start}, end={end}", file=sys.stderr)
+            
             if start > end:
                 raise ValueError(f"Invalid page range: '{part}'. Start page must be <= end page")
             
@@ -51,6 +59,10 @@ def parse_page_ranges(page_spec: str) -> set:
                 raise ValueError(f"Invalid page range: '{part}'. Page numbers must be >= 1")
             
             # Add all pages in the range
+            range_pages = list(range(start, end + 1))
+            print(f"DEBUG: Range '{part}' expands to pages: {range_pages}", file=sys.stderr)
+            excluded_pages.update(range_pages)
+            
             excluded_pages.update(range(start, end + 1))
             
         else:
@@ -63,7 +75,11 @@ def parse_page_ranges(page_spec: str) -> set:
             if page_num < 1:
                 raise ValueError(f"Invalid page number: '{part}'. Page numbers must be >= 1")
             
+            print(f"DEBUG: Individual page '{part}' parsed as: {page_num}", file=sys.stderr)
             excluded_pages.add(page_num)
+    
+    final_pages = sorted(excluded_pages)
+    print(f"DEBUG: Final excluded pages set: {final_pages}", file=sys.stderr)
     
     return excluded_pages
 
