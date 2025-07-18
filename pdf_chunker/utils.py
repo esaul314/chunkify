@@ -41,11 +41,17 @@ def format_chunks_with_metadata(
     char_map = _build_char_map(original_blocks)
     
     def process_chunk(chunk, chunk_index):
+        import sys
+        
+        print(f"DEBUG: process_chunk() ENTRY - chunk {chunk_index}", file=sys.stderr)
+        
         final_text = chunk.content.strip()
         if not final_text:
+            print(f"DEBUG: process_chunk() EXIT - chunk {chunk_index} - EMPTY CONTENT", file=sys.stderr)
             return None
 
-        print(f"DEBUG: Processing chunk {chunk_index} with {len(final_text)} characters", file=sys.stderr)
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} has {len(final_text)} characters", file=sys.stderr)
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} preview: '{final_text[:50]}...'", file=sys.stderr)
 
         # Strict chunk size validation before processing
         max_chunk_size = 8000  # Strict 8k character limit
@@ -80,22 +86,42 @@ def format_chunks_with_metadata(
                         # Emergency character truncation
                         final_text = final_text[:truncate_point].strip()
 
-            print(f"Truncated chunk {chunk_index} to {len(final_text)} characters", file=sys.stderr)
+            print(f"DEBUG: process_chunk() - chunk {chunk_index} truncated to {len(final_text)} characters", file=sys.stderr)
     
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} checking metadata generation flag", file=sys.stderr)
 
         if not generate_metadata:
+            print(f"DEBUG: process_chunk() EXIT - chunk {chunk_index} - NO METADATA MODE", file=sys.stderr)
             return {"text": final_text}
 
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} finding source block", file=sys.stderr)
         source_block = _find_source_block(chunk, char_map, original_blocks)
         if not source_block:
+            print(f"DEBUG: process_chunk() EXIT - chunk {chunk_index} - NO SOURCE BLOCK FOUND", file=sys.stderr)
             return None  # Or handle as an error
 
         filename = source_block.get("source", {}).get("filename", "Unknown")
         page = source_block.get("source", {}).get("page", 0)
+        
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} mapped to page {page}, filename {filename}", file=sys.stderr)
 
         # AI classification is only done if the flag is set
-        utterance_type = classify_chunk_utterance(final_text) if perform_ai_enrichment else "disabled"
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} checking AI enrichment flag: {perform_ai_enrichment}", file=sys.stderr)
+        
+        if perform_ai_enrichment:
+            print(f"DEBUG: process_chunk() - chunk {chunk_index} CALLING AI ENRICHMENT", file=sys.stderr)
+            try:
+                utterance_type = classify_chunk_utterance(final_text)
+                print(f"DEBUG: process_chunk() - chunk {chunk_index} AI enrichment SUCCESS: {utterance_type}", file=sys.stderr)
+            except Exception as e:
+                print(f"DEBUG: process_chunk() - chunk {chunk_index} AI enrichment FAILED: {e}", file=sys.stderr)
+                utterance_type = {"classification": "error", "tags": []}
+        else:
+            print(f"DEBUG: process_chunk() - chunk {chunk_index} AI enrichment DISABLED", file=sys.stderr)
+            utterance_type = "disabled"
 
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} building metadata", file=sys.stderr)
+        
         metadata = {
             "source": filename,
             "chunk_id": _generate_chunk_id(filename, page, chunk_index),
@@ -108,10 +134,15 @@ def format_chunks_with_metadata(
             "importance": "medium",
         }
 
-        return {
+        print(f"DEBUG: process_chunk() - chunk {chunk_index} building final result", file=sys.stderr)
+        
+        result = {
             "text": final_text,
             "metadata": {k: v for k, v in metadata.items() if v is not None}
         }
+        
+        print(f"DEBUG: process_chunk() EXIT - chunk {chunk_index} SUCCESS - result has {len(result.get('text', ''))} chars", file=sys.stderr)
+        return result
 
     # We only need parallel processing if AI enrichment is on
     if perform_ai_enrichment:
