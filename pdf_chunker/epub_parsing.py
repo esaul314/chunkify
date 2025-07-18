@@ -93,19 +93,53 @@ def extract_text_blocks_from_epub(filepath: str, exclude_spines: str = None) -> 
 
 def list_epub_spines(filepath: str) -> list[dict]:
     """
-    Lists spine items from an EPUB file with their indices and filenames.
+    Lists spine items from an EPUB file with their indices, filenames, and content previews.
     
     Args:
         filepath: Path to the EPUB file
         
     Returns:
         List of dictionaries containing spine information:
-        [{"index": 1, "filename": "cover.xhtml"}, ...]
+        [{"index": 1, "filename": "cover.xhtml", "content_preview": "Cover Page..."}, ...]
     """
     book = epub.read_epub(filepath)
     spine_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
     
+    def extract_content_preview(item) -> str:
+        """Extract first 50-100 characters of text content from a spine item."""
+        try:
+            soup = BeautifulSoup(item.get_content(), 'html.parser')
+            body = soup.find('body')
+            if not body:
+                return "No readable content"
+            
+            # Extract text from all elements, similar to process_epub_item
+            text_parts = []
+            for element in body.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'span']):
+                raw_text = get_element_text_content(element)
+                if raw_text and raw_text.strip():
+                    text_parts.append(raw_text.strip())
+            
+            if not text_parts:
+                return "No readable content"
+            
+            # Join text parts and clean up
+            full_text = ' '.join(text_parts)
+            cleaned_text = clean_paragraph(full_text)
+            
+            # Truncate to 80 characters with ellipsis
+            if len(cleaned_text) > 80:
+                return cleaned_text[:77] + "..."
+            return cleaned_text
+            
+        except Exception:
+            return "Content extraction failed"
+    
     return [
-        {"index": index, "filename": item.get_name()}
+        {
+            "index": index, 
+            "filename": item.get_name(),
+            "content_preview": extract_content_preview(item)
+        }
         for index, item in enumerate(spine_items, 1)
     ]
