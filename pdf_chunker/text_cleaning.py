@@ -2,66 +2,24 @@
 
 import re
 from functools import reduce
-
-# Unicode ligature to ASCII mapping for common typographic ligatures
-LIGATURE_MAP = {
-    # Latin ligatures
-    '\ufb01': 'fi',    # ﬁ (U+FB01)
-    '\ufb02': 'fl',    # ﬂ (U+FB02)
-    '\ufb03': 'ffi',   # ﬃ (U+FB03)
-    '\ufb04': 'ffl',   # ﬄ (U+FB04)
-    '\ufb00': 'ff',    # ﬀ (U+FB00)
-    '\ufb05': 'ft',    # ﬅ (U+FB05)
-    '\ufb06': 'st',    # ﬆ (U+FB06)
-
-    # Additional common ligatures
-    '\u0152': 'OE',    # Œ (U+0152)
-    '\u0153': 'oe',    # œ (U+0153)
-    '\u00c6': 'AE',    # Æ (U+00C6)
-    '\u00e6': 'ae',    # æ (U+00E6)
-    '\u0132': 'IJ',    # Ĳ (U+0132)
-    '\u0133': 'ij',    # ĳ (U+0133)
-
-    # German eszett (though not technically a ligature, often needs normalization)
-    '\u00df': 'ss',    # ß (U+00DF)
-
-    # Unicode hyphens to ASCII hyphen
-    '\u00AD': '-',   # ­ (U+00AD) Soft hyphen
-    '\u2010': '-',     # ‐ (U+2010) Hyphen
-    '\u2011': '-',     # ‑ (U+2011) Non-breaking hyphen
-    '\u2012': '-',     # ‒ (U+2012) Figure dash
-    '\u2013': '-',     # – (U+2013) En dash
-    '\u2014': '-',     # — (U+2014) Em dash
-}
+import ftfy
 
 
 def normalize_ligatures(text: str) -> str:
-    return reduce(lambda acc, kv: acc.replace(kv[0], kv[1]),
-                  LIGATURE_MAP.items(),
-                  text)
-
-
-
-
-#def normalize_ligatures(text: str) -> str:
-#    """
-#    Normalize Unicode ligatures to their ASCII equivalents.
-#    
-#    Args:
-#        text: Input text that may contain Unicode ligatures
-#        
-#    Returns:
-#        Text with ligatures replaced by ASCII equivalents
-#    """
-#    if not text:
-#        return text
-#    
-#    # Apply ligature replacements
-#    normalized_text = text
-#    for ligature, replacement in LIGATURE_MAP.items():
-#        normalized_text = normalized_text.replace(ligature, replacement)
-#    
-#    return normalized_text
+    """
+    Normalize Unicode ligatures and other text issues using ftfy.
+    
+    Args:
+        text: Input text that may contain Unicode ligatures and encoding issues
+        
+    Returns:
+        Text with ligatures and encoding issues fixed
+    """
+    if not text:
+        return text
+    
+    # Use ftfy to fix Unicode issues including ligatures
+    return ftfy.fix_text(text)
 
 
 def remove_special_chars(text: str) -> str:
