@@ -1,0 +1,42 @@
+content_type:
+- analysis
+- assumption_examination
+- case_study
+- comparison
+- conclusion
+- context_setting
+- critique
+- definition
+- example
+- explanation
+- instruction
+- introduction
+- methodology
+- misalignment_diagnosis
+- opinion
+- pattern_recognition
+- question
+- statement_of_fact
+- summary
+- tension_resolution
+
+complexity:
+- advanced
+- ambiguous
+- beginner
+- expert
+- intermediate
+- paradoxical
+
+actionability:
+- actionable
+- checklist
+- framework
+- practical_exercise
+- reference
+- reflective_prompt
+- scaffolding
+- sensemaking
+- template
+- theoretical
+- tool

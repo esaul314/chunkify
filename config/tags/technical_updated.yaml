@@ -1,0 +1,20 @@
+
+concepts:
+  - observability
+  - monitoring
+  - reliability
+  - scalability
+  - architecture
+  - software_design
+  - infrastructure_as_code
+  - feedback_loops
+  - coupling_and_cohesion
+  - technical_debt
+  - operational_excellence
+
+technical_level:
+  - foundational
+  - intermediate
+  - advanced
+  - integration_pattern
+  - ops_maturity_model

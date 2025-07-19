@@ -8,16 +8,19 @@ This project aims to construct a robust, reusable, standalone Python library for
 
 The project has undergone significant evolution to produce RAG-supportive, context-aware metadata with enterprise-grade reliability and strict quality controls.
 
-> **⚠️ Known Issue:** There are edge cases relating to page numbering in multi-page PDFs with repeating content across pages, where chunk-to-source block mapping may assign incorrect page numbers. This can lead to chunks appearing in a non-intuitive order in the output JSONL. A potential solution would involve implementing a more sophisticated page-aware heuristic in the `_find_source_block` function in `utils.py`.
-
 *   **Three-Pass Architecture**: The pipeline follows a **three-pass (Structural → Semantic → AI Enrichment) architecture**, adding intelligent metadata generation with external configuration support.
 *   **Enhanced PDF Extraction**: Implements a **three-tier fallback strategy** (PyMuPDF → pdftotext → pdfminer.six) with quality assessment and automatic fallback logic to handle problematic PDFs.
 *   **Page and Spine Exclusion Support**: Flexible filtering functionality allows excluding specific pages or ranges for PDFs (e.g., "1,3,5-10,15-20") and spine items for EPUBs to skip tables of contents, bibliographies, and other non-content sections.
+*   **EPUB Spine Discovery**: Interactive spine listing with content sampling allows users to preview EPUB structure before processing, showing spine indices, filenames, and content previews (first 80 characters) for informed exclusion decisions.
 *   **Modernized Core**: The entire processing backend has been upgraded to the modern **`haystack-ai`** framework, resolving critical dependency conflicts (`Pydantic V1 vs V2`) and ensuring future compatibility.
 *   **Strict Semantic Chunking**: Implements comprehensive chunk size validation with force-splitting logic to prevent oversized chunks (8k character limit per chunk, emergency truncation at 25k characters).
 *   **External Tag Configuration**: Uses **YAML-based tag vocabularies** for domain-specific AI enrichment, supporting generic tags plus specialized domains (philosophy, psychology, technical, project management).
-*   **Modular Code Organization**: Refactored into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`) following Unix philosophy principles.
-*   **Modular Test Architecture**: Comprehensive test suite refactored from monolithic script into focused, reusable test modules with shared utilities and lightweight orchestration.
+*   **Modular Code Organization**: Refactored into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`, `epub_parsing.py`) following Unix philosophy principles.
+*   **Modular Test Architecture**: Comprehensive test suite refactored from monolithic script into focused, reusable test modules with shared utilities (`tests/utils/common.sh`) and lightweight orchestration (`tests/run_all_tests.sh`).
+*   **Enhanced Metadata Generation Pipeline**: Implements granular diagnostic logging throughout the chunk processing pipeline with detailed process tracing to prevent silent chunk loss and ensure all valid chunks are properly processed or logged with drop reasons.
+*   **Robust Error Handling**: Added comprehensive error handling and validation in the metadata generation pipeline to prevent chunks from being silently dropped during AI enrichment or final formatting phases.
+
+
 *   **Rich Metadata Generation**: The pipeline generates comprehensive RAG-supportive metadata for each chunk, including:
     *   **Language Detection**: Using `langdetect` on a per-block basis.
     *   **Readability Scores**: Calculated using `textstat` to provide Flesch-Kincaid grade levels.
@@ -166,6 +169,8 @@ Small, composable modules that do one thing well and communicate through structu
 
 ### One-Command Comprehensive Workflow
 
+### Modular Test Infrastructure
+
 The project provides a streamlined validation workflow accessible via a single command:
 
 ```bash
@@ -178,10 +183,13 @@ This executes the following lightweight sequence:
 2. **Test Orchestration**: Delegates to `tests/run_all_tests.sh` for comprehensive validation
 3. **Modular Test Execution**: Runs focused test modules for each feature area
 
+The test suite follows the same modular architecture principles as the main codebase, with focused modules that can be run independently or as part of the comprehensive test orchestration.
+
 ### Modular Test Architecture
 
-The test suite has been refactored into focused, reusable modules:
+The test suite has been refactored into focused, reusable modules following the same Unix philosophy principles as the main codebase:
 
+The test suite has been refactored into focused, reusable modules:
 **Test Orchestrator (`tests/run_all_tests.sh`):**
 - Coordinates execution of all test modules
 - Aggregates results and provides overall success/failure status
@@ -199,6 +207,13 @@ The test suite has been refactored into focused, reusable modules:
 - Result formatting utilities for standardized output
 - Error handling patterns for robust test execution
 
+**Enhanced Testing Coverage:**
+**Enhanced Diagnostic Testing:**
+- **Metadata Generation Pipeline Testing**: Comprehensive validation of chunk processing with detailed process tracing
+- **Chunk Loss Prevention**: Granular logging to ensure all valid chunks are either processed or logged with drop reasons
+- **Page Exclusion Validation**: Tests both range parsing accuracy and metadata generation pipeline compliance
+- **EPUB Spine Discovery Testing**: Validates content sampling and preview generation functionality
+
 **Testing Coverage:**
 - **PDF Extraction Quality**: Tests three-tier fallback strategy with quality metrics
 - **Chunk Size Validation**: Ensures strict adherence to size limits (8k chars, 10k JSONL lines)
@@ -207,6 +222,64 @@ The test suite has been refactored into focused, reusable modules:
 - **Error Handling**: Validates KeyError fixes and graceful degradation
 - **Page/Spine Exclusion**: Comprehensive testing of filtering functionality for both PDFs and EPUBs
 - **JSONL Compatibility**: Ensures output meets line length requirements
+- **Process Tracing**: Detailed logging validation to prevent silent chunk drops
+
+### EPUB Spine Discovery
+
+The EPUB chunker includes interactive spine discovery to help users identify content structure before processing.
+
+**Basic Spine Listing:**
+
+```bash
+# List all spine items with indices and filenames
+python scripts/chunk_pdf.py book.epub --list-spines
+```
+
+**Enhanced Content Sampling:**
+The spine discovery feature provides content previews (first 80 characters) to help identify sections:
+
+```
+EPUB Spine Structure (15 items):
+  1. cover.xhtml - Cover Page
+  2. titlepage.xhtml - Title: The Complete Guide to...
+  3. toc.xhtml - Table of Contents Chapter 1...
+  4. chapter01.xhtml - Chapter 1: Introduction In this...
+  5. chapter02.xhtml - Chapter 2: Getting Started The...
+```
+
+**Workflow for EPUB Processing:**
+1. **Discovery**: Use `--list-spines` to examine EPUB structure and content
+2. **Exclusion Planning**: Identify spine items to exclude (ToC, cover, bibliography)
+3. **Processing**: Run with `--exclude-pages` using spine indices
+
+**Content Sampling Features:**
+- **Text Extraction**: Uses existing EPUB parsing utilities for clean content extraction
+- **Truncation**: Automatically truncates previews to 80 characters with ellipsis
+- **Error Handling**: Gracefully handles spine items with no readable content
+- **Functional Design**: Pure functions with clear data transformations
+
+### Enhanced Diagnostic Capabilities
+
+The system includes comprehensive diagnostic logging and process tracing to ensure reliable chunk processing and metadata generation.
+
+**Metadata Generation Pipeline Diagnostics:**
+- **Process Entry/Exit Tracking**: Detailed logging of chunk processing entry, validation, and exit points
+- **Source Block Mapping Validation**: Traces how chunks are mapped back to original source blocks for metadata
+- **AI Enrichment Monitoring**: Logs before and after AI enrichment calls to identify processing failures
+- **Chunk Loss Prevention**: Ensures all chunks either produce output or are logged with specific drop reasons
+- **Character Map Validation**: Verifies that excluded pages aren't included in character mapping for metadata generation
+
+**Page Exclusion Diagnostics:**
+- **Range Parsing Validation**: Detailed logging of how page range specifications are parsed and expanded
+- **Exclusion Application Tracking**: Traces how exclusions are applied during PDF extraction and metadata generation
+- **Boundary Calculation Verification**: Validates that range boundaries are calculated correctly (e.g., "1-7" excludes exactly pages 1-7)
+- **Pipeline Compliance**: Ensures exclusions are respected throughout the entire processing pipeline
+
+**Process Tracing Features:**
+- **Chunk-Level Tracking**: Individual chunk processing with entry/exit logging and error capture
+- **Pipeline Stage Validation**: Verification that chunks flow correctly through structural → semantic → AI enrichment phases
+- **Error Isolation**: Granular error handling to prevent silent failures and provide actionable debugging information
+- **Performance Monitoring**: Tracking of processing times and resource usage for optimization
 
 ### Page Exclusion Functionality
 
@@ -502,6 +575,7 @@ The testing infrastructure includes comprehensive validation of the page exclusi
 *   **Code Smell Elimination**: Identify and remove code smells, such as duplicate code, long methods, complex conditional statements, and stateful operations.
 *   **SOLID Principles**: Apply SOLID principles to enhance the overall design and maintainability of the code, with particular emphasis on Single Responsibility and Dependency Inversion.
 *   **Functional Composition**: Build complex functionality by composing simple, pure functions rather than creating large, monolithic functions or classes.
+*   **Performance Awareness**: Consider time and space complexity, using generators, lazy evaluation, and parallelism where appropriate.
 
 ### Performance and Optimization
 *   **Efficiency**: Optimize performance where applicable, considering time and space complexity while maintaining functional purity.
@@ -536,3 +610,4 @@ The testing infrastructure includes comprehensive validation of the page exclusi
 *   **Test Composition**: Build comprehensive test suites by composing focused test modules, following the same principles as the main codebase.
 *   **Shared Utilities**: Extract common test patterns into reusable utilities to eliminate duplication and ensure consistency.
 *   **Declarative Test Logic**: Write tests that clearly express what is being validated rather than how the validation is performed.
+*   **Modular Test Infrastructure**: Tests follow lightweight orchestration using shell scripts and shared utilities.

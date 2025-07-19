@@ -1,0 +1,25 @@
+
+content_type:
+  - context_setting
+  - assumption_examination
+  - tension_resolution
+  - pattern_recognition
+  - misalignment_diagnosis
+  - exploratory
+  - analytical
+  - practical
+
+complexity:
+  - simple
+  - intermediate
+  - advanced
+  - ambiguous
+  - paradoxical
+
+actionability:
+  - informational
+  - actionable
+  - strategic
+  - scaffolding
+  - sensemaking
+  - reflective_prompt

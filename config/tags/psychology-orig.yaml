@@ -1,0 +1,53 @@
+psychological_schools:
+  - cognitive
+  - behavioral
+  - psychoanalytic
+  - humanistic
+  - gestalt
+  - positive_psychology
+  - evolutionary
+  - social
+  - developmental
+  - neuropsychology
+
+concepts:
+  - cognition
+  - emotion
+  - motivation
+  - personality
+  - learning
+  - memory
+  - perception
+  - consciousness
+  - behavior
+  - development
+  - attachment
+  - trauma
+  - resilience
+  - well_being
+  - stress
+  - anxiety
+  - depression
+
+research_methods:
+  - experimental
+  - observational
+  - case_study
+  - survey
+  - longitudinal
+  - cross_sectional
+  - meta_analysis
+  - qualitative
+  - quantitative
+
+applications:
+  - therapy
+  - counseling
+  - assessment
+  - intervention
+  - prevention
+  - education
+  - organizational
+  - clinical
+  - forensic
+  - health

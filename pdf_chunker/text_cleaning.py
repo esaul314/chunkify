@@ -26,6 +26,7 @@ LIGATURE_MAP = {
     '\u00df': 'ss',    # ß (U+00DF)
 
     # Unicode hyphens to ASCII hyphen
+    '\u00AD': '-',   # ­ (U+00AD) Soft hyphen
     '\u2010': '-',     # ‐ (U+2010) Hyphen
     '\u2011': '-',     # ‑ (U+2011) Non-breaking hyphen
     '\u2012': '-',     # ‒ (U+2012) Figure dash
@@ -33,25 +34,34 @@ LIGATURE_MAP = {
     '\u2014': '-',     # — (U+2014) Em dash
 }
 
-def _normalize_ligatures(text: str) -> str:
-    """
-    Normalize Unicode ligatures to their ASCII equivalents.
-    
-    Args:
-        text: Input text that may contain Unicode ligatures
-        
-    Returns:
-        Text with ligatures replaced by ASCII equivalents
-    """
-    if not text:
-        return text
-    
-    # Apply ligature replacements
-    normalized_text = text
-    for ligature, replacement in LIGATURE_MAP.items():
-        normalized_text = normalized_text.replace(ligature, replacement)
-    
-    return normalized_text
+
+def normalize_ligatures(text: str) -> str:
+    return reduce(lambda acc, kv: acc.replace(kv[0], kv[1]),
+                  LIGATURE_MAP.items(),
+                  text)
+
+
+
+
+#def normalize_ligatures(text: str) -> str:
+#    """
+#    Normalize Unicode ligatures to their ASCII equivalents.
+#    
+#    Args:
+#        text: Input text that may contain Unicode ligatures
+#        
+#    Returns:
+#        Text with ligatures replaced by ASCII equivalents
+#    """
+#    if not text:
+#        return text
+#    
+#    # Apply ligature replacements
+#    normalized_text = text
+#    for ligature, replacement in LIGATURE_MAP.items():
+#        normalized_text = normalized_text.replace(ligature, replacement)
+#    
+#    return normalized_text
 
 
 def remove_special_chars(text: str) -> str:
@@ -60,12 +70,37 @@ def remove_special_chars(text: str) -> str:
 
 
 def fix_hyphenated_breaks(text: str) -> str:
-    """Fix hyphenated word breaks from PDF line wrapping."""
-    text = re.sub(r'(\w)-\n+', r'\1', text)
-    text = re.sub(r'(\w)-\s*\n+\s*', r'\1', text)
-    # Fix hyphen + space + lowercase continuation (e.g., "charac- teristics" -> "characteristics")
-    text = re.sub(r'(\w)-\s+([a-z])', r'\1\2', text)
-    return text
+    """
+    Merge hyphenated splits into single words, whether the break
+    was newline-based or space-based (e.g. 'fea-\ntures' or 'fea- tures').
+    """
+    patterns = [
+        # hyphen + optional whitespace & newline + lowercase → merge
+        (r"([A-Za-z])-\s*\n\s*([a-z])", r"\1\2"),
+        # hyphen + space(s) + lowercase → merge
+        (r"([A-Za-z])-\s+([a-z])",  r"\1\2"),
+    ]
+    return reduce(lambda acc, pr: re.sub(pr[0], pr[1], acc),
+                  patterns,
+                  text)
+
+
+#def fix_hyphenated_breaks(text: str) -> str:
+#    """
+#    Merge hyphenated splits across line breaks into single words.
+#    E.g., 'fea-\ntures' or 'fea-  \ntures' -> 'features'
+#    """
+#    # Pattern: letter, '-', optional whitespace/newlines, lowercase letter
+#    return re.sub(r"([A-Za-z])\-\s*\n\s*([a-z])", r"\1\2", text)
+
+
+#def fix_hyphenated_breaks(text: str) -> str:
+#    """Fix hyphenated word breaks from PDF line wrapping."""
+#    text = re.sub(r'(\w)-\n+', r'\1', text)
+#    text = re.sub(r'(\w)-\s*\n+\s*', r'\1', text)
+#    # Fix hyphen + space + lowercase continuation (e.g., "charac- teristics" -> "characteristics")
+#    text = re.sub(r'(\w)-\s+([a-z])', r'\1\2', text)
+#    return text
 
 
 def consolidate_whitespace(text: str) -> str:

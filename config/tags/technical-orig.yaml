@@ -1,0 +1,55 @@
+programming_languages:
+  - python
+  - javascript
+  - java
+  - cpp
+  - csharp
+  - go
+  - rust
+  - typescript
+  - php
+  - ruby
+  - swift
+  - kotlin
+
+technologies:
+  - web_development
+  - mobile_development
+  - database
+  - cloud_computing
+  - machine_learning
+  - artificial_intelligence
+  - blockchain
+  - cybersecurity
+  - devops
+  - api
+  - microservices
+  - containerization
+  - kubernetes
+  - docker
+
+concepts:
+  - algorithms
+  - data_structures
+  - design_patterns
+  - architecture
+  - testing
+  - debugging
+  - optimization
+  - scalability
+  - performance
+  - security
+  - maintainability
+  - documentation
+  - version_control
+  - deployment
+
+technical_level:
+  - tutorial
+  - reference
+  - best_practices
+  - troubleshooting
+  - configuration
+  - implementation
+  - architecture_design
+  - code_review

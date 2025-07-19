@@ -1,0 +1,33 @@
+
+concepts:
+  - agile
+  - waterfall
+  - kanban
+  - scrum
+  - lean
+  - sensemaking
+  - emergence
+  - coordination
+  - psychological_safety
+  - co_creation
+  - feedback_mechanisms
+  - learning_organization
+
+phases:
+  - initiation
+  - planning
+  - execution
+  - monitoring
+  - closure
+  - scaffolding
+  - divergence
+  - convergence
+
+roles:
+  - manager
+  - analyst
+  - coordinator
+  - lead
+  - facilitator
+  - bridge_role
+  - systemic_thinker

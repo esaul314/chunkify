@@ -1,0 +1,87 @@
+methodologies:
+- agile
+- scrum
+- kanban
+- waterfall
+- lean
+- six_sigma
+- prince2
+- pmbok
+- safe
+- devops
+
+phases:
+- closure
+- convergence
+- divergence
+- execution
+- initiation
+- monitoring
+- planning
+- retrospective
+- scaffolding
+
+concepts:
+- co_creation
+- communication
+- coordination
+- cost_management
+- emergence
+- feedback_mechanisms
+- integration
+- learning_organization
+- procurement
+- psychological_safety
+- quality_management
+- resource_management
+- risk_management
+- scope_management
+- sensemaking
+- stakeholder_management
+- time_management
+
+tools:
+- burndown_charts
+- kanban_boards
+- risk_registers
+- stakeholder_matrix
+- work_breakdown_structure
+- critical_path_method
+- project_management_software
+- gantt_charts
+- retrospectives
+- user_stories
+- project_charter
+- requirements_document
+- project_plan
+- status_reports
+- project_documentation
+
+roles:
+- bridge_role
+- business_analyst
+- facilitator
+- product_owner
+- project_manager
+- scrum_master
+- sponsor
+- stakeholder
+- systemic_thinker
+- team_lead
+- technical_lead
+- tester
+- developer
+
+deliverables:
+- project_charter
+- requirements
+- specifications
+- timeline
+- budget
+- status_report
+- lessons_learned
+- documentation
+- final_report
+- project_plan
+- stakeholder_value
+- prototype

@@ -1,0 +1,56 @@
+philosophical_schools:
+  - phenomenology
+  - existentialism
+  - analytic_philosophy
+  - continental_philosophy
+  - pragmatism
+  - stoicism
+  - empiricism
+  - rationalism
+  - idealism
+  - materialism
+  - postmodernism
+
+concepts:
+  - consciousness
+  - being
+  - ethics
+  - metaphysics
+  - epistemology
+  - ontology
+  - aesthetics
+  - logic
+  - free_will
+  - identity
+  - truth
+  - meaning
+  - reality
+  - knowledge
+  - morality
+
+thinkers:
+  - aristotle
+  - plato
+  - kant
+  - hegel
+  - nietzsche
+  - heidegger
+  - wittgenstein
+  - descartes
+  - hume
+  - locke
+  - spinoza
+  - sartre
+  - camus
+  - foucault
+  - derrida
+
+philosophical_methods:
+  - dialectical
+  - phenomenological
+  - analytical
+  - hermeneutical
+  - deconstructive
+  - pragmatic
+  - empirical
+  - rational
