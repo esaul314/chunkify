@@ -33,7 +33,6 @@ except ImportError:
 
 from pdf_chunker.core import process_document
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
-from pdf_chunker.heading_detection import detect_headings
 from pdf_chunker.text_cleaning import clean_text
 
 
@@ -356,7 +355,9 @@ def print_comparison_report(comparison: ComparisonReport):
     print(f"{'Text Length':<30} {current.text_length:<15} {pymupdf4llm.text_length:<15} {metrics.get('text_length_difference', 0):<15}")
     print(f"{'Chunk Count':<30} {current.chunk_count:<15} {pymupdf4llm.chunk_count:<15} {metrics.get('chunk_count_difference', 0):<15}")
     print(f"{'Heading Count':<30} {current.heading_count:<15} {pymupdf4llm.heading_count:<15} {metrics.get('heading_count_difference', 0):<15}")
-    print(f"{'Processing Time (s)':<30} {current.processing_time:.2f:<15} {pymupdf4llm.processing_time:.2f:<15} {pymupdf4llm.processing_time - current.processing_time:.2f:<15}")
+
+    print(f"{'Processing Time (s)':<30} {current.processing_time:<15.2f} {pymupdf4llm.processing_time:<15.2f} {(pymupdf4llm.processing_time - current.processing_time):<15.2f}")
+    
     print(f"{'Errors':<30} {len(current.errors):<15} {len(pymupdf4llm.errors):<15} {len(pymupdf4llm.errors) - len(current.errors):<15}")
 
     # Detailed metrics
