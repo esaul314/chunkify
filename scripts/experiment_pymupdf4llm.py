@@ -66,12 +66,22 @@ def extract_with_current_pipeline(pdf_path: str, pages_to_exclude: Optional[List
     errors = []
     
     try:
-        # Use the full pipeline
+
+        # Convert pages_to_exclude list to comma-separated string format
+        exclude_pages_str = None
+        if pages_to_exclude:
+            exclude_pages_str = ','.join(map(str, pages_to_exclude))
+
+        # Use the full pipeline with correct parameter names and required arguments
         result = process_document(
-            pdf_path, 
-            pages_to_exclude=pages_to_exclude or [],
-            domain_tags_file=None  # Skip AI enrichment for comparison
+            pdf_path,
+            chunk_size=8000,           # Default chunk size
+            overlap=200,               # Default overlap
+            exclude_pages=exclude_pages_str,
+            generate_metadata=True,
+            ai_enrichment=False        # Skip AI enrichment for comparison
         )
+    
         
         chunks = result.get('chunks', [])
         text_length = sum(len(chunk.get('text', '')) for chunk in chunks)
