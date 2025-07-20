@@ -85,17 +85,58 @@ def clean_paragraph(paragraph: str) -> str:
     return reduce(lambda txt, fn: fn(txt), transformations, paragraph)
 
 
-def clean_text(text: str) -> str:
+def clean_text(text: str, use_pymupdf4llm: bool = True) -> str:
     """
     Clean a text block by paragraph, preserving meaningful breaks and
-    cleaning residual continuations.
+    cleaning residual continuations. Optionally uses PyMuPDF4LLM for
+    enhanced text normalization.
+    
+    Args:
+        text: Text to clean
+        use_pymupdf4llm: Whether to use PyMuPDF4LLM for enhanced cleaning
+        
+    Returns:
+        Cleaned text with improved formatting
     """
     if not text or not text.strip():
         return ''
 
+    # Try PyMuPDF4LLM enhanced cleaning if available and requested
+    if use_pymupdf4llm:
+        try:
+            from .pymupdf4llm_integration import is_pymupdf4llm_available, clean_text_with_pymupdf4llm
+            
+            if is_pymupdf4llm_available():
+                return clean_text_with_pymupdf4llm(text)
+        except ImportError:
+            # PyMuPDF4LLM integration not available, fall back to traditional cleaning
+            pass
+        except Exception:
+            # PyMuPDF4LLM cleaning failed, fall back to traditional cleaning
+            pass
+    
+    # Traditional text cleaning approach
     paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
     cleaned = '\n\n'.join(p for p in paragraphs if p)
     return cleanup_residual_continuations(cleaned)
+
+
+def clean_text_traditional(text: str) -> str:
+    """
+    Clean text using only traditional methods without PyMuPDF4LLM.
+    
+    This function provides a way to explicitly use traditional text cleaning
+    without attempting PyMuPDF4LLM integration, useful for fallback scenarios
+    or when PyMuPDF4LLM-specific behavior is not desired.
+    
+    Args:
+        text: Text to clean
+        
+    Returns:
+        Cleaned text using traditional methods only
+    """
+    return clean_text(text, use_pymupdf4llm=False)
+
 
 # Alias original underscored names for backward compatibility
 _normalize_ligatures = normalize_ligatures

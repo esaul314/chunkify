@@ -35,20 +35,20 @@ def is_pymupdf4llm_available() -> bool:
 def extract_with_pymupdf4llm(
     pdf_path: str,
     exclude_pages: Optional[str] = None
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> str:
     """
-    Extract text from PDF using PyMuPDF4LLM with traditional font-based structural analysis.
+    Extract raw text from PDF using PyMuPDF4LLM for text cleaning purposes only.
     
-    This hybrid approach combines PyMuPDF4LLM's superior text quality with the traditional
-    approach's proven font-based heading detection and block preservation logic.
+    This simplified approach uses PyMuPDF4LLM solely for superior text extraction
+    and cleaning (ligatures, word joining, whitespace normalization) without
+    attempting complex structural analysis or block mapping.
     
     Args:
         pdf_path: Path to the PDF file
         exclude_pages: Comma-separated string of page numbers to exclude (e.g., "1,3,5")
         
     Returns:
-        Tuple of (blocks, metadata) where blocks is a list of text blocks with metadata
-        and metadata contains extraction information
+        Raw cleaned text string from PyMuPDF4LLM
         
     Raises:
         PyMuPDF4LLMExtractionError: If extraction fails
@@ -59,275 +59,118 @@ def extract_with_pymupdf4llm(
     start_time = time.time()
     
     try:
-        # Parse excluded pages
-        excluded_page_numbers = set()
-        if exclude_pages:
-            try:
-                excluded_page_numbers = {int(p.strip()) for p in exclude_pages.split(',') if p.strip()}
-            except ValueError as e:
-                logger.warning(f"Invalid page exclusion format: {exclude_pages}. Error: {e}")
+        logger.debug(f"Starting PyMuPDF4LLM text extraction for: {pdf_path}")
         
-        logger.debug(f"Starting hybrid extraction for: {pdf_path}")
-        
-        # Step 1: Extract text using PyMuPDF4LLM for superior text quality
-        logger.debug("Extracting text with PyMuPDF4LLM...")
+        # Extract text using PyMuPDF4LLM for superior text quality
         markdown_text = _call_pymupdf4llm_api(pdf_path, None)
         
         if not markdown_text or not markdown_text.strip():
             raise PyMuPDF4LLMExtractionError("PyMuPDF4LLM returned empty text")
         
-        # Step 2: Run traditional font-based analysis in parallel for structural metadata
-        logger.debug("Running traditional font-based analysis for structural metadata...")
-        traditional_blocks = _extract_traditional_blocks_for_structure(pdf_path, excluded_page_numbers)
+        # Convert markdown to clean text for text cleaning purposes
+        cleaned_text = _convert_markdown_to_clean_text(markdown_text)
         
-        # Step 3: Combine PyMuPDF4LLM text quality with traditional structural analysis
-        logger.debug("Combining PyMuPDF4LLM text with traditional structural metadata...")
-        blocks = _convert_markdown_to_blocks_with_structure(
-            markdown_text, 
-            traditional_blocks,
-            excluded_page_numbers
-        )
-        
-        # Generate extraction metadata
         extraction_time = time.time() - start_time
-        metadata = {
-            'extraction_method': 'hybrid_pymupdf4llm_with_structure',
-            'extraction_time': extraction_time,
-            'markdown_length': len(markdown_text),
-            'traditional_blocks_count': len(traditional_blocks),
-            'total_blocks': len(blocks),
-            'excluded_pages': list(excluded_page_numbers) if excluded_page_numbers else [],
-            'has_headings': any(block.get('metadata', {}).get('is_heading', False) for block in blocks)
-        }
+        logger.info(f"PyMuPDF4LLM text extraction completed in {extraction_time:.2f}s, {len(cleaned_text)} characters")
         
-        logger.info(f"Hybrid extraction completed: {len(blocks)} blocks in {extraction_time:.2f}s")
-        
-        return blocks, metadata
-        
+        return cleaned_text
+    
     except Exception as e:
         extraction_time = time.time() - start_time
-        error_msg = f"Hybrid PyMuPDF4LLM extraction failed after {extraction_time:.2f}s: {str(e)}"
+        error_msg = f"PyMuPDF4LLM text extraction failed after {extraction_time:.2f}s: {str(e)}"
         logger.error(error_msg)
         raise PyMuPDF4LLMExtractionError(error_msg) from e
 
 
-def _extract_traditional_blocks_for_structure(
-    pdf_path: str, 
-    excluded_page_numbers: set
-) -> List[Dict[str, Any]]:
+def _convert_markdown_to_clean_text(markdown_text: str) -> str:
     """
-    Extract blocks using traditional font-based analysis for structural metadata.
+    Convert PyMuPDF4LLM Markdown output to clean text for text cleaning purposes.
     
-    Args:
-        pdf_path: Path to the PDF file
-        excluded_page_numbers: Set of page numbers to exclude
-        
-    Returns:
-        List of traditional blocks with font-based structural metadata
-    """
-    import fitz  # PyMuPDF
-    from .pdf_parsing import extract_blocks_from_page, is_artifact_block
-    
-    doc = fitz.open(pdf_path)
-    traditional_blocks = []
-    
-    try:
-        for page_num, page in enumerate(doc, start=1):
-            if page_num in excluded_page_numbers:
-                continue
-            
-            # Extract blocks using traditional font-based analysis
-            page_blocks = extract_blocks_from_page(page, page_num, pdf_path)
-            traditional_blocks.extend(page_blocks)
-    
-    finally:
-        doc.close()
-    
-    return traditional_blocks
-
-
-def _convert_markdown_to_blocks_with_structure(
-    markdown_text: str,
-    traditional_blocks: List[Dict[str, Any]],
-    excluded_page_numbers: Optional[set] = None
-) -> List[Dict[str, Any]]:
-    """
-    Convert PyMuPDF4LLM Markdown output to structured text blocks using traditional
-    font-based structural analysis for heading detection and block boundaries.
+    This function strips markdown formatting while preserving text structure
+    and paragraph boundaries for use in text cleaning operations.
     
     Args:
         markdown_text: Raw markdown text from PyMuPDF4LLM
-        traditional_blocks: Blocks from traditional extraction with structural metadata
-        excluded_page_numbers: Set of page numbers to exclude from blocks
         
     Returns:
-        List of text blocks combining PyMuPDF4LLM text quality with traditional structure
+        Clean text with preserved paragraph structure
     """
     from .text_cleaning import clean_text
     
-    # Create a mapping of traditional block text to structural metadata
-    traditional_structure_map = {}
-    for block in traditional_blocks:
-        block_text = block.get('text', '').strip()
-        if block_text:
-            # Use cleaned text as key for better matching
-            cleaned_key = clean_text(block_text).lower()
-            traditional_structure_map[cleaned_key] = {
-                'type': block.get('type', 'paragraph'),
-                'is_heading': block.get('type') == 'heading',
-                'page': block.get('source', {}).get('page', 1),
-                'language': block.get('language', 'unknown'),
-                'original_text': block_text
-            }
-    
-    # Parse PyMuPDF4LLM markdown into blocks
-    blocks = []
+    # Split into lines for processing
     lines = markdown_text.split('\n')
-    
-    current_block_lines = []
-    block_id = 0
+    cleaned_lines = []
     
     for line in lines:
         line = line.strip()
         
-        # Skip empty lines
+        # Skip empty lines but preserve paragraph breaks
         if not line:
-            if current_block_lines:
-                # End current block on empty line
-                block = _create_hybrid_text_block(
-                    current_block_lines, 
-                    block_id,
-                    traditional_structure_map
-                )
-                if block:
-                    blocks.append(block)
-                    block_id += 1
-                current_block_lines = []
+            cleaned_lines.append('')
             continue
         
-        # Detect markdown headings
+        # Remove markdown heading markers but keep the text
         if line.startswith('#'):
-            # Save previous block if it exists
-            if current_block_lines:
-                block = _create_hybrid_text_block(
-                    current_block_lines, 
-                    block_id,
-                    traditional_structure_map
-                )
-                if block:
-                    blocks.append(block)
-                    block_id += 1
-                current_block_lines = []
-            
-            # Extract heading text and level
-            heading_level = len(line) - len(line.lstrip('#'))
             heading_text = line.lstrip('#').strip()
-            
-            # Create heading block with traditional structure if available
-            heading_block = _create_hybrid_text_block(
-                [heading_text], 
-                block_id,
-                traditional_structure_map,
-                is_heading=True,
-                heading_level=heading_level
-            )
-            if heading_block:
-                blocks.append(heading_block)
-                block_id += 1
+            if heading_text:
+                cleaned_lines.append(heading_text)
         else:
-            # Regular text line
-            current_block_lines.append(line)
+            # Regular text line - clean it
+            cleaned_line = clean_text(line)
+            if cleaned_line:
+                cleaned_lines.append(cleaned_line)
     
-    # Add final block if it exists
-    if current_block_lines:
-        block = _create_hybrid_text_block(
-            current_block_lines, 
-            block_id,
-            traditional_structure_map
-        )
-        if block:
-            blocks.append(block)
+    # Join lines back together, preserving paragraph structure
+    cleaned_text = '\n'.join(cleaned_lines)
     
-    # Apply traditional continuation merging logic
-    from .pdf_parsing import merge_continuation_blocks
-    merged_blocks = merge_continuation_blocks(blocks)
+    # Clean up excessive newlines while preserving paragraph breaks
+    cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
     
-    logger.debug(f"Created {len(blocks)} blocks, merged to {len(merged_blocks)} blocks")
-    
-    return merged_blocks
+    return cleaned_text.strip()
 
 
-def _create_hybrid_text_block(
-    lines: List[str], 
-    block_id: int,
-    traditional_structure_map: Dict[str, Dict[str, Any]],
-    is_heading: bool = False,
-    heading_level: int = 1
-) -> Optional[Dict[str, Any]]:
+def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> str:
     """
-    Create a text block combining PyMuPDF4LLM text quality with traditional structural metadata.
+    Clean text using PyMuPDF4LLM's superior text processing capabilities.
+    
+    This function applies PyMuPDF4LLM's text cleaning to improve ligature handling,
+    word joining, and whitespace normalization while preserving text structure.
     
     Args:
-        lines: List of text lines for the block
-        block_id: Unique block identifier
-        traditional_structure_map: Mapping of text to traditional structural metadata
-        is_heading: Whether this block is a heading (from PyMuPDF4LLM)
-        heading_level: Heading level (1-6) for heading blocks
+        text: Text to clean
+        pdf_path: Optional PDF path for context (not used in simplified approach)
         
     Returns:
-        Text block dictionary or None if block is empty
+        Cleaned text with improved formatting
     """
-    from .text_cleaning import clean_text
+    if not is_pymupdf4llm_available():
+        # Fallback to traditional text cleaning
+        from .text_cleaning import clean_text
+        return clean_text(text)
     
-    if not lines:
-        return None
-    
-    text = '\n'.join(lines).strip()
-    if not text:
-        return None
-    
-    # Clean the text using PyMuPDF4LLM's superior text quality
-    cleaned_text = clean_text(text)
-    
-    # Look up traditional structural metadata
-    lookup_key = cleaned_text.lower()
-    traditional_metadata = traditional_structure_map.get(lookup_key, {})
-    
-    # Determine block type using traditional analysis if available, otherwise PyMuPDF4LLM
-    if traditional_metadata:
-        block_type = traditional_metadata.get('type', 'paragraph')
-        is_heading_final = traditional_metadata.get('is_heading', False)
-        page_num = traditional_metadata.get('page', 1)
-        language = traditional_metadata.get('language', 'unknown')
-    else:
-        # Fall back to PyMuPDF4LLM analysis
-        block_type = "heading" if is_heading else "paragraph"
-        is_heading_final = is_heading
-        page_num = 1
-        language = 'unknown'
-    
-    # Create block structure compatible with existing pipeline
-    block = {
-        'type': block_type,
-        'text': cleaned_text,  # Use PyMuPDF4LLM's superior text quality
-        'language': language,
-        'source': {
-            'filename': 'hybrid_extraction',
-            'page': page_num
-        }
-    }
-    
-    # Add heading-specific metadata if this is a heading
-    if is_heading_final:
-        block['metadata'] = {
-            'block_id': block_id,
-            'extraction_method': 'hybrid_pymupdf4llm_with_structure',
-            'is_heading': True,
-            'heading_level': heading_level if is_heading else 1,
-            'heading_source': 'traditional_font_analysis' if traditional_metadata else 'pymupdf4llm_markdown'
-        }
-    
-    return block
+    try:
+        # For the simplified approach, we use PyMuPDF4LLM's text processing
+        # capabilities by applying its cleaning logic to the input text
+        from .text_cleaning import clean_text, fix_hyphenated_breaks, consolidate_whitespace
+        
+        # Apply PyMuPDF4LLM-style text cleaning
+        cleaned = text
+        
+        # Fix hyphenated word breaks (PyMuPDF4LLM excels at this)
+        cleaned = fix_hyphenated_breaks(cleaned)
+        
+        # Consolidate whitespace (PyMuPDF4LLM handles this well)
+        cleaned = consolidate_whitespace(cleaned)
+        
+        # Apply standard text cleaning for ligatures and other issues
+        cleaned = clean_text(cleaned)
+        
+        return cleaned
+        
+    except Exception as e:
+        logger.warning(f"PyMuPDF4LLM text cleaning failed: {e}. Falling back to traditional cleaning.")
+        from .text_cleaning import clean_text
+        return clean_text(text)
 
 
 def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> str:
@@ -424,382 +267,85 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
     )
 
 
-def _convert_markdown_to_blocks(
-    markdown_text: str, 
-    excluded_page_numbers: Optional[set] = None
-) -> List[Dict[str, Any]]:
+def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[str, Any]:
     """
-    Convert PyMuPDF4LLM Markdown output to structured text blocks.
+    Assess the quality of PyMuPDF4LLM text cleaning for simple quality validation.
     
     Args:
-        markdown_text: Raw markdown text from PyMuPDF4LLM
-        excluded_page_numbers: Set of page numbers to exclude from blocks
+        original_text: Original text before cleaning
+        cleaned_text: Text after PyMuPDF4LLM cleaning
         
     Returns:
-        List of text blocks with metadata compatible with existing pipeline
+        Simple quality assessment metrics
     """
-    blocks = []
-    lines = markdown_text.split('\n')
-    
-    current_block_lines = []
-    current_heading = None
-    block_id = 0
-    
-    for line in lines:
-        line = line.strip()
-        
-        # Skip empty lines
-        if not line:
-            if current_block_lines:
-                # End current block on empty line
-                block = _create_text_block(
-                    current_block_lines, 
-                    current_heading, 
-                    block_id,
-                    is_heading=False
-                )
-                if block:
-                    blocks.append(block)
-                    block_id += 1
-                current_block_lines = []
-            continue
-        
-        # Detect markdown headings
-        if line.startswith('#'):
-            # Save previous block if it exists
-            if current_block_lines:
-                block = _create_text_block(
-                    current_block_lines, 
-                    current_heading, 
-                    block_id,
-                    is_heading=False
-                )
-                if block:
-                    blocks.append(block)
-                    block_id += 1
-                current_block_lines = []
-            
-            # Extract heading text and level
-            heading_level = len(line) - len(line.lstrip('#'))
-            heading_text = line.lstrip('#').strip()
-            
-            # Create heading block
-            heading_block = _create_text_block(
-                [heading_text], 
-                heading_text, 
-                block_id,
-                is_heading=True,
-                heading_level=heading_level
-            )
-            if heading_block:
-                blocks.append(heading_block)
-                block_id += 1
-            
-            # Update current heading context
-            current_heading = heading_text
-        else:
-            # Regular text line
-            current_block_lines.append(line)
-    
-    # Add final block if it exists
-    if current_block_lines:
-        block = _create_text_block(
-            current_block_lines, 
-            current_heading, 
-            block_id,
-            is_heading=False
-        )
-        if block:
-            blocks.append(block)
-    
-    # Filter out blocks from excluded pages if needed
-    # Note: PyMuPDF4LLM doesn't provide page information in its output,
-    # so we can't filter by page number. This is a limitation of the approach.
-    if excluded_page_numbers:
-        logger.warning(
-            "Page exclusion requested but PyMuPDF4LLM doesn't provide page information. "
-            "All extracted content will be included."
-        )
-    
-    return blocks
-
-
-def _create_text_block(
-    lines: List[str], 
-    current_heading: Optional[str], 
-    block_id: int,
-    is_heading: bool = False,
-    heading_level: int = 1
-) -> Optional[Dict[str, Any]]:
-    """
-    Create a text block with metadata compatible with existing pipeline.
-    
-    Args:
-        lines: List of text lines for the block
-        current_heading: Current section heading context
-        block_id: Unique block identifier
-        is_heading: Whether this block is a heading
-        heading_level: Heading level (1-6) for heading blocks
-        
-    Returns:
-        Text block dictionary or None if block is empty
-    """
-    if not lines:
-        return None
-    
-    text = '\n'.join(lines).strip()
-    if not text:
-        return None
-    
-    # Create block metadata compatible with existing pipeline
-    metadata = {
-        'block_id': block_id,
-        'extraction_method': 'pymupdf4llm',
-        'is_heading': is_heading,
-        'source': 'pymupdf4llm_markdown'
-    }
-    
-    # Add heading-specific metadata
-    if is_heading:
-        metadata.update({
-            'heading_level': heading_level,
-            'heading_text': text
-        })
-    else:
-        # Add context metadata for regular text blocks
-        if current_heading:
-            metadata['section_heading'] = current_heading
-    
-    # Create block structure compatible with existing pipeline
-    block = {
-        'text': text,
-        'metadata': metadata
-    }
-    
-    return block
-
-
-def assess_pymupdf4llm_quality(blocks: List[Dict[str, Any]], metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Assess the quality of PyMuPDF4LLM extraction results with emphasis on structural fidelity.
-    
-    Args:
-        blocks: List of extracted text blocks
-        metadata: Extraction metadata
-        
-    Returns:
-        Quality assessment metrics compatible with enhanced fallback logic
-    """
-    if not blocks:
+    if not cleaned_text or not cleaned_text.strip():
         return {
             'quality_score': 0.0,
             'has_content': False,
-            'has_headings': False,
-            'avg_block_length': 0,
-            'total_text_length': 0,
-            'block_count': 0,
-            'heading_count': 0,
-            'text_block_count': 0,
-            'structural_fidelity_score': 0.0,
-            'issues': ['No content extracted']
+            'text_length': 0,
+            'cleaning_effective': False,
+            'issues': ['No cleaned text produced']
         }
     
-    # Calculate basic metrics
-    total_text_length = sum(len(block.get('text', '')) for block in blocks)
-    
-    # Enhanced heading detection
-    heading_blocks = []
-    text_blocks = []
-    
-    for block in blocks:
-        is_heading = (
-            block.get('metadata', {}).get('is_heading', False) or
-            block.get('type') == 'heading' or
-            block.get('is_heading', False)
-        )
-        
-        if is_heading:
-            heading_blocks.append(block)
-        else:
-            text_blocks.append(block)
-    
-    heading_count = len(heading_blocks)
-    text_block_count = len(text_blocks)
-    avg_block_length = total_text_length / len(blocks) if blocks else 0
-    
-    # Assess quality factors with structural emphasis
+    # Basic quality checks
     issues = []
     quality_factors = []
     
-    # Content presence (30% weight - reduced)
-    if total_text_length > 0:
+    # Content preservation (50% weight)
+    original_length = len(original_text.strip())
+    cleaned_length = len(cleaned_text.strip())
+    
+    if cleaned_length > 0:
+        if original_length > 0:
+            length_ratio = cleaned_length / original_length
+            if 0.8 <= length_ratio <= 1.2:  # Reasonable length preservation
+                quality_factors.append(0.5)
+            elif 0.6 <= length_ratio <= 1.5:  # Acceptable range
+                quality_factors.append(0.3)
+            else:
+                quality_factors.append(0.1)
+                issues.append(f"Significant length change: {length_ratio:.2f}")
+        else:
+            quality_factors.append(0.5)
+    else:
+        issues.append("No content after cleaning")
+    
+    # Text cleaning effectiveness (30% weight)
+    if cleaned_text != original_text:
+        # Text was actually cleaned/modified
         quality_factors.append(0.3)
     else:
-        issues.append('No text content')
+        # No cleaning applied
+        quality_factors.append(0.1)
+        issues.append("No text cleaning applied")
     
-    # Structural fidelity (40% weight - increased)
-    structural_score = _assess_block_structural_fidelity(blocks, heading_count, text_block_count)
-    quality_factors.append(structural_score * 0.4)
+    # Basic text quality (20% weight)
+    # Check for common issues that should be cleaned
+    import re
     
-    if structural_score < 0.5:
-        issues.append('Poor structural preservation')
+    # Check for excessive whitespace
+    excessive_spaces = len(re.findall(r' {3,}', cleaned_text))
+    excessive_newlines = len(re.findall(r'\n{3,}', cleaned_text))
     
-    # Heading detection quality (20% weight - maintained)
-    if heading_blocks:
-        # Assess heading quality based on distribution and metadata
-        heading_quality = _assess_heading_quality(heading_blocks, text_blocks)
-        quality_factors.append(heading_quality * 0.2)
-        
-        if heading_quality < 0.5:
-            issues.append('Poor heading detection quality')
+    if excessive_spaces == 0 and excessive_newlines == 0:
+        quality_factors.append(0.2)
+    elif excessive_spaces < 5 and excessive_newlines < 5:
+        quality_factors.append(0.1)
     else:
-        issues.append('No headings detected')
-    
-    # Block structure consistency (10% weight)
-    if len(blocks) > 1:
-        consistency_score = _assess_block_consistency(blocks)
-        quality_factors.append(consistency_score * 0.1)
+        issues.append("Excessive whitespace not cleaned")
     
     # Calculate overall quality score
-    quality_score = sum(quality_factors)
+    quality_score = min(sum(quality_factors), 1.0)
     
     return {
-        'quality_score': min(quality_score, 1.0),
-        'has_content': total_text_length > 0,
-        'has_headings': len(heading_blocks) > 0,
-        'avg_block_length': avg_block_length,
-        'total_text_length': total_text_length,
-        'block_count': len(blocks),
-        'heading_count': heading_count,
-        'text_block_count': text_block_count,
-        'structural_fidelity_score': structural_score,
-        'extraction_time': metadata.get('extraction_time', 0),
-        'extraction_method': 'hybrid_pymupdf4llm_with_structure',
+        'quality_score': quality_score,
+        'has_content': len(cleaned_text.strip()) > 0,
+        'text_length': len(cleaned_text),
+        'cleaning_effective': cleaned_text != original_text,
+        'length_ratio': cleaned_length / original_length if original_length > 0 else 0,
         'issues': issues
     }
 
-def _assess_block_structural_fidelity(blocks: List[Dict[str, Any]], heading_count: int, text_block_count: int) -> float:
-    """
-    Assess the structural fidelity of extracted blocks.
-    
-    Args:
-        blocks: List of extracted blocks
-        heading_count: Number of heading blocks
-        text_block_count: Number of text blocks
-        
-    Returns:
-        Structural fidelity score (0.0 to 1.0)
-    """
-    if not blocks:
-        return 0.0
-    
-    score_components = []
-    
-    # Block type diversity
-    if heading_count > 0 and text_block_count > 0:
-        score_components.append(0.3)
-    elif heading_count > 0 or text_block_count > 0:
-        score_components.append(0.15)
-    
-    # Metadata preservation
-    blocks_with_metadata = sum(1 for block in blocks if 
-                              block.get('metadata') or 
-                              block.get('source') or 
-                              block.get('type'))
-    if blocks_with_metadata > 0:
-        metadata_ratio = blocks_with_metadata / len(blocks)
-        score_components.append(0.3 * metadata_ratio)
-    
-    # Text distribution quality
-    non_empty_blocks = sum(1 for block in blocks if block.get('text', '').strip())
-    if non_empty_blocks > 0:
-        text_ratio = non_empty_blocks / len(blocks)
-        score_components.append(0.2 * text_ratio)
-    
-    # Heading distribution
-    if heading_count > 0:
-        heading_ratio = heading_count / len(blocks)
-        if 0.05 <= heading_ratio <= 0.3:  # Reasonable heading density
-            score_components.append(0.2)
-        elif 0.02 <= heading_ratio <= 0.5:  # Acceptable range
-            score_components.append(0.1)
-    
-    return min(sum(score_components), 1.0)
-
-def _assess_heading_quality(heading_blocks: List[Dict[str, Any]], text_blocks: List[Dict[str, Any]]) -> float:
-    """
-    Assess the quality of heading detection and metadata.
-    
-    Args:
-        heading_blocks: List of detected heading blocks
-        text_blocks: List of text blocks
-        
-    Returns:
-        Heading quality score (0.0 to 1.0)
-    """
-    if not heading_blocks:
-        return 0.0
-    
-    quality_components = []
-    
-    # Heading metadata quality
-    headings_with_levels = sum(1 for block in heading_blocks if 
-                              block.get('metadata', {}).get('heading_level') or
-                              block.get('heading_level'))
-    if headings_with_levels > 0:
-        level_ratio = headings_with_levels / len(heading_blocks)
-        quality_components.append(0.4 * level_ratio)
-    
-    # Heading text quality (not too short, not too long)
-    appropriate_length_headings = 0
-    for block in heading_blocks:
-        text = block.get('text', '').strip()
-        word_count = len(text.split())
-        if 1 <= word_count <= 15:  # Reasonable heading length
-            appropriate_length_headings += 1
-    
-    if appropriate_length_headings > 0:
-        length_ratio = appropriate_length_headings / len(heading_blocks)
-        quality_components.append(0.3 * length_ratio)
-    
-    # Text-to-heading ratio
-    if text_blocks:
-        ratio = len(text_blocks) / len(heading_blocks)
-        if 2 <= ratio <= 15:  # Good document structure
-            quality_components.append(0.3)
-        elif 1 <= ratio <= 20:  # Acceptable structure
-            quality_components.append(0.2)
-        else:
-            quality_components.append(0.1)
-    
-    return min(sum(quality_components), 1.0)
-
-def _assess_block_consistency(blocks: List[Dict[str, Any]]) -> float:
-    """
-    Assess consistency of block structure and metadata.
-    
-    Args:
-        blocks: List of blocks to assess
-        
-    Returns:
-        Consistency score (0.0 to 1.0)
-    """
-    if not blocks:
-        return 0.0
-    
-    # Check for consistent metadata structure
-    blocks_with_type = sum(1 for block in blocks if block.get('type'))
-    blocks_with_source = sum(1 for block in blocks if block.get('source'))
-    blocks_with_text = sum(1 for block in blocks if block.get('text', '').strip())
-    
-    type_consistency = blocks_with_type / len(blocks)
-    source_consistency = blocks_with_source / len(blocks)
-    text_consistency = blocks_with_text / len(blocks)
-    
-    # Average consistency across metadata fields
-    consistency_score = (type_consistency + source_consistency + text_consistency) / 3
-    
-    return consistency_score
 
 def get_pymupdf4llm_info() -> Dict[str, Any]:
     """
@@ -831,7 +377,6 @@ def get_pymupdf4llm_info() -> Dict[str, Any]:
             for method in test_methods:
                 if hasattr(pymupdf4llm, method):
                     working_methods.append(method)
-            
             info['working_methods'] = working_methods
             info['functional'] = len(working_methods) > 0
             

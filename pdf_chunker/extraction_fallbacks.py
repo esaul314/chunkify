@@ -200,219 +200,49 @@ def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dic
         print(f"pdfminer extraction failed: {e}", file=sys.stderr)
         return []
 
-def assess_pymupdf4llm_extraction_quality(blocks: list[dict], metadata: dict = None) -> dict:
-    """
-    Assess the quality of PyMuPDF4LLM extraction results for fallback decisions.
-    Enhanced to prioritize structural fidelity including heading preservation.
-    
-    Args:
-        blocks: List of extracted text blocks from PyMuPDF4LLM
-        metadata: Optional extraction metadata from PyMuPDF4LLM
-        
-    Returns:
-        Quality assessment metrics compatible with existing fallback logic
-    """
-    if not blocks:
-        return {
-            "quality_score": 0.0,
-            "avg_line_length": 0,
-            "space_density": 0,
-            "has_content": False,
-            "has_headings": False,
-            "total_text_length": 0,
-            "block_count": 0,
-            "heading_count": 0,
-            "structural_fidelity_score": 0.0,
-            "issues": ["No content extracted from PyMuPDF4LLM"]
-        }
-    
-    # Extract text content from blocks
-    all_text = []
-    heading_count = 0
-    text_block_count = 0
-    
-    for block in blocks:
-        text = block.get('text', '')
-        if text:
-            all_text.append(text)
-            
-        # Count headings with enhanced detection
-        is_heading = (
-            block.get('metadata', {}).get('is_heading', False) or 
-            block.get('type') == 'heading' or
-            block.get('is_heading', False)
-        )
-        
-        if is_heading:
-            heading_count += 1
-        else:
-            text_block_count += 1
-    
-    combined_text = '\n'.join(all_text)
-    
-    # Use existing quality assessment logic for base text quality
-    base_quality = _assess_text_quality(combined_text)
-    
-    # Enhanced assessment for PyMuPDF4LLM-specific factors with structural emphasis
-    issues = []
-    quality_factors = []
-    
-    # Base content quality (40% weight - reduced to emphasize structure)
-    if base_quality['quality_score'] > 0:
-        quality_factors.append(base_quality['quality_score'] * 0.4)
-    else:
-        issues.append("Poor text extraction quality")
-    
-    # Structural fidelity assessment (35% weight - increased importance)
-    structural_score = _assess_structural_fidelity(blocks, heading_count, text_block_count)
-    quality_factors.append(structural_score * 0.35)
-    
-    if structural_score < 0.5:
-        issues.append("Poor structural preservation")
-    
-    # Heading detection bonus (15% weight - maintained importance)
-    if heading_count > 0:
-        # Scale heading bonus based on text-to-heading ratio
-        if text_block_count > 0:
-            ratio = text_block_count / heading_count
-            if 2 <= ratio <= 15:  # Good document structure
-                quality_factors.append(0.15)
-            elif ratio > 15:  # Too few headings
-                quality_factors.append(0.08)
-                issues.append("Insufficient heading detection")
-            else:  # Too many headings
-                quality_factors.append(0.10)
-        else:
-            quality_factors.append(0.10)
-    else:
-        issues.append("No headings detected")
-    
-    # Block structure assessment (10% weight)
-    if len(blocks) > 1:
-        quality_factors.append(0.1)
-    else:
-        issues.append("Insufficient block segmentation")
-    
-    # Calculate final quality score
-    final_quality_score = min(sum(quality_factors), 1.0)
-    
-    return {
-        "quality_score": final_quality_score,
-        "avg_line_length": base_quality['avg_line_length'],
-        "space_density": base_quality['space_density'],
-        "has_content": len(combined_text.strip()) > 0,
-        "has_headings": heading_count > 0,
-        "total_text_length": len(combined_text),
-        "block_count": len(blocks),
-        "heading_count": heading_count,
-        "text_block_count": text_block_count,
-        "structural_fidelity_score": structural_score,
-        "extraction_method": "hybrid_pymupdf4llm_with_structure",
-        "issues": issues
-    }
 
-def _assess_structural_fidelity(blocks: list[dict], heading_count: int, text_block_count: int) -> float:
+    
+def should_use_pymupdf4llm_cleaning(text: str) -> bool:
     """
-    Assess structural fidelity of extracted blocks focusing on heading preservation
-    and proper block segmentation.
+    Determine if PyMuPDF4LLM text cleaning should be attempted for a text block.
     
     Args:
-        blocks: List of extracted blocks
-        heading_count: Number of heading blocks detected
-        text_block_count: Number of text blocks detected
+        text: Text to evaluate for cleaning
         
     Returns:
-        Structural fidelity score (0.0 to 1.0)
+        True if PyMuPDF4LLM cleaning should be attempted
     """
-    if not blocks:
-        return 0.0
+    if not text or not text.strip():
+        return False
     
-    score_factors = []
+    # Use PyMuPDF4LLM cleaning for text blocks that might benefit from it
+    text_length = len(text.strip())
     
-    # Block type diversity (25% of structural score)
-    if heading_count > 0 and text_block_count > 0:
-        score_factors.append(0.25)
-    elif heading_count > 0 or text_block_count > 0:
-        score_factors.append(0.15)
+    # Skip very short text blocks (likely not worth cleaning)
+    if text_length < 20:
+        return False
     
-    # Heading distribution quality (35% of structural score)
-    if heading_count > 0:
-        total_blocks = len(blocks)
-        heading_ratio = heading_count / total_blocks
-        
-        if 0.05 <= heading_ratio <= 0.3:  # 5-30% headings is reasonable
-            score_factors.append(0.35)
-        elif 0.02 <= heading_ratio <= 0.5:  # Acceptable range
-            score_factors.append(0.25)
-        else:
-            score_factors.append(0.1)  # Too few or too many headings
+    # Skip very long text blocks (might be too complex or cause performance issues)
+    if text_length > 50000:
+        return False
     
-    # Block metadata quality (25% of structural score)
-    blocks_with_metadata = sum(1 for block in blocks if block.get('metadata') or block.get('source'))
-    if blocks_with_metadata > 0:
-        metadata_ratio = blocks_with_metadata / len(blocks)
-        score_factors.append(0.25 * metadata_ratio)
+    # Check for indicators that text might benefit from cleaning
+    import re
     
-    # Text quality consistency across blocks (15% of structural score)
-    non_empty_blocks = sum(1 for block in blocks if block.get('text', '').strip())
-    if non_empty_blocks > 0:
-        consistency_ratio = non_empty_blocks / len(blocks)
-        score_factors.append(0.15 * consistency_ratio)
+    # Look for potential ligature issues
+    has_ligatures = bool(re.search(r'[ﬁﬂﬀﬃﬄﬆﬅ]', text))
     
-    return min(sum(score_factors), 1.0)
-
-def should_fallback_from_pymupdf4llm(quality_assessment: dict, min_quality_threshold: float = 0.65) -> tuple[bool, str]:
-    """
-    Determine if fallback from PyMuPDF4LLM to traditional extraction methods is needed.
-    Enhanced to prioritize structural fidelity and heading preservation.
+    # Look for potential word joining issues
+    has_joining_issues = bool(re.search(r'[a-z][A-Z]', text))
     
-    Args:
-        quality_assessment: Quality metrics from assess_pymupdf4llm_extraction_quality
-        min_quality_threshold: Minimum quality score to accept PyMuPDF4LLM results (raised to 0.65)
-        
-    Returns:
-        Tuple of (should_fallback, reason)
-    """
-    if not quality_assessment.get('has_content', False):
-        return True, "No content extracted"
+    # Look for excessive whitespace
+    has_whitespace_issues = bool(re.search(r'  +|\n{3,}', text))
     
-    quality_score = quality_assessment.get('quality_score', 0)
-    if quality_score < min_quality_threshold:
-        issues = quality_assessment.get('issues', [])
-        reason = f"Quality score {quality_score:.2f} below threshold {min_quality_threshold}"
-        if issues:
-            reason += f". Issues: {', '.join(issues)}"
-        return True, reason
+    # Look for hyphenation issues
+    has_hyphenation_issues = bool(re.search(r'-\s*\n\s*[a-z]', text))
     
-    # Enhanced structural fidelity checks
-    structural_score = quality_assessment.get('structural_fidelity_score', 0)
-    if structural_score < 0.4:
-        return True, f"Poor structural fidelity (score: {structural_score:.2f})"
-    
-    # Heading preservation check
-    heading_count = quality_assessment.get('heading_count', 0)
-    text_block_count = quality_assessment.get('text_block_count', 0)
-    
-    # For documents with reasonable length, expect some headings
-    total_text_length = quality_assessment.get('total_text_length', 0)
-    if total_text_length > 2000 and heading_count == 0:
-        return True, "No headings detected in substantial document"
-    
-    # Check for reasonable text-to-heading ratio
-    if heading_count > 0 and text_block_count > 0:
-        ratio = text_block_count / heading_count
-        if ratio > 20:  # Too few headings for document size
-            return True, f"Insufficient heading detection (ratio: {ratio:.1f})"
-    
-    # Additional checks for specific failure modes
-    if quality_assessment.get('total_text_length', 0) < 100:
-        return True, "Extracted text too short"
-    
-    if quality_assessment.get('block_count', 0) == 0:
-        return True, "No text blocks extracted"
-    
-    # PyMuPDF4LLM passed enhanced quality checks
-    return False, "Quality and structural fidelity acceptable"
+    # Use PyMuPDF4LLM if any potential issues are detected
+    return has_ligatures or has_joining_issues or has_whitespace_issues or has_hyphenation_issues
 
 def execute_fallback_extraction(filepath: str, exclude_pages: str = None, fallback_reason: str = None) -> list[dict]:
     """

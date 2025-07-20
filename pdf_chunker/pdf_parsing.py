@@ -13,15 +13,13 @@ from .extraction_fallbacks import (
     _extract_with_pdftotext,
     _extract_with_pdfminer,
     PDFMINER_AVAILABLE
-
 )
 from .pymupdf4llm_integration import (
     extract_with_pymupdf4llm,
     is_pymupdf4llm_available,
-    assess_pymupdf4llm_quality,
     PyMuPDF4LLMExtractionError
 )
-    
+
 
 def is_artifact_block(block, page_height, frac=0.15, max_words=6):
     """
@@ -105,56 +103,16 @@ def merge_continuation_blocks(blocks: list[dict]) -> list[dict]:
 
 def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
     """
-    Extract structured text from a PDF using enhanced hybrid approach:
-    1. Try PyMuPDF4LLM with traditional font-based structural analysis for superior text quality and structure preservation
-    2. Fallback to existing three-tier system (PyMuPDF → pdftotext → pdfminer.six) if needed
+    Extract structured text from a PDF using traditional extraction with optional PyMuPDF4LLM text cleaning.
     
-    Preserves all existing functionality including page exclusion, text cleaning,
-    and error handling while adding PyMuPDF4LLM's enhanced capabilities combined
-    with traditional structural fidelity.
+    This simplified approach uses traditional font-based extraction for all structural analysis
+    (headings, block boundaries, page metadata) and optionally applies PyMuPDF4LLM's superior
+    text cleaning to improve text quality without affecting document structure.
+    
+    Preserves all existing functionality including page exclusion, heading detection,
+    and error handling while optionally enhancing text quality with PyMuPDF4LLM.
     """
-    # Try enhanced hybrid PyMuPDF4LLM extraction first if available
-    if is_pymupdf4llm_available():
-        try:
-            blocks, metadata = extract_with_pymupdf4llm(filepath, exclude_pages)
-            
-            # Assess PyMuPDF4LLM extraction quality
-            quality_assessment = assess_pymupdf4llm_quality(blocks, metadata)
-            
-            # Use PyMuPDF4LLM results if quality is acceptable
-            if quality_assessment['quality_score'] >= 0.6 and quality_assessment['has_content']:
-                # Log successful hybrid extraction
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(
-                    f"Hybrid PyMuPDF4LLM extraction successful: {len(blocks)} blocks, "
-                    f"quality score: {quality_assessment['quality_score']:.2f}, "
-                    f"headings detected: {quality_assessment.get('heading_count', 0)}"
-                )
-                
-                return blocks
-            else:
-                # Log quality issues and fallback
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(
-                    f"Hybrid PyMuPDF4LLM quality insufficient (score: {quality_assessment['quality_score']:.2f}), "
-                    f"falling back to traditional extraction. Issues: {quality_assessment.get('issues', [])}"
-                )
-                
-        except PyMuPDF4LLMExtractionError as e:
-            # Log PyMuPDF4LLM failure and fallback
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Hybrid PyMuPDF4LLM extraction failed: {e}. Falling back to traditional extraction.")
-        except Exception as e:
-            # Log unexpected errors and fallback
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Unexpected error in hybrid PyMuPDF4LLM extraction: {e}. Falling back to traditional extraction.")
-    
-    # Fallback to existing three-tier extraction system
-    # This preserves all existing functionality and behavior
+    # Always use traditional extraction for structural analysis
     doc = fitz.open(filepath)
     excluded = set()
 
@@ -175,8 +133,14 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
         )
     doc.close()
 
+    # Apply traditional continuation merging
     merged_blocks = merge_continuation_blocks(all_blocks)
-    text_blob = "\n".join(block["text"] for block in merged_blocks)
+    
+    # Optionally enhance text quality with PyMuPDF4LLM text cleaning
+    enhanced_blocks = _enhance_blocks_with_pymupdf4llm_cleaning(merged_blocks, filepath)
+    
+    # Assess text quality and apply fallbacks if needed
+    text_blob = "\n".join(block["text"] for block in enhanced_blocks)
     quality = _assess_text_quality(text_blob)
 
     if quality["quality_score"] < 0.7:
@@ -188,4 +152,54 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
             if fallback:
                 return merge_continuation_blocks(fallback)
 
-    return merged_blocks
+    return enhanced_blocks
+
+
+def _enhance_blocks_with_pymupdf4llm_cleaning(blocks: list[dict], filepath: str) -> list[dict]:
+    """
+    Enhance text blocks with PyMuPDF4LLM text cleaning while preserving all structural metadata.
+    
+    Args:
+        blocks: List of text blocks from traditional extraction
+        filepath: Path to PDF file for context
+        
+    Returns:
+        Enhanced blocks with improved text quality but preserved structure
+    """
+    from .pymupdf4llm_integration import is_pymupdf4llm_available, clean_text_with_pymupdf4llm
+
+    # If PyMuPDF4LLM is not available, return blocks unchanged
+    if not is_pymupdf4llm_available():
+        return blocks
+
+    enhanced_blocks = []
+
+    for block in blocks:
+        enhanced_block = block.copy()
+        original_text = block.get('text', '')
+
+        if original_text.strip():
+            try:
+                # Apply PyMuPDF4LLM text cleaning while preserving structure
+                cleaned_text = clean_text_with_pymupdf4llm(original_text, filepath)
+                enhanced_block['text'] = cleaned_text
+
+                # Add metadata about text enhancement
+                if 'metadata' not in enhanced_block:
+                    enhanced_block['metadata'] = {}
+                enhanced_block['metadata']['text_enhanced_with_pymupdf4llm'] = True
+
+            except Exception as e:
+                # If PyMuPDF4LLM cleaning fails, keep original text
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"PyMuPDF4LLM text cleaning failed for block: {e}")
+                enhanced_block['text'] = original_text
+
+                if 'metadata' not in enhanced_block:
+                    enhanced_block['metadata'] = {}
+                enhanced_block['metadata']['text_enhanced_with_pymupdf4llm'] = False
+
+        enhanced_blocks.append(enhanced_block)
+
+    return enhanced_blocks
