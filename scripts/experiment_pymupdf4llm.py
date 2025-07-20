@@ -81,9 +81,13 @@ def extract_with_current_pipeline(pdf_path: str, pages_to_exclude: Optional[List
             generate_metadata=True,
             ai_enrichment=False        # Skip AI enrichment for comparison
         )
-    
         
-        chunks = result.get('chunks', [])
+        # Handle the actual return type from process_document (list of chunks)
+        if isinstance(result, list):
+            chunks = result
+        else:
+            chunks = result.get('chunks', [])
+        
         text_length = sum(len(chunk.get('text', '')) for chunk in chunks)
         
         # Extract headings from chunks
@@ -102,7 +106,7 @@ def extract_with_current_pipeline(pdf_path: str, pages_to_exclude: Optional[List
             processing_time=processing_time,
             chunks=chunks,
             headings=headings,
-            metadata=result.get('metadata', {}),
+            metadata={'total_chunks': len(chunks)},
             errors=errors
         )
         
@@ -129,15 +133,23 @@ def extract_with_pymupdf4llm(pdf_path: str, pages_to_exclude: Optional[List[int]
     errors = []
     
     try:
-        # PyMuPDF4LLM extraction
-        md_text = pymupdf4llm.to_markdown(
-            pdf_path,
-            pages=None if not pages_to_exclude else [i for i in range(1, 1000) if i not in pages_to_exclude],
-            write_images=False,
-            image_path=None,
-            image_format="png",
-            dpi=150
-        )
+        # Check what methods are actually available in pymupdf4llm
+        available_methods = [method for method in dir(pymupdf4llm) if not method.startswith('_')]
+        
+        # Try common method names for PyMuPDF4LLM
+        if hasattr(pymupdf4llm, 'to_markdown'):
+            md_text = pymupdf4llm.to_markdown(pdf_path)
+        elif hasattr(pymupdf4llm, 'LlamaParseReader'):
+            # Alternative API structure
+            reader = pymupdf4llm.LlamaParseReader()
+            documents = reader.load_data(pdf_path)
+            md_text = '\n'.join([doc.text for doc in documents])
+        elif hasattr(pymupdf4llm, 'extract'):
+            md_text = pymupdf4llm.extract(pdf_path)
+        elif hasattr(pymupdf4llm, 'convert'):
+            md_text = pymupdf4llm.convert(pdf_path)
+        else:
+            raise AttributeError(f"Could not find extraction method in pymupdf4llm. Available methods: {available_methods}")
         
         # Parse the markdown to extract headings and create chunks
         lines = md_text.split('\n')
