@@ -13,7 +13,15 @@ from .extraction_fallbacks import (
     _extract_with_pdftotext,
     _extract_with_pdfminer,
     PDFMINER_AVAILABLE
+
 )
+from .pymupdf4llm_integration import (
+    extract_with_pymupdf4llm,
+    is_pymupdf4llm_available,
+    assess_pymupdf4llm_quality,
+    PyMuPDF4LLMExtractionError
+)
+    
 
 
 def is_artifact_block(block, page_height, frac=0.15, max_words=6):
@@ -96,11 +104,76 @@ def merge_continuation_blocks(blocks: list[dict]) -> list[dict]:
     return merged
 
 
+
 def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
     """
-    Extract structured text from a PDF, skipping small numeric header/footer artifacts
-    and applying fallback extraction on low-quality pages.
+    Extract structured text from a PDF using hybrid approach:
+    1. Try PyMuPDF4LLM first for superior heading detection and structured output
+    2. Fallback to existing three-tier system (PyMuPDF → pdftotext → pdfminer.six) if needed
+    
+    Preserves all existing functionality including page exclusion, text cleaning,
+    and error handling while adding PyMuPDF4LLM's enhanced capabilities.
     """
+    # Try PyMuPDF4LLM extraction first if available
+    if is_pymupdf4llm_available():
+        try:
+            blocks, metadata = extract_with_pymupdf4llm(filepath, exclude_pages)
+            
+            # Assess PyMuPDF4LLM extraction quality
+            quality_assessment = assess_pymupdf4llm_quality(blocks, metadata)
+            
+            # Use PyMuPDF4LLM results if quality is acceptable
+            if quality_assessment['quality_score'] >= 0.6 and quality_assessment['has_content']:
+                # Convert PyMuPDF4LLM blocks to format expected by existing pipeline
+                converted_blocks = []
+                for block in blocks:
+                    converted_block = {
+                        "type": "heading" if block.get('metadata', {}).get('is_heading', False) else "paragraph",
+                        "text": block.get('text', ''),
+                        "language": _detect_language(block.get('text', '')),
+                        "source": {"filename": os.path.basename(filepath), "page": 1}
+                    }
+                    
+                    # Add PyMuPDF4LLM-specific metadata
+                    if 'metadata' in block:
+                        converted_block['pymupdf4llm_metadata'] = block['metadata']
+                    
+                    converted_blocks.append(converted_block)
+                
+                # Apply continuation merging to PyMuPDF4LLM results
+                merged_blocks = merge_continuation_blocks(converted_blocks)
+                
+                # Log successful PyMuPDF4LLM extraction
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(
+                    f"PyMuPDF4LLM extraction successful: {len(merged_blocks)} blocks, "
+                    f"quality score: {quality_assessment['quality_score']:.2f}"
+                )
+                
+                return merged_blocks
+            else:
+                # Log quality issues and fallback
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"PyMuPDF4LLM quality insufficient (score: {quality_assessment['quality_score']:.2f}), "
+                    f"falling back to traditional extraction. Issues: {quality_assessment.get('issues', [])}"
+                )
+                
+        except PyMuPDF4LLMExtractionError as e:
+            # Log PyMuPDF4LLM failure and fallback
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"PyMuPDF4LLM extraction failed: {e}. Falling back to traditional extraction.")
+        except Exception as e:
+            # Log unexpected errors and fallback
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Unexpected error in PyMuPDF4LLM extraction: {e}. Falling back to traditional extraction.")
+    
+    # Fallback to existing three-tier extraction system
+    # This preserves all existing functionality and behavior
     doc = fitz.open(filepath)
     excluded = set()
 
@@ -135,3 +208,4 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                 return merge_continuation_blocks(fallback)
 
     return merged_blocks
+    

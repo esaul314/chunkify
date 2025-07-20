@@ -89,6 +89,7 @@ def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[di
             text=True,
             timeout=60
         )
+        
     # ... existing code ...
     
         
@@ -161,7 +162,7 @@ def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dic
             LAParams(char_margin=2.0, word_margin=0.3, line_margin=0.3),
             LAParams(char_margin=1.0, word_margin=0.8, line_margin=0.8)
         ]
-    
+        
         
         for i, laparams in enumerate(configs):
             print(f"Trying pdfminer config {i+1}/3", file=sys.stderr)
@@ -203,3 +204,164 @@ def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dic
     except Exception as e:
         print(f"pdfminer extraction failed: {e}", file=sys.stderr)
         return []
+
+
+def assess_pymupdf4llm_extraction_quality(blocks: list[dict], metadata: dict = None) -> dict:
+    """
+    Assess the quality of PyMuPDF4LLM extraction results for fallback decisions.
+    
+    Args:
+        blocks: List of extracted text blocks from PyMuPDF4LLM
+        metadata: Optional extraction metadata from PyMuPDF4LLM
+        
+    Returns:
+        Quality assessment metrics compatible with existing fallback logic
+    """
+    if not blocks:
+        return {
+            "quality_score": 0.0,
+            "avg_line_length": 0,
+            "space_density": 0,
+            "has_content": False,
+            "has_headings": False,
+            "total_text_length": 0,
+            "block_count": 0,
+            "heading_count": 0,
+            "issues": ["No content extracted from PyMuPDF4LLM"]
+        }
+    
+    # Extract text content from blocks
+    all_text = []
+    heading_count = 0
+    
+    for block in blocks:
+        text = block.get('text', '')
+        if text:
+            all_text.append(text)
+            
+        # Count headings
+        if block.get('metadata', {}).get('is_heading', False) or block.get('type') == 'heading':
+            heading_count += 1
+    
+    combined_text = '\n'.join(all_text)
+    
+    # Use existing quality assessment logic
+    base_quality = _assess_text_quality(combined_text)
+    
+    # Enhanced assessment for PyMuPDF4LLM-specific factors
+    issues = []
+    quality_factors = []
+    
+    # Base content quality
+    if base_quality['quality_score'] > 0:
+        quality_factors.append(base_quality['quality_score'] * 0.6)  # 60% weight for base quality
+    else:
+        issues.append("Poor text extraction quality")
+    
+    # Heading detection bonus (PyMuPDF4LLM's strength)
+    if heading_count > 0:
+        quality_factors.append(0.2)  # 20% bonus for heading detection
+    else:
+        issues.append("No headings detected")
+    
+    # Block structure assessment
+    if len(blocks) > 1:
+        quality_factors.append(0.1)  # 10% bonus for multiple blocks
+    
+    # Text-to-heading ratio
+    text_blocks = len(blocks) - heading_count
+    if heading_count > 0 and text_blocks > 0:
+        ratio = text_blocks / heading_count
+        if 2 <= ratio <= 10:  # Good structure
+            quality_factors.append(0.1)  # 10% bonus for good structure
+    
+    # Calculate final quality score
+    final_quality_score = min(sum(quality_factors), 1.0)
+    
+    return {
+        "quality_score": final_quality_score,
+        "avg_line_length": base_quality['avg_line_length'],
+        "space_density": base_quality['space_density'],
+        "has_content": len(combined_text.strip()) > 0,
+        "has_headings": heading_count > 0,
+        "total_text_length": len(combined_text),
+        "block_count": len(blocks),
+        "heading_count": heading_count,
+        "text_block_count": len(blocks) - heading_count,
+        "extraction_method": "pymupdf4llm",
+        "issues": issues
+    }
+
+
+def should_fallback_from_pymupdf4llm(quality_assessment: dict, min_quality_threshold: float = 0.6) -> tuple[bool, str]:
+    """
+    Determine if fallback from PyMuPDF4LLM to traditional extraction methods is needed.
+    
+    Args:
+        quality_assessment: Quality metrics from assess_pymupdf4llm_extraction_quality
+        min_quality_threshold: Minimum quality score to accept PyMuPDF4LLM results
+        
+    Returns:
+        Tuple of (should_fallback, reason)
+    """
+    if not quality_assessment.get('has_content', False):
+        return True, "No content extracted"
+    
+    if quality_assessment.get('quality_score', 0) < min_quality_threshold:
+        issues = quality_assessment.get('issues', [])
+        reason = f"Quality score {quality_assessment.get('quality_score', 0):.2f} below threshold {min_quality_threshold}"
+        if issues:
+            reason += f". Issues: {', '.join(issues)}"
+        return True, reason
+    
+    # Additional checks for specific failure modes
+    if quality_assessment.get('total_text_length', 0) < 100:
+        return True, "Extracted text too short"
+    
+    if quality_assessment.get('block_count', 0) == 0:
+        return True, "No text blocks extracted"
+    
+    # PyMuPDF4LLM passed quality checks
+    return False, "Quality acceptable"
+
+
+def execute_fallback_extraction(filepath: str, exclude_pages: str = None, fallback_reason: str = None) -> list[dict]:
+    """
+    Execute the traditional three-tier fallback extraction system.
+    
+    Args:
+        filepath: Path to the PDF file
+        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
+        fallback_reason: Reason for falling back (for logging)
+        
+    Returns:
+        List of extracted text blocks using traditional methods
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if fallback_reason:
+        logger.info(f"Executing fallback extraction for {os.path.basename(filepath)}: {fallback_reason}")
+    else:
+        logger.info(f"Executing fallback extraction for {os.path.basename(filepath)}")
+    
+    # Try pdftotext first
+    logger.debug("Attempting pdftotext extraction")
+    pdftotext_blocks = _extract_with_pdftotext(filepath, exclude_pages)
+    if pdftotext_blocks:
+        logger.info(f"pdftotext extraction successful: {len(pdftotext_blocks)} blocks")
+        return pdftotext_blocks
+    
+    # Try pdfminer.six as final fallback
+    if PDFMINER_AVAILABLE:
+        logger.debug("Attempting pdfminer extraction")
+        pdfminer_blocks = _extract_with_pdfminer(filepath, exclude_pages)
+        if pdfminer_blocks:
+            logger.info(f"pdfminer extraction successful: {len(pdfminer_blocks)} blocks")
+            return pdfminer_blocks
+    else:
+        logger.warning("pdfminer.six not available for fallback extraction")
+    
+    # All fallback methods failed
+    logger.error("All fallback extraction methods failed")
+    return []
