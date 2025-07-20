@@ -169,29 +169,52 @@ def detect_headings_hybrid(
     extraction_method: str = 'unknown'
 ) -> List[Dict[str, Any]]:
     """
-    Hybrid heading detection that uses PyMuPDF4LLM Markdown headers as primary source
-    and falls back to font-based detection for traditional extractions.
+    Hybrid heading detection that prioritizes traditional font-based analysis
+    and uses PyMuPDF4LLM Markdown headers as supplementary information.
     
     Args:
         blocks: List of text blocks from PDF extraction
-        extraction_method: Method used for extraction ('pymupdf4llm', 'traditional', etc.)
+        extraction_method: Method used for extraction ('hybrid_pymupdf4llm_with_structure', 'traditional', etc.)
         
     Returns:
         List of heading dictionaries with consistent metadata
     """
     # Determine extraction method if not provided
     if extraction_method == 'unknown':
-        # Check if any blocks have PyMuPDF4LLM metadata
-        has_pymupdf4llm_metadata = any(
-            block.get('pymupdf4llm_metadata') or 
-            block.get('metadata', {}).get('extraction_method') == 'pymupdf4llm'
+        # Check if any blocks have hybrid PyMuPDF4LLM metadata
+        has_hybrid_metadata = any(
+            block.get('metadata', {}).get('extraction_method') == 'hybrid_pymupdf4llm_with_structure'
             for block in blocks
         )
-        extraction_method = 'pymupdf4llm' if has_pymupdf4llm_metadata else 'traditional'
+        extraction_method = 'hybrid_pymupdf4llm_with_structure' if has_hybrid_metadata else 'traditional'
     
-    # Use appropriate detection method
-    if extraction_method == 'pymupdf4llm':
-        # First try to get headings from PyMuPDF4LLM metadata
+    # For hybrid extraction, prioritize traditional font-based analysis
+    if extraction_method == 'hybrid_pymupdf4llm_with_structure':
+        # The hybrid approach already incorporates traditional font analysis
+        # during block creation, so we can trust the block type assignments
+        headings = []
+        
+        for i, block in enumerate(blocks):
+            if block.get('type') == 'heading' or block.get('metadata', {}).get('is_heading', False):
+                heading_info = {
+                    'text': block.get('text', '').strip(),
+                    'level': block.get('metadata', {}).get('heading_level', _estimate_heading_level(block.get('text', ''))),
+                    'source': block.get('metadata', {}).get('heading_source', 'hybrid_analysis'),
+                    'block_id': i,
+                    'extraction_method': 'hybrid_pymupdf4llm_with_structure'
+                }
+                
+                # Add source information
+                if 'source' in block:
+                    heading_info['page'] = block['source'].get('page')
+                    heading_info['filename'] = block['source'].get('filename')
+                
+                headings.append(heading_info)
+        
+        return headings
+    
+    elif extraction_method == 'pymupdf4llm':
+        # Legacy PyMuPDF4LLM extraction without structural analysis
         pymupdf4llm_headings = detect_headings_from_pymupdf4llm_blocks(blocks)
         
         if pymupdf4llm_headings:
