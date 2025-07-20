@@ -6,10 +6,17 @@ This project aims to construct a robust, reusable, standalone Python library for
 
 ## Project State: Enhanced for RAG with Robust Processing Pipeline
 
-The project has undergone significant evolution to produce RAG-supportive, context-aware metadata with enterprise-grade reliability and strict quality controls.
 
+The project has undergone significant evolution to produce RAG-supportive, context-aware metadata with enterprise-grade reliability and strict quality controls. The system now uses a **simplified PyMuPDF4LLM integration** that combines the best of both traditional and modern extraction approaches.
+    
+
+
+*   **Simplified PyMuPDF4LLM Integration**: The pipeline uses **traditional font-based extraction for all structural analysis** (headings, block boundaries, page metadata) while applying **PyMuPDF4LLM's superior text cleaning** for improved ligature handling, word joining, and whitespace normalization. This approach maintains proven reliability while leveraging PyMuPDF4LLM's evolving capabilities with reduced complexity.
+    
 *   **Three-Pass Architecture**: The pipeline follows a **three-pass (Structural → Semantic → AI Enrichment) architecture**, adding intelligent metadata generation with external configuration support.
-*   **Enhanced PDF Extraction**: Implements a **three-tier fallback strategy** (PyMuPDF → pdftotext → pdfminer.six) with quality assessment and automatic fallback logic to handle problematic PDFs.
+
+*   **Enhanced PDF Extraction**: Implements a **three-tier fallback strategy** (PyMuPDF → pdftotext → pdfminer.six) with quality assessment and automatic fallback logic to handle problematic PDFs, now enhanced with optional PyMuPDF4LLM text cleaning.
+    
 *   **Page and Spine Exclusion Support**: Flexible filtering functionality allows excluding specific pages or ranges for PDFs (e.g., "1,3,5-10,15-20") and spine items for EPUBs to skip tables of contents, bibliographies, and other non-content sections.
 *   **EPUB Spine Discovery**: Interactive spine listing with content sampling allows users to preview EPUB structure before processing, showing spine indices, filenames, and content previews (first 80 characters) for informed exclusion decisions.
 *   **Modernized Core**: The entire processing backend has been upgraded to the modern **`haystack-ai`** framework, resolving critical dependency conflicts (`Pydantic V1 vs V2`) and ensuring future compatibility.
@@ -39,24 +46,24 @@ The project has undergone significant evolution to produce RAG-supportive, conte
 
 ## Core Architecture: Enhanced Three-Pass Approach
 
-The library is designed around an enhanced three-pass philosophy to maximize semantic integrity, reliability, and usefulness of the final text chunks.
+The library is designed around an enhanced three-pass philosophy to maximize semantic integrity, reliability, and usefulness of the final text chunks. The system now incorporates a **simplified PyMuPDF4LLM integration** that provides superior text quality while maintaining proven structural analysis.
 
-### 1. The Structural Pass (Enhanced with Fallback Strategy)
-**Intention: Extract clean, structured text from the source document with maximum reliability.**
+### 1. The Structural Pass (Enhanced with Simplified PyMuPDF4LLM Integration)
+**Intention: Extract clean, structured text from the source document with maximum reliability and superior text quality.**
 
-This pass is handled by the `parsing.py` module with support from specialized modules. It analyzes the source file and converts it into an intermediate representation: a list of structured text blocks.
+This pass is handled by the `parsing.py` module with support from specialized modules. It analyzes the source file and converts it into an intermediate representation: a list of structured text blocks with enhanced text quality.
 
-#### Enhanced PDF Extraction with Three-Tier Fallback
-*   **Primary Method**: **`PyMuPDF` (`fitz`)** for layout-aware parsing with quality assessment  
-*   **Fallback Method 1**: **`pdftotext -layout`** for layout preservation when PyMuPDF quality is poor  
-*   **Fallback Method 2**: **`pdfminer.six`** with tunable LAParams as final option  
-*   **Quality Assessment**: Automatic evaluation of extraction quality using average line length, space density, and combined quality scores  
-*   **Automatic Fallback Logic**: Tries methods in order based on quality thresholds (quality score < 0.7 triggers fallback)  
+#### Simplified PyMuPDF4LLM Integration
+*   **Traditional Structural Analysis**: **`PyMuPDF` (`fitz`)** handles all structural analysis including font-based heading detection, block boundaries, and page metadata  
+*   **PyMuPDF4LLM Text Enhancement**: **`PyMuPDF4LLM`** provides superior text cleaning for ligature translation, word joining, and whitespace normalization  
+*   **Automatic Fallback**: Falls back to traditional three-tier system (PyMuPDF → pdftotext → pdfminer.six) if PyMuPDF4LLM text cleaning fails  
+*   **Reduced Complexity**: Eliminates complex hybrid extraction logic while maintaining the benefits of both approaches  
+*   **Future-Ready**: Positions the system to leverage PyMuPDF4LLM's evolving capabilities as they improve  
 
 #### Robust Text Processing
 *   **EPUB Parsing**: Uses `EbookLib` and `BeautifulSoup` with functional approach (`_get_element_text_content`) for inline formatting handling  
-*   **Text Cleaning**: Enhanced `_clean_paragraph` function strips Unicode BOM (`\uFEFF`) and fixes hyphenated word breaks (e.g., "itera-tion" → "iteration")  
-*   **Heading Detection**: Font flag analysis with defensive error handling and fallback heuristics for unusual PDF structures  
+*   **Enhanced Text Cleaning**: PyMuPDF4LLM-enhanced `_clean_paragraph` function with superior ligature handling and word joining, plus traditional BOM removal and hyphenated word break fixes  
+*   **Heading Detection**: Traditional font flag analysis with defensive error handling and fallback heuristics for unusual PDF structures  
 *   **Language Detection**: `langdetect` applied to each text block with graceful error handling  
 
 ### 2. The Semantic Pass (Strict Size Validation)
@@ -213,16 +220,6 @@ The test suite has been refactored into focused, reusable modules:
 - **Chunk Loss Prevention**: Granular logging to ensure all valid chunks are either processed or logged with drop reasons
 - **Page Exclusion Validation**: Tests both range parsing accuracy and metadata generation pipeline compliance
 - **EPUB Spine Discovery Testing**: Validates content sampling and preview generation functionality
-
-**Testing Coverage:**
-- **PDF Extraction Quality**: Tests three-tier fallback strategy with quality metrics
-- **Chunk Size Validation**: Ensures strict adherence to size limits (8k chars, 10k JSONL lines)
-- **AI Enrichment**: Validates tag loading, LLM integration, and tag validation
-- **Module Integration**: Tests refactored module imports and functionality
-- **Error Handling**: Validates KeyError fixes and graceful degradation
-- **Page/Spine Exclusion**: Comprehensive testing of filtering functionality for both PDFs and EPUBs
-- **JSONL Compatibility**: Ensures output meets line length requirements
-- **Process Tracing**: Detailed logging validation to prevent silent chunk drops
 
 ### EPUB Spine Discovery
 
@@ -474,8 +471,10 @@ Each line in the output JSONL file contains a chunk with the following structure
 - **AI Enrichment**: Validates tag loading, LLM integration, and tag validation
 - **Module Integration**: Tests refactored module imports and functionality
 - **Error Handling**: Validates KeyError fixes and graceful degradation
-- **Page Exclusion**: Comprehensive testing of page filtering functionality
+- **Page/Spine Exclusion**: Comprehensive testing of filtering functionality for both PDFs and EPUBs
 - **JSONL Compatibility**: Ensures output meets line length requirements
+- **Process Tracing**: Detailed logging validation to prevent silent chunk drops
+- **Page Exclusion**: Comprehensive testing of page filtering functionality
 
 **Page Exclusion Testing:**
 The testing infrastructure includes comprehensive validation of the page exclusion feature:

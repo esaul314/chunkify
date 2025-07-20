@@ -200,8 +200,6 @@ def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dic
         print(f"pdfminer extraction failed: {e}", file=sys.stderr)
         return []
 
-
-    
 def should_use_pymupdf4llm_cleaning(text: str) -> bool:
     """
     Determine if PyMuPDF4LLM text cleaning should be attempted for a text block.
@@ -214,35 +212,93 @@ def should_use_pymupdf4llm_cleaning(text: str) -> bool:
     """
     if not text or not text.strip():
         return False
-    
+
     # Use PyMuPDF4LLM cleaning for text blocks that might benefit from it
     text_length = len(text.strip())
-    
+
     # Skip very short text blocks (likely not worth cleaning)
     if text_length < 20:
         return False
-    
+
     # Skip very long text blocks (might be too complex or cause performance issues)
     if text_length > 50000:
         return False
-    
+
     # Check for indicators that text might benefit from cleaning
     import re
-    
+
     # Look for potential ligature issues
-    has_ligatures = bool(re.search(r'[ﬁﬂﬀﬃﬄﬆﬅ]', text))
-    
+    has_ligatures = bool(re.search(r'[ﬁﬂﬁﬃﬄﬆﬅ]', text))
+
     # Look for potential word joining issues
     has_joining_issues = bool(re.search(r'[a-z][A-Z]', text))
-    
+
     # Look for excessive whitespace
     has_whitespace_issues = bool(re.search(r'  +|\n{3,}', text))
-    
+
     # Look for hyphenation issues
     has_hyphenation_issues = bool(re.search(r'-\s*\n\s*[a-z]', text))
-    
+
     # Use PyMuPDF4LLM if any potential issues are detected
     return has_ligatures or has_joining_issues or has_whitespace_issues or has_hyphenation_issues
+
+def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> dict:
+    """
+    Simple quality assessment for PyMuPDF4LLM text cleaning effectiveness.
+
+    Args:
+        original_text: Original text before cleaning
+        cleaned_text: Text after PyMuPDF4LLM cleaning
+
+    Returns:
+        Simple quality assessment metrics for text cleaning
+    """
+    if not cleaned_text or not cleaned_text.strip():
+        return {
+            "quality_score": 0.0,
+            "has_content": False,
+            "cleaning_effective": False,
+            "issues": ["No cleaned text produced"]
+        }
+
+    issues = []
+    quality_factors = []
+
+    # Content preservation (60% weight)
+    original_length = len(original_text.strip())
+    cleaned_length = len(cleaned_text.strip())
+
+    if cleaned_length > 0:
+        if original_length > 0:
+            length_ratio = cleaned_length / original_length
+            if 0.8 <= length_ratio <= 1.2:  # Reasonable length preservation
+                quality_factors.append(0.6)
+            elif 0.6 <= length_ratio <= 1.5:  # Acceptable range
+                quality_factors.append(0.4)
+            else:
+                quality_factors.append(0.2)
+                issues.append(f"Significant length change: {length_ratio:.2f}")
+        else:
+            quality_factors.append(0.6)
+    else:
+        issues.append("No content after cleaning")
+
+    # Text cleaning effectiveness (40% weight)
+    if cleaned_text != original_text:
+        quality_factors.append(0.4)
+    else:
+        quality_factors.append(0.2)
+
+    # Calculate overall quality score
+    quality_score = min(sum(quality_factors), 1.0)
+
+    return {
+        "quality_score": quality_score,
+        "has_content": len(cleaned_text.strip()) > 0,
+        "cleaning_effective": cleaned_text != original_text,
+        "length_ratio": cleaned_length / original_length if original_length > 0 else 0,
+        "issues": issues
+    }
 
 def execute_fallback_extraction(filepath: str, exclude_pages: str = None, fallback_reason: str = None) -> list[dict]:
     """

@@ -1,4 +1,10 @@
 # parsing.py
+#
+# Default extraction approach: Simplified PyMuPDF4LLM integration
+# - Uses traditional font-based extraction for all structural analysis (headings, blocks, metadata)
+# - Applies PyMuPDF4LLM text cleaning for superior text quality (ligatures, word joining, whitespace)
+# - Maintains proven reliability while leveraging PyMuPDF4LLM's evolving capabilities
+# - Reduces complexity compared to complex hybrid approaches
 
 import os
 from .pdf_parsing import extract_text_blocks_from_pdf

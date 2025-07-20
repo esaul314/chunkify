@@ -1,11 +1,12 @@
 # Performance Monitoring and Rollback Guide
 
-This document provides guidelines for monitoring the performance of the hybrid PyMuPDF4LLM PDF extraction system and procedures for rolling back to the traditional extraction methods if performance issues arise.
+This document provides guidelines for monitoring the performance of the simplified PyMuPDF4LLM PDF extraction system and procedures for rolling back to traditional extraction methods if performance issues arise.
 
 ## Overview
 
-The hybrid extraction system uses PyMuPDF4LLM as the primary extraction method with automatic fallback to the traditional three-tier system (PyMuPDF → pdftotext → pdfminer.six). This approach provides enhanced heading detection and structured output while maintaining reliability through proven fallback mechanisms.
+The simplified extraction system uses PyMuPDF4LLM primarily for text cleaning while maintaining traditional font-based extraction for all structural analysis (headings, block boundaries, page metadata). This approach provides enhanced text quality through superior ligature handling, word joining, and whitespace normalization while preserving the proven reliability of traditional structural detection.
 
+Unlike complex hybrid approaches, this simplified integration reduces code complexity and maintenance overhead while positioning the system to leverage PyMuPDF4LLM's evolving capabilities. The system automatically falls back to traditional text cleaning if PyMuPDF4LLM is unavailable or fails.
 ## Performance Monitoring
 
 ### Key Performance Metrics
@@ -155,71 +156,73 @@ tracemalloc.stop()
 
 Consider rolling back to traditional extraction methods when:
 
-1. **Performance Degradation**
-   - Consistent performance metrics in the Red Zone
-   - User experience significantly impacted
+Consider rolling back to traditional text cleaning methods when:
+
+1. **Text Quality Degradation**
+   - PyMuPDF4LLM text cleaning produces worse results than traditional methods
+   - Increased text formatting issues or artifacts
+   - User complaints about text quality
+
+2. **Performance Issues**
+   - PyMuPDF4LLM text cleaning significantly slows down processing
+   - Memory usage increases unacceptably
    - System stability compromised
 
-2. **Reliability Issues**
-   - Success rate drops below 85%
-   - Frequent PyMuPDF4LLM crashes or errors
-   - Data quality concerns
+3. **Reliability Concerns**
+   - Frequent PyMuPDF4LLM text cleaning failures
+   - Inconsistent text cleaning results
+   - Integration errors affecting overall system stability
 
-3. **Resource Constraints**
-   - Memory usage exceeding system capacity
-   - Processing times unacceptable for production
-   - Infrastructure costs increasing significantly
+4. **Maintenance Burden**
+   - PyMuPDF4LLM dependency issues
+   - Version compatibility problems
+   - Increased support overhead
 
 ### Rollback Methods
 
-#### Method 1: Disable PyMuPDF4LLM Integration
+Since the simplified approach uses PyMuPDF4LLM only for text cleaning, rollback is straightforward and low-risk. The traditional structural analysis remains unchanged, so rolling back only affects text quality, not document structure or heading detection.
+
+#### Method 1: Disable PyMuPDF4LLM Text Cleaning
 
 **Temporary Disable (Environment Variable)**
 
-Set an environment variable to disable PyMuPDF4LLM:
+Set an environment variable to disable PyMuPDF4LLM text cleaning:
 
 ```bash
-export DISABLE_PYMUPDF4LLM=true
+export DISABLE_PYMUPDF4LLM_CLEANING=true
 ```
 
-Then modify the integration check in `pdf_chunker/pymupdf4llm_integration.py`:
+Then modify the text cleaning function in `pdf_chunker/text_cleaning.py`:
 
 ```python
-def is_pymupdf4llm_available() -> bool:
-    """Check if PyMuPDF4LLM is available for use"""
-    if os.environ.get('DISABLE_PYMUPDF4LLM', '').lower() in ('true', '1', 'yes'):
-        return False
-    return PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
+def clean_text(text: str, use_pymupdf4llm: bool = True) -> str:
+    """Clean text with optional PyMuPDF4LLM enhancement"""
+    if os.environ.get('DISABLE_PYMUPDF4LLM_CLEANING', '').lower() in ('true', '1', 'yes'):
+        use_pymupdf4llm = False
+    
+    # ... rest of function
 ```
 
 **Configuration-Based Disable**
 
-Add a configuration option to disable PyMuPDF4LLM:
+Add a configuration option to disable PyMuPDF4LLM text cleaning:
 
 ```python
 # In your configuration file or settings
-ENABLE_PYMUPDF4LLM = False
+ENABLE_PYMUPDF4LLM_CLEANING = False
 
-# In pdf_chunker/pymupdf4llm_integration.py
-def is_pymupdf4llm_available() -> bool:
-    """Check if PyMuPDF4LLM is available for use"""
-    from your_config import ENABLE_PYMUPDF4LLM
-    if not ENABLE_PYMUPDF4LLM:
-        return False
-    return PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
+# In pdf_chunker/text_cleaning.py
+def clean_text(text: str, use_pymupdf4llm: bool = True) -> str:
+    """Clean text with optional PyMuPDF4LLM enhancement"""
+    from your_config import ENABLE_PYMUPDF4LLM_CLEANING
+    if not ENABLE_PYMUPDF4LLM_CLEANING:
+        use_pymupdf4llm = False
+    
+    # ... rest of function
 ```
+    
 
-#### Method 2: Adjust Quality Thresholds
-
-Increase the quality threshold to force more fallbacks to traditional methods:
-
-```python
-# In pdf_chunker/pdf_parsing.py, modify the quality check
-if quality_assessment['quality_score'] >= 0.9 and quality_assessment['has_content']:  # Raised from 0.6
-    # Use PyMuPDF4LLM results
-```
-
-#### Method 3: Uninstall PyMuPDF4LLM
+#### Method 2: Uninstall PyMuPDF4LLM
 
 Complete removal of PyMuPDF4LLM dependency:
 
@@ -230,6 +233,35 @@ pip uninstall pymupdf4llm
 # Remove from requirements.txt
 sed -i '/pymupdf4llm/d' requirements.txt
 ```
+
+The system will automatically fall back to traditional text cleaning when PyMuPDF4LLM is not available.
+
+#### Method 3: Code-Level Rollback
+
+Modify the text cleaning function to skip PyMuPDF4LLM entirely:
+
+```python
+# In pdf_chunker/text_cleaning.py, modify the clean_text function
+def clean_text(text: str, use_pymupdf4llm: bool = False) -> str:  # Changed default to False
+    """Clean text using traditional methods only"""
+    
+    # Skip PyMuPDF4LLM text cleaning (rollback)
+    # if use_pymupdf4llm:
+    #     try:
+    #         # PyMuPDF4LLM text cleaning code...
+    #     except:
+    #         # Fallback handling...
+    
+    # Proceed directly to traditional text cleaning
+    if not text or not text.strip():
+        return ''
+    
+    # Traditional text cleaning approach
+    paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
+    cleaned = '\n\n'.join(p for p in paragraphs if p)
+    return cleanup_residual_continuations(cleaned)
+```
+    
 
 #### Method 4: Code-Level Rollback
 

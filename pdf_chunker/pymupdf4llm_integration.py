@@ -38,43 +38,43 @@ def extract_with_pymupdf4llm(
 ) -> str:
     """
     Extract raw text from PDF using PyMuPDF4LLM for text cleaning purposes only.
-    
+
     This simplified approach uses PyMuPDF4LLM solely for superior text extraction
     and cleaning (ligatures, word joining, whitespace normalization) without
     attempting complex structural analysis or block mapping.
-    
+
     Args:
         pdf_path: Path to the PDF file
         exclude_pages: Comma-separated string of page numbers to exclude (e.g., "1,3,5")
-        
+
     Returns:
         Raw cleaned text string from PyMuPDF4LLM
-        
+
     Raises:
         PyMuPDF4LLMExtractionError: If extraction fails
     """
     if not is_pymupdf4llm_available():
         raise PyMuPDF4LLMExtractionError("PyMuPDF4LLM is not available")
-    
+
     start_time = time.time()
-    
+
     try:
         logger.debug(f"Starting PyMuPDF4LLM text extraction for: {pdf_path}")
-        
+
         # Extract text using PyMuPDF4LLM for superior text quality
         markdown_text = _call_pymupdf4llm_api(pdf_path, None)
-        
+
         if not markdown_text or not markdown_text.strip():
             raise PyMuPDF4LLMExtractionError("PyMuPDF4LLM returned empty text")
-        
+
         # Convert markdown to clean text for text cleaning purposes
         cleaned_text = _convert_markdown_to_clean_text(markdown_text)
-        
+
         extraction_time = time.time() - start_time
-        logger.info(f"PyMuPDF4LLM text extraction completed in {extraction_time:.2f}s, {len(cleaned_text)} characters")
-        
+        logger.info(f"PyMuPDF4LLM text extraction completed in {extractionion_time:.2f}s, {len(cleaned_text)} characters")
+
         return cleaned_text
-    
+
     except Exception as e:
         extraction_time = time.time() - start_time
         error_msg = f"PyMuPDF4LLM text extraction failed after {extraction_time:.2f}s: {str(e)}"
@@ -85,30 +85,30 @@ def extract_with_pymupdf4llm(
 def _convert_markdown_to_clean_text(markdown_text: str) -> str:
     """
     Convert PyMuPDF4LLM Markdown output to clean text for text cleaning purposes.
-    
+
     This function strips markdown formatting while preserving text structure
     and paragraph boundaries for use in text cleaning operations.
-    
+
     Args:
         markdown_text: Raw markdown text from PyMuPDF4LLM
-        
+
     Returns:
         Clean text with preserved paragraph structure
     """
     from .text_cleaning import clean_text
-    
+
     # Split into lines for processing
     lines = markdown_text.split('\n')
     cleaned_lines = []
-    
+
     for line in lines:
         line = line.strip()
-        
+
         # Skip empty lines but preserve paragraph breaks
         if not line:
             cleaned_lines.append('')
             continue
-        
+
         # Remove markdown heading markers but keep the text
         if line.startswith('#'):
             heading_text = line.lstrip('#').strip()
@@ -119,71 +119,78 @@ def _convert_markdown_to_clean_text(markdown_text: str) -> str:
             cleaned_line = clean_text(line)
             if cleaned_line:
                 cleaned_lines.append(cleaned_line)
-    
+
     # Join lines back together, preserving paragraph structure
     cleaned_text = '\n'.join(cleaned_lines)
-    
+
     # Clean up excessive newlines while preserving paragraph breaks
     cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
-    
+
     return cleaned_text.strip()
 
 
 def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> str:
     """
     Clean text using PyMuPDF4LLM's superior text processing capabilities.
-    
+
     This function applies PyMuPDF4LLM's text cleaning to improve ligature handling,
     word joining, and whitespace normalization while preserving text structure.
-    
+
     Args:
         text: Text to clean
         pdf_path: Optional PDF path for context (not used in simplified approach)
-        
+
     Returns:
         Cleaned text with improved formatting
     """
     if not is_pymupdf4llm_available():
         # Fallback to traditional text cleaning
-        from .text_cleaning import clean_text
-        return clean_text(text)
-    
+        from .text_cleaning import clean_paragraph, cleanup_residual_continuations
+        paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
+        cleaned = '\n\n'.join(p for p in paragraphs if p)
+        return cleanup_residual_continuations(cleaned)
+
     try:
-        # For the simplified approach, we use PyMuPDF4LLM's text processing
-        # capabilities by applying its cleaning logic to the input text
-        from .text_cleaning import clean_text, fix_hyphenated_breaks, consolidate_whitespace
-        
-        # Apply PyMuPDF4LLM-style text cleaning
-        cleaned = text
-        
-        # Fix hyphenated word breaks (PyMuPDF4LLM excels at this)
-        cleaned = fix_hyphenated_breaks(cleaned)
-        
-        # Consolidate whitespace (PyMuPDF4LLM handles this well)
-        cleaned = consolidate_whitespace(cleaned)
-        
-        # Apply standard text cleaning for ligatures and other issues
-        cleaned = clean_text(cleaned)
-        
+        # Use only the traditional cleaning functions directly to avoid recursion
+        from .text_cleaning import (
+            remove_special_chars,
+            normalize_ligatures,
+            fix_hyphenated_breaks,
+            consolidate_whitespace,
+            cleanup_residual_continuations,
+        )
+        # Apply the cleaning steps directly, paragraph by paragraph
+        paragraphs = []
+        for p in text.split('\n\n'):
+            p = remove_special_chars(p)
+            p = normalize_ligatures(p)
+            p = fix_hyphenated_breaks(p)
+            p = consolidate_whitespace(p)
+            if p:
+                paragraphs.append(p)
+        cleaned = '\n\n'.join(paragraphs)
+        cleaned = cleanup_residual_continuations(cleaned)
         return cleaned
-        
+
     except Exception as e:
         logger.warning(f"PyMuPDF4LLM text cleaning failed: {e}. Falling back to traditional cleaning.")
-        from .text_cleaning import clean_text
-        return clean_text(text)
+        from .text_cleaning import clean_paragraph, cleanup_residual_continuations
+        paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
+        cleaned = '\n\n'.join(p for p in paragraphs if p)
+        return cleanup_residual_continuations(cleaned)
 
 
 def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> str:
     """
     Call PyMuPDF4LLM API with fallback for different method names.
-    
+
     Args:
         pdf_path: Path to the PDF file
         pages: List of page numbers to process (None for all pages)
-        
+
     Returns:
         Extracted markdown text
-        
+
     Raises:
         PyMuPDF4LLMExtractionError: If no working API method is found
     """
@@ -194,22 +201,22 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
         ('extract', lambda: pymupdf4llm.extract(pdf_path, pages=pages)),
         ('convert', lambda: pymupdf4llm.convert(pdf_path, pages=pages)),
         ('parse', lambda: pymupdf4llm.parse(pdf_path, pages=pages)),
-        
+
         # Pattern 2: Simple function calls without pages parameter
         ('to_markdown_simple', lambda: pymupdf4llm.to_markdown(pdf_path)),
         ('extract_simple', lambda: pymupdf4llm.extract(pdf_path)),
         ('convert_simple', lambda: pymupdf4llm.convert(pdf_path)),
         ('parse_simple', lambda: pymupdf4llm.parse(pdf_path)),
     ]
-    
+
     # Try class-based APIs
     class_methods = [
         'LlamaParseReader',
-        'PyMuPDFReader', 
+        'PyMuPDFReader',
         'PDFReader',
         'DocumentReader'
     ]
-    
+
     # Try direct function calls first
     for method_name, method_call in api_methods:
         try:
@@ -222,7 +229,7 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
         except Exception as e:
             logger.debug(f"Method {method_name} failed: {e}")
             continue
-    
+
     # Try class-based APIs
     for class_name in class_methods:
         if hasattr(pymupdf4llm, class_name):
@@ -230,14 +237,14 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
                 logger.debug(f"Trying PyMuPDF4LLM class: {class_name}")
                 cls = getattr(pymupdf4llm, class_name)
                 reader = cls()
-                
+
                 # Try different method names on the class
                 for method_name in ['load_data', 'read', 'extract', 'parse', 'to_markdown']:
                     if hasattr(reader, method_name):
                         try:
                             method = getattr(reader, method_name)
                             result = method(pdf_path)
-                            
+
                             # Handle different return types
                             if isinstance(result, str) and result.strip():
                                 logger.debug(f"Successfully extracted using {class_name}.{method_name}")
@@ -248,7 +255,7 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
                                     text = '\n'.join([doc.text for doc in result])
                                 else:
                                     text = '\n'.join([str(doc) for doc in result])
-                                
+
                                 if text.strip():
                                     logger.debug(f"Successfully extracted using {class_name}.{method_name}")
                                     return text
@@ -258,7 +265,7 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
             except Exception as e:
                 logger.debug(f"Class {class_name} instantiation failed: {e}")
                 continue
-    
+
     # If we get here, no method worked
     available_attrs = [attr for attr in dir(pymupdf4llm) if not attr.startswith('_')]
     raise PyMuPDF4LLMExtractionError(
@@ -270,11 +277,11 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
 def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[str, Any]:
     """
     Assess the quality of PyMuPDF4LLM text cleaning for simple quality validation.
-    
+
     Args:
         original_text: Original text before cleaning
         cleaned_text: Text after PyMuPDF4LLM cleaning
-        
+
     Returns:
         Simple quality assessment metrics
     """
@@ -286,15 +293,15 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[
             'cleaning_effective': False,
             'issues': ['No cleaned text produced']
         }
-    
+
     # Basic quality checks
     issues = []
     quality_factors = []
-    
+
     # Content preservation (50% weight)
     original_length = len(original_text.strip())
     cleaned_length = len(cleaned_text.strip())
-    
+
     if cleaned_length > 0:
         if original_length > 0:
             length_ratio = cleaned_length / original_length
@@ -309,7 +316,7 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[
             quality_factors.append(0.5)
     else:
         issues.append("No content after cleaning")
-    
+
     # Text cleaning effectiveness (30% weight)
     if cleaned_text != original_text:
         # Text was actually cleaned/modified
@@ -318,25 +325,25 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[
         # No cleaning applied
         quality_factors.append(0.1)
         issues.append("No text cleaning applied")
-    
+
     # Basic text quality (20% weight)
     # Check for common issues that should be cleaned
     import re
-    
+
     # Check for excessive whitespace
     excessive_spaces = len(re.findall(r' {3,}', cleaned_text))
     excessive_newlines = len(re.findall(r'\n{3,}', cleaned_text))
-    
+
     if excessive_spaces == 0 and excessive_newlines == 0:
         quality_factors.append(0.2)
     elif excessive_spaces < 5 and excessive_newlines < 5:
         quality_factors.append(0.1)
     else:
         issues.append("Excessive whitespace not cleaned")
-    
+
     # Calculate overall quality score
     quality_score = min(sum(quality_factors), 1.0)
-    
+
     return {
         'quality_score': quality_score,
         'has_content': len(cleaned_text.strip()) > 0,
@@ -350,7 +357,7 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[
 def get_pymupdf4llm_info() -> Dict[str, Any]:
     """
     Get information about the PyMuPDF4LLM installation.
-    
+
     Returns:
         Dictionary with installation and capability information
     """
@@ -359,7 +366,7 @@ def get_pymupdf4llm_info() -> Dict[str, Any]:
             'available': False,
             'error': 'PyMuPDF4LLM not installed or not importable'
         }
-    
+
     try:
         info = {
             'available': True,
@@ -367,25 +374,25 @@ def get_pymupdf4llm_info() -> Dict[str, Any]:
             'module_file': getattr(pymupdf4llm, '__file__', 'Unknown'),
             'available_attributes': [attr for attr in dir(pymupdf4llm) if not attr.startswith('_')]
         }
-        
+
         # Test basic functionality
         try:
             # Try to identify working extraction methods
             working_methods = []
             test_methods = ['to_markdown', 'extract', 'convert', 'parse']
-            
+
             for method in test_methods:
                 if hasattr(pymupdf4llm, method):
                     working_methods.append(method)
             info['working_methods'] = working_methods
             info['functional'] = len(working_methods) > 0
-            
+
         except Exception as e:
             info['functional'] = False
             info['test_error'] = str(e)
-        
+
         return info
-        
+
     except Exception as e:
         return {
             'available': True,

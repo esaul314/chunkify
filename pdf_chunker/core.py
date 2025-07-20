@@ -38,7 +38,7 @@ def process_document(
 
     structured_blocks = extract_structured_text(filepath, exclude_pages=exclude_pages)
     
-    
+
     # Debug: Show what we got from the structural pass
     print(f"Extracted {len(structured_blocks)} structured blocks", file=sys.stderr)
     total_block_chars = 0
