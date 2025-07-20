@@ -133,23 +133,120 @@ def extract_with_pymupdf4llm(pdf_path: str, pages_to_exclude: Optional[List[int]
     errors = []
     
     try:
-        # Check what methods are actually available in pymupdf4llm
-        available_methods = [method for method in dir(pymupdf4llm) if not method.startswith('_')]
+
+        # Enhanced API discovery for PyMuPDF4LLM
+        print(f"DEBUG: Inspecting pymupdf4llm module structure...")
         
-        # Try common method names for PyMuPDF4LLM
-        if hasattr(pymupdf4llm, 'to_markdown'):
-            md_text = pymupdf4llm.to_markdown(pdf_path)
-        elif hasattr(pymupdf4llm, 'LlamaParseReader'):
-            # Alternative API structure
-            reader = pymupdf4llm.LlamaParseReader()
-            documents = reader.load_data(pdf_path)
-            md_text = '\n'.join([doc.text for doc in documents])
-        elif hasattr(pymupdf4llm, 'extract'):
-            md_text = pymupdf4llm.extract(pdf_path)
-        elif hasattr(pymupdf4llm, 'convert'):
-            md_text = pymupdf4llm.convert(pdf_path)
-        else:
-            raise AttributeError(f"Could not find extraction method in pymupdf4llm. Available methods: {available_methods}")
+        # Check main module attributes
+        main_attrs = [attr for attr in dir(pymupdf4llm) if not attr.startswith('_')]
+        print(f"DEBUG: Main module attributes: {main_attrs}")
+        
+        # Check for submodules
+        submodules = []
+        for attr in main_attrs:
+            try:
+                obj = getattr(pymupdf4llm, attr)
+                if hasattr(obj, '__module__') and hasattr(obj, '__dict__'):
+                    submodules.append(attr)
+                    sub_attrs = [a for a in dir(obj) if not a.startswith('_')]
+                    print(f"DEBUG: Submodule {attr} attributes: {sub_attrs}")
+            except:
+                pass
+        
+        print(f"DEBUG: Found submodules: {submodules}")
+        
+        # Try different API patterns
+        md_text = None
+        extraction_method = None
+        
+        # Pattern 1: Direct function call
+        for method_name in ['to_markdown', 'extract', 'convert', 'parse', 'process']:
+            if hasattr(pymupdf4llm, method_name):
+                try:
+                    method = getattr(pymupdf4llm, method_name)
+                    print(f"DEBUG: Trying method {method_name}")
+                    md_text = method(pdf_path)
+                    extraction_method = f"pymupdf4llm.{method_name}"
+                    break
+                except Exception as e:
+                    print(f"DEBUG: Method {method_name} failed: {e}")
+                    continue
+        
+        # Pattern 2: Class-based API
+        if md_text is None:
+            for class_name in ['LlamaParseReader', 'PyMuPDFReader', 'PDFReader', 'DocumentReader']:
+                if hasattr(pymupdf4llm, class_name):
+                    try:
+                        cls = getattr(pymupdf4llm, class_name)
+                        print(f"DEBUG: Trying class {class_name}")
+                        reader = cls()
+                        
+                        # Try different method names on the class
+                        for method_name in ['load_data', 'read', 'extract', 'parse', 'to_markdown']:
+                            if hasattr(reader, method_name):
+                                try:
+                                    method = getattr(reader, method_name)
+                                    print(f"DEBUG: Trying {class_name}.{method_name}")
+                                    result = method(pdf_path)
+                                    
+                                    # Handle different return types
+                                    if isinstance(result, str):
+                                        md_text = result
+                                    elif isinstance(result, list):
+                                        if result and hasattr(result[0], 'text'):
+                                            md_text = '\n'.join([doc.text for doc in result])
+                                        else:
+                                            md_text = '\n'.join([str(doc) for doc in result])
+                                    else:
+                                        md_text = str(result)
+                                    
+                                    extraction_method = f"pymupdf4llm.{class_name}().{method_name}"
+                                    break
+                                except Exception as e:
+                                    print(f"DEBUG: {class_name}.{method_name} failed: {e}")
+                                    continue
+                        
+                        if md_text is not None:
+                            break
+                    except Exception as e:
+                        print(f"DEBUG: Class {class_name} instantiation failed: {e}")
+                        continue
+        
+        # Pattern 3: Check submodules for extraction functions
+        if md_text is None:
+            for submodule_name in submodules:
+                try:
+                    submodule = getattr(pymupdf4llm, submodule_name)
+                    for method_name in ['to_markdown', 'extract', 'convert', 'parse']:
+                        if hasattr(submodule, method_name):
+                            try:
+                                method = getattr(submodule, method_name)
+                                print(f"DEBUG: Trying {submodule_name}.{method_name}")
+                                md_text = method(pdf_path)
+                                extraction_method = f"pymupdf4llm.{submodule_name}.{method_name}"
+                                break
+                            except Exception as e:
+                                print(f"DEBUG: {submodule_name}.{method_name} failed: {e}")
+                                continue
+                    
+                    if md_text is not None:
+                        break
+                except Exception as e:
+                    print(f"DEBUG: Submodule {submodule_name} access failed: {e}")
+                    continue
+        
+        # If still no success, provide detailed error information
+        if md_text is None:
+            error_info = {
+                'main_attributes': main_attrs,
+                'submodules': submodules,
+                'module_file': getattr(pymupdf4llm, '__file__', 'Unknown'),
+                'module_version': getattr(pymupdf4llm, '__version__', 'Unknown')
+            }
+            raise AttributeError(f"Could not find working extraction method in pymupdf4llm. Module info: {error_info}")
+        
+        print(f"DEBUG: Successfully extracted using {extraction_method}")
+    
         
         # Parse the markdown to extract headings and create chunks
         lines = md_text.split('\n')
