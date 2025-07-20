@@ -354,6 +354,230 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[
     }
 
 
+def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[str, Any]:
+    """
+    Detect if PyMuPDF4LLM cleaning has degraded text flow quality.
+    
+    This function specifically looks for issues that can occur when cleaning
+    text that spans page boundaries or contains page artifacts.
+    
+    Args:
+        original_text: Original text before cleaning
+        cleaned_text: Text after PyMuPDF4LLM cleaning
+        
+    Returns:
+        Dictionary with degradation assessment and specific issues found
+    """
+    import re
+    
+    issues = []
+    degradation_score = 0.0
+    
+    if not cleaned_text or not cleaned_text.strip():
+        return {
+            'degraded': True,
+            'degradation_score': 1.0,
+            'issues': ['Text completely removed by cleaning'],
+            'recommendation': 'Use original text'
+        }
+    
+    # Check for sentence fragmentation (sentences cut off abruptly)
+    original_sentences = re.split(r'[.!?]+', original_text)
+    cleaned_sentences = re.split(r'[.!?]+', cleaned_text)
+    
+    # Look for very short sentence fragments that might indicate cutting
+    short_fragments = [s.strip() for s in cleaned_sentences if 0 < len(s.strip().split()) <= 4]
+    if len(short_fragments) > len(original_sentences) * 0.3:
+        issues.append(f"Excessive sentence fragmentation: {len(short_fragments)} short fragments")
+        degradation_score += 0.3
+    
+    # Check for header/footer contamination patterns
+    contamination_patterns = [
+        r'\b\d+\s*$',  # Ends with page number
+        r'^\s*\d+\b',  # Starts with page number
+        r'\bchapter\s+\d+\b.*\bpage\s+\d+\b',  # Chapter and page mixed
+        r'\bfootnote\s*\d+\b',  # Footnote references
+        r'^\s*[A-Z\s]{10,}\s*$',  # All caps headers
+    ]
+    
+    contamination_count = 0
+    for pattern in contamination_patterns:
+        if re.search(pattern, cleaned_text, re.IGNORECASE):
+            contamination_count += 1
+    
+    if contamination_count > 0:
+        issues.append(f"Potential header/footer contamination: {contamination_count} patterns detected")
+        degradation_score += contamination_count * 0.15
+    
+    # Check for text length changes that might indicate content loss
+    original_length = len(original_text.strip())
+    cleaned_length = len(cleaned_text.strip())
+    
+    if original_length > 0:
+        length_ratio = cleaned_length / original_length
+        if length_ratio < 0.7:
+            issues.append(f"Significant content loss: {length_ratio:.2f} length ratio")
+            degradation_score += 0.4
+        elif length_ratio > 1.5:
+            issues.append(f"Unexpected content expansion: {length_ratio:.2f} length ratio")
+            degradation_score += 0.2
+    
+    # Check for word joining issues (words accidentally merged)
+    original_words = len(original_text.split())
+    cleaned_words = len(cleaned_text.split())
+    
+    if original_words > 0:
+        word_ratio = cleaned_words / original_words
+        if word_ratio < 0.8:
+            issues.append(f"Potential word merging: {word_ratio:.2f} word count ratio")
+            degradation_score += 0.2
+    
+    # Check for excessive whitespace or formatting issues
+    excessive_spaces = len(re.findall(r' {4,}', cleaned_text))
+    excessive_newlines = len(re.findall(r'\n{4,}', cleaned_text))
+    
+    if excessive_spaces > 5 or excessive_newlines > 3:
+        issues.append(f"Formatting issues: {excessive_spaces} space clusters, {excessive_newlines} newline clusters")
+        degradation_score += 0.1
+    
+    # Overall assessment
+    degradation_score = min(degradation_score, 1.0)
+    degraded = degradation_score > 0.3
+    
+    recommendation = 'Use original text' if degraded else 'Use cleaned text'
+    if degradation_score > 0.1 and not degraded:
+        recommendation = 'Use cleaned text with caution'
+    
+    return {
+        'degraded': degraded,
+        'degradation_score': degradation_score,
+        'issues': issues,
+        'recommendation': recommendation,
+        'original_length': original_length,
+        'cleaned_length': cleaned_length,
+        'length_ratio': cleaned_length / original_length if original_length > 0 else 0
+    }
+
+
+def should_apply_pymupdf4llm_cleaning(block: dict, context: Dict[str, Any] = None) -> bool:
+    """
+    Determine if PyMuPDF4LLM cleaning should be applied to a specific text block.
+    
+    This function considers block characteristics and context to avoid cleaning
+    blocks that are likely to be degraded by the process.
+    
+    Args:
+        block: Text block with metadata
+        context: Optional context information about the document
+        
+    Returns:
+        True if PyMuPDF4LLM cleaning should be applied
+    """
+    text = block.get('text', '').strip()
+    
+    # Skip very short blocks
+    if len(text) < 20:
+        return False
+    
+    # Skip blocks that are likely page artifacts
+    page_num = block.get("source", {}).get("page", 0)
+    if is_page_artifact_text(text, page_num):
+        return False
+    
+    # Skip blocks that are already very clean
+    if is_text_already_clean(text):
+        return False
+    
+    # Check for text that would benefit from PyMuPDF4LLM cleaning
+    return has_cleaning_opportunities(text)
+
+
+def is_page_artifact_text(text: str, page_num: int) -> bool:
+    """
+    Check if text appears to be a page artifact (header, footer, page number).
+    
+    Args:
+        text: Text to check
+        page_num: Page number for context
+        
+    Returns:
+        True if text appears to be a page artifact
+    """
+    import re
+    
+    text_lower = text.lower().strip()
+    
+    # Page numbers
+    if re.match(r'^\d+$', text_lower):
+        return True
+    
+    # Common header/footer patterns
+    artifact_patterns = [
+        r'^page\s+\d+',
+        r'^\d+\s*$',
+        r'^chapter\s+\d+$',
+        r'^\d+\s+chapter',
+        r'^table\s+of\s+contents',
+        r'^bibliography',
+        r'^index$',
+        r'^appendix\s+[a-z]$',
+    ]
+    
+    for pattern in artifact_patterns:
+        if re.match(pattern, text_lower):
+            return True
+    
+    # Very short text that might be artifacts
+    if len(text.split()) <= 3 and len(text) <= 30:
+        # Could be artifact, but be conservative
+        return any(char.isdigit() for char in text)
+    
+    return False
+
+
+def is_text_already_clean(text: str) -> bool:
+    """
+    Check if text is already clean and doesn't need PyMuPDF4LLM processing.
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        True if text appears to already be clean
+    """
+    import re
+    
+    # Check for common issues that PyMuPDF4LLM would fix
+    has_ligatures = any(char in text for char in ['ﬁ', 'ﬂ', 'ﬀ', 'ﬃ', 'ﬄ'])
+    has_excessive_spaces = bool(re.search(r' {3,}', text))
+    has_hyphenated_breaks = bool(re.search(r'-\s*\n\s*[a-z]', text))
+    has_word_joining_issues = bool(re.search(r'[a-z][A-Z]', text))
+    
+    # If none of these issues are present, text is probably already clean
+    return not (has_ligatures or has_excessive_spaces or has_hyphenated_breaks or has_word_joining_issues)
+
+
+def has_cleaning_opportunities(text: str) -> bool:
+    """
+    Check if text has characteristics that would benefit from PyMuPDF4LLM cleaning.
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        True if text would likely benefit from cleaning
+    """
+    import re
+    
+    # Look for specific issues that PyMuPDF4LLM handles well
+    has_ligatures = any(char in text for char in ['ﬁ', 'ﬂ', 'ﬀ', 'ﬃ', 'ﬄ'])
+    has_excessive_spaces = bool(re.search(r' {3,}', text))
+    has_hyphenated_breaks = bool(re.search(r'-\s*\n\s*[a-z]', text))
+    has_unicode_issues = bool(re.search(r'[^\x00-\x7F]', text)) and not has_ligatures
+    
+    return has_ligatures or has_excessive_spaces or has_hyphenated_breaks or has_unicode_issues
+
+
 def get_pymupdf4llm_info() -> Dict[str, Any]:
     """
     Get information about the PyMuPDF4LLM installation.

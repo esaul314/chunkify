@@ -85,7 +85,7 @@ def clean_paragraph(paragraph: str) -> str:
     return reduce(lambda txt, fn: fn(txt), transformations, paragraph)
 
 
-def clean_text(text: str, use_pymupdf4llm: bool = True) -> str:
+def clean_text(text: str, use_pymupdf4llm: bool = False) -> str:
     """
     Clean a text block by paragraph, preserving meaningful breaks and
     cleaning residual continuations. Optionally uses PyMuPDF4LLM for
@@ -93,13 +93,25 @@ def clean_text(text: str, use_pymupdf4llm: bool = True) -> str:
     
     Args:
         text: Text to clean
-        use_pymupdf4llm: Whether to use PyMuPDF4LLM for enhanced cleaning
+        use_pymupdf4llm: Whether to use PyMuPDF4LLM for enhanced cleaning.
+                        Defaults to False for safer behavior. Can be overridden
+                        by setting PDF_CHUNKER_USE_PYMUPDF4LLM environment variable.
         
     Returns:
         Cleaned text with improved formatting
     """
+    import os
+    
     if not text or not text.strip():
         return ''
+    
+    # Check environment variable to override default behavior
+    env_use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', '').lower()
+    if env_use_pymupdf4llm in ('true', '1', 'yes', 'on'):
+        use_pymupdf4llm = True
+    elif env_use_pymupdf4llm in ('false', '0', 'no', 'off'):
+        use_pymupdf4llm = False
+    # If environment variable is not set or invalid, use the parameter value
 
     # Try PyMuPDF4LLM enhanced cleaning if available and requested
     if use_pymupdf4llm:
@@ -114,7 +126,7 @@ def clean_text(text: str, use_pymupdf4llm: bool = True) -> str:
         except Exception:
             # PyMuPDF4LLM cleaning failed, fall back to traditional cleaning
             pass
-    
+
     # Traditional text cleaning approach
     paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
     cleaned = '\n\n'.join(p for p in paragraphs if p)
