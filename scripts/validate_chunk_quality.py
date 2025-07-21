@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Chunk Quality Validation Script
 
@@ -15,7 +16,6 @@ Usage:
     python scripts/validate_chunk_quality.py --compare <file1.jsonl> <file2.jsonl>
     python scripts/validate_chunk_quality.py --generate <pdf_file> [--traditional] [--enhanced]
 """
-
 import sys
 import os
 import json
@@ -29,7 +29,17 @@ import statistics
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+
 from pdf_chunker.core import process_document
+
+# Centralized chunk threshold constants (matching splitter.py)
+VALIDATION_THRESHOLDS = {
+    'very_short': 5,      # Very short chunks (≤5 words) - quality concern
+    'short': 10,          # Short chunks (≤10 words) - potential quality issue
+    'minimal': 15,        # Minimal chunks (≤15 words) - acceptable but monitored
+    'dialogue_response': 6,  # Short dialogue responses (≤6 words)
+    'fragment': 4         # Very short fragments (≤4 words) - critical issue
+}
 
 
 def load_jsonl(filepath: str) -> List[Dict[str, Any]]:
@@ -116,20 +126,17 @@ def analyze_chunk_sizes(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def detect_short_chunks(chunks: List[Dict[str, Any]], thresholds: Dict[str, int] = None) -> Dict[str, Any]:
-    """Detect and categorize short chunks."""
+    """Detect and categorize short chunks using centralized thresholds."""
     if thresholds is None:
-        thresholds = {
-            'very_short': 3,
-            'short': 7,
-            'minimal': 15
-        }
-    
+        thresholds = VALIDATION_THRESHOLDS
+
     categorized_chunks = {
-        'very_short': [],  # ≤ 3 words
-        'short': [],       # 4-7 words
-        'minimal': [],     # 8-15 words
+        'very_short': [],  # ≤ 5 words
+        'short': [],       # 6-10 words
+        'minimal': [],     # 11-15 words
         'normal': []       # > 15 words
     }
+    
     
     for i, chunk in enumerate(chunks):
         text = chunk.get('text', '')
@@ -156,14 +163,14 @@ def detect_short_chunks(chunks: List[Dict[str, Any]], thresholds: Dict[str, int]
 
 
 def detect_dialogue_patterns(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Detect dialogue and conversational patterns in chunks."""
+    """Detect dialogue and conversational patterns in chunks using centralized thresholds."""
     dialogue_patterns = {
         'quoted_speech': [],
         'dialogue_attribution': [],
         'conversational_responses': [],
         'potential_fragments': []
     }
-    
+
     # Patterns for detecting dialogue
     quote_pattern = r'"[^"]*"'
     attribution_words = [
@@ -172,76 +179,74 @@ def detect_dialogue_patterns(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
         'shouted', 'muttered', 'explained', 'insisted', 'argued', 'suggested',
         'wondered', 'thought', 'concluded', 'responded', 'commented'
     ]
-    
+
+    def _analyze_chunk_info(i: int, text: str, word_count: int) -> Dict[str, Any]:
+        """Helper function to create standardized chunk info."""
+        return {
+            'index': i,
+            'word_count': word_count,
+            'text_preview': text[:100].replace('\n', ' ')
+        }
+
     for i, chunk in enumerate(chunks):
         text = chunk.get('text', '')
         if not text:
             continue
-        
+
         word_count = len(text.split())
-        
+        text_lower = text.lower()
+
         # Check for quoted speech
         quotes = re.findall(quote_pattern, text)
         if quotes:
-            dialogue_patterns['quoted_speech'].append({
-                'index': i,
-                'word_count': word_count,
+            chunk_info = _analyze_chunk_info(i, text, word_count)
+            chunk_info.update({
                 'quote_count': len(quotes),
-                'quotes': quotes[:3],  # First 3 quotes
-                'text_preview': text[:100].replace('\n', ' ')
+                'quotes': quotes[:3]
             })
-        
-        # Check for dialogue attribution
-        text_lower = text.lower()
+            dialogue_patterns['quoted_speech'].append(chunk_info)
+
+        # Check for dialogue attribution using centralized thresholds
         attribution_found = any(word in text_lower for word in attribution_words)
-        if attribution_found and word_count <= 10:
-            dialogue_patterns['dialogue_attribution'].append({
-                'index': i,
-                'word_count': word_count,
-                'text_preview': text[:100].replace('\n', ' '),
-                'attribution_words': [word for word in attribution_words if word in text_lower]
-            })
-        
-        # Check for conversational responses (short chunks that might be responses)
-        if 3 <= word_count <= 8:
-            # Look for patterns that suggest this is a response or commentary
+        if attribution_found and word_count <= VALIDATION_THRESHOLDS['short']:
+            chunk_info = _analyze_chunk_info(i, text, word_count)
+            chunk_info['attribution_words'] = [word for word in attribution_words if word in text_lower]
+            dialogue_patterns['dialogue_attribution'].append(chunk_info)
+
+        # Check for conversational responses using centralized thresholds
+        if VALIDATION_THRESHOLDS['very_short'] <= word_count <= VALIDATION_THRESHOLDS['dialogue_response']:
             response_indicators = [
-                text.strip().endswith('?'),  # Questions
+                text.strip().endswith('?'),
                 text.strip().startswith(('Yes', 'No', 'Well', 'Oh', 'Ah', 'Indeed', 'Certainly')),
                 any(word in text_lower for word in ['indeed', 'certainly', 'perhaps', 'maybe', 'probably'])
             ]
-            
             if any(response_indicators):
-                dialogue_patterns['conversational_responses'].append({
-                    'index': i,
-                    'word_count': word_count,
-                    'text_preview': text[:100].replace('\n', ' '),
-                    'indicators': [ind for ind, present in zip(['question', 'starter', 'qualifier'], response_indicators) if present]
-                })
-        
-        # Check for potential fragments (very short chunks that might be incomplete)
-        if word_count <= 5:
-            # Analyze if this looks like a fragment
+                chunk_info = _analyze_chunk_info(i, text, word_count)
+                chunk_info['indicators'] = [
+                    ind for ind, present in zip(
+                        ['question', 'starter', 'qualifier'], response_indicators
+                    ) if present
+                ]
+                dialogue_patterns['conversational_responses'].append(chunk_info)
+
+        # Check for potential fragments using centralized thresholds
+        if word_count <= VALIDATION_THRESHOLDS['very_short']:
             is_complete_sentence = (
                 text.strip().endswith(('.', '!', '?')) and
                 text.strip()[0].isupper() and
-                word_count >= 3
+                word_count >= VALIDATION_THRESHOLDS['fragment']
             )
-            
             if not is_complete_sentence:
-                dialogue_patterns['potential_fragments'].append({
-                    'index': i,
-                    'word_count': word_count,
-                    'text_preview': text[:100].replace('\n', ' '),
-                    'issues': {
-                        'no_end_punctuation': not text.strip().endswith(('.', '!', '?')),
-                        'no_capitalization': not (text.strip() and text.strip()[0].isupper()),
-                        'too_short': word_count < 3
-                    }
-                })
-    
-    return dialogue_patterns
+                chunk_info = _analyze_chunk_info(i, text, word_count)
+                chunk_info['issues'] = {
+                    'no_end_punctuation': not text.strip().endswith(('.', '!', '?')),
+                    'no_capitalization': not text.strip()[0].isupper(),
+                    'too_short': word_count < VALIDATION_THRESHOLDS['fragment']
+                }
+                dialogue_patterns['potential_fragments'].append(chunk_info)
 
+    return dialogue_patterns
+    
 
 def analyze_chunk_flow(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Analyze text flow and continuity between chunks."""
@@ -327,7 +332,7 @@ def analyze_chunk_flow(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unknown") -> Dict[str, Any]:
-    """Generate a comprehensive quality report for chunks."""
+    """Generate a comprehensive quality report for chunks using centralized thresholds."""
     # Always include summary_stats, even if empty
     summary_stats = {
         'total_chunks': len(chunks) if chunks else 0,
@@ -339,6 +344,7 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
         'dialogue_chunks': 0,
         'flow_issues': 0
     }
+    
     if not chunks:
         return {
             'filename': filename,
@@ -354,36 +360,57 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
             'recommendations': ['Check input file and processing pipeline']
         }
     
-    # Analyze different aspects
+    # Analyze different aspects using centralized thresholds
     size_analysis = analyze_chunk_sizes(chunks)
-    short_chunks = detect_short_chunks(chunks)
+    short_chunks = detect_short_chunks(chunks, VALIDATION_THRESHOLDS)
     dialogue_analysis = detect_dialogue_patterns(chunks)
     flow_analysis = analyze_chunk_flow(chunks)
     
-    # Calculate quality score
+    def _calculate_size_quality_factor() -> Tuple[str, float, float]:
+        """Calculate size distribution quality factor."""
+        word_counts = size_analysis['word_counts']
+        if not word_counts:
+            return ('size_distribution', 0.0, 0.3)
+        
+        very_short_ratio = len(short_chunks['very_short']) / len(chunks)
+        short_ratio = len(short_chunks['short']) / len(chunks)
+        
+        size_score = 1.0 - (very_short_ratio * 0.8 + short_ratio * 0.4)
+        return ('size_distribution', size_score, 0.3)
+    
+    def _calculate_dialogue_quality_factor() -> Tuple[str, float, float]:
+        """Calculate dialogue handling quality factor."""
+        total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) + 
+                                 len(dialogue_analysis['dialogue_attribution']) +
+                                 len(dialogue_analysis['conversational_responses']))
+        
+        if total_dialogue_chunks == 0:
+            return ('dialogue_handling', 1.0, 0.3)
+        
+        fragment_ratio = len(dialogue_analysis['potential_fragments']) / total_dialogue_chunks
+        dialogue_score = max(0.0, 1.0 - fragment_ratio)
+        return ('dialogue_handling', dialogue_score, 0.3)
+    
+    # Calculate quality factors using helper functions
     quality_factors = []
     issues = []
     recommendations = []
     
     # Factor 1: Chunk size distribution (0.3 weight)
-    word_counts = size_analysis['word_counts']
-    if word_counts:
+    size_factor = _calculate_size_quality_factor()
+    quality_factors.append(size_factor)
+    
+    if size_factor[1] < 0.8:  # If size score is poor
         very_short_ratio = len(short_chunks['very_short']) / len(chunks)
         short_ratio = len(short_chunks['short']) / len(chunks)
         
-        size_score = 1.0 - (very_short_ratio * 0.8 + short_ratio * 0.4)
-        quality_factors.append(('size_distribution', size_score, 0.3))
-        
         if very_short_ratio > 0.1:
-            issues.append(f"High ratio of very short chunks: {very_short_ratio:.1%}")
+            issues.append(f"High ratio of very short chunks (≤{VALIDATION_THRESHOLDS['very_short']} words): {very_short_ratio:.1%}")
             recommendations.append("Consider adjusting minimum chunk size or improving merging logic")
         
         if short_ratio > 0.2:
-            issues.append(f"High ratio of short chunks: {short_ratio:.1%}")
+            issues.append(f"High ratio of short chunks (≤{VALIDATION_THRESHOLDS['short']} words): {short_ratio:.1%}")
             recommendations.append("Review conversational text handling and chunk merging")
-    else:
-        quality_factors.append(('size_distribution', 0.0, 0.3))
-        issues.append("No valid chunks with text content")
     
     # Factor 2: Text flow quality (0.4 weight)
     flow_score = flow_analysis['flow_score']
@@ -398,25 +425,22 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
         recommendations.append("Review semantic chunking boundaries")
     
     # Factor 3: Dialogue handling (0.3 weight)
-    dialogue_score = 1.0
-    total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) + 
-                             len(dialogue_analysis['dialogue_attribution']) +
-                             len(dialogue_analysis['conversational_responses']))
+    dialogue_factor = _calculate_dialogue_quality_factor()
+    quality_factors.append(dialogue_factor)
     
-    if total_dialogue_chunks > 0:
-        fragment_ratio = len(dialogue_analysis['potential_fragments']) / total_dialogue_chunks
-        dialogue_score = max(0.0, 1.0 - fragment_ratio)
-        
-        if fragment_ratio > 0.3:
-            issues.append(f"High dialogue fragmentation: {fragment_ratio:.1%}")
-            recommendations.append("Improve dialogue pattern detection and merging")
-    quality_factors.append(('dialogue_handling', dialogue_score, 0.3))
+    if dialogue_factor[1] < 0.7:
+        fragment_ratio = len(dialogue_analysis['potential_fragments']) / max(1, len(dialogue_analysis['quoted_speech']) + len(dialogue_analysis['dialogue_attribution']) + len(dialogue_analysis['conversational_responses']))
+        issues.append(f"High dialogue fragmentation: {fragment_ratio:.1%}")
+        recommendations.append("Improve dialogue pattern detection and merging")
     
     # Calculate overall quality score
     weighted_score = sum(score * weight for _, score, weight in quality_factors)
     overall_quality = max(0.0, min(1.0, weighted_score))
     
     # Generate summary statistics
+    total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) + 
+                             len(dialogue_analysis['dialogue_attribution']) +
+                             len(dialogue_analysis['conversational_responses']))
     summary_stats = {
         'total_chunks': len(chunks),
         'total_words': sum(size_analysis['word_counts']) if size_analysis['word_counts'] else 0,
@@ -522,9 +546,9 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
     very_short = stats.get('very_short_chunks', 0)
     short = stats.get('short_chunks', 0)
     normal = total_chunks - very_short - short if total_chunks else 0
-    print(f"Very Short (≤3 words):  {very_short} ({(very_short/total_chunks*100) if total_chunks else 0:.1f}%)")
-    print(f"Short (4-7 words):      {short} ({(short/total_chunks*100) if total_chunks else 0:.1f}%)")
-    print(f"Normal (>7 words):      {normal}")
+    print(f"Very Short (≤{VALIDATION_THRESHOLDS['very_short']} words):  {very_short} ({(very_short/total_chunks*100) if total_chunks else 0:.1f}%)")
+    print(f"Short ({VALIDATION_THRESHOLDS['very_short']+1}-{VALIDATION_THRESHOLDS['short']} words):      {short} ({(short/total_chunks*100) if total_chunks else 0:.1f}%)")
+    print(f"Normal (>{VALIDATION_THRESHOLDS['short']} words):      {normal}")
     print()
     
     # Quality factors
@@ -555,7 +579,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
         short_chunks = report.get('short_chunks', {})
     
         if short_chunks.get('very_short'):
-            print("VERY SHORT CHUNKS (≤3 words)")
+            print(f"VERY SHORT CHUNKS (≤{VALIDATION_THRESHOLDS['very_short']} words)")
             print("-" * 40)
             for chunk in short_chunks['very_short'][:5]:
                 print(f"Chunk {chunk['index']}: {chunk['word_count']} words - '{chunk['text_preview']}'")
@@ -564,7 +588,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
             print()
     
         if short_chunks.get('short'):
-            print("SHORT CHUNKS (4-7 words)")
+            print(f"SHORT CHUNKS ({VALIDATION_THRESHOLDS['very_short']+1}-{VALIDATION_THRESHOLDS['short']} words)")
             print("-" * 40)
             for chunk in short_chunks['short'][:5]:
                 print(f"Chunk {chunk['index']}: {chunk['word_count']} words - '{chunk['text_preview']}'")
@@ -651,17 +675,28 @@ def generate_chunks_from_pdf(pdf_path: str, traditional: bool = False, enhanced:
     """Generate chunks from a PDF using specified approach."""
     import os
 
-    # Only one approach should be active at a time; if both True, enhanced takes precedence
-    if traditional and not enhanced:
-        # Traditional: disable conversational text handling
+
+    # Ensure mutually exclusive approaches
+    if traditional and enhanced:
+        # If both are True, default to enhanced
+        traditional = False
+    elif not traditional and not enhanced:
+        # If both are False, default to enhanced
+        enhanced = True
+
+    # Set environment variables and parameters based on approach
+    if traditional:
+        # Traditional: disable PyMuPDF4LLM and conversational text handling
         os.environ['PDF_CHUNKER_USE_PYMUPDF4LLM'] = 'false'
-        min_chunk_size = None
+        min_chunk_size = None  # Use default large chunk size
         enable_dialogue_detection = False
+        print(f"Using traditional approach: PyMuPDF4LLM disabled, dialogue detection disabled")
     else:
-        # Enhanced: enable conversational text handling
+        # Enhanced: enable PyMuPDF4LLM and conversational text handling
         os.environ['PDF_CHUNKER_USE_PYMUPDF4LLM'] = 'true'
-        min_chunk_size = 8
+        min_chunk_size = 8  # Use small minimum chunk size for conversational merging
         enable_dialogue_detection = True
+        print(f"Using enhanced approach: PyMuPDF4LLM enabled, dialogue detection enabled")
 
     try:
         # Process the document
@@ -686,10 +721,10 @@ def generate_chunks_from_pdf(pdf_path: str, traditional: bool = False, enhanced:
 
 def save_chunks_to_jsonl(chunks: List[Dict[str, Any]], output_path: str):
     """Save chunks to a JSONL file."""
-    # Remove any double extensions like .traditional.jsonl or .enhanced.jsonl
-    base, ext = os.path.splitext(output_path)
-    if ext.lower() != ".jsonl":
-        output_path = base + ".jsonl"
+    # Ensure proper .jsonl extension
+    if not output_path.endswith('.jsonl'):
+        output_path = output_path + '.jsonl'
+
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
             for chunk in chunks:
@@ -698,7 +733,7 @@ def save_chunks_to_jsonl(chunks: List[Dict[str, Any]], output_path: str):
         print(f"Saved {len(chunks)} chunks to {output_path}")
     except Exception as e:
         print(f"Error saving chunks to '{output_path}': {e}", file=sys.stderr)
-
+    
 
 def main():
     parser = argparse.ArgumentParser(description='Validate chunk quality from JSONL output')
@@ -718,15 +753,19 @@ def main():
                        help='Show detailed analysis')
 
     # Options for PDF generation
-    parser.add_argument('--traditional', action='store_true',
-                       help='Use traditional approach (when generating from PDF)')
-    parser.add_argument('--enhanced', action='store_true', default=True,
-                       help='Use enhanced approach (default when generating from PDF)')
+
+    approach_group = parser.add_mutually_exclusive_group()
+    approach_group.add_argument('--traditional', action='store_true',
+                                help='Use traditional approach (when generating from PDF)')
+    approach_group.add_argument('--enhanced', action='store_true',
+                                help='Use enhanced approach (when generating from PDF)')
     parser.add_argument('--save-jsonl', metavar='OUTPUT_PATH',
-                       help='Save generated chunks to JSONL file')
+                        help='Save generated chunks to JSONL file')
+    
 
     args = parser.parse_args()
 
+    # For --generate, set default approach to enhanced if neither is specified
     if args.generate:
         # Generate chunks from PDF
         pdf_path = args.generate
@@ -736,46 +775,35 @@ def main():
 
         print(f"Generating chunks from PDF: {pdf_path}")
 
-        # If both --traditional and --enhanced, generate both and save to fixed file names
+
+        # Determine which approach to use
         if args.traditional and args.enhanced:
-            print("Generating traditional approach chunks...")
-            traditional_chunks = generate_chunks_from_pdf(pdf_path, traditional=True, enhanced=False)
-            trad_path = "chunk_quality_traditional.jsonl"
-            save_chunks_to_jsonl(traditional_chunks, trad_path)
-
-            print("Generating enhanced approach chunks...")
-            enhanced_chunks = generate_chunks_from_pdf(pdf_path, traditional=False, enhanced=True)
-            enh_path = "chunk_quality_enhanced.jsonl"
-            save_chunks_to_jsonl(enhanced_chunks, enh_path)
-
-            # Analyze both
-            print("\nTraditional Approach Analysis:")
-            trad_report = generate_quality_report(traditional_chunks, f"{pdf_path} (traditional)")
-            print_quality_report(trad_report, detailed=args.detailed)
-
-            print("\nEnhanced Approach Analysis:")
-            enh_report = generate_quality_report(enhanced_chunks, f"{pdf_path} (enhanced)")
-            print_quality_report(enh_report, detailed=args.detailed)
-
-            # Compare
-            print("\nComparison (Traditional vs Enhanced):")
-            comparison = compare_quality_reports(trad_report, enh_report)
-            print_comparison_report(comparison)
-
+            print("ERROR: Cannot specify both --traditional and --enhanced for a single generation. Please choose one.")
+            sys.exit(1)
+        if not args.traditional and not args.enhanced:
+            args.enhanced = True
+            approach = "enhanced"
+            traditional = False
+            enhanced = True
         else:
-            # Generate single approach
             approach = "traditional" if args.traditional else "enhanced"
-            chunks = generate_chunks_from_pdf(pdf_path, traditional=args.traditional, enhanced=args.enhanced)
-            # Use default file names if not specified
-            if args.save_jsonl:
-                save_chunks_to_jsonl(chunks, args.save_jsonl)
-            else:
-                default_path = f"chunk_quality_{approach}.jsonl"
-                save_chunks_to_jsonl(chunks, default_path)
+            traditional = args.traditional
+            enhanced = args.enhanced
 
-            # Analyze
-            report = generate_quality_report(chunks, f"{pdf_path} ({approach})")
-            print_quality_report(report, detailed=args.detailed)
+        # Generate the chunks
+        chunks = generate_chunks_from_pdf(pdf_path, traditional=traditional, enhanced=enhanced)
+
+        # Determine output path
+        if args.save_jsonl:
+            output_path = args.save_jsonl
+        else:
+            output_path = f"chunk_quality_{approach}.jsonl"
+        save_chunks_to_jsonl(chunks, output_path)
+
+        # Analyze
+        report = generate_quality_report(chunks, f"{pdf_path} ({approach})")
+        print_quality_report(report, detailed=args.detailed)
+    
 
     elif args.compare:
         # Compare two JSONL files
