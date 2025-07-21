@@ -11,10 +11,12 @@ def process_document(
     overlap: int,
     generate_metadata: bool = True,
     ai_enrichment: bool = True,  # New flag to control AI calls
-    exclude_pages: str = None  # New parameter for page exclusion
+    exclude_pages: str = None,  # New parameter for page exclusion
+    min_chunk_size: int = None,  # New parameter for conversational text handling
+    enable_dialogue_detection: bool = True  # New parameter to control dialogue pattern detection
 ) -> list[dict]:
     """
-    Core pipeline for processing a document with optional AI enrichment.
+    Core pipeline for processing a document with optional AI enrichment and conversational text handling.
 
     Args:
         filepath: Path to the document to process
@@ -23,7 +25,13 @@ def process_document(
         generate_metadata: Whether to generate metadata
         ai_enrichment: Whether to perform AI enrichment
         exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
+        min_chunk_size: Minimum chunk size in words (defaults to max(8, chunk_size // 10))
+        enable_dialogue_detection: Whether to enable dialogue pattern detection for conversational text
     """
+    # Set default minimum chunk size if not provided
+    if min_chunk_size is None:
+        min_chunk_size = max(8, chunk_size // 10)  # Minimum 8 words or 10% of target size
+
     # Determine if AI enrichment should be performed
     perform_ai_enrichment = generate_metadata and ai_enrichment
     
@@ -38,7 +46,6 @@ def process_document(
 
     structured_blocks = extract_structured_text(filepath, exclude_pages=exclude_pages)
     
-
     # Debug: Show what we got from the structural pass
     print(f"Extracted {len(structured_blocks)} structured blocks", file=sys.stderr)
     total_block_chars = 0
@@ -54,24 +61,50 @@ def process_document(
     total_all_chars = sum(len(block.get("text", "")) for block in structured_blocks)
     print(f"Total characters in all blocks: {total_all_chars}", file=sys.stderr)
     
-    # 2. Semantic Pass: Chunk the blocks into coherent documents
-    haystack_chunks = semantic_chunker(structured_blocks, chunk_size, overlap)
-    
-    # Debug: Validate chunk sizes after semantic chunking
-    print(f"Semantic chunking produced {len(haystack_chunks)} chunks", file=sys.stderr)
-    
+    # 2. Semantic Pass: Chunk the blocks into coherent documents with conversational text handling
+    haystack_chunks = semantic_chunker(
+        structured_blocks,
+        chunk_size,
+        overlap,
+        min_chunk_size=min_chunk_size,
+        enable_dialogue_detection=enable_dialogue_detection
+    )
+
+    # Debug: Validate chunk sizes after conversational text handling
+    print(f"Semantic chunking with conversational text handling produced {len(haystack_chunks)} chunks", file=sys.stderr)
+
     if haystack_chunks:
         chunk_sizes = [len(chunk.content) for chunk in haystack_chunks]
+        word_counts = [len(chunk.content.split()) for chunk in haystack_chunks]
         avg_size = sum(chunk_sizes) / len(chunk_sizes)
+        avg_words = sum(word_counts) / len(word_counts)
         max_size = max(chunk_sizes)
         min_size = min(chunk_sizes)
+        max_words = max(word_counts)
+        min_words = min(word_counts)
         
-        print(f"Chunk size statistics after semantic chunking:", file=sys.stderr)
-        print(f"  Average: {avg_size:.0f} characters", file=sys.stderr)
-        print(f"  Maximum: {max_size} characters", file=sys.stderr)
-        print(f"  Minimum: {min_size} characters", file=sys.stderr)
+        print(f"Chunk size statistics after conversational text handling:", file=sys.stderr)
+        print(f"  Average: {avg_size:.0f} characters ({avg_words:.1f} words)", file=sys.stderr)
+        print(f"  Maximum: {max_size} characters ({max_words} words)", file=sys.stderr)
+        print(f"  Minimum: {min_size} characters ({min_words} words)", file=sys.stderr)
         
-        # Check for problematic chunks
+        # Check for problematic chunks after conversational text handling
+        short_chunks = [i for i, words in enumerate(word_counts) if words <= 7]
+        very_short_chunks = [i for i, words in enumerate(word_counts) if words <= 3]
+        
+        if short_chunks:
+            print(f"  Short chunks (≤7 words): {len(short_chunks)} chunks", file=sys.stderr)
+            if len(short_chunks) <= 3:  # Show examples if not too many
+                for i in short_chunks:
+                    chunk_preview = haystack_chunks[i].content[:50].replace('\n', ' ')
+                    print(f"    Chunk {i}: {word_counts[i]} words - '{chunk_preview}...'", file=sys.stderr)
+        
+        if very_short_chunks:
+            print(f"  Very short chunks (≤3 words): {len(very_short_chunks)} chunks", file=sys.stderr)
+            for i in very_short_chunks:
+                chunk_preview = haystack_chunks[i].content[:50].replace('\n', ' ')
+                print(f"    Chunk {i}: {word_counts[i]} words - '{chunk_preview}...'", file=sys.stderr)
+        
         oversized_chunks = [i for i, size in enumerate(chunk_sizes) if size > 10000]
         if oversized_chunks:
             print(f"  WARNING: {len(oversized_chunks)} chunks exceed 10k characters", file=sys.stderr)
@@ -84,13 +117,17 @@ def process_document(
             for i in extreme_chunks:
                 print(f"    Chunk {i}: {chunk_sizes[i]} characters", file=sys.stderr)
     
-    # 3. Final Formatting and AI Enrichment
+
+    # 3. Final Formatting and AI Enrichment with conversational text metadata
     final_chunks = format_chunks_with_metadata(
         haystack_chunks,
         structured_blocks,
         generate_metadata=generate_metadata,
-        perform_ai_enrichment=perform_ai_enrichment
+        perform_ai_enrichment=perform_ai_enrichment,
+        min_chunk_size=min_chunk_size,
+        enable_dialogue_detection=enable_dialogue_detection
     )
+    
     
     # Debug: Validate that excluded pages don't appear in final chunks
     if exclude_pages and generate_metadata:
