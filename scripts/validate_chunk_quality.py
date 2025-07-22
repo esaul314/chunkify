@@ -34,8 +34,8 @@ from pdf_chunker.core import process_document
 
 # Centralized chunk threshold constants (matching splitter.py)
 VALIDATION_THRESHOLDS = {
-    'very_short': 5,      # Very short chunks (≤5 words) - quality concern
-    'short': 10,          # Short chunks (≤10 words) - potential quality issue
+    'very_short': 9,      # Very short chunks (≤5 words) - quality concern
+    'short': 12,          # Short chunks (≤10 words) - potential quality issue
     'minimal': 15,        # Minimal chunks (≤15 words) - acceptable but monitored
     'dialogue_response': 6,  # Short dialogue responses (≤6 words)
     'fragment': 4         # Very short fragments (≤4 words) - critical issue
@@ -63,7 +63,7 @@ def load_jsonl(filepath: str) -> List[Dict[str, Any]]:
     except Exception as e:
         print(f"Error reading file '{filepath}': {e}", file=sys.stderr)
         return []
-    
+
     return chunks
 
 
@@ -76,10 +76,10 @@ def analyze_chunk_sizes(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
             'char_counts': [],
             'statistics': {}
         }
-    
+
     word_counts = []
     char_counts = []
-    
+
     for chunk in chunks:
         text = chunk.get('text', '')
         if text:
@@ -87,7 +87,7 @@ def analyze_chunk_sizes(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
             chars = len(text)
             word_counts.append(words)
             char_counts.append(chars)
-    
+
     if not word_counts:
         return {
             'total_chunks': len(chunks),
@@ -95,7 +95,7 @@ def analyze_chunk_sizes(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
             'char_counts': [],
             'statistics': {}
         }
-    
+
     # Calculate statistics
     word_stats = {
         'mean': statistics.mean(word_counts),
@@ -105,7 +105,7 @@ def analyze_chunk_sizes(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
         'max': max(word_counts),
         'std_dev': statistics.stdev(word_counts) if len(word_counts) > 1 else 0
     }
-    
+
     char_stats = {
         'mean': statistics.mean(char_counts),
         'median': statistics.median(char_counts),
@@ -113,7 +113,7 @@ def analyze_chunk_sizes(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
         'max': max(char_counts),
         'std_dev': statistics.stdev(char_counts) if len(char_counts) > 1 else 0
     }
-    
+
     return {
         'total_chunks': len(chunks),
         'word_counts': word_counts,
@@ -136,12 +136,12 @@ def detect_short_chunks(chunks: List[Dict[str, Any]], thresholds: Dict[str, int]
         'minimal': [],     # 11-15 words
         'normal': []       # > 15 words
     }
-    
-    
+
+
     for i, chunk in enumerate(chunks):
         text = chunk.get('text', '')
         word_count = len(text.split()) if text else 0
-        
+
         chunk_info = {
             'index': i,
             'word_count': word_count,
@@ -149,7 +149,7 @@ def detect_short_chunks(chunks: List[Dict[str, Any]], thresholds: Dict[str, int]
             'text_preview': text[:100].replace('\n', ' ') + ('...' if len(text) > 100 else ''),
             'full_text': text
         }
-        
+
         if word_count <= thresholds['very_short']:
             categorized_chunks['very_short'].append(chunk_info)
         elif word_count <= thresholds['short']:
@@ -158,7 +158,7 @@ def detect_short_chunks(chunks: List[Dict[str, Any]], thresholds: Dict[str, int]
             categorized_chunks['minimal'].append(chunk_info)
         else:
             categorized_chunks['normal'].append(chunk_info)
-    
+
     return categorized_chunks
 
 
@@ -246,7 +246,7 @@ def detect_dialogue_patterns(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
                 dialogue_patterns['potential_fragments'].append(chunk_info)
 
     return dialogue_patterns
-    
+
 
 def analyze_chunk_flow(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Analyze text flow and continuity between chunks."""
@@ -256,27 +256,27 @@ def analyze_chunk_flow(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
         'continuation_issues': [],
         'flow_score': 0.0
     }
-    
+
     if len(chunks) < 2:
         return flow_analysis
-    
+
     issues_count = 0
     total_transitions = len(chunks) - 1
-    
+
     for i in range(len(chunks) - 1):
         current_chunk = chunks[i]
         next_chunk = chunks[i + 1]
-        
+
         current_text = current_chunk.get('text', '').strip()
         next_text = next_chunk.get('text', '').strip()
-        
+
         if not current_text or not next_text:
             continue
-        
+
         # Check for abrupt transitions
         current_ends_incomplete = not current_text.endswith(('.', '!', '?', ':', ';'))
         next_starts_lowercase = next_text and next_text[0].islower()
-        
+
         if current_ends_incomplete and next_starts_lowercase:
             flow_analysis['abrupt_transitions'].append({
                 'current_index': i,
@@ -286,16 +286,16 @@ def analyze_chunk_flow(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
                 'issue': 'incomplete_sentence_split'
             })
             issues_count += 1
-        
+
         # Check for potential word splits
         current_words = current_text.split()
         next_words = next_text.split()
-        
+
         if (current_words and next_words and
             len(current_words[-1]) < 4 and
             len(next_words[0]) < 8 and
             next_words[0][0].islower()):
-            
+
             flow_analysis['potential_splits'].append({
                 'current_index': i,
                 'next_index': i + 1,
@@ -304,14 +304,14 @@ def analyze_chunk_flow(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
                 'next_start': next_text[:20]
             })
             issues_count += 1
-        
+
         # Check for continuation issues (very short chunks followed by related content)
         current_word_count = len(current_words)
         next_word_count = len(next_words)
-        
+
         if (current_word_count <= 5 and next_word_count <= 10 and
             not current_text.endswith(('.', '!', '?'))):
-            
+
             flow_analysis['continuation_issues'].append({
                 'current_index': i,
                 'next_index': i + 1,
@@ -321,13 +321,13 @@ def analyze_chunk_flow(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
                 'next_text': next_text[:50]
             })
             issues_count += 1
-    
+
     # Calculate flow score (1.0 = perfect, 0.0 = many issues)
     if total_transitions > 0:
         flow_analysis['flow_score'] = max(0.0, 1.0 - (issues_count / total_transitions))
     else:
         flow_analysis['flow_score'] = 1.0
-    
+
     return flow_analysis
 
 
@@ -344,7 +344,7 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
         'dialogue_chunks': 0,
         'flow_issues': 0
     }
-    
+
     if not chunks:
         return {
             'filename': filename,
@@ -359,86 +359,86 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
             'issues': ['No chunks found'],
             'recommendations': ['Check input file and processing pipeline']
         }
-    
+
     # Analyze different aspects using centralized thresholds
     size_analysis = analyze_chunk_sizes(chunks)
     short_chunks = detect_short_chunks(chunks, VALIDATION_THRESHOLDS)
     dialogue_analysis = detect_dialogue_patterns(chunks)
     flow_analysis = analyze_chunk_flow(chunks)
-    
+
     def _calculate_size_quality_factor() -> Tuple[str, float, float]:
         """Calculate size distribution quality factor."""
         word_counts = size_analysis['word_counts']
         if not word_counts:
             return ('size_distribution', 0.0, 0.3)
-        
+
         very_short_ratio = len(short_chunks['very_short']) / len(chunks)
         short_ratio = len(short_chunks['short']) / len(chunks)
-        
+
         size_score = 1.0 - (very_short_ratio * 0.8 + short_ratio * 0.4)
         return ('size_distribution', size_score, 0.3)
-    
+
     def _calculate_dialogue_quality_factor() -> Tuple[str, float, float]:
         """Calculate dialogue handling quality factor."""
-        total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) + 
+        total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) +
                                  len(dialogue_analysis['dialogue_attribution']) +
                                  len(dialogue_analysis['conversational_responses']))
-        
+
         if total_dialogue_chunks == 0:
             return ('dialogue_handling', 1.0, 0.3)
-        
+
         fragment_ratio = len(dialogue_analysis['potential_fragments']) / total_dialogue_chunks
         dialogue_score = max(0.0, 1.0 - fragment_ratio)
         return ('dialogue_handling', dialogue_score, 0.3)
-    
+
     # Calculate quality factors using helper functions
     quality_factors = []
     issues = []
     recommendations = []
-    
+
     # Factor 1: Chunk size distribution (0.3 weight)
     size_factor = _calculate_size_quality_factor()
     quality_factors.append(size_factor)
-    
+
     if size_factor[1] < 0.8:  # If size score is poor
         very_short_ratio = len(short_chunks['very_short']) / len(chunks)
         short_ratio = len(short_chunks['short']) / len(chunks)
-        
+
         if very_short_ratio > 0.1:
             issues.append(f"High ratio of very short chunks (≤{VALIDATION_THRESHOLDS['very_short']} words): {very_short_ratio:.1%}")
             recommendations.append("Consider adjusting minimum chunk size or improving merging logic")
-        
+
         if short_ratio > 0.2:
             issues.append(f"High ratio of short chunks (≤{VALIDATION_THRESHOLDS['short']} words): {short_ratio:.1%}")
             recommendations.append("Review conversational text handling and chunk merging")
-    
+
     # Factor 2: Text flow quality (0.4 weight)
     flow_score = flow_analysis['flow_score']
     quality_factors.append(('text_flow', flow_score, 0.4))
-    
+
     if flow_score < 0.8:
         issues.append(f"Poor text flow continuity: {flow_score:.2f}")
         recommendations.append("Improve page boundary handling and sentence reconstruction")
-    
+
     if len(flow_analysis['abrupt_transitions']) > 0:
         issues.append(f"{len(flow_analysis['abrupt_transitions'])} abrupt transitions detected")
         recommendations.append("Review semantic chunking boundaries")
-    
+
     # Factor 3: Dialogue handling (0.3 weight)
     dialogue_factor = _calculate_dialogue_quality_factor()
     quality_factors.append(dialogue_factor)
-    
+
     if dialogue_factor[1] < 0.7:
         fragment_ratio = len(dialogue_analysis['potential_fragments']) / max(1, len(dialogue_analysis['quoted_speech']) + len(dialogue_analysis['dialogue_attribution']) + len(dialogue_analysis['conversational_responses']))
         issues.append(f"High dialogue fragmentation: {fragment_ratio:.1%}")
         recommendations.append("Improve dialogue pattern detection and merging")
-    
+
     # Calculate overall quality score
     weighted_score = sum(score * weight for _, score, weight in quality_factors)
     overall_quality = max(0.0, min(1.0, weighted_score))
-    
+
     # Generate summary statistics
-    total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) + 
+    total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) +
                              len(dialogue_analysis['dialogue_attribution']) +
                              len(dialogue_analysis['conversational_responses']))
     summary_stats = {
@@ -451,7 +451,7 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
         'dialogue_chunks': total_dialogue_chunks,
         'flow_issues': len(flow_analysis['abrupt_transitions']) + len(flow_analysis['potential_splits']) if flow_analysis else 0
     }
-    
+
     return {
         'filename': filename,
         'quality_score': overall_quality,
@@ -476,11 +476,11 @@ def compare_quality_reports(report1: Dict[str, Any], report2: Dict[str, Any]) ->
         'regressions': [],
         'summary': {}
     }
-    
+
     # Compare summary statistics
     stats1 = report1['summary_stats']
     stats2 = report2['summary_stats']
-    
+
     comparison['summary'] = {
         'chunk_count_change': stats2['total_chunks'] - stats1['total_chunks'],
         'very_short_change': stats2['very_short_chunks'] - stats1['very_short_chunks'],
@@ -488,27 +488,27 @@ def compare_quality_reports(report1: Dict[str, Any], report2: Dict[str, Any]) ->
         'flow_issues_change': stats2['flow_issues'] - stats1['flow_issues'],
         'dialogue_chunks_change': stats2['dialogue_chunks'] - stats1['dialogue_chunks']
     }
-    
+
     # Analyze improvements and regressions
     if comparison['summary']['very_short_change'] < 0:
         comparison['improvements'].append(f"Reduced very short chunks by {-comparison['summary']['very_short_change']}")
     elif comparison['summary']['very_short_change'] > 0:
         comparison['regressions'].append(f"Increased very short chunks by {comparison['summary']['very_short_change']}")
-    
+
     if comparison['summary']['short_change'] < 0:
         comparison['improvements'].append(f"Reduced short chunks by {-comparison['summary']['short_change']}")
     elif comparison['summary']['short_change'] > 0:
         comparison['regressions'].append(f"Increased short chunks by {comparison['summary']['short_change']}")
-    
+
     if comparison['summary']['flow_issues_change'] < 0:
         comparison['improvements'].append(f"Reduced flow issues by {-comparison['summary']['flow_issues_change']}")
     elif comparison['summary']['flow_issues_change'] > 0:
         comparison['regressions'].append(f"Increased flow issues by {comparison['summary']['flow_issues_change']}")
-    
+
     # Compare quality factors
     factors1 = {name: score for name, score, _ in report1['quality_factors']}
     factors2 = {name: score for name, score, _ in report2['quality_factors']}
-    
+
     for factor_name in factors1:
         if factor_name in factors2:
             improvement = factors2[factor_name] - factors1[factor_name]
@@ -516,7 +516,7 @@ def compare_quality_reports(report1: Dict[str, Any], report2: Dict[str, Any]) ->
                 comparison['improvements'].append(f"Improved {factor_name}: {improvement:+.3f}")
             elif improvement < -0.05:
                 comparison['regressions'].append(f"Degraded {factor_name}: {improvement:+.3f}")
-    
+
     return comparison
 
 
@@ -528,7 +528,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
     print(f"File: {report.get('filename', 'unknown')}")
     print(f"Overall Quality Score: {report.get('quality_score', 0.0):.3f}")
     print()
-    
+
     # Summary statistics
     stats = report.get('summary_stats', {})
     print("SUMMARY STATISTICS")
@@ -538,7 +538,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
     print(f"Total Characters:       {stats.get('total_characters', 0)}")
     print(f"Avg Words per Chunk:    {stats.get('avg_words_per_chunk', 0):.1f}")
     print()
-    
+
     # Chunk size distribution
     print("CHUNK SIZE DISTRIBUTION")
     print("-" * 40)
@@ -550,7 +550,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
     print(f"Short ({VALIDATION_THRESHOLDS['very_short']+1}-{VALIDATION_THRESHOLDS['short']} words):      {short} ({(short/total_chunks*100) if total_chunks else 0:.1f}%)")
     print(f"Normal (>{VALIDATION_THRESHOLDS['short']} words):      {normal}")
     print()
-    
+
     # Quality factors
     print("QUALITY FACTORS")
     print("-" * 40)
@@ -558,7 +558,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
         factor_name, score, weight = factor
         print(f"{factor_name.replace('_', ' ').title():<20} {score:.3f} (weight: {weight:.1f})")
     print()
-    
+
     # Issues and recommendations
     if report.get('issues'):
         print("ISSUES IDENTIFIED")
@@ -566,18 +566,18 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
         for i, issue in enumerate(report['issues'], 1):
             print(f"{i}. {issue}")
         print()
-    
+
     if report.get('recommendations'):
         print("RECOMMENDATIONS")
         print("-" * 40)
         for i, rec in enumerate(report['recommendations'], 1):
             print(f"{i}. {rec}")
         print()
-    
+
     if detailed and total_chunks:
         # Detailed analysis
         short_chunks = report.get('short_chunks', {})
-    
+
         if short_chunks.get('very_short'):
             print(f"VERY SHORT CHUNKS (≤{VALIDATION_THRESHOLDS['very_short']} words)")
             print("-" * 40)
@@ -586,7 +586,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
             if len(short_chunks['very_short']) > 5:
                 print(f"... and {len(short_chunks['very_short']) - 5} more")
             print()
-    
+
         if short_chunks.get('short'):
             print(f"SHORT CHUNKS ({VALIDATION_THRESHOLDS['very_short']+1}-{VALIDATION_THRESHOLDS['short']} words)")
             print("-" * 40)
@@ -595,7 +595,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
             if len(short_chunks['short']) > 5:
                 print(f"... and {len(short_chunks['short']) - 5} more")
             print()
-    
+
         # Dialogue analysis
         dialogue = report.get('dialogue_analysis', {})
         if any(dialogue.values()):
@@ -606,7 +606,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
             print(f"Conversational Responses:  {len(dialogue.get('conversational_responses', []))}")
             print(f"Potential Fragments:       {len(dialogue.get('potential_fragments', []))}")
             print()
-    
+
         # Flow analysis
         flow = report.get('flow_analysis', {})
         if flow.get('abrupt_transitions') or flow.get('potential_splits'):
@@ -628,7 +628,7 @@ def print_comparison_report(comparison: Dict[str, Any]):
     print(f"File 2: {comparison.get('file2', 'unknown')}")
     print(f"Quality Improvement: {comparison.get('quality_improvement', 0.0):+.3f}")
     print()
-    
+
     # Summary changes
     summary = comparison.get('summary', {})
     print("SUMMARY CHANGES")
@@ -639,7 +639,7 @@ def print_comparison_report(comparison: Dict[str, Any]):
     print(f"Flow Issues:             {summary.get('flow_issues_change', 0):+d}")
     print(f"Dialogue Chunks:         {summary.get('dialogue_chunks_change', 0):+d}")
     print()
-    
+
     # Improvements
     if comparison.get('improvements'):
         print("IMPROVEMENTS")
@@ -647,7 +647,7 @@ def print_comparison_report(comparison: Dict[str, Any]):
         for improvement in comparison['improvements']:
             print(f"✓ {improvement}")
         print()
-    
+
     # Regressions
     if comparison.get('regressions'):
         print("REGRESSIONS")
@@ -655,7 +655,7 @@ def print_comparison_report(comparison: Dict[str, Any]):
         for regression in comparison['regressions']:
             print(f"✗ {regression}")
         print()
-    
+
     # Overall assessment
     quality_improvement = comparison.get('quality_improvement', 0.0)
     print("OVERALL ASSESSMENT")
@@ -733,7 +733,7 @@ def save_chunks_to_jsonl(chunks: List[Dict[str, Any]], output_path: str):
         print(f"Saved {len(chunks)} chunks to {output_path}")
     except Exception as e:
         print(f"Error saving chunks to '{output_path}': {e}", file=sys.stderr)
-    
+
 
 def main():
     parser = argparse.ArgumentParser(description='Validate chunk quality from JSONL output')
@@ -761,7 +761,7 @@ def main():
                                 help='Use enhanced approach (when generating from PDF)')
     parser.add_argument('--save-jsonl', metavar='OUTPUT_PATH',
                         help='Save generated chunks to JSONL file')
-    
+
 
     args = parser.parse_args()
 
@@ -803,7 +803,7 @@ def main():
         # Analyze
         report = generate_quality_report(chunks, f"{pdf_path} ({approach})")
         print_quality_report(report, detailed=args.detailed)
-    
+
 
     elif args.compare:
         # Compare two JSONL files

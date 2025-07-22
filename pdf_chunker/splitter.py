@@ -9,12 +9,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Centralized chunk threshold constants
 CHUNK_THRESHOLDS = {
-    'very_short': 5,          # Very short chunks (≤5 words) - always merge
-    'short': 10,              # Short chunks (≤10 words) - consider for merging
-    'min_target': 8,          # Minimum target chunk size after merging
+    'very_short': 9,          # Very short chunks (≤5 words) - always merge
+    'short': 12,              # Short chunks (≤10 words) - consider for merging
+    'min_target': 10,          # Minimum target chunk size after merging
     'dialogue_response': 6,   # Short dialogue responses (≤6 words)
     'fragment': 4,            # Very short fragments (≤4 words) - always merge
-    'related_short': 8        # Related short chunks threshold
+    'related_short': 9        # Related short chunks threshold
 }
 
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
@@ -100,13 +100,13 @@ def analyze_chunk_relationships(chunks: List[str]) -> List[Dict[str, Any]]:
             # Short chunk - analyze context for merging
 
             # Case 1: Short response after dialogue
-            if (len(current_words) <= CHUNK_THRESHOLDS['dialogue_response'] and 
+            if (len(current_words) <= CHUNK_THRESHOLDS['dialogue_response'] and
                 any(word.lower() in ['said', 'replied', 'asked', 'answered', 'continued', 'added', 'noted', 'observed', 'remarked', 'stated', 'declared', 'exclaimed', 'whispered', 'shouted', 'muttered', 'explained', 'insisted', 'argued', 'suggested', 'wondered', 'thought', 'concluded'] for word in current_words)):
                 relationship['should_merge'] = True
                 relationship['merge_reason'] = 'short_dialogue_attribution'
 
             # Case 2: Short commentary or response
-            elif (len(current_words) <= CHUNK_THRESHOLDS['dialogue_response'] and 
+            elif (len(current_words) <= CHUNK_THRESHOLDS['dialogue_response'] and
                   not current_chunk.endswith(('.', '!', '?')) and
                   not next_chunk[0].isupper()):
                 relationship['should_merge'] = True
@@ -118,7 +118,7 @@ def analyze_chunk_relationships(chunks: List[str]) -> List[Dict[str, Any]]:
                 relationship['merge_reason'] = 'very_short_fragment'
 
             # Case 4: Short chunk followed by related content
-            elif (len(current_words) <= CHUNK_THRESHOLDS['related_short'] and 
+            elif (len(current_words) <= CHUNK_THRESHOLDS['related_short'] and
                   len(next_words) <= CHUNK_THRESHOLDS['short'] and
                   not current_chunk.endswith(('.', '!', '?'))):
                 relationship['should_merge'] = True
