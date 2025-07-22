@@ -3,8 +3,9 @@ import sys
 import json
 import re
 import subprocess
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from funcy import compose, cat, mapcat
+from funcy import compose, cat, mapcat, group_by
 import enchant
 from nltk.corpus import wordnet
 from wordfreq import zipf_frequency
@@ -45,33 +46,61 @@ def freq_bad(words, cutoff=3.0):
 
 def snippet_for(word, text, window=20):
     tokens = text.split()
-    if word in tokens:
+    try:
         idx = tokens.index(word)
-        start, end = max(0, idx-window), min(len(tokens), idx+window)
-        return " ".join(tokens[start:end])
-    return None
+    except ValueError:
+        return None
+    start, end = max(0, idx-window), min(len(tokens), idx+window)
+    return " ".join(tokens[start:end])
 
-def ai_correction_step(words, texts, workers=5):
-    def correct(pair):
-        word, text = pair
+def ai_correction_step(words, texts, workers=5, log=print):
+    """
+    For each (word, text) pair, call LLM to check for glue errors.
+    Returns {(record_idx, word): correction}.
+    """
+    pairs = [ (i, word, text)
+              for i, text in enumerate(texts)
+              for word in words if word in text.split() ]
+
+    def correct(args):
+        i, word, text = args
         snippet = snippet_for(word, text)
         if snippet:
+            log(f"[LLM] Checking word '{word}' in record {i} (context: '{snippet[:60]}...')")  # Truncated
             corrected = correct_word(word, snippet)
-            return (word, corrected) if corrected != word else None
+            if corrected != word:
+                log(f"[LLM] Correction: '{word}' → '{corrected}' (record {i})")
+                return (i, word, corrected, snippet)
         return None
 
-    word_text_pairs = [(word, text) for text in texts for word in words if word in text]
-
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        corrections = filter(None, executor.map(correct, word_text_pairs))
+        results = filter(None, executor.map(correct, pairs))
 
-    return dict(corrections)
+    # {(record_idx, word): corrected}
+    corrections = {(i, word): (corrected, snippet) for i, word, corrected, snippet in results}
+    return corrections
 
 # ─── Replacement Step ────────────────────────────────────────
 
-def apply_corrections_to_text(text, corrections):
-    pattern = re.compile(r'\\b(' + '|'.join(map(re.escape, corrections.keys())) + r')\\b')
-    return pattern.sub(lambda m: corrections[m.group()], text)
+def apply_corrections_to_text(text, word_map):
+    # word_map: {word: corrected}
+    if not word_map:
+        return text
+    pattern = re.compile(r'\b(' + '|'.join(map(re.escape, word_map.keys())) + r')\b')
+    return pattern.sub(lambda m: word_map[m.group()], text)
+
+# ─── Logging ─────────────────────────────────────────────
+
+def log_detected_suspicious(suspicious):
+    print("[INFO] Suspicious glued words detected by pipeline:")
+    for w in suspicious:
+        print("  -", w)
+    print()
+
+def log_record_changes(record_idx, changed_words, corrections):
+    for w in changed_words:
+        corrected, snippet = corrections[(record_idx, w)]
+        print(f"[CHANGE] Record {record_idx}: '{w}' → '{corrected}' | context: ...{snippet}...")
 
 # ─── Main pipeline ──────────────────────────────────────────
 
@@ -88,26 +117,41 @@ def main(path, output_path, summary=True):
     )
 
     suspicious = pipeline(texts)
-    corrections = ai_correction_step(suspicious, texts)
+    log_detected_suspicious(suspicious)
 
-    cleaned_records = [
-        {**record, "text": apply_corrections_to_text(record["text"], corrections)}
-        for record in records
-    ]
+    corrections = ai_correction_step(suspicious, texts, log=print)
+
+    # Build per-record word correction map
+    rec_word_corrections = defaultdict(dict)
+    for (i, word), (corrected, _) in corrections.items():
+        rec_word_corrections[i][word] = corrected
+
+    cleaned_records = []
+    total_changes = 0
+    changed_records = []
+
+    for i, record in enumerate(records):
+        word_map = rec_word_corrections.get(i, {})
+        if word_map:
+            log_record_changes(i, word_map, corrections)
+            changed_records.append(i)
+        cleaned_text = apply_corrections_to_text(record["text"], word_map)
+        total_changes += len(word_map)
+        cleaned_records.append({**record, "text": cleaned_text})
 
     with open(output_path, "w", encoding="utf-8") as f:
         for record in cleaned_records:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     if summary:
-        print("Detected and corrected glued words:")
-        for original, corrected in corrections.items():
-            print(f"{original} → {corrected}")
+        print(f"\n[SUMMARY] {total_changes} glued words corrected in {len(changed_records)} records.")
+        if changed_records:
+            print(f"[SUMMARY] Changed records: {', '.join(map(str, changed_records))}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.stderr.write(f"Usage: {sys.argv[0]} <input.jsonl> <output.jsonl>\n")
         sys.exit(1)
-
     main(sys.argv[1], sys.argv[2])
+
 
