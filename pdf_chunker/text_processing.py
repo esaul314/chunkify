@@ -3,6 +3,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def normalize_quotes(text: str) -> str:
     """
     Normalize smart quotes to standard ASCII quotes and fix spacing around quotes.
@@ -15,27 +16,28 @@ def normalize_quotes(text: str) -> str:
     if not text:
         return text
 
-    # Convert smart quotes to ASCII using str.maketrans()
+    # Normalize all smart quotes to ASCII
     text = text.translate(str.maketrans({
         '“': '"', '”': '"', '„': '"', '«': '"', '»': '"',
         '‘': "'", '’': "'", '‚': "'", '`': "'"
     }))
 
-    # Add missing space before opening quotes
-    text = re.sub(r'(\S)(["\'])', r'\1 \2', text)
+    # Add space before opening quote if it's stuck to a word or punctuation
+    text = re.sub(r'(?<=[\w.,;!?])(["\'])', r' \1', text)
 
-    # Remove extra spaces after opening quotes
+    # Remove space after opening quote (e.g., " Hello" → "Hello")
     text = re.sub(r'(["\'])( +)(\w)', r'\1\3', text)
 
-    # Remove extra spaces before closing quotes
+    # Remove space before closing quote (e.g., Hello " → Hello)
     text = re.sub(r'(\w)( +)(["\'])', r'\1\3', text)
 
-    # Add space after closing quote if missing (e.g. "Hello"and -> "Hello" and)
+    # Add space after closing quote if missing (e.g., "Hello"and → "Hello" and)
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
 
     # Remove multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
+    
 
 def _fix_case_transition_gluing(text: str) -> str:
     """
@@ -65,6 +67,7 @@ def _fix_page_boundary_gluing(text: str) -> str:
     """
     return _fix_case_transition_gluing(text)
 
+
 def _fix_quote_boundary_gluing(text: str) -> str:
     """
     Fix word gluing around quotes (e.g. said"Hello"and -> said "Hello" and).
@@ -75,21 +78,22 @@ def _fix_quote_boundary_gluing(text: str) -> str:
     if not text:
         return text
 
-    # Add missing space before opening quotes
-    text = re.sub(r'(\S)(["\'])', r'\1 \2', text)
+    # Add space before opening quote if it's stuck to a word or punctuation
+    text = re.sub(r'(?<=[\w.,;!?])(["\'])', r' \1', text)
 
-    # Remove extra spaces after opening quotes
+    # Remove space after opening quote (e.g., " Hello" → "Hello")
     text = re.sub(r'(["\'])( +)(\w)', r'\1\3', text)
 
-    # Remove extra spaces before closing quotes
+    # Remove space before closing quote (e.g., Hello " → Hello)
     text = re.sub(r'(\w)( +)(["\'])', r'\1\3', text)
 
-    # Add space after closing quote if missing
+    # Add space after closing quote if missing (e.g., "Hello"and → "Hello" and)
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
 
     # Remove multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
+    
 
 def detect_and_fix_word_gluing(text: str) -> str:
     """
