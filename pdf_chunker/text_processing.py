@@ -15,27 +15,22 @@ def normalize_quotes(text: str) -> str:
     if not text:
         return text
 
-    # Convert smart quotes to ASCII
-    text = text.replace('“', '"').replace('”', '"')
-    text = text.replace('‘', "'").replace('’', "'")
-    text = text.replace('„', '"').replace('‚', "'")
-    text = text.replace('«', '"').replace('»', '"')
-    text = text.replace('`', "'")
+    # Convert smart quotes to ASCII using str.maketrans()
+    text = text.translate(str.maketrans({
+        '“': '"', '”': '"', '„': '"', '«': '"', '»': '"',
+        '‘': "'", '’': "'", '‚': "'", '`': "'"
+    }))
 
-    # Add space before opening quote if missing (e.g. said"Hello" -> said "Hello")
-    # Only match when not already preceded by whitespace or at start of string
-    # Use negative lookbehind for whitespace or start of string
-    text = re.sub(r'(?<![\s^])"', r' "', text)
-    text = re.sub(r"(?<![\s^])'", r" '", text)
+    # Add missing space before opening quotes
+    text = re.sub(r'(\S)(["\'])', r'\1 \2', text)
 
-    # Remove any extra spaces after opening quote (e.g. " Hello" -> "Hello")
+    # Remove extra spaces after opening quotes
     text = re.sub(r'(["\'])( +)(\w)', r'\1\3', text)
 
-    # Remove any extra spaces before closing quote (e.g. Hello " -> Hello)
+    # Remove extra spaces before closing quotes
     text = re.sub(r'(\w)( +)(["\'])', r'\1\3', text)
 
     # Add space after closing quote if missing (e.g. "Hello"and -> "Hello" and)
-    # Only if the quote is followed by a word character and not punctuation or space
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
 
     # Remove multiple spaces
@@ -79,15 +74,19 @@ def _fix_quote_boundary_gluing(text: str) -> str:
     """
     if not text:
         return text
-    # Add space before opening quote if missing (not already preceded by whitespace or start of string)
-    text = re.sub(r'(?<![\s^])"', r' "', text)
-    text = re.sub(r"(?<![\s^])'", r" '", text)
-    # Remove any extra spaces after opening quote
+
+    # Add missing space before opening quotes
+    text = re.sub(r'(\S)(["\'])', r'\1 \2', text)
+
+    # Remove extra spaces after opening quotes
     text = re.sub(r'(["\'])( +)(\w)', r'\1\3', text)
-    # Remove any extra spaces before closing quote
+
+    # Remove extra spaces before closing quotes
     text = re.sub(r'(\w)( +)(["\'])', r'\1\3', text)
-    # Add space after closing quote if missing (but not after opening)
+
+    # Add space after closing quote if missing
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
+
     # Remove multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
