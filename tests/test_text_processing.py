@@ -13,9 +13,11 @@ class TestQuoteHandling(unittest.TestCase):
         normalized = normalize_quotes(text)
         self.assertIn('"Hello world"', normalized)
         self.assertIn("'goodbye'", normalized)
+
         # Should not contain smart quotes
-        self.assertNotIn('"', normalized)
-        self.assertNotIn('"', normalized)
+        self.assertNotIn('“', normalized)
+        self.assertNotIn('”', normalized)
+    
         self.assertNotIn('’', normalized)
         self.assertNotIn('‘', normalized)
     

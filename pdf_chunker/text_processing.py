@@ -16,28 +16,29 @@ def normalize_quotes(text: str) -> str:
     if not text:
         return text
 
-    # Normalize all smart quotes to ASCII
+    # 1) Map smart quotes → ASCII
     text = text.translate(str.maketrans({
         '“': '"', '”': '"', '„': '"', '«': '"', '»': '"',
         '‘': "'", '’': "'", '‚': "'", '`': "'"
     }))
 
-    # Add space before opening quote if it's stuck to a word or punctuation
-    text = re.sub(r'(?<=[\w.,;!?])(["\'])', r' \1', text)
+    # 2) Add space before opening quote if missing (only for opening quotes)
+    # Opening quote: quote followed by a word character
+    text = re.sub(r'(?<=[\w.,;!?])(["\'])(?=\w)', r' \1', text)
 
-    # Remove space after opening quote (e.g., " Hello" → "Hello")
-    text = re.sub(r'(["\'])( +)(\w)', r'\1\3', text)
+    # 3) Remove any space after opening quote (e.g. " Hello" -> "Hello")
+    text = re.sub(r'(["\'])\s+(\w)', r'\1\2', text)
 
-    # Remove space before closing quote (e.g., Hello " → Hello)
-    text = re.sub(r'(\w)( +)(["\'])', r'\1\3', text)
+    # 4) Remove any space before closing quote (e.g. Hello " -> Hello")
+    text = re.sub(r'(\w)\s+(["\'])', r'\1\2', text)
 
-    # Add space after closing quote if missing (e.g., "Hello"and → "Hello" and)
+    # 5) Add space after closing quote if missing (e.g. "Hello"and -> "Hello" and)
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
 
     # Remove multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
-    
+
 
 def _fix_case_transition_gluing(text: str) -> str:
     """
@@ -60,6 +61,7 @@ def _fix_case_transition_gluing(text: str) -> str:
     text = pattern.sub(split_camel, text)
     return text
 
+
 def _fix_page_boundary_gluing(text: str) -> str:
     """
     Fix word gluing at page boundaries (e.g. hereThe -> here The),
@@ -78,22 +80,28 @@ def _fix_quote_boundary_gluing(text: str) -> str:
     if not text:
         return text
 
-    # Add space before opening quote if it's stuck to a word or punctuation
-    text = re.sub(r'(?<=[\w.,;!?])(["\'])', r' \1', text)
+    # 1) Map smart quotes → ASCII
+    text = text.translate(str.maketrans({
+        '“': '"', '”': '"', '„': '"', '«': '"', '»': '"',
+        '‘': "'", '’': "'", '‚': "'", '`': "'"
+    }))
 
-    # Remove space after opening quote (e.g., " Hello" → "Hello")
-    text = re.sub(r'(["\'])( +)(\w)', r'\1\3', text)
+    # 2) Add space before opening quote if missing (only for opening quotes)
+    text = re.sub(r'(?<=[\w.,;!?])(["\'])(?=\w)', r' \1', text)
 
-    # Remove space before closing quote (e.g., Hello " → Hello)
-    text = re.sub(r'(\w)( +)(["\'])', r'\1\3', text)
+    # 3) Remove any space after opening quote
+    text = re.sub(r'(["\'])\s+(\w)', r'\1\2', text)
 
-    # Add space after closing quote if missing (e.g., "Hello"and → "Hello" and)
+    # 4) Remove any space before closing quote
+    text = re.sub(r'(\w)\s+(["\'])', r'\1\2', text)
+
+    # 5) Add space after closing quote if missing
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
 
     # Remove multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
-    
+
 
 def detect_and_fix_word_gluing(text: str) -> str:
     """
@@ -108,6 +116,7 @@ def detect_and_fix_word_gluing(text: str) -> str:
     text = _fix_quote_boundary_gluing(text)
     return text
 
+
 def _repair_json_escaping_issues(text: str) -> str:
     """
     Remove problematic JSON escaping fragments, especially leading '",'.
@@ -116,17 +125,20 @@ def _repair_json_escaping_issues(text: str) -> str:
         return text
     # Remove control characters first
 
+
 def _detect_text_reordering(*args, **kwargs):
     """
     Stub for test compatibility. Returns False (no reordering detected).
     """
     return False
 
+
 def _validate_chunk_integrity(chunks, original_text=None):
     """
     Stub for test compatibility. Returns chunks unchanged.
     """
     return chunks
+
 
 def _repair_json_escaping_issues(text):
     """
@@ -145,9 +157,11 @@ def _repair_json_escaping_issues(text):
     text = re.sub(r'^["\s]*,\s*', '', text)
     return text.strip()
 
+
 def _remove_control_characters(text):
     import re
     return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
+
 
 def _fix_quote_splitting_issues(chunks):
     """
@@ -161,8 +175,7 @@ def _fix_quote_splitting_issues(chunks):
     # Check if we have exactly 2 chunks and they match the splitting pattern
     if (len(chunks) == 2 and
         chunks[0].rstrip().endswith('"') and
-        re.match(r'^\s*"', ',', chunks[1])):
-        # Merge the chunks
+        re.match(r'^\s*",', chunks[1])):
         merged_text = chunks[0] + chunks[1]
         return [merged_text]
 
@@ -181,6 +194,7 @@ def _fix_quote_splitting_issues(chunks):
             merged.append(current)
             i += 1
     return merged
+
 
 def _validate_json_safety(text):
     """
