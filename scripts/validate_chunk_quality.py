@@ -433,30 +433,22 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
         issues.append(f"High dialogue fragmentation: {fragment_ratio:.1%}")
         recommendations.append("Improve dialogue pattern detection and merging")
 
-    # Calculate overall quality score
-    weighted_score = sum(score * weight for _, score, weight in quality_factors)
-    overall_quality = max(0.0, min(1.0, weighted_score))
-
-    # Generate summary statistics
-    total_dialogue_chunks = (len(dialogue_analysis['quoted_speech']) +
-                             len(dialogue_analysis['dialogue_attribution']) +
-                             len(dialogue_analysis['conversational_responses']))
-    summary_stats = {
-        'total_chunks': len(chunks),
-        'total_words': sum(size_analysis['word_counts']) if size_analysis['word_counts'] else 0,
-        'total_characters': sum(size_analysis['char_counts']) if size_analysis['char_counts'] else 0,
-        'avg_words_per_chunk': size_analysis['statistics']['words']['mean'] if size_analysis['statistics'] and 'words' in size_analysis['statistics'] and 'mean' in size_analysis['statistics']['words'] else 0,
-        'very_short_chunks': len(short_chunks['very_short']) if 'very_short' in short_chunks else 0,
-        'short_chunks': len(short_chunks['short']) if 'short' in short_chunks else 0,
-        'dialogue_chunks': total_dialogue_chunks,
-        'flow_issues': len(flow_analysis['abrupt_transitions']) + len(flow_analysis['potential_splits']) if flow_analysis else 0
-    }
-
     return {
         'filename': filename,
-        'quality_score': overall_quality,
+        'quality_score': sum(score * weight for _, score, weight in quality_factors),
         'quality_factors': quality_factors,
-        'summary_stats': summary_stats,
+        'summary_stats': {
+            'total_chunks': len(chunks),
+            'total_words': sum(size_analysis['word_counts']),
+            'total_characters': sum(size_analysis['char_counts']),
+            'avg_words_per_chunk': size_analysis['statistics']['words']['mean'],
+            'very_short_chunks': len(short_chunks['very_short']),
+            'short_chunks': len(short_chunks['short']),
+            'dialogue_chunks': (len(dialogue_analysis['quoted_speech']) +
+                                len(dialogue_analysis['dialogue_attribution']) +
+                                len(dialogue_analysis['conversational_responses'])),
+            'flow_issues': len(flow_analysis['abrupt_transitions']) + len(flow_analysis['potential_splits'])
+        },
         'size_analysis': size_analysis,
         'short_chunks': short_chunks,
         'dialogue_analysis': dialogue_analysis,
@@ -464,6 +456,246 @@ def generate_quality_report(chunks: List[Dict[str, Any]], filename: str = "unkno
         'issues': issues,
         'recommendations': recommendations
     }
+
+
+def detect_word_gluing_issues(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Detect word gluing issues in chunks."""
+    import re
+    
+    gluing_issues = {
+        "case_transition_gluing": 0,
+        "page_boundary_gluing": 0,
+        "quote_boundary_gluing": 0,
+        "total_chunks_affected": 0,
+        "examples": []
+    }
+    
+    for i, chunk in enumerate(chunks):
+        text = chunk.get('text', '')
+        if not text:
+            continue
+        
+        chunk_has_issues = False
+        
+        # Check for case transition gluing (lowercase followed by uppercase)
+        case_transitions = re.findall(r'[a-z][A-Z][a-z]', text)
+        if case_transitions:
+            gluing_issues["case_transition_gluing"] += len(case_transitions)
+            chunk_has_issues = True
+            if len(gluing_issues["examples"]) < 3:
+                gluing_issues["examples"].append({
+                    "type": "case_transition",
+                    "chunk_index": i,
+                    "example": case_transitions[0],
+                    "context": text[max(0, text.find(case_transitions[0]) - 20):text.find(case_transitions[0]) + 30]
+                })
+        
+        # Check for quote boundary gluing
+        quote_gluing = re.findall(r'[a-z]"[a-z]|[a-z]\'[a-z]', text)
+        if quote_gluing:
+            gluing_issues["quote_boundary_gluing"] += len(quote_gluing)
+            chunk_has_issues = True
+            if len(gluing_issues["examples"]) < 3:
+                gluing_issues["examples"].append({
+                    "type": "quote_boundary",
+                    "chunk_index": i,
+                    "example": quote_gluing[0],
+                    "context": text[max(0, text.find(quote_gluing[0]) - 20):text.find(quote_gluing[0]) + 30]
+                })
+        
+        # Check for potential page boundary issues (very long words that might be glued)
+        long_words = re.findall(r'\b\w{15,}\b', text)
+        suspicious_long_words = [word for word in long_words if re.search(r'[a-z][A-Z]', word)]
+        if suspicious_long_words:
+            gluing_issues["page_boundary_gluing"] += len(suspicious_long_words)
+            chunk_has_issues = True
+            if len(gluing_issues["examples"]) < 3:
+                gluing_issues["examples"].append({
+                    "type": "page_boundary",
+                    "chunk_index": i,
+                    "example": suspicious_long_words[0],
+                    "context": text[max(0, text.find(suspicious_long_words[0]) - 20):text.find(suspicious_long_words[0]) + 30]
+                })
+        
+        if chunk_has_issues:
+            gluing_issues["total_chunks_affected"] += 1
+    
+    return gluing_issues
+
+
+def detect_text_reordering_issues(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Detect text reordering and corruption issues in chunks."""
+    import re
+    
+    reordering_issues = {
+        "quote_splitting_issues": 0,
+        "sentence_fragmentation": 0,
+        "suspicious_starts": 0,
+        "json_escaping_issues": 0,
+        "total_chunks_affected": 0,
+        "examples": []
+    }
+    
+    for i, chunk in enumerate(chunks):
+        text = chunk.get('text', '')
+        if not text:
+            continue
+        
+        chunk_has_issues = False
+        
+        # Check for quote splitting issues (text starting with quote fragments)
+        if re.match(r'^[",]\s*[a-z]', text.strip()):
+            reordering_issues["quote_splitting_issues"] += 1
+            chunk_has_issues = True
+            if len(reordering_issues["examples"]) < 3:
+                reordering_issues["examples"].append({
+                    "type": "quote_splitting",
+                    "chunk_index": i,
+                    "example": text[:50],
+                    "issue": "Chunk starts with quote fragment"
+                })
+        
+        # Check for sentence fragmentation (starts with lowercase, no capital)
+        if text.strip() and text.strip()[0].islower() and not text.strip().startswith(('and', 'but', 'or', 'so')):
+            reordering_issues["sentence_fragmentation"] += 1
+            chunk_has_issues = True
+            if len(reordering_issues["examples"]) < 3:
+                reordering_issues["examples"].append({
+                    "type": "sentence_fragmentation",
+                    "chunk_index": i,
+                    "example": text[:50],
+                    "issue": "Chunk starts with lowercase (possible fragment)"
+                })
+        
+        # Check for suspicious starts (punctuation at beginning)
+        if re.match(r'^[,.;:]\s', text.strip()):
+            reordering_issues["suspicious_starts"] += 1
+            chunk_has_issues = True
+            if len(reordering_issues["examples"]) < 3:
+                reordering_issues["examples"].append({
+                    "type": "suspicious_start",
+                    "chunk_index": i,
+                    "example": text[:50],
+                    "issue": "Chunk starts with punctuation"
+                })
+        
+        # Check for potential JSON escaping issues
+        try:
+            import json
+            json.dumps({"text": text})
+        except (json.JSONEncodeError, UnicodeEncodeError):
+            reordering_issues["json_escaping_issues"] += 1
+            chunk_has_issues = True
+            if len(reordering_issues["examples"]) < 3:
+                reordering_issues["examples"].append({
+                    "type": "json_escaping",
+                    "chunk_index": i,
+                    "example": text[:50],
+                    "issue": "Text cannot be JSON serialized"
+                })
+        
+        if chunk_has_issues:
+            reordering_issues["total_chunks_affected"] += 1
+    
+    return reordering_issues
+
+
+def validate_text_processing_quality(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Comprehensive validation of text processing quality."""
+    validation_results = {
+        "total_chunks": len(chunks),
+        "word_gluing_issues": detect_word_gluing_issues(chunks),
+        "text_reordering_issues": detect_text_reordering_issues(chunks),
+        "overall_quality_score": 0.0,
+        "recommendations": []
+    }
+    
+    # Calculate overall quality score
+    total_issues = (
+        validation_results["word_gluing_issues"]["total_chunks_affected"] +
+        validation_results["text_reordering_issues"]["total_chunks_affected"]
+    )
+    
+    if validation_results["total_chunks"] > 0:
+        quality_score = max(0.0, 1.0 - (total_issues / validation_results["total_chunks"]))
+        validation_results["overall_quality_score"] = quality_score
+    
+    # Generate recommendations
+    if validation_results["word_gluing_issues"]["case_transition_gluing"] > 0:
+        validation_results["recommendations"].append(
+            "Consider enabling enhanced word boundary detection to fix case transition gluing"
+        )
+    
+    if validation_results["text_reordering_issues"]["quote_splitting_issues"] > 0:
+        validation_results["recommendations"].append(
+            "Consider enabling enhanced quote handling to fix quote splitting issues"
+        )
+    
+    if validation_results["text_reordering_issues"]["json_escaping_issues"] > 0:
+        validation_results["recommendations"].append(
+            "Consider enabling enhanced JSON safety validation and repair"
+        )
+    
+    if validation_results["overall_quality_score"] < 0.8:
+        validation_results["recommendations"].append(
+            "Overall text quality is below recommended threshold - consider enabling PyMuPDF4LLM enhancement"
+        )
+    
+    return validation_results
+
+
+def print_text_processing_validation_report(validation_results: Dict[str, Any]):
+    """Print a detailed text processing validation report."""
+    print("================================================================================")
+    print("TEXT PROCESSING QUALITY VALIDATION REPORT")
+    print("================================================================================")
+    
+    print(f"Total Chunks Analyzed: {validation_results['total_chunks']}")
+    print(f"Overall Quality Score: {validation_results['overall_quality_score']:.3f}")
+
+    # Word gluing issues
+    gluing = validation_results["word_gluing_issues"]
+    print("WORD GLUING ISSUES")
+    print("----------------------------------------")
+    print(f"Case Transition Gluing:  {gluing['case_transition_gluing']} instances")
+    print(f"Page Boundary Gluing:    {gluing['page_boundary_gluing']} instances")
+    print(f"Quote Boundary Gluing:   {gluing['quote_boundary_gluing']} instances")
+    print(f"Chunks Affected:         {gluing['total_chunks_affected']}")
+    print()
+
+    # Text reordering issues
+    reordering = validation_results["text_reordering_issues"]
+    print("TEXT REORDERING ISSUES")
+    print("----------------------------------------")
+    print(f"Quote Splitting Issues:  {reordering['quote_splitting_issues']} instances")
+    print(f"Sentence Fragmentation:  {reordering['sentence_fragmentation']} instances")
+    print(f"Suspicious Starts:       {reordering['suspicious_starts']} instances")
+    print(f"JSON Escaping Issues:    {reordering['json_escaping_issues']} instances")
+    print(f"Chunks Affected:         {reordering['total_chunks_affected']}")
+    print()
+
+    # Examples
+    all_examples = gluing.get("examples", []) + reordering.get("examples", [])
+    if all_examples:
+        print("ISSUE EXAMPLES")
+        print("----------------------------------------")
+        for i, example in enumerate(all_examples[:5]):  # Show up to 5 examples
+            print(f"Example {i+1} ({example['type']}):")
+            print(f"  Chunk {example['chunk_index']}: {example.get('example', 'N/A')}")
+            if 'context' in example:
+                print(f"  Context: ...{example['context']}...")
+            if 'issue' in example:
+                print(f"  Issue: {example['issue']}")
+            print()
+
+    # Recommendations
+    if validation_results["recommendations"]:
+        print("RECOMMENDATIONS")
+        print("----------------------------------------")
+        for i, rec in enumerate(validation_results["recommendations"], 1):
+            print(f"{i}. {rec}")
+        print()
+    
 
 
 def compare_quality_reports(report1: Dict[str, Any], report2: Dict[str, Any]) -> Dict[str, Any]:
@@ -520,7 +752,7 @@ def compare_quality_reports(report1: Dict[str, Any], report2: Dict[str, Any]) ->
     return comparison
 
 
-def print_quality_report(report: Dict[str, Any], detailed: bool = True):
+def print_quality_report(report: Dict[str, Any], detailed: bool = True, validation_results: Dict[str, Any] = None):
     """Print a formatted quality report."""
     print("=" * 80)
     print("CHUNK QUALITY ASSESSMENT REPORT")
@@ -528,6 +760,51 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
     print(f"File: {report.get('filename', 'unknown')}")
     print(f"Overall Quality Score: {report.get('quality_score', 0.0):.3f}")
     print()
+
+    # If validation_results is provided, print text processing validation as well
+    if validation_results:
+        # Word gluing issues
+        gluing = validation_results["word_gluing_issues"]
+        print("WORD GLUING ISSUES")
+        print("----------------------------------------")
+        print(f"Case Transition Gluing:  {gluing['case_transition_gluing']} instances")
+        print(f"Page Boundary Gluing:    {gluing['page_boundary_gluing']} instances")
+        print(f"Quote Boundary Gluing:   {gluing['quote_boundary_gluing']} instances")
+        print(f"Chunks Affected:         {gluing['total_chunks_affected']}")
+        print()
+
+        # Text reordering issues
+        reordering = validation_results["text_reordering_issues"]
+        print("TEXT REORDERING ISSUES")
+        print("----------------------------------------")
+        print(f"Quote Splitting Issues:  {reordering['quote_splitting_issues']} instances")
+        print(f"Sentence Fragmentation:  {reordering['sentence_fragmentation']} instances")
+        print(f"Suspicious Starts:       {reordering['suspicious_starts']} instances")
+        print(f"JSON Escaping Issues:    {reordering['json_escaping_issues']} instances")
+        print(f"Chunks Affected:         {reordering['total_chunks_affected']}")
+        print()
+
+        # Examples
+        all_examples = gluing.get("examples", []) + reordering.get("examples", [])
+        if all_examples:
+            print("ISSUE EXAMPLES")
+            print("----------------------------------------")
+            for i, example in enumerate(all_examples[:5]):  # Show up to 5 examples
+                print(f"Example {i+1} ({example['type']}):")
+                print(f"  Chunk {example['chunk_index']}: {example.get('example', 'N/A')}")
+                if 'context' in example:
+                    print(f"  Context: ...{example['context']}...")
+                if 'issue' in example:
+                    print(f"  Issue: {example['issue']}")
+                print()
+
+        # Recommendations
+        if validation_results["recommendations"]:
+            print("RECOMMENDATIONS")
+            print("----------------------------------------")
+            for i, rec in enumerate(validation_results["recommendations"], 1):
+                print(f"{i}. {rec}")
+            print()
 
     # Summary statistics
     stats = report.get('summary_stats', {})
@@ -569,7 +846,7 @@ def print_quality_report(report: Dict[str, Any], detailed: bool = True):
 
     if report.get('recommendations'):
         print("RECOMMENDATIONS")
-        print("-" * 40)
+        print("----------------------------------------")
         for i, rec in enumerate(report['recommendations'], 1):
             print(f"{i}. {rec}")
         print()
@@ -674,7 +951,6 @@ def print_comparison_report(comparison: Dict[str, Any]):
 def generate_chunks_from_pdf(pdf_path: str, traditional: bool = False, enhanced: bool = True) -> List[Dict[str, Any]]:
     """Generate chunks from a PDF using specified approach."""
     import os
-
 
     # Ensure mutually exclusive approaches
     if traditional and enhanced:
@@ -802,11 +1078,15 @@ def main():
 
         # Analyze
         report = generate_quality_report(chunks, f"{pdf_path} ({approach})")
-        print_quality_report(report, detailed=args.detailed)
+        # Generate validation_results and pass to print_quality_report
+        validation_results = validate_text_processing_quality(chunks) if args.detailed else None
+        print_quality_report(report, detailed=args.detailed, validation_results=validation_results)
 
+        if args.detailed and validation_results:
+            print("\n")
+            print_text_processing_validation_report(validation_results)
 
     elif args.compare:
-        # Compare two JSONL files
         file1, file2 = args.compare
 
         print(f"Loading chunks from {file1}...")
@@ -823,12 +1103,16 @@ def main():
         report1 = generate_quality_report(chunks1, file1)
         report2 = generate_quality_report(chunks2, file2)
 
+        # Generate validation_results for both files if detailed
+        validation_results1 = validate_text_processing_quality(chunks1) if args.detailed else None
+        validation_results2 = validate_text_processing_quality(chunks2) if args.detailed else None
+
         # Print individual reports
         print(f"\nAnalysis of {file1}:")
-        print_quality_report(report1, detailed=args.detailed)
+        print_quality_report(report1, detailed=args.detailed, validation_results=validation_results1)
 
         print(f"\nAnalysis of {file2}:")
-        print_quality_report(report2, detailed=args.detailed)
+        print_quality_report(report2, detailed=args.detailed, validation_results=validation_results2)
 
         # Print comparison
         print(f"\nComparison ({file1} vs {file2}):")
@@ -836,25 +1120,22 @@ def main():
         print_comparison_report(comparison)
 
     else:
-        # Analyze single JSONL file
+        # Single file analysis
         jsonl_file = args.jsonl_file
-
         if not os.path.exists(jsonl_file):
             print(f"Error: JSONL file '{jsonl_file}' not found", file=sys.stderr)
             sys.exit(1)
 
-        print(f"Loading chunks from {jsonl_file}...")
         chunks = load_jsonl(jsonl_file)
-
-        if not chunks:
-            print("Error: No valid chunks found in file", file=sys.stderr)
-            sys.exit(1)
-
-        # Generate and print report
         report = generate_quality_report(chunks, jsonl_file)
-        print_quality_report(report, detailed=args.detailed)
+        # Generate validation_results and pass to print_quality_report
+        validation_results = validate_text_processing_quality(chunks) if args.detailed else None
+        print_quality_report(report, detailed=args.detailed, validation_results=validation_results)
 
-        # Compare with baseline if provided
+        if args.detailed and validation_results:
+            print("\n")
+            print_text_processing_validation_report(validation_results)
+
         if args.baseline:
             if not os.path.exists(args.baseline):
                 print(f"Warning: Baseline file '{args.baseline}' not found", file=sys.stderr)

@@ -32,54 +32,155 @@ def is_pymupdf4llm_available() -> bool:
     return PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
 
 
-def extract_with_pymupdf4llm(
-    pdf_path: str,
-    exclude_pages: Optional[str] = None
-) -> str:
-    """
-    Extract raw text from PDF using PyMuPDF4LLM for text cleaning purposes only.
-
-    This simplified approach uses PyMuPDF4LLM solely for superior text extraction
-    and cleaning (ligatures, word joining, whitespace normalization) without
-    attempting complex structural analysis or block mapping.
-
-    Args:
-        pdf_path: Path to the PDF file
-        exclude_pages: Comma-separated string of page numbers to exclude (e.g., "1,3,5")
-
-    Returns:
-        Raw cleaned text string from PyMuPDF4LLM
-
-    Raises:
-        PyMuPDF4LLMExtractionError: If extraction fails
-    """
-    if not is_pymupdf4llm_available():
-        raise PyMuPDF4LLMExtractionError("PyMuPDF4LLM is not available")
-
-    start_time = time.time()
+def extract_with_pymupdf4llm(pdf_path: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Extract text using PyMuPDF4LLM with enhanced error handling and validation."""
+    logger.info(f"Starting PyMuPDF4LLM extraction for: {pdf_path}")
 
     try:
-        logger.debug(f"Starting PyMuPDF4LLM text extraction for: {pdf_path}")
+        import pymupdf4llm
 
-        # Extract text using PyMuPDF4LLM for superior text quality
-        markdown_text = _call_pymupdf4llm_api(pdf_path, None)
+        # Extract with PyMuPDF4LLM
+        md_text = pymupdf4llm.to_markdown(pdf_path)
 
-        if not markdown_text or not markdown_text.strip():
-            raise PyMuPDF4LLMExtractionError("PyMuPDF4LLM returned empty text")
+        if not md_text or not md_text.strip():
+            logger.warning("PyMuPDF4LLM returned empty text")
+            return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
 
-        # Convert markdown to clean text for text cleaning purposes
-        cleaned_text = _convert_markdown_to_clean_text(markdown_text)
+        logger.debug(f"PyMuPDF4LLM extracted {len(md_text)} characters")
 
-        extraction_time = time.time() - start_time
-        logger.info(f"PyMuPDF4LLM text extraction completed in {extractionion_time:.2f}s, {len(cleaned_text)} characters")
+        # Convert markdown to blocks
+        blocks = _convert_markdown_to_blocks(md_text, pdf_path)
 
-        return cleaned_text
+        if not blocks:
+            logger.warning("No blocks created from PyMuPDF4LLM output")
+            return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
+
+        # Validate enhancement quality
+        quality_score = _validate_enhancement_quality(blocks)
+        logger.debug(f"PyMuPDF4LLM enhancement quality score: {quality_score:.2f}")
+
+        if quality_score < 0.5:  # Threshold for acceptable quality
+            logger.warning(f"PyMuPDF4LLM enhancement quality too low ({quality_score:.2f}), may need fallback")
+            return blocks, {"enhanced": 0, "failed": 0, "skipped": 0, "degraded": len(blocks), "artifacts_filtered": 0}
+
+        # Apply additional cleaning to PyMuPDF4LLM output
+        cleaned_blocks = []
+        artifacts_filtered = 0
+
+        for block in blocks:
+            cleaned_block = _clean_pymupdf4llm_block(block)
+            if cleaned_block:
+                cleaned_blocks.append(cleaned_block)
+            else:
+                artifacts_filtered += 1
+
+        stats = {
+            "enhanced": len(cleaned_blocks),
+            "failed": 0,
+            "skipped": 0,
+            "degraded": 0,
+            "artifacts_filtered": artifacts_filtered
+        }
+
+        logger.info(f"PyMuPDF4LLM extraction completed: {stats}")
+        return cleaned_blocks, stats
+
+    except ImportError:
+        logger.error("PyMuPDF4LLM not available - install with: pip install pymupdf4llm")
+        return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
 
     except Exception as e:
-        extraction_time = time.time() - start_time
-        error_msg = f"PyMuPDF4LLM text extraction failed after {extraction_time:.2f}s: {str(e)}"
-        logger.error(error_msg)
-        raise PyMuPDF4LLMExtractionError(error_msg) from e
+        logger.error(f"PyMuPDF4LLM extraction failed: {e}")
+        return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
+
+
+def _validate_enhancement_quality(blocks: List[Dict[str, Any]]) -> float:
+    """Validate the quality of PyMuPDF4LLM enhancement and return a quality score (0-1)."""
+    if not blocks:
+        return 0.0
+
+    total_score = 0.0
+    total_blocks = len(blocks)
+
+    for block in blocks:
+        text = block.get('text', '')
+        block_score = 0.0
+
+        if not text.strip():
+            continue
+
+        # Score based on text characteristics
+        # 1. Length (reasonable blocks get higher scores)
+        length_score = min(len(text) / 100, 1.0)  # Normalize to 0-1
+        block_score += length_score * 0.3
+
+        # 2. Sentence structure (complete sentences get higher scores)
+        sentences = text.count('.') + text.count('!') + text.count('?')
+        if len(text) > 0:
+            sentence_density = sentences / (len(text) / 100)  # Sentences per 100 chars
+            sentence_score = min(sentence_density / 2, 1.0)  # Normalize
+            block_score += sentence_score * 0.3
+
+        # 3. Word boundaries (proper spacing gets higher scores)
+        import re as _re1
+        word_count = len(text.split())
+        if word_count > 0:
+            # Check for proper word spacing
+            glued_words = len(_re1.findall(r'[a-z][A-Z]', text))
+            gluing_penalty = min(glued_words / word_count, 0.5)
+            spacing_score = 1.0 - gluing_penalty
+            block_score += spacing_score * 0.2
+
+        # 4. Quote balance (balanced quotes get higher scores)
+        quote_balance = abs(text.count('"') % 2) + abs(text.count("'") % 2)
+        quote_score = 1.0 if quote_balance == 0 else 0.5
+        block_score += quote_score * 0.2
+
+        total_score += block_score
+
+    average_score = total_score / total_blocks if total_blocks > 0 else 0.0
+    return min(average_score, 1.0)
+
+
+def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Clean and validate a block from PyMuPDF4LLM output."""
+    text = block.get('text', '')
+
+    if not text or not text.strip():
+        return None
+
+    import re as _re2
+
+    # Remove markdown headers that weren't converted properly
+    text = _re2.sub(r'^#{1,6}\s*', '', text, flags=_re2.MULTILINE)
+
+    # Remove markdown emphasis that wasn't converted
+    text = _re2.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Bold
+    text = _re2.sub(r'\*(.*?)\*', r'\1', text)      # Italic
+
+    # Remove markdown links
+    text = _re2.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+
+    # Clean up excessive whitespace
+    text = _re2.sub(r'\n{3,}', '\n\n', text)
+    text = _re2.sub(r' {2,}', ' ', text)
+
+    # Skip blocks that are too short or look like artifacts
+    if len(text.strip()) < 10:
+        return None
+
+    # Skip blocks that look like page numbers or headers/footers
+    if _re2.match(r'^\s*\d+\s*$', text.strip()):  # Just a number
+        return None
+
+    if _re2.match(r'^\s*(page|chapter|section)\s+\d+\s*$', text.strip().lower()):
+        return None
+
+    # Update the block with cleaned text
+    cleaned_block = block.copy()
+    cleaned_block['text'] = text.strip()
+
+    return cleaned_block
 
 
 def _convert_markdown_to_clean_text(markdown_text: str) -> str:
@@ -178,6 +279,59 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
         cleaned = '\n\n'.join(p for p in paragraphs if p)
         return cleanup_residual_continuations(cleaned)
+
+
+def should_apply_pymupdf4llm_cleaning(blocks: list[dict]) -> bool:
+    """
+    Determine if PyMuPDF4LLM cleaning should be applied to improve text quality.
+
+    Args:
+        blocks: List of text blocks (dicts) from PDF extraction
+
+    Returns:
+        True if PyMuPDF4LLM cleaning should be attempted, False otherwise.
+    """
+    if not blocks or not isinstance(blocks, list):
+        logger.debug("should_apply_pymupdf4llm_cleaning: No blocks provided or not a list.")
+        return False
+
+    # Heuristic: If any block shows extraction issues, recommend cleaning
+    problematic_count = 0
+    total_blocks = len(blocks)
+    for block in blocks:
+        text = block.get("text", "")
+        if not isinstance(text, str) or not text.strip():
+            continue
+
+        # Look for common extraction issues
+        # 1. Ligatures
+        if any(lig in text for lig in ['ﬁ', 'ﬂ', 'ﬀ', 'ﬃ', 'ﬄ']):
+            problematic_count += 1
+            continue
+        # 2. Word joining (lowercase followed by uppercase)
+        import re
+        if re.search(r'[a-z][A-Z]', text):
+            problematic_count += 1
+            continue
+        # 3. Excessive whitespace
+        if re.search(r'  +|\n{3,}', text):
+            problematic_count += 1
+            continue
+        # 4. Hyphenation issues
+        if re.search(r'-\s*\n\s*[a-z]', text):
+            problematic_count += 1
+            continue
+        # 5. Unbalanced quotes
+        if (text.count('"') % 2 != 0) or (text.count("'") % 2 != 0):
+            problematic_count += 1
+            continue
+
+    # If more than 10% of blocks are problematic, recommend cleaning
+    if total_blocks == 0:
+        return False
+    ratio = problematic_count / total_blocks
+    logger.debug(f"should_apply_pymupdf4llm_cleaning: {problematic_count}/{total_blocks} blocks problematic (ratio={ratio:.2f})")
+    return ratio > 0.1
 
 
 def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> str:
@@ -327,12 +481,11 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[
         issues.append("No text cleaning applied")
 
     # Basic text quality (20% weight)
-    # Check for common issues that should be cleaned
-    import re
+    import re as _re3
 
     # Check for excessive whitespace
-    excessive_spaces = len(re.findall(r' {3,}', cleaned_text))
-    excessive_newlines = len(re.findall(r'\n{3,}', cleaned_text))
+    excessive_spaces = len(_re3.findall(r' {3,}', cleaned_text))
+    excessive_newlines = len(_re3.findall(r'\n{3,}', cleaned_text))
 
     if excessive_spaces == 0 and excessive_newlines == 0:
         quality_factors.append(0.2)
@@ -368,11 +521,11 @@ def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[
     Returns:
         Dictionary with degradation assessment and specific issues found
     """
-    import re
-    
+    import re as _re4
+
     issues = []
     degradation_score = 0.0
-    
+
     if not cleaned_text or not cleaned_text.strip():
         return {
             'degraded': True,
@@ -380,17 +533,17 @@ def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[
             'issues': ['Text completely removed by cleaning'],
             'recommendation': 'Use original text'
         }
-    
+
     # Check for sentence fragmentation (sentences cut off abruptly)
-    original_sentences = re.split(r'[.!?]+', original_text)
-    cleaned_sentences = re.split(r'[.!?]+', cleaned_text)
-    
+    original_sentences = _re4.split(r'[.!?]+', original_text)
+    cleaned_sentences = _re4.split(r'[.!?]+', cleaned_text)
+
     # Look for very short sentence fragments that might indicate cutting
     short_fragments = [s.strip() for s in cleaned_sentences if 0 < len(s.strip().split()) <= 4]
     if len(short_fragments) > len(original_sentences) * 0.3:
         issues.append(f"Excessive sentence fragmentation: {len(short_fragments)} short fragments")
         degradation_score += 0.3
-    
+
     # Check for header/footer contamination patterns
     contamination_patterns = [
         r'\b\d+\s*$',  # Ends with page number
@@ -399,20 +552,20 @@ def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[
         r'\bfootnote\s*\d+\b',  # Footnote references
         r'^\s*[A-Z\s]{10,}\s*$',  # All caps headers
     ]
-    
+
     contamination_count = 0
     for pattern in contamination_patterns:
-        if re.search(pattern, cleaned_text, re.IGNORECASE):
+        if _re4.search(pattern, cleaned_text, re.IGNORECASE):
             contamination_count += 1
-    
+
     if contamination_count > 0:
         issues.append(f"Potential header/footer contamination: {contamination_count} patterns detected")
         degradation_score += contamination_count * 0.15
-    
+
     # Check for text length changes that might indicate content loss
     original_length = len(original_text.strip())
     cleaned_length = len(cleaned_text.strip())
-    
+
     if original_length > 0:
         length_ratio = cleaned_length / original_length
         if length_ratio < 0.7:
@@ -421,33 +574,33 @@ def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[
         elif length_ratio > 1.5:
             issues.append(f"Unexpected content expansion: {length_ratio:.2f} length ratio")
             degradation_score += 0.2
-    
+
     # Check for word joining issues (words accidentally merged)
     original_words = len(original_text.split())
     cleaned_words = len(cleaned_text.split())
-    
+
     if original_words > 0:
         word_ratio = cleaned_words / original_words
         if word_ratio < 0.8:
             issues.append(f"Potential word merging: {word_ratio:.2f} word count ratio")
             degradation_score += 0.2
-    
+
     # Check for excessive whitespace or formatting issues
-    excessive_spaces = len(re.findall(r' {4,}', cleaned_text))
-    excessive_newlines = len(re.findall(r'\n{4,}', cleaned_text))
-    
+    excessive_spaces = len(_re4.findall(r' {4,}', cleaned_text))
+    excessive_newlines = len(_re4.findall(r'\n{4,}', cleaned_text))
+
     if excessive_spaces > 5 or excessive_newlines > 3:
         issues.append(f"Formatting issues: {excessive_spaces} space clusters, {excessive_newlines} newline clusters")
         degradation_score += 0.1
-    
+
     # Overall assessment
     degradation_score = min(degradation_score, 1.0)
     degraded = degradation_score > 0.3
-    
+
     recommendation = 'Use original text' if degraded else 'Use cleaned text'
     if degradation_score > 0.1 and not degraded:
         recommendation = 'Use cleaned text with caution'
-    
+
     return {
         'degraded': degraded,
         'degradation_score': degradation_score,
@@ -459,38 +612,117 @@ def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[
     }
 
 
-def should_apply_pymupdf4llm_cleaning(block: dict, context: Dict[str, Any] = None) -> bool:
-    """
-    Determine if PyMuPDF4LLM cleaning should be applied to a specific text block.
-    
-    This function considers block characteristics and context to avoid cleaning
-    blocks that are likely to be degraded by the process.
-    
-    Args:
-        block: Text block with metadata
-        context: Optional context information about the document
-        
-    Returns:
-        True if PyMuPDF4LLM cleaning should be applied
-    """
-    text = block.get('text', '').strip()
-    
-    # Skip very short blocks
-    if len(text) < 20:
+def should_apply_pymupdf4llm_cleaning(blocks: List[Dict[str, Any]]) -> bool:
+    """Determine if PyMuPDF4LLM cleaning should be applied to improve text quality."""
+    if not blocks:
+        logger.debug("No blocks provided, skipping PyMuPDF4LLM cleaning")
         return False
-    
-    # Skip blocks that are likely page artifacts
-    page_num = block.get("source", {}).get("page", 0)
-    if is_page_artifact_text(text, page_num):
-        return False
-    
-    # Skip blocks that are already very clean
-    if is_text_already_clean(text):
-        return False
-    
-    # Check for text that would benefit from PyMuPDF4LLM cleaning
-    return has_cleaning_opportunities(text)
 
+    # Count total text and analyze patterns
+    total_text = ""
+    total_blocks = len(blocks)
+    problematic_patterns = 0
+
+    for block in blocks:
+        text = block.get('text', '')
+        total_text += text + " "
+
+        # Check for patterns that suggest PyMuPDF4LLM could help
+        if _has_extraction_issues(text):
+            problematic_patterns += 1
+
+    logger.debug(f"PyMuPDF4LLM analysis: {total_blocks} blocks, {problematic_patterns} with extraction issues")
+
+    # More liberal criteria for applying PyMuPDF4LLM
+    should_apply = (
+        problematic_patterns > 0 or
+        (total_blocks > 10 and len(total_text) / total_blocks < 100) or
+        '"' in total_text or "'" in total_text or
+        any(indicator in total_text.lower() for indicator in [
+            'part i', 'part ii', 'part iii', 'chapter', 'section',
+            'figure', 'table', 'appendix', 'bibliography'
+        ]) or
+        _has_page_boundary_issues(blocks)
+    )
+
+    if should_apply:
+        logger.info(f"PyMuPDF4LLM enhancement recommended: {problematic_patterns} problematic patterns detected")
+    else:
+        logger.debug("PyMuPDF4LLM enhancement not needed based on text analysis")
+
+    return should_apply
+
+
+def _has_extraction_issues(text: str) -> bool:
+    """Check if text shows signs of extraction issues that PyMuPDF4LLM could fix."""
+    if not text:
+        return False
+
+    import re as _re5
+
+    # Pattern 1: Suspicious word gluing (lowercase followed by uppercase)
+    if _re5.search(r'[a-z][A-Z]', text):
+        return True
+
+    # Pattern 2: Fragmented sentences (starts with lowercase, ends without punctuation)
+    if (text.strip() and 
+        text.strip()[0].islower() and 
+        not text.strip().endswith(('.', '!', '?', ':', ';'))):
+        return True
+
+    # Pattern 3: Unusual spacing patterns
+    if _re5.search(r'\s{3,}', text):
+        return True
+
+    # Pattern 4: Broken quotes or dialogue
+    quote_count = text.count('"') + text.count("'")
+    if quote_count > 0 and quote_count % 2 != 0:
+        return True
+
+    # Pattern 5: Very short fragments that look incomplete
+    if len(text.strip()) < 20 and not text.strip().endswith(('.', '!', '?')):
+        return True
+
+    # Pattern 6: Suspicious punctuation patterns
+    if _re5.search(r'[a-z][.!?][A-Z]', text):
+        return True
+
+    return False
+
+
+def _has_page_boundary_issues(blocks: List[Dict[str, Any]]) -> bool:
+    """Check if blocks show signs of page boundary extraction issues."""
+    if len(blocks) < 2:
+        return False
+
+    page_transitions = 0
+    problematic_transitions = 0
+
+    for i in range(len(blocks) - 1):
+        curr_block = blocks[i]
+        next_block = blocks[i + 1]
+        curr_page = curr_block.get("source", {}).get("page")
+        next_page = next_block.get("source", {}).get("page")
+
+        if curr_page != next_page:
+            page_transitions += 1
+            curr_text = curr_block.get('text', '').strip()
+            next_text = next_block.get('text', '').strip()
+
+            # Check for problematic page transitions
+            if (curr_text and next_text and
+                not curr_text.endswith(('.', '!', '?')) and
+                next_text[0].islower()):
+                problematic_transitions += 1
+
+    # If more than 30% of page transitions look problematic, recommend PyMuPDF4LLM
+    if page_transitions > 0:
+        problem_ratio = problematic_transitions / page_transitions
+        logger.debug(f"Page boundary analysis: {problematic_transitions}/{page_transitions} transitions problematic ({problem_ratio:.2f})")
+        return problem_ratio > 0.3
+
+    return False
+    
 
 def is_page_artifact_text(text: str, page_num: int) -> bool:
     """
@@ -503,14 +735,14 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
     Returns:
         True if text appears to be a page artifact
     """
-    import re
-    
+    import re as _re6
+
     text_lower = text.lower().strip()
-    
+
     # Page numbers
-    if re.match(r'^\d+$', text_lower):
+    if _re6.match(r'^\d+$', text_lower):
         return True
-    
+
     # Common header/footer patterns
     artifact_patterns = [
         r'^page\s+\d+',
@@ -522,16 +754,16 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
         r'^index$',
         r'^appendix\s+[a-z]$',
     ]
-    
+
     for pattern in artifact_patterns:
-        if re.match(pattern, text_lower):
+        if _re6.match(pattern, text_lower):
             return True
-    
+
     # Very short text that might be artifacts
     if len(text.split()) <= 3 and len(text) <= 30:
         # Could be artifact, but be conservative
         return any(char.isdigit() for char in text)
-    
+
     return False
 
 
@@ -545,14 +777,14 @@ def is_text_already_clean(text: str) -> bool:
     Returns:
         True if text appears to already be clean
     """
-    import re
-    
+    import re as _re7
+
     # Check for common issues that PyMuPDF4LLM would fix
     has_ligatures = any(char in text for char in ['ﬁ', 'ﬂ', 'ﬀ', 'ﬃ', 'ﬄ'])
-    has_excessive_spaces = bool(re.search(r' {3,}', text))
-    has_hyphenated_breaks = bool(re.search(r'-\s*\n\s*[a-z]', text))
-    has_word_joining_issues = bool(re.search(r'[a-z][A-Z]', text))
-    
+    has_excessive_spaces = bool(_re7.search(r' {3,}', text))
+    has_hyphenated_breaks = bool(_re7.search(r'-\s*\n\s*[a-z]', text))
+    has_word_joining_issues = bool(_re7.search(r'[a-z][A-Z]', text))
+
     # If none of these issues are present, text is probably already clean
     return not (has_ligatures or has_excessive_spaces or has_hyphenated_breaks or has_word_joining_issues)
 
@@ -567,14 +799,14 @@ def has_cleaning_opportunities(text: str) -> bool:
     Returns:
         True if text would likely benefit from cleaning
     """
-    import re
-    
+    import re as _re8
+
     # Look for specific issues that PyMuPDF4LLM handles well
     has_ligatures = any(char in text for char in ['ﬁ', 'ﬂ', 'ﬀ', 'ﬃ', 'ﬄ'])
-    has_excessive_spaces = bool(re.search(r' {3,}', text))
-    has_hyphenated_breaks = bool(re.search(r'-\s*\n\s*[a-z]', text))
-    has_unicode_issues = bool(re.search(r'[^\x00-\x7F]', text)) and not has_ligatures
-    
+    has_excessive_spaces = bool(_re8.search(r' {3,}', text))
+    has_hyphenated_breaks = bool(_re8.search(r'-\s*\n\s*[a-z]', text))
+    has_unicode_issues = bool(_re8.search(r'[^\x00-\x7F]', text)) and not has_ligatures
+
     return has_ligatures or has_excessive_spaces or has_hyphenated_breaks or has_unicode_issues
 
 
@@ -621,4 +853,326 @@ def get_pymupdf4llm_info() -> Dict[str, Any]:
         return {
             'available': True,
             'error': f'Error getting PyMuPDF4LLM info: {str(e)}'
+        }
+
+
+def apply_pymupdf4llm_fallback(
+    original_blocks: List[Dict[str, Any]],
+    pdf_path: str
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Apply PyMuPDF4LLM selectively to problematic blocks as a fallback strategy."""
+    logger.info("Applying PyMuPDF4LLM fallback strategy")
+
+    if not original_blocks:
+        return original_blocks, {
+            "enhanced": 0,
+            "failed": 0,
+            "skipped": 0,
+            "degraded": 0,
+            "artifacts_filtered": 0
+        }
+
+    # Identify blocks that would benefit from PyMuPDF4LLM enhancement
+    problematic_blocks = []
+    for i, block in enumerate(original_blocks):
+        if _has_extraction_issues(block.get("text", "")):
+            problematic_blocks.append(i)
+
+    if not problematic_blocks:
+        logger.debug(
+            "No problematic blocks identified for fallback enhancement"
+        )
+        return original_blocks, {
+            "enhanced": 0,
+            "failed": 0,
+            "skipped": len(original_blocks),
+            "degraded": 0,
+            "artifacts_filtered": 0
+        }
+
+    logger.info(
+        f"Applying fallback enhancement to {len(problematic_blocks)} problematic blocks"
+    )
+
+    try:
+        pymupdf4llm_blocks, _ = extract_with_pymupdf4llm(pdf_path)
+
+        if not pymupdf4llm_blocks:
+            logger.warning(
+                "PyMuPDF4LLM fallback failed - no blocks extracted"
+            )
+            return original_blocks, {
+                "enhanced": 0,
+                "failed": len(problematic_blocks),
+                "skipped": len(original_blocks) - len(problematic_blocks),
+                "degraded": 0,
+                "artifacts_filtered": 0
+            }
+
+        # Merge the best parts of both extractions
+        enhanced_blocks = _merge_extraction_results(
+            original_blocks, pymupdf4llm_blocks, problematic_blocks
+        )
+
+        enhanced_count = len([
+            idx for idx in problematic_blocks
+            if idx < len(enhanced_blocks)
+        ])
+
+        stats = {
+            "enhanced": enhanced_count,
+            "failed": 0,
+            "skipped": len(original_blocks) - enhanced_count,
+            "degraded": 0,
+            "artifacts_filtered": 0
+        }
+
+        logger.info(f"PyMuPDF4LLM fallback completed: {stats}")
+        return enhanced_blocks, stats
+
+    except Exception as e:
+        logger.error(f"PyMuPDF4LLM fallback failed: {e}")
+        return original_blocks, {
+            "enhanced": 0,
+            "failed": len(problematic_blocks),
+            "skipped": len(original_blocks) - len(problematic_blocks),
+            "degraded": 0,
+            "artifacts_filtered": 0
+        }
+
+
+def _merge_extraction_results(
+    original_blocks: List[Dict[str, Any]],
+    pymupdf4llm_blocks: List[Dict[str, Any]],
+    problematic_indices: List[int]
+) -> List[Dict[str, Any]]:
+    """Merge original and PyMuPDF4LLM extraction results, using the better version for each block."""
+    merged_blocks = original_blocks.copy()
+
+    # Simple strategy: try to match blocks by content similarity and replace problematic ones
+    for prob_idx in problematic_indices:
+        if prob_idx >= len(original_blocks):
+            continue
+
+        original_text = original_blocks[prob_idx].get("text", "")
+        best_match = _find_best_matching_block(
+            original_text, pymupdf4llm_blocks
+        )
+
+        if best_match and _is_text_improvement(
+            original_text, best_match.get("text", "")
+        ):
+            logger.debug(f"Replacing block {prob_idx} with PyMuPDF4LLM version")
+            improved_block = original_blocks[prob_idx].copy()
+            improved_block["text"] = best_match["text"]
+            merged_blocks[prob_idx] = improved_block
+
+    return merged_blocks
+
+
+def _find_best_matching_block(
+    target_text: str,
+    candidate_blocks: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Find the block that best matches the target text."""
+    if not target_text or not candidate_blocks:
+        return None
+
+    target_words = set(target_text.lower().split())
+    best_match = None
+    best_score = 0.0
+
+    for block in candidate_blocks:
+        candidate_text = block.get("text", "")
+        if not candidate_text:
+            continue
+        candidate_words = set(candidate_text.lower().split())
+
+        # Calculate similarity based on word overlap
+        intersection = target_words & candidate_words
+        union = target_words | candidate_words
+        similarity = len(intersection) / len(union) if union else 0.0
+
+        if similarity > best_score and similarity > 0.3:
+            best_score = similarity
+            best_match = block
+
+    return best_match
+
+
+def _is_text_improvement(original: str, candidate: str) -> bool:
+    """Determine if the candidate text is an improvement over the original."""
+    if not original or not candidate:
+        return False
+
+    improvements = 0
+
+    # 1. Better word spacing (fewer glued words)
+    import re
+    original_glued = len(re.findall(r"[a-z][A-Z]", original))
+    candidate_glued = len(re.findall(r"[a-z][A-Z]", candidate))
+    if candidate_glued < original_glued:
+        improvements += 1
+
+    # 2. Better sentence structure
+    original_sentences = (
+        original.count(".") +
+        original.count("!") +
+        original.count("?")
+    )
+    candidate_sentences = (
+        candidate.count(".") +
+        candidate.count("!") +
+        candidate.count("?")
+    )
+    if candidate_sentences > original_sentences:
+        improvements += 1
+
+    # 3. Better quote balance
+    original_quote_balance = abs(original.count('"') % 2)
+    candidate_quote_balance = abs(candidate.count('"') % 2)
+    if candidate_quote_balance < original_quote_balance:
+        improvements += 1
+
+    # 4. More complete text (not just longer, but complete sentences)
+    if (
+        len(candidate) > len(original) * 1.1 and
+        candidate.strip().endswith((".", "!", "?")) and
+        not original.strip().endswith((".", "!", "?"))
+    ):
+        improvements += 1
+
+    # Require at least 2 improvements to consider it better
+    return improvements >= 2
+
+
+def _convert_markdown_to_blocks(md_text: str, pdf_path: str = None) -> list[dict]:
+    """
+    Convert PyMuPDF4LLM Markdown output to a list of structured blocks.
+    Each block is a dict with 'text' and 'metadata' keys.
+    Headings are detected by markdown headers (#, ##, etc.).
+    """
+    import re
+
+    if not md_text or not md_text.strip():
+        logger.warning("No markdown text provided to _convert_markdown_to_blocks")
+        return []
+
+    lines = md_text.split('\n')
+    blocks = []
+    current_paragraph = []
+    current_heading = None
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            # End of a paragraph
+            if current_paragraph:
+                para_text = '\n'.join(current_paragraph).strip()
+                if para_text:
+                    blocks.append({
+                        'text': para_text,
+                        'metadata': {
+                            'is_heading': False,
+                            'heading': current_heading,
+                            'source': 'pymupdf4llm'
+                        }
+                    })
+                current_paragraph = []
+            continue
+
+        # Detect markdown headings
+        heading_match = re.match(r'^(#{1,6})\s*(.+)', line)
+        if heading_match:
+            # Save any current paragraph before heading
+            if current_paragraph:
+                para_text = '\n'.join(current_paragraph).strip()
+                if para_text:
+                    blocks.append({
+                        'text': para_text,
+                        'metadata': {
+                            'is_heading': False,
+                            'heading': current_heading,
+                            'source': 'pymupdf4llm'
+                        }
+                    })
+                current_paragraph = []
+
+            heading_text = heading_match.group(2).strip()
+            heading_level = len(heading_match.group(1))
+            blocks.append({
+                'text': heading_text,
+                'metadata': {
+                    'is_heading': True,
+                    'heading_level': heading_level,
+                    'source': 'pymupdf4llm'
+                }
+            })
+            current_heading = heading_text
+        else:
+            current_paragraph.append(line)
+
+    # Add any trailing paragraph
+    if current_paragraph:
+        para_text = '\n'.join(current_paragraph).strip()
+        if para_text:
+            blocks.append({
+                'text': para_text,
+                'metadata': {
+                    'is_heading': False,
+                    'heading': current_heading,
+                    'source': 'pymupdf4llm'
+                }
+            })
+
+    return blocks
+
+
+def apply_pymupdf4llm_fallback(original_blocks: list[dict], pdf_path: str) -> tuple[list[dict], dict]:
+    """
+    Fallback: Attempt to re-extract using PyMuPDF4LLM and merge with original blocks.
+    If PyMuPDF4LLM fails, return the original blocks and stats.
+    """
+    logger.info("Attempting PyMuPDF4LLM fallback enhancement")
+
+    try:
+        # Try extracting with PyMuPDF4LLM
+        import pymupdf4llm
+        md_text = pymupdf4llm.to_markdown(pdf_path)
+        if not md_text or not md_text.strip():
+            logger.warning("PyMuPDF4LLM fallback returned empty markdown")
+            return original_blocks, {
+                "enhanced": 0,
+                "failed": 1,
+                "skipped": len(original_blocks),
+                "degraded": 0,
+                "artifacts_filtered": 0
+            }
+        new_blocks = _convert_markdown_to_blocks(md_text, pdf_path)
+        if not new_blocks:
+            logger.warning("PyMuPDF4LLM fallback produced no blocks")
+            return original_blocks, {
+                "enhanced": 0,
+                "failed": 1,
+                "skipped": len(original_blocks),
+                "degraded": 0,
+                "artifacts_filtered": 0
+            }
+        # Simple merge: prefer new_blocks if non-empty, else original
+        logger.info(f"PyMuPDF4LLM fallback produced {len(new_blocks)} blocks")
+        return new_blocks, {
+            "enhanced": len(new_blocks),
+            "failed": 0,
+            "skipped": 0,
+            "degraded": 0,
+            "artifacts_filtered": 0
+        }
+    except Exception as e:
+        logger.error(f"PyMuPDF4LLM fallback failed: {e}")
+        return original_blocks, {
+            "enhanced": 0,
+            "failed": 1,
+            "skipped": len(original_blocks),
+            "degraded": 0,
+            "artifacts_filtered": 0
         }

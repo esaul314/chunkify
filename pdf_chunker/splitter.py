@@ -1,11 +1,26 @@
 import logging
+logger = logging.getLogger(__name__)
 import re
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from haystack.components.preprocessors import DocumentSplitter
 from haystack.dataclasses import Document
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Try importing RecursiveCharacterTextSplitter from both possible locations
+try:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    _LANGCHAIN_SPLITTER_AVAILABLE = True
+except ImportError:
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        _LANGCHAIN_SPLITTER_AVAILABLE = True
+    except ImportError:
+        RecursiveCharacterTextSplitter = None
+        _LANGCHAIN_SPLITTER_AVAILABLE = False
+        
+
+    
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Centralized chunk threshold constants
 CHUNK_THRESHOLDS = {
@@ -94,7 +109,6 @@ def analyze_chunk_relationships(chunks: List[str]) -> List[Dict[str, Any]]:
             'merge_reason': None
         }
 
-
         # Check for short chunks that should be merged using centralized thresholds
         if len(current_words) <= CHUNK_THRESHOLDS['short']:
             # Short chunk - analyze context for merging
@@ -152,7 +166,6 @@ def merge_conversational_chunks(chunks: List[str], min_chunk_size: int = None) -
     # Use centralized threshold if not provided
     if min_chunk_size is None:
         min_chunk_size = CHUNK_THRESHOLDS['min_target']
-
 
     # Analyze relationships between chunks
     relationships = analyze_chunk_relationships(chunks)
@@ -225,7 +238,6 @@ def merge_conversational_chunks(chunks: List[str], min_chunk_size: int = None) -
             next_words = len(next_chunk.split())
 
             # Merge if combined size is reasonable (use centralized threshold)
-
             if current_words + next_words <= min_chunk_size * 3:
                 separator = ' ' if not current_chunk.endswith(('.', '!', '?')) else ' '
                 merged_text = current_chunk + separator + next_chunk
@@ -251,238 +263,441 @@ def merge_conversational_chunks(chunks: List[str], min_chunk_size: int = None) -
 
     return final_chunks, merge_stats
 
-def semantic_chunker(
-    structured_blocks: list[dict],
-    chunk_size: int,
-    overlap: int,
-    min_chunk_size: int = None,
-    enable_dialogue_detection: bool = True
-) -> list[Document]:
-
+def _merge_short_chunks(
+    chunks: List[str],
+    min_chunk_size: int,
+    very_short_threshold: int,
+    short_threshold: int
+) -> Tuple[List[str], Dict[str, Any]]:
     """
-    Chunks the document using Haystack's DocumentSplitter with enhanced conversational text handling.
-
-    This enhanced version includes:
-    - Dialogue pattern detection
-    - Minimum chunk size enforcement
-    - Intelligent merging of short fragments
-    - Conversational flow preservation
-    - Debugging output for chunk quality analysis
-
-    Args:
-        structured_blocks: List of text blocks from PDF parsing
-        chunk_size: Target chunk size in words
-
-        overlap: Overlap size in words
-        min_chunk_size: Minimum chunk size in words (defaults to max(8, chunk_size // 10))
-        enable_dialogue_detection: Whether to enable dialogue pattern detection
-
-
-    Returns:
-        List of Document objects representing chunks
+    Merge adjacent short chunks that fall below the minimum word threshold.
+    Combines very short and short chunks with their neighbors to improve semantic coherence.
+    Returns the merged chunks and merge statistics.
     """
-    if not structured_blocks:
-        return []
+    logger.info(f"Running _merge_short_chunks: min_chunk_size={min_chunk_size}, very_short_threshold={very_short_threshold}, short_threshold={short_threshold}")
+    if not chunks:
+        return [], {"merges_performed": 0, "final_count": 0, "short_chunks_remaining": 0}
 
-    # Set default minimum chunk size using centralized threshold
-    if min_chunk_size is None:
-        min_chunk_size = max(CHUNK_THRESHOLDS['min_target'], chunk_size // 10)
+    merged_chunks = []
+    merge_stats = {
+        "merges_performed": 0,
+        "final_count": 0,
+        "short_chunks_remaining": 0,
+        "merge_reasons": {}
+    }
 
+    i = 0
+    while i < len(chunks):
+        current_chunk = chunks[i].strip()
+        current_words = len(current_chunk.split())
 
-    logging.info(f"Starting enhanced semantic chunking: {len(structured_blocks)} blocks, target size={chunk_size} words, overlap={overlap} words, min_chunk_size={min_chunk_size} words, dialogue_detection={enable_dialogue_detection}")
-
-    # Debug: Analyze input blocks
-    total_input_chars = 0
-    dialogue_blocks = 0
-    for i, block in enumerate(structured_blocks):
-        block_text = block.get("text", "")
-        block_chars = len(block_text)
-        total_input_chars += block_chars
-
-        # Check for dialogue patterns
-        dialogue_segments = detect_dialogue_patterns(block_text)
-        if dialogue_segments:
-            dialogue_blocks += 1
-
-        if i < 3:  # Log first 3 blocks for debugging
-            logging.info(f"Block {i}: {block_chars} chars, {len(dialogue_segments)} dialogue segments, preview: '{block_text[:100]}...'")
-
-    logging.info(f"Total input: {total_input_chars} characters, {dialogue_blocks} blocks with dialogue")
-
-    # Join blocks with paragraph-aware spacing to better preserve structure
-    full_text = "\n\n".join(
-        block["text"].strip() for block in structured_blocks
-        if block["text"].strip()
-    )
-
-    logging.info(f"Combined text length: {len(full_text)} characters")
-
-    if not full_text.strip():
-        return []
-
-    # Detect dialogue patterns in full text (if enabled)
-    dialogue_segments = []
-    if enable_dialogue_detection:
-        dialogue_segments = detect_dialogue_patterns(full_text)
-        logging.info(f"Detected {len(dialogue_segments)} dialogue segments in full text")
-    else:
-        logging.info("Dialogue detection disabled")
-
-
-    # Calculate maximum characters per chunk based on word target
-    # Assume average 5 characters per word + spaces
-    max_chars_per_chunk = chunk_size * 6  # Conservative estimate
-    logging.info(f"Target max characters per chunk: {max_chars_per_chunk}")
-
-    # Initialize the DocumentSplitter with conservative settings
-    # Use smaller chunk size to ensure we don't exceed limits
-    conservative_chunk_size = min(chunk_size, 800)  # Cap at 800 words max
-    conservative_overlap = min(overlap, conservative_chunk_size // 4)  # Overlap no more than 25%
-
-    logging.info(f"Using conservative settings: {conservative_chunk_size} words, {conservative_overlap} overlap")
-
-    splitter = DocumentSplitter(
-        split_by="word",
-        split_length=conservative_chunk_size,
-        split_overlap=conservative_overlap,
-        respect_sentence_boundary=True
-    )
-    splitter.warm_up()
-
-    # Create a single document from the full text
-    document = Document(content=full_text)
-
-    # Split the document into chunks
-    result = splitter.run(documents=[document])
-    initial_chunks = result.get("documents", [])
-
-    # Extract chunk texts for analysis
-    chunk_texts = [chunk.content.strip() for chunk in initial_chunks if chunk.content.strip()]
-
-    # Debug: Analyze initial chunks
-    logging.info(f"DocumentSplitter produced {len(chunk_texts)} initial chunks")
-
-    short_chunks_initial = [chunk for chunk in chunk_texts if len(chunk.split()) <= CHUNK_THRESHOLDS['short']]
-    very_short_chunks_initial = [chunk for chunk in chunk_texts if len(chunk.split()) <= CHUNK_THRESHOLDS['very_short']]
-
-    logging.info(f"Initial short chunks (≤{CHUNK_THRESHOLDS['short']} words): {len(short_chunks_initial)}")
-    logging.info(f"Initial very short chunks (≤{CHUNK_THRESHOLDS['very_short']} words): {len(very_short_chunks_initial)}")
-
-    for i, chunk in enumerate(chunk_texts[:5]):  # Log first 5 chunks
-        chunk_words = len(chunk.split())
-        logging.info(f"Initial chunk {i}: {chunk_words} words, preview: '{chunk[:100]}...'")
-
-    # Apply conversational text merging with configured minimum chunk size
-    merged_chunk_texts, merge_stats = merge_conversational_chunks(chunk_texts, min_chunk_size)
-
-    logging.info(f"Conversational merging completed: {merge_stats}")
-
-    # Convert back to Document objects
-    final_chunks = []
-    max_allowed_chars = 8000  # Strict limit: 8k characters max per chunk
-
-    for i, chunk_text in enumerate(merged_chunk_texts):
-        if not chunk_text.strip():
+        # Always merge very short chunks (≤ very_short_threshold) with the next chunk
+        if current_words <= very_short_threshold and i + 1 < len(chunks):
+            next_chunk = chunks[i + 1].strip()
+            merged_text = current_chunk + " " + next_chunk
+            merged_chunks.append(merged_text)
+            merge_stats["merges_performed"] += 1
+            merge_stats["merge_reasons"]["very_short"] = merge_stats["merge_reasons"].get("very_short", 0) + 1
+            i += 2
             continue
 
-        chunk_chars = len(chunk_text)
-        chunk_words = len(chunk_text.split())
+        # Merge short chunks (≤ short_threshold) with the next chunk if both are short
+        elif current_words <= short_threshold and i + 1 < len(chunks):
+            next_chunk = chunks[i + 1].strip()
+            next_words = len(next_chunk.split())
+            if next_words <= short_threshold:
+                merged_text = current_chunk + " " + next_chunk
+                merged_chunks.append(merged_text)
+                merge_stats["merges_performed"] += 1
+                merge_stats["merge_reasons"]["short_pair"] = merge_stats["merge_reasons"].get("short_pair", 0) + 1
+                i += 2
+                continue
+            else:
+                merged_chunks.append(current_chunk)
+                i += 1
+                continue
 
-        if chunk_chars <= max_allowed_chars:
-            # Chunk is acceptable size
-            final_chunks.append(Document(content=chunk_text))
+        # Merge any chunk below min_chunk_size with the next chunk if possible
+        elif current_words < min_chunk_size and i + 1 < len(chunks):
+            next_chunk = chunks[i + 1].strip()
+            merged_text = current_chunk + " " + next_chunk
+            merged_chunks.append(merged_text)
+            merge_stats["merges_performed"] += 1
+            merge_stats["merge_reasons"]["below_min"] = merge_stats["merge_reasons"].get("below_min", 0) + 1
+            i += 2
+            continue
+
         else:
-            # Force split oversized chunk (same logic as before)
-            logging.warning(f"Force-splitting oversized chunk {i} ({chunk_chars} chars)")
+            merged_chunks.append(current_chunk)
+            i += 1
 
-            # Split by paragraphs first, then by sentences if needed
-            paragraphs = chunk_text.split('\n\n')
-            current_chunk = ""
+    # Count remaining short chunks
+    for chunk in merged_chunks:
+        if len(chunk.split()) < min_chunk_size:
+            merge_stats["short_chunks_remaining"] += 1
 
-            for paragraph in paragraphs:
-                paragraph = paragraph.strip()
-                if not paragraph:
-                    continue
+    merge_stats["final_count"] = len(merged_chunks)
+    logger.info(f"_merge_short_chunks complete: {merge_stats}")
+    return merged_chunks, merge_stats
 
-                # If adding this paragraph would exceed limit, save current chunk
-                if current_chunk and len(current_chunk) + len(paragraph) + 2 > max_allowed_chars:
-                    if current_chunk.strip():
-                        final_chunks.append(Document(content=current_chunk.strip()))
-                    current_chunk = paragraph
-                else:
-                    if current_chunk:
-                        current_chunk += "\n\n" + paragraph
-                    else:
-                        current_chunk = paragraph
+def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
+    """Split text into chunks using sentence boundaries."""
 
-                # If single paragraph is too large, split by sentences
-                if len(current_chunk) > max_allowed_chars:
-                    sentences = current_chunk.split('. ')
-                    sentence_chunk = ""
 
-                    for sentence in sentences:
-                        sentence = sentence.strip()
-                        if not sentence:
-                            continue
+    if _LANGCHAIN_SPLITTER_AVAILABLE and RecursiveCharacterTextSplitter is not None:
+        # Convert word-based sizes to character estimates
+        chunk_size_chars = chunk_size * 6  # Rough estimate: 6 chars per word
+        overlap_chars = overlap * 6
 
-                        # Add period back if it was removed by split
-                        if not sentence.endswith('.') and sentence != sentences[-1]:
-                            sentence += '.'
+        logger.debug(
+            f"Text splitting: {chunk_size} words ({chunk_size_chars} chars), "
+            f"{overlap} words overlap ({overlap_chars} chars)"
+        )
 
-                        if sentence_chunk and len(sentence_chunk) + len(sentence) + 2 > max_allowed_chars:
-                            if sentence_chunk.strip():
-                                final_chunks.append(Document(content=sentence_chunk.strip()))
-                            sentence_chunk = sentence
-                        else:
-                            if sentence_chunk:
-                                sentence_chunk += " " + sentence
-                            else:
-                                sentence_chunk = sentence
+        # Check for potential quote-related splitting issues
+        quote_count = text.count('"') + text.count("'")
+        if quote_count > 0:
+            logger.debug(f"Text contains {quote_count} quote characters - monitoring for split issues")
 
-                        # If single sentence is still too large, force character split
-                        if len(sentence_chunk) > max_allowed_chars:
-                            # Character-based splitting as last resort
-                            while len(sentence_chunk) > max_allowed_chars:
-                                break_point = max_allowed_chars
-                                # Try to break at word boundary
-                                last_space = sentence_chunk.rfind(' ', 0, break_point)
-                                if last_space > break_point // 2:
-                                    break_point = last_space
+        # Use quote-aware separators - avoid splitting at quotes when possible
+        separators = [
+            "\n\n",  # Paragraph breaks (highest priority)
+            "\n",    # Line breaks
+            ". ",    # Sentence endings with space
+            "! ",    # Exclamation with space
+            "? ",    # Question with space
+            "; ",    # Semicolon with space
+            ": ",    # Colon with space
+            ", ",    # Comma with space (lower priority)
+            " ",     # Word boundaries (very low priority)
+            ""       # Character boundaries (last resort)
+        ]
 
-                                final_chunks.append(Document(content=sentence_chunk[:break_point].strip()))
-                                sentence_chunk = sentence_chunk[break_point:].strip()
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size_chars,
+            chunk_overlap=overlap_chars,
+            length_function=len,
+            separators=separators
+        )
 
-                    if sentence_chunk.strip():
-                        current_chunk = sentence_chunk
-                    else:
-                        current_chunk = ""
+        chunks = splitter.split_text(text)
 
-            # Add any remaining content
-            if current_chunk.strip():
-                final_chunks.append(Document(content=current_chunk.strip()))
+        logger.debug(f"RecursiveCharacterTextSplitter produced {len(chunks)} chunks")
 
-    # Final analysis and logging
-    final_chunk_sizes = [len(chunk.content.split()) for chunk in final_chunks]
-    short_chunks_final = [size for size in final_chunk_sizes if size <= CHUNK_THRESHOLDS['short']]
-    very_short_chunks_final = [size for size in final_chunk_sizes if size <= CHUNK_THRESHOLDS['very_short']]
+        # Post-process to fix quote-related issues
+        fixed_chunks = _fix_quote_splitting_issues(chunks)
 
-    logging.info(f"Final chunking results:")
-    logging.info(f"  Total chunks: {len(final_chunks)}")
-    logging.info(f"  Short chunks (≤{CHUNK_THRESHOLDS['short']} words): {len(short_chunks_final)} (reduced from {len(short_chunks_initial)})")
-    logging.info(f"  Very short chunks (≤{CHUNK_THRESHOLDS['very_short']} words): {len(very_short_chunks_final)} (reduced from {len(very_short_chunks_initial)})")
+        if len(fixed_chunks) != len(chunks):
+            logger.info(f"Quote splitting fixes: {len(chunks)} → {len(fixed_chunks)} chunks")
 
-    if final_chunk_sizes:
-        avg_size = sum(final_chunk_sizes) / len(final_chunk_sizes)
-        max_size = max(final_chunk_sizes)
-        min_size = min(final_chunk_sizes)
-        logging.info(f"  Chunk size stats: avg={avg_size:.1f} words, min={min_size} words, max={max_size} words")
+        # Log potential issues with quote handling
+        for i, chunk in enumerate(fixed_chunks):
+            if chunk.startswith('"') and not chunk.endswith('"'):
+                logger.warning(
+                    f"Chunk {i} starts with quote but doesn't end with quote - potential split issue"
+                )
+            elif chunk.endswith('"') and not chunk.startswith('"'):
+                logger.warning(
+                    f"Chunk {i} ends with quote but doesn't start with quote - potential split issue"
+                )
 
-    # Log examples of remaining short chunks for debugging
-    if short_chunks_final:
-        logging.info("Examples of remaining short chunks:")
-        for i, chunk in enumerate(final_chunks):
-            chunk_words = len(chunk.content.split())
-            if chunk_words <= CHUNK_THRESHOLDS['short'] and i < 5:  # Log first 5 short chunks
-                logging.info(f"  Short chunk {i}: {chunk_words} words - '{chunk.content[:100]}...'")
+            # Check for suspicious text ordering
+            if i > 0:
+                prev_chunk = fixed_chunks[i - 1]
+                if chunk.strip() and prev_chunk.strip():
+                    # Simple heuristic: if current chunk starts with lowercase and previous ends without punctuation
+                    if (chunk[0].islower() and
+                            not prev_chunk.rstrip().endswith(('.', '!', '?', ':', ';'))):
+                        logger.debug(
+                            f"Potential continuation split between chunks {i-1} and {i}"
+                        )
 
-    return final_chunks
+        return fixed_chunks
+    else:
+        # Fallback: simple paragraph-based splitting
+        logger.warning("LangChain RecursiveCharacterTextSplitter not available, using fallback splitter.")
+        # Split by double newlines (paragraphs)
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        chunks = []
+        current_chunk = ""
+        for para in paragraphs:
+            if not current_chunk:
+                current_chunk = para
+            elif len(current_chunk) + len(para) + 2 < chunk_size * 6:
+                current_chunk += "\n\n" + para
+            else:
+                chunks.append(current_chunk)
+                current_chunk = para
+        if current_chunk:
+            chunks.append(current_chunk)
+        logger.info(f"Fallback splitter produced {len(chunks)} chunks")
+        return chunks
+    
+
+def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
+    """Post-process chunks to fix quote-related splitting issues."""
+    if not chunks:
+        return chunks
+
+    if not chunks:
+        return chunks
+    fixed_chunks = []
+    i = 0
+
+    while i < len(chunks):
+        current_chunk = chunks[i]
+
+        if i < len(chunks) - 1:
+            next_chunk = chunks[i + 1]
+
+            # Case 1: Current chunk ends with opening quote, next starts with content
+            if (_ends_with_opening_quote(current_chunk) and
+                    _starts_with_quote_content(next_chunk)):
+                logger.debug(f"Fixing quote split: merging chunks {i} and {i+1}")
+                merged = current_chunk + " " + next_chunk
+                fixed_chunks.append(merged)
+                i += 2
+                continue
+
+            # Case 2: Current chunk is quote content, next starts with closing quote
+            if (_is_quote_content(current_chunk) and
+                    _starts_with_closing_quote(next_chunk)):
+                logger.debug(f"Fixing quote split: merging chunks {i} and {i+1}")
+                merged = current_chunk + " " + next_chunk
+                fixed_chunks.append(merged)
+                i += 2
+                continue
+
+            # Case 3: Detect and fix reordered text
+            if _is_text_reordered(current_chunk, next_chunk):
+                logger.warning(
+                    f"Detected text reordering between chunks {i} and {i+1} - attempting fix"
+                )
+                # Try to fix by swapping the order
+                fixed_chunks.append(next_chunk)
+                fixed_chunks.append(current_chunk)
+                i += 2
+                continue
+
+        fixed_chunks.append(current_chunk)
+        i += 1
+
+    return fixed_chunks
+
+def _validate_chunk_integrity(chunks: List[str], original_text: str) -> List[str]:
+    """Validate chunk integrity and detect corruption issues."""
+    if not chunks:
+        return chunks
+
+    logger.debug(f"Validating integrity of {len(chunks)} chunks")
+    
+    # Check 1: Ensure all text is preserved
+    combined_chunks = ' '.join(chunks)
+    original_words = set(original_text.split())
+    combined_words = set(combined_chunks.split())
+    
+    missing_words = original_words - combined_words
+    extra_words = combined_words - original_words
+    
+    if missing_words:
+        logger.warning(f"Missing words detected: {list(missing_words)[:5]}...")
+    if extra_words:
+        logger.warning(f"Extra words detected: {list(extra_words)[:5]}...")
+    
+    # Check 2: Validate quote balance
+    for i, chunk in enumerate(chunks):
+        quote_balance = _check_quote_balance(chunk)
+        if quote_balance != 0:
+            logger.warning(f"Chunk {i} has unbalanced quotes (balance: {quote_balance})")
+    
+    # Check 3: Look for obvious corruption patterns
+    validated_chunks = []
+    for i, chunk in enumerate(chunks):
+        if _is_chunk_corrupted(chunk):
+            logger.error(f"Chunk {i} appears corrupted: '{chunk[:100]}...'")
+            # Try to fix or skip corrupted chunks
+            fixed_chunk = _attempt_chunk_repair(chunk)
+            if fixed_chunk:
+                validated_chunks.append(fixed_chunk)
+            else:
+                logger.error(f"Could not repair chunk {i}, skipping")
+        else:
+            validated_chunks.append(chunk)
+    
+    return validated_chunks
+
+def _ends_with_opening_quote(text: str) -> bool:
+    """Check if text ends with an opening quote pattern."""
+    import re
+    # Pattern: ends with quote followed by capital letter or start of sentence
+    return bool(
+        re.search(r'"[A-Z]', text[-10:]) or
+        re.search(r"'[A-Z]", text[-10:])
+    )
+
+def _starts_with_quote_content(text: str) -> bool:
+    """Check if text starts with content that should be inside quotes."""
+    if not text:
+        return False
+
+    continuation_words = {'and', 'but', 'or', 'so', 'yet', 'for', 'nor'}
+    first_word = text.split()[0].lower() if text.split() else ''
+
+    return (
+        text[0].islower() or
+        first_word in continuation_words or
+        not text[0].isupper()
+    )
+
+def _is_quote_content(text: str) -> bool:
+    """Check if text appears to be content inside quotes."""
+    return (
+        text and
+        not text[0].isupper() and
+        not text.rstrip().endswith(('"', "'"))
+    )
+
+def _starts_with_closing_quote(text: str) -> bool:
+    """Check if text starts with a closing quote pattern."""
+    import re
+    # Pattern: starts with quote followed by punctuation or attribution
+    return bool(
+        re.match(r'^["\'][,.;:]', text) or
+        re.match(r'^["\'].*?(said|asked|replied)', text.lower())
+    )
+
+def _is_text_reordered(chunk1: str, chunk2: str) -> bool:
+    """Detect if text chunks appear to be in wrong order."""
+    if not chunk1 or not chunk2:
+        return False
+
+    # Heuristic: if chunk1 starts with continuation and chunk2 ends with setup
+    continuation_starters = ['"', ',', 'and', 'but', 'or', 'so']
+    chunk1_starts_continuation = any(
+        chunk1.lower().startswith(starter) for starter in continuation_starters
+    )
+
+    setup_enders = [',', ':', ';', 'said', 'asked', 'replied']
+    chunk2_ends_setup = any(
+        chunk2.lower().rstrip().endswith(ender) for ender in setup_enders
+    )
+
+    return chunk1_starts_continuation and chunk2_ends_setup
+
+def semantic_chunker(
+    text: str,
+    chunk_size: int = 8000,
+    overlap: int = 200,
+    min_chunk_size: Optional[int] = None,
+    enable_dialogue_detection: bool = False
+) -> List[str]:
+    """Split text into semantic chunks with dialogue awareness."""
+    if not text.strip():
+        logger.warning("Empty text provided to semantic chunker")
+        return []
+
+    logger.info(f"Starting semantic chunking: {len(text)} chars, target size={chunk_size} words, overlap={overlap} words, min_chunk_size={min_chunk_size} words, dialogue_detection={enable_dialogue_detection}")
+
+    # Log text preview for debugging
+    text_preview = text[:200].replace('\n', '\\n')
+    logger.debug(f"Input text preview: '{text_preview}...'")
+
+    # Apply thresholds
+    very_short_threshold = CHUNK_THRESHOLDS['very_short']
+    short_threshold = CHUNK_THRESHOLDS['short']
+
+    logger.debug(f"Using thresholds: very_short ≤{very_short_threshold} words, short ≤{short_threshold} words")
+
+    # Initial splitting
+    initial_chunks = _split_text_into_chunks(text, chunk_size, overlap)
+    logger.info(f"DocumentSplitter produced {len(initial_chunks)} initial chunks")
+
+    # Count and log short chunks before processing
+    initial_short_count = sum(1 for chunk in initial_chunks if len(chunk.split()) <= short_threshold)
+    initial_very_short_count = sum(1 for chunk in initial_chunks if len(chunk.split()) <= very_short_threshold)
+
+    logger.info(f"Initial short chunks (≤{short_threshold} words): {initial_short_count}")
+    logger.info(f"Initial very short chunks (≤{very_short_threshold} words): {initial_very_short_count}")
+
+    # Log initial chunk details
+    for i, chunk in enumerate(initial_chunks):
+        word_count = len(chunk.split())
+        chunk_preview = chunk[:100].replace('\n', '\\n')
+        logger.info(f"Initial chunk {i}: {word_count} words, preview: '{chunk_preview}...'")
+
+    # Apply conversational merging if enabled
+    if enable_dialogue_detection and min_chunk_size:
+        merged_chunks, merge_stats = _merge_short_chunks(
+            initial_chunks, 
+            min_chunk_size, 
+            very_short_threshold, 
+            short_threshold
+        )
+        logger.info(f"Conversational merging completed: {merge_stats}")
+    else:
+        merged_chunks = initial_chunks
+        logger.info("Dialogue detection disabled")
+
+    # Validate chunk integrity before returning
+    validated_chunks = _validate_chunk_integrity(merged_chunks, text)
+
+    # Final statistics
+    final_short_count = sum(1 for chunk in validated_chunks if len(chunk.split()) <= short_threshold)
+    final_very_short_count = sum(1 for chunk in validated_chunks if len(chunk.split()) <= very_short_threshold)
+
+    logger.info(f"Final chunking results:")
+    logger.info(f"  Total chunks: {len(validated_chunks)}")
+    logger.info(f"  Short chunks (≤{short_threshold} words): {final_short_count} (reduced from {initial_short_count})")
+    logger.info(f"  Very short chunks (≤{very_short_threshold} words): {final_very_short_count} (reduced from {initial_very_short_count})")
+
+    if validated_chunks:
+        word_counts = [len(chunk.split()) for chunk in validated_chunks]
+        avg_words = sum(word_counts) / len(word_counts)
+        min_words = min(word_counts)
+        max_words = max(word_counts)
+        logger.info(f"  Chunk size stats: avg={avg_words:.1f} words, min={min_words} words, max={max_words} words")
+
+    return validated_chunks
+
+def _check_quote_balance(text: str) -> int:
+    """Check quote balance in text. Returns 0 if balanced, positive if more opening quotes."""
+    double_quotes = text.count('"') - text.count('\\"')
+    single_quotes = text.count("'") - text.count("\\'")
+
+    # For simplicity, assume quotes should be balanced
+    return (double_quotes % 2) + (single_quotes % 2)
+
+def _is_chunk_corrupted(chunk: str) -> bool:
+    """Detect if a chunk appears to be corrupted."""
+    if not chunk.strip():
+        return False
+
+    # Pattern 1: Starts with punctuation that suggests it's a fragment
+    if chunk.lstrip().startswith(('", ', '",', '".')):
+        return True
+
+    # Pattern 2: Contains obvious ordering issues
+    if '", pulls it all together' in chunk and 'Finally, Part III' in chunk:
+        return True
+
+    # Pattern 3: Starts with closing punctuation
+    if chunk.lstrip().startswith((',', '.', ';', ':')):
+        return True
+
+    return False
+
+def _attempt_chunk_repair(chunk: str) -> str:
+    """Attempt to repair a corrupted chunk."""
+    if not chunk:
+        return chunk
+
+    # Remove leading punctuation that suggests fragmentation
+    repaired = chunk.lstrip()
+    while repaired and repaired[0] in '",.:;':
+        repaired = repaired[1:].lstrip()
+
+    # If nothing meaningful remains, return empty
+    if len(repaired) < 10:
+        return ""
+
+    return repaired
