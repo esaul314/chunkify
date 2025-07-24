@@ -37,7 +37,6 @@ def collapse_artifact_breaks(text: str) -> str:
     # Remove unwanted breaks after ., _, etc. (e.g., systems._\nThis → systems. This)
     return re.sub(r'([._])\n(\w)', r'\1 \2', text)
 
-
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
@@ -51,7 +50,6 @@ def collapse_single_newlines(text: str) -> str:
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
     return text
-
 
 def normalize_ligatures(text: str) -> str:
     return ftfy.fix_text(text)
@@ -138,7 +136,6 @@ def clean_paragraph(paragraph: str) -> str:
         consolidate_whitespace,
     )
 
-
 def clean_text(text: str) -> str:
     """
     Cleans multi-paragraph text, preserving paragraph breaks,
@@ -151,16 +148,22 @@ def clean_text(text: str) -> str:
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
     use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', '').lower() in ('true', '1', 'yes', 'on')
+    logger.debug(f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}")
+    logger.debug(f"use_pymupdf4llm evaluated to: {use_pymupdf4llm}")
+    
     if use_pymupdf4llm:
         logger.debug("Using PyMuPDF4LLM text cleaning path")
         try:
             from .pymupdf4llm_integration import is_pymupdf4llm_available, clean_text_with_pymupdf4llm
             if is_pymupdf4llm_available():
+                logger.debug("PyMuPDF4LLM is available, calling clean_text_with_pymupdf4llm")
                 result = clean_text_with_pymupdf4llm(text)
                 logger.debug(f"PyMuPDF4LLM result preview: {repr(result[:100])}")
                 return result
-        except Exception:
-            logger.debug("PyMuPDF4LLM cleaning failed, falling back to traditional")
+            else:
+                logger.debug("PyMuPDF4LLM not available, falling back to traditional")
+        except Exception as e:
+            logger.debug(f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional")
             pass
 
     logger.debug("Using traditional text cleaning path")
@@ -168,6 +171,8 @@ def clean_text(text: str) -> str:
     # Normalize newlines first
     logger.debug("Calling normalize_newlines")
     text = normalize_newlines(text)
+    logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+    
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)

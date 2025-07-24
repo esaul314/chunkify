@@ -400,6 +400,9 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
 
     # Apply PyMuPDF4LLM enhancement if requested and beneficial
     use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM','').lower() not in ('false','0','no','off')
+    logger.debug(f"PDF_CHUNKER_USE_PYMUPDF4LLM environment check: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}")
+    logger.debug(f"use_pymupdf4llm evaluated to: {use_pymupdf4llm}")
+    
     enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
     enhanced_blocks = None
 
@@ -439,13 +442,6 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                             logger.debug(f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}")
                             block['text'] = clean_text(block['text'])
                             logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
-                    logger.warning("PyMuPDF4LLM enhancement quality degraded, trying fallback strategy")
-                    fallback_blocks, fallback_stats = apply_pymupdf4llm_fallback(merged_blocks, filepath)
-                    if fallback_stats.get("enhanced", 0) > 0:
-                        logger.info(f"PyMuPDF4LLM fallback successful: {fallback_stats}")
-                        merged_blocks = fallback_blocks
-                    else:
-                        logger.warning("PyMuPDF4LLM fallback also failed, using original blocks")
             else:
                 logger.warning("PyMuPDF4LLM enhancement failed, falling back to traditional text cleaning")
                 logger.debug("Ensuring traditional text cleaning pipeline is used for all blocks")
@@ -456,13 +452,6 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                         logger.debug(f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}")
                         block['text'] = clean_text(block['text'])
                         logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
-                logger.warning("PyMuPDF4LLM enhancement failed, trying fallback strategy")
-                fallback_blocks, fallback_stats = apply_pymupdf4llm_fallback(merged_blocks, filepath)
-                if fallback_stats.get("enhanced", 0) > 0:
-                    logger.info(f"PyMuPDF4LLM fallback successful: {fallback_stats}")
-                    merged_blocks = fallback_blocks
-                else:
-                    logger.warning("PyMuPDF4LLM fallback also failed, using original blocks")
         except Exception as e:
             logger.error(f"PyMuPDF4LLM enhancement failed with error: {e}")
             logger.info("Falling back to traditional text cleaning pipeline")
@@ -474,10 +463,12 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                     logger.debug(f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}")
                     block['text'] = clean_text(block['text'])
                     logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
-            logger.info("Continuing with original extraction")
     elif use_pymupdf4llm:
         logger.info("PyMuPDF4LLM enhancement skipped - not beneficial for this content")
         logger.debug("Using traditional text cleaning pipeline")
+        enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
+    else:
+        logger.debug("PyMuPDF4LLM disabled by environment variable")
         enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
 
     # Log final enhancement statistics
