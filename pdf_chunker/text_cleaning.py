@@ -7,47 +7,51 @@ from typing import List, Callable, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Simple pipe utility to apply a series of functions to a value
 def pipe(value, *funcs):
-    """
-    Thread `value` through each function in `funcs` sequentially.
-    """
     for fn in funcs:
         value = fn(value)
     return value
 
-# Patterns for splitting and cleaning
-PARAGRAPH_SPLIT = re.compile(r'\n{2,}')
-SINGLE_LINE_BREAK = re.compile(r'(?<!\n)\n(?!\n)')
+# Patterns
+PARAGRAPH_BREAK = re.compile(r'\n{2,}')
 CONTROL_CHARS = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]')
-
-# Hyphenation break fix patterns
-HYPHEN_BREAK_PATTERNS: List[Tuple[re.Pattern, str]] = [
-    (re.compile(r'([A-Za-z])\-\s*\n\s*([a-z])'), r'\1\2'),
-    (re.compile(r'([A-Za-z])\-\s+([a-z])'),  r'\1\2'),
-]
 
 # Quote normalization patterns
 QUOTE_PATTERNS: List[Tuple[re.Pattern, str]] = [
-    (re.compile(r'(\w)"([A-Z])'),      r'\1 "\2'),
-    (re.compile(r'"(\w)'),             r'" \1'),
-    (re.compile(r'"{2,}'),              '"'),
-    (re.compile(r"'{2,}"),             "'"),
+    (re.compile(r'(\w)"([A-Z])'), r'\1 "\2'),
+    (re.compile(r'"(\w)'), r'" \1'),
+    (re.compile(r'"{2,}'), '"'),
+    (re.compile(r"'{2,}"), "'"),
     (re.compile(r'\s+"([^\"]*?)"\s+'), r' "\1" '),
 ]
 
+# Hyphenation (handles soft hyphens at line breaks and artifacts)
+def fix_hyphenated_linebreaks(text: str) -> str:
+    # Handle: word-reali-\nties → word-realities
+    text = re.sub(r'(\w)[‐-]\n(\w)', r'\1\2', text)
+    # Remove soft hyphens
+    text = text.replace('\u00ad', '')
+    return text
+
+def collapse_artifact_breaks(text: str) -> str:
+    # Remove unwanted breaks after ., _, etc. (e.g., systems._\nThis → systems. This)
+    return re.sub(r'([._])\n(\w)', r'\1 \2', text)
+
+
+def collapse_single_newlines(text: str) -> str:
+    # First, protect paragraph breaks (2+ newlines) by replacing with placeholder
+    text = re.sub(r'\n{2,}', '[[PARAGRAPH_BREAK]]', text)
+    # Replace all remaining single newlines with spaces
+    text = text.replace('\n', ' ')
+    # Restore paragraph breaks
+    text = text.replace('[[PARAGRAPH_BREAK]]', '\n\n')
+    return text
+    
 
 def normalize_ligatures(text: str) -> str:
-    """
-    Fix Unicode ligatures and encoding issues via ftfy.
-    """
     return ftfy.fix_text(text)
 
-
 def normalize_quotes(text: str) -> str:
-    """
-    Convert smart quotes to ASCII and fix spacing/patterns.
-    """
     if not text:
         return text
     mapping = {
@@ -60,41 +64,13 @@ def normalize_quotes(text: str) -> str:
         text = pattern.sub(repl, text)
     return text
 
-
-def fix_hyphenated_breaks(text: str) -> str:
-    """
-    Merge hyphenated splits across line breaks or spaces.
-    """
-    for pattern, repl in HYPHEN_BREAK_PATTERNS:
-        text = pattern.sub(repl, text)
-    return text
-
-
 def remove_control_characters(text: str) -> str:
-    """
-    Strip out ASCII control characters that break JSON.
-    """
     return CONTROL_CHARS.sub('', text)
 
-
-def collapse_single_line_breaks(text: str) -> str:
-    """
-    Replace single newlines (not paragraphs) with spaces.
-    """
-    return SINGLE_LINE_BREAK.sub(' ', text)
-
-
 def consolidate_whitespace(text: str) -> str:
-    """
-    Collapse spaces/tabs into single spaces and trim edges.
-    """
     return re.sub(r'[ \t\r\f\v]+', ' ', text).strip()
 
-
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
-    """
-    Check JSON serialization, control chars, and quote balance.
-    """
     issues: List[str] = []
     try:
         json.dumps({"text": text}, ensure_ascii=False)
@@ -116,11 +92,7 @@ def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
         issues.append("Unicode encoding issues detected")
     return (len(issues) == 0, issues)
 
-
 def apply_json_safety_fixes(text: str) -> str:
-    """
-    Remove/fix chars and quote fragments to satisfy JSON safety.
-    """
     fixed = CONTROL_CHARS.sub('', text)
     if fixed.startswith('", '):
         fixed = fixed[3:]
@@ -139,33 +111,30 @@ def apply_json_safety_fixes(text: str) -> str:
             fixed = fixed[1:]
     return fixed
 
-
 def clean_paragraph(paragraph: str) -> str:
     """
-    Clean a paragraph: control chars, ligatures, hyphens,
-    collapse lines, normalize quotes, and whitespace.
+    Cleans a single paragraph: removes mid-line hyphens, artifacts,
+    collapses all newlines (if present) to spaces, and normalizes.
     """
-    pipeline: List[Callable[[str], str]] = [
-        remove_control_characters,
+    return pipe(
+        paragraph,
+        fix_hyphenated_linebreaks,
+        collapse_artifact_breaks,
+        lambda t: t.replace('\n', ' '),    # any internal newlines to space
         normalize_ligatures,
-        fix_hyphenated_breaks,
-        collapse_single_line_breaks,
         normalize_quotes,
+        remove_control_characters,
         consolidate_whitespace,
-    ]
-    return pipe(paragraph, *pipeline)
-
+    )
 
 def clean_text(text: str) -> str:
     """
-    Clean multi-paragraph text, preserving paragraph breaks and
-    normalizing content before final JSON safety.
+    Cleans multi-paragraph text, preserving paragraph breaks,
+    using clean_paragraph() for each paragraph.
     """
-    # Short-circuit empty input
     if not text or not text.strip():
         return ''
 
-    # Delegate to PyMuPDF4LLM if enabled
     use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', '').lower() in ('true', '1', 'yes', 'on')
     if use_pymupdf4llm:
         try:
@@ -175,14 +144,15 @@ def clean_text(text: str) -> str:
         except Exception:
             pass
 
-    # Split into paragraphs on two-or-more consecutive newlines
-    paragraphs = [p for p in PARAGRAPH_SPLIT.split(text) if p.strip()]
+    # Collapse single line breaks except paragraph breaks
+    text = collapse_single_newlines(text)
 
-    # Clean each paragraph and rejoin with two real newlines
+    # Split on paragraph breaks, clean each
+    paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     cleaned_paragraphs = [clean_paragraph(p) for p in paragraphs]
     result = "\n\n".join(cleaned_paragraphs)
 
-    # Ensure JSON-safe output
+    # Final JSON safety check
     safe, issues = validate_json_safety(result)
     if not safe:
         logger.warning(f"JSON safety issues detected: {issues}")
