@@ -230,6 +230,9 @@ def _convert_markdown_to_blocks(markdown_text: str, pdf_path: str) -> List[Dict[
     if not markdown_text or not markdown_text.strip():
         return []
 
+    # Import text cleaning function to collapse newlines
+    from .text_cleaning import collapse_single_newlines
+
     blocks = []
     lines = markdown_text.split('\n')
     current_block_lines = []
@@ -244,9 +247,11 @@ def _convert_markdown_to_blocks(markdown_text: str, pdf_path: str) -> List[Dict[
                 # Finish current block
                 block_text = '\n'.join(current_block_lines).strip()
                 if block_text:
+                    # Apply newline collapsing to clean the text
+                    cleaned_text = collapse_single_newlines(block_text)
                     blocks.append({
                         "type": current_block_type,
-                        "text": block_text,
+                        "text": cleaned_text,
                         "language": "en",  # Default language
                         "source": {
                             "filename": pdf_path,
@@ -264,9 +269,11 @@ def _convert_markdown_to_blocks(markdown_text: str, pdf_path: str) -> List[Dict[
             if current_block_lines:
                 block_text = '\n'.join(current_block_lines).strip()
                 if block_text:
+                    # Apply newline collapsing to clean the text
+                    cleaned_text = collapse_single_newlines(block_text)
                     blocks.append({
                         "type": current_block_type,
-                        "text": block_text,
+                        "text": cleaned_text,
                         "language": "en",
                         "source": {
                             "filename": pdf_path,
@@ -291,9 +298,11 @@ def _convert_markdown_to_blocks(markdown_text: str, pdf_path: str) -> List[Dict[
     if current_block_lines:
         block_text = '\n'.join(current_block_lines).strip()
         if block_text:
+            # Apply newline collapsing to clean the text
+            cleaned_text = collapse_single_newlines(block_text)
             blocks.append({
                         "type": current_block_type,
-                        "text": block_text,
+                        "text": cleaned_text,
                         "language": "en",
                         "source": {
                             "filename": pdf_path,
