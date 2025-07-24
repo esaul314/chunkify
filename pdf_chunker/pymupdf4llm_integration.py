@@ -32,15 +32,40 @@ def is_pymupdf4llm_available() -> bool:
     return PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
 
 
-def extract_with_pymupdf4llm(pdf_path: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """Extract text using PyMuPDF4LLM with enhanced error handling and validation."""
+
+def extract_with_pymupdf4llm(pdf_path: str, exclude_pages: set = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Extract text using PyMuPDF4LLM with enhanced error handling and validation.
+    Respects excluded pages by only processing non-excluded pages.
+    """
     logger.info(f"Starting PyMuPDF4LLM extraction for: {pdf_path}")
 
     try:
+        import fitz
         import pymupdf4llm
 
-        # Extract with PyMuPDF4LLM
-        md_text = pymupdf4llm.to_markdown(pdf_path)
+        # Determine which pages to process
+        doc = fitz.open(pdf_path)
+        all_pages = set(range(1, len(doc) + 1))
+        doc.close()
+        if exclude_pages:
+            pages_to_include = sorted(list(all_pages - set(exclude_pages)))
+        else:
+            pages_to_include = sorted(list(all_pages))
+
+        # PyMuPDF4LLM expects 0-based page indices
+        if pages_to_include:
+            zero_based_pages = [p - 1 for p in pages_to_include]
+        else:
+            zero_based_pages = []
+
+        # Extract with PyMuPDF4LLM, passing the correct pages
+        if zero_based_pages:
+            md_text = pymupdf4llm.to_markdown(pdf_path, pages=zero_based_pages)
+        else:
+            # If all pages are excluded, return empty
+            logger.warning("All pages are excluded; returning empty block list.")
+            return [], {"enhanced": 0, "failed": 0, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
 
         if not md_text or not md_text.strip():
             logger.warning("PyMuPDF4LLM returned empty text")
@@ -54,6 +79,10 @@ def extract_with_pymupdf4llm(pdf_path: str) -> Tuple[List[Dict[str, Any]], Dict[
         if not blocks:
             logger.warning("No blocks created from PyMuPDF4LLM output")
             return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
+
+        # Filter blocks to only include those from non-excluded pages (if possible)
+        # Since markdown output may not have page info, this is a best-effort; 
+        # but since we only processed the allowed pages, this should be sufficient.
 
         # Validate enhancement quality
         quality_score = _validate_enhancement_quality(blocks)
@@ -93,6 +122,7 @@ def extract_with_pymupdf4llm(pdf_path: str) -> Tuple[List[Dict[str, Any]], Dict[
         logger.error(f"PyMuPDF4LLM extraction failed: {e}")
         return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
 
+    
 
 def _validate_enhancement_quality(blocks: List[Dict[str, Any]]) -> float:
     """Validate the quality of PyMuPDF4LLM enhancement and return a quality score (0-1)."""
