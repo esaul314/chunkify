@@ -110,7 +110,7 @@ def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
 def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     """Check if the boundary between texts looks like a legitimate quote boundary."""
     # If current ends with closing quote and punctuation, and next starts with capital
-    if (curr_text.endswith(('."', ".'", '!"', "!'", '?"', "?\'")) and
+    if (curr_text.endswith(('."', ".'", '!"', "!'", '?"', "?'")) and
         next_text and next_text[0].isupper()):
         return True
     
@@ -154,7 +154,11 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     structured = []
     for b in filtered:
         raw_text = b[4]
+        logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
+        
         block_text = clean_text(raw_text)
+        logger.debug(f"Block text after cleaning: {repr(block_text[:50])}")
+        
         if not block_text:
             continue
 
@@ -186,11 +190,11 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
 def is_page_artifact(block: dict, page_num: int) -> bool:
     """
     Detect headers, footers, and page numbers that should be filtered out.
-    
+
     Args:
         block: Text block with metadata
         page_num: Current page number
-        
+
     Returns:
         True if block appears to be a page artifact
     """
@@ -357,12 +361,16 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
         for i, block in enumerate(page_blocks):
             text_preview = block.get('text', '')[:100].replace('\n', '\\n')
             logger.debug(f"Page {page_num}, Block {i}: {len(block.get('text', ''))} chars - {text_preview}...")
-
         all_blocks.extend(page_blocks)
 
     doc.close()
     logger.info(f"Raw extraction complete: {len(all_blocks)} total blocks from pages: {sorted(page_block_counts.keys())}")
     logger.debug(f"Page block distribution: {page_block_counts}")
+
+    # Debug: Log sample text from first few blocks to trace cleaning
+    for i, block in enumerate(all_blocks[:3]):
+        text_preview = block.get('text', '')[:100].replace('\n', '\\n')
+        logger.debug(f"Raw block {i} text preview: {repr(text_preview)}")
 
     # Defensive filter: ensure no excluded pages made it through
     filtered_blocks = []
@@ -378,16 +386,17 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     all_blocks = filtered_blocks
 
     # Apply improved continuation merging with page boundary handling
+    logger.debug("Starting block merging process")
     merged_blocks = merge_continuation_blocks(all_blocks)
 
     logger.debug(f"Total blocks after merging: {len(merged_blocks)}")
     # Log text flow analysis for debugging
-    for idx, block in enumerate(merged_blocks[:5]):  # Log first 5 blocks for debugging
-        text_preview = block.get("text", "")[:100].replace('\n', ' ')
+    for idx, block in enumerate(merged_blocks[:3]):  # Log first 3 blocks for debugging
+        text_preview = block.get("text", "")[:100].replace('\n', '\\n')
         page_info = block.get("source", {})
-        logger.debug(f"Block {idx}: page {page_info.get('page', 'unknown')}, "
+        logger.debug(f"Merged block {idx}: page {page_info.get('page', 'unknown')}, "
                      f"type {block.get('type', 'unknown')}, "
-                     f"text: '{text_preview}{'...' if len(block.get('text', '')) > 100 else ''}'")
+                     f"text: {repr(text_preview)}")
 
     # Apply PyMuPDF4LLM enhancement if requested and beneficial
     use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM','').lower() not in ('false','0','no','off')

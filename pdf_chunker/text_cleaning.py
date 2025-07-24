@@ -39,14 +39,19 @@ def collapse_artifact_breaks(text: str) -> str:
 
 
 def collapse_single_newlines(text: str) -> str:
+    logger.debug(f"collapse_single_newlines called with {len(text)} chars")
+    logger.debug(f"Input text preview: {repr(text[:100])}")
+    
     # First, protect paragraph breaks (2+ newlines) by replacing with placeholder
     text = re.sub(r'\n{2,}', '[[PARAGRAPH_BREAK]]', text)
     # Replace all remaining single newlines with spaces
     text = text.replace('\n', ' ')
     # Restore paragraph breaks
     text = text.replace('[[PARAGRAPH_BREAK]]', '\n\n')
-    return text
     
+    logger.debug(f"Output text preview: {repr(text[:100])}")
+    return text
+
 
 def normalize_ligatures(text: str) -> str:
     return ftfy.fix_text(text)
@@ -127,6 +132,7 @@ def clean_paragraph(paragraph: str) -> str:
         consolidate_whitespace,
     )
 
+
 def clean_text(text: str) -> str:
     """
     Cleans multi-paragraph text, preserving paragraph breaks,
@@ -135,20 +141,32 @@ def clean_text(text: str) -> str:
     if not text or not text.strip():
         return ''
 
+    logger.debug(f"clean_text called with {len(text)} chars")
+    logger.debug(f"Input text preview: {repr(text[:100])}")
+
     use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', '').lower() in ('true', '1', 'yes', 'on')
     if use_pymupdf4llm:
+        logger.debug("Using PyMuPDF4LLM text cleaning path")
         try:
             from .pymupdf4llm_integration import is_pymupdf4llm_available, clean_text_with_pymupdf4llm
             if is_pymupdf4llm_available():
-                return clean_text_with_pymupdf4llm(text)
+                result = clean_text_with_pymupdf4llm(text)
+                logger.debug(f"PyMuPDF4LLM result preview: {repr(result[:100])}")
+                return result
         except Exception:
+            logger.debug("PyMuPDF4LLM cleaning failed, falling back to traditional")
             pass
 
+    logger.debug("Using traditional text cleaning path")
+
     # Collapse single line breaks except paragraph breaks
+    logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)
+    logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
 
     # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
+    logger.debug(f"Split into {len(paragraphs)} paragraphs")
     cleaned_paragraphs = [clean_paragraph(p) for p in paragraphs]
     result = "\n\n".join(cleaned_paragraphs)
 
@@ -158,5 +176,6 @@ def clean_text(text: str) -> str:
         logger.warning(f"JSON safety issues detected: {issues}")
         result = apply_json_safety_fixes(result)
 
+    logger.debug(f"Final clean_text result preview: {repr(result[:100])}")
     return result
-
+    
