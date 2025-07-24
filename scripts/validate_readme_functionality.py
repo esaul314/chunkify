@@ -240,14 +240,14 @@ class READMEValidator:
                 clean_text,
                 normalize_ligatures,
                 normalize_quotes,
-                fix_hyphenated_breaks
+                fix_hyphenated_linebreaks
             )
 
             cleaning_functions = [
                 ("clean_text", clean_text),
                 ("normalize_ligatures", normalize_ligatures),
                 ("normalize_quotes", normalize_quotes),
-                ("fix_hyphenated_breaks", fix_hyphenated_breaks)
+                ("fix_hyphenated_linebreaks", fix_hyphenated_linebreaks)
             ]
 
             for func_name, func in cleaning_functions:

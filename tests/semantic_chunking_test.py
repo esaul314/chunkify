@@ -89,14 +89,14 @@ def test_semantic_chunking():
                 # Test refactored modules by importing them
                 print(f'  Testing refactored modules:')
                 try:
-                    from pdf_chunker.text_cleaning import _clean_text, _clean_paragraph
+                    from pdf_chunker.text_cleaning import clean_paragraph
                     from pdf_chunker.heading_detection import _detect_heading_fallback
                     from pdf_chunker.extraction_fallbacks import _assess_text_quality, _extract_with_pdftotext
                     print(f'    SUCCESS: All refactored modules imported successfully')
                     
                     # Test a few functions to ensure they work
                     test_text = 'This is a test para-graph with hyphenated words.'
-                    cleaned = _clean_paragraph(test_text)
+                    cleaned = clean_paragraph(test_text)
                     print(f'    Text cleaning test: "{test_text}" -> "{cleaned}"')
                     
                     heading_test = _detect_heading_fallback('Chapter 1: Introduction')
