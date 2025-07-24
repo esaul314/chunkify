@@ -14,12 +14,22 @@ from pathlib import Path
 def create_test_pdf():
     """Create a test PDF file using reportlab"""
     try:
+        # Debug import path and environment
+        import sys
+        print(f"Python executable: {sys.executable}")
+        print(f"Python path: {sys.path[:3]}...")  # Show first 3 entries
+        
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import letter
         from reportlab.lib.units import inch
-    except ImportError:
-        print("reportlab not available for PDF generation")
+        print("reportlab imported successfully")
+    except ImportError as e:
+        print(f"reportlab import failed: {e}")
         print("To install reportlab, run: pip install reportlab")
+        print("Creating placeholder PDF info file instead...")
+        return create_pdf_placeholder()
+    except Exception as e:
+        print(f"Unexpected error importing reportlab: {e}")
         print("Creating placeholder PDF info file instead...")
         return create_pdf_placeholder()
     
