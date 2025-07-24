@@ -1,8 +1,14 @@
 import argparse
 import json
+import logging
 from pdf_chunker.core import process_document
 
+# Set up logging to see debug messages
+logging.basicConfig(level=logging.DEBUG, format='%(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 def main():
+    logger.debug("Starting chunk_pdf script execution")
     parser = argparse.ArgumentParser("Chunk a document into structured JSONL.")
     parser.add_argument("document_file", help="Path to the document file (PDF or EPUB)")
     parser.add_argument("--chunk_size", type=int, default=400)
@@ -23,7 +29,9 @@ def main():
         help="List EPUB spine items with their indices and filenames (EPUB files only)."
     )
     args = parser.parse_args()
-
+    
+    logger.debug(f"Processing document: {args.document_file}")
+    logger.debug(f"Arguments: chunk_size={args.chunk_size}, overlap={args.overlap}, no_metadata={args.no_metadata}")
     # Handle spine listing for EPUB files
     if args.list_spines:
         if not args.document_file.lower().endswith('.epub'):
@@ -45,6 +53,8 @@ def main():
 
     # The flag is --no-metadata, so we pass the inverse to generate_metadata
     generate_metadata = not args.no_metadata
+    
+    logger.debug(f"Calling process_document with generate_metadata={generate_metadata}")
 
     chunks = process_document(
         args.document_file,
@@ -54,9 +64,12 @@ def main():
         exclude_pages=args.exclude_pages
     )
     
+    logger.debug(f"process_document returned {len(chunks)} chunks")
+    
     # Filter out any None or empty chunks
     valid_chunks = [chunk for chunk in chunks if chunk]
     
+    logger.debug(f"After filtering, have {len(valid_chunks)} valid chunks")
     # Use a more robust approach for JSONL output
     for chunk in valid_chunks:
         try:

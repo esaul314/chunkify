@@ -30,9 +30,14 @@ def process_document(
         exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
         min_chunk_size: Minimum chunk size in words (defaults to max(8, chunk_size // 10))
         enable_dialogue_detection: Whether to enable dialogue pattern detection for conversational text
-    """
 
+    """
+    
+    logger.debug(f"process_document called with filepath={filepath}, chunk_size={chunk_size}, overlap={overlap}")
+    logger.debug(f"generate_metadata={generate_metadata}, ai_enrichment={ai_enrichment}, exclude_pages={exclude_pages}")
+    
     # Set default minimum chunk size if not provided
+    
     if min_chunk_size is None:
         min_chunk_size = max(8, chunk_size // 10)  # Minimum 8 words or 10% of target size
 
@@ -60,7 +65,15 @@ def process_document(
 
     # 1. Structural Pass: Extract text into structured blocks, passing excluded pages
     from .pdf_parsing import extract_text_blocks_from_pdf
+    logger.debug(f"Starting PDF extraction for {filepath}")
     structured_blocks = extract_text_blocks_from_pdf(filepath, exclude_pages=exclude_pages)
+    logger.debug(f"PDF extraction complete: got {len(structured_blocks)} blocks")
+
+    # Debug: Show sample text from first few blocks to trace text cleaning
+    for i, block in enumerate(structured_blocks[:3]):
+        text_preview = block.get('text', '')[:100].replace('\n', '\\n')
+        logger.debug(f"Block {i} text preview: {repr(text_preview)}")
+
     print(f"DEBUG: After PDF extraction, got {len(structured_blocks)} blocks", file=sys.stderr)
 
     # Filter out any blocks from excluded pages (defensive, in case enhancement/fallbacks leak them)

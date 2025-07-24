@@ -29,9 +29,10 @@ class PyMuPDF4LLMExtractionError(Exception):
 
 def is_pymupdf4llm_available() -> bool:
     """Check if PyMuPDF4LLM is available for use"""
-    return PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
-
-
+    available = PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
+    logger.debug(f"PyMuPDF4LLM availability check: {available}")
+    return available
+    
 
 def extract_with_pymupdf4llm(pdf_path: str, exclude_pages: set = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -121,7 +122,6 @@ def extract_with_pymupdf4llm(pdf_path: str, exclude_pages: set = None) -> Tuple[
     except Exception as e:
         logger.error(f"PyMuPDF4LLM extraction failed: {e}")
         return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
-
     
 
 def _validate_enhancement_quality(blocks: List[Dict[str, Any]]) -> float:
@@ -260,6 +260,7 @@ def _convert_markdown_to_clean_text(markdown_text: str) -> str:
     return cleaned_text.strip()
 
 
+# Updated clean_text_with_pymupdf4llm function with debug logging
 def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> str:
     """
     Clean text using PyMuPDF4LLM's superior text processing capabilities.
@@ -274,14 +275,21 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
     Returns:
         Cleaned text with improved formatting
     """
+    logger.debug(f"clean_text_with_pymupdf4llm called with {len(text)} chars")
+    logger.debug(f"Input text preview: {repr(text[:100])}")
+    
     if not is_pymupdf4llm_available():
+        logger.debug("PyMuPDF4LLM not available, falling back to traditional cleaning")
         # Fallback to traditional text cleaning
         from .text_cleaning import clean_paragraph, cleanup_residual_continuations
         paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
         cleaned = '\n\n'.join(p for p in paragraphs if p)
-        return cleanup_residual_continuations(cleaned)
+        result = cleanup_residual_continuations(cleaned)
+        logger.debug(f"Traditional fallback result preview: {repr(result[:100])}")
+        return result
 
     try:
+        logger.debug("Using PyMuPDF4LLM text cleaning path")
         # Use only the traditional cleaning functions directly to avoid recursion
         from .text_cleaning import (
             remove_special_chars,
@@ -301,6 +309,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
                 paragraphs.append(p)
         cleaned = '\n\n'.join(paragraphs)
         cleaned = cleanup_residual_continuations(cleaned)
+        logger.debug(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")
         return cleaned
 
     except Exception as e:
@@ -308,7 +317,9 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         from .text_cleaning import clean_paragraph, cleanup_residual_continuations
         paragraphs = (clean_paragraph(p) for p in text.split('\n\n'))
         cleaned = '\n\n'.join(p for p in paragraphs if p)
-        return cleanup_residual_continuations(cleaned)
+        result = cleanup_residual_continuations(cleaned)
+        logger.debug(f"Exception fallback result preview: {repr(result[:100])}")
+        return result
 
 
 def should_apply_pymupdf4llm_cleaning(blocks: list[dict]) -> bool:
@@ -919,14 +930,12 @@ def apply_pymupdf4llm_fallback(
             "degraded": 0,
             "artifacts_filtered": 0
         }
-
     logger.info(
         f"Applying fallback enhancement to {len(problematic_blocks)} problematic blocks"
     )
 
     try:
         pymupdf4llm_blocks, _ = extract_with_pymupdf4llm(pdf_path)
-
         if not pymupdf4llm_blocks:
             logger.warning(
                 "PyMuPDF4LLM fallback failed - no blocks extracted"
@@ -938,17 +947,14 @@ def apply_pymupdf4llm_fallback(
                 "degraded": 0,
                 "artifacts_filtered": 0
             }
-
         # Merge the best parts of both extractions
         enhanced_blocks = _merge_extraction_results(
             original_blocks, pymupdf4llm_blocks, problematic_blocks
         )
-
         enhanced_count = len([
             idx for idx in problematic_blocks
             if idx < len(enhanced_blocks)
         ])
-
         stats = {
             "enhanced": enhanced_count,
             "failed": 0,
@@ -956,10 +962,8 @@ def apply_pymupdf4llm_fallback(
             "degraded": 0,
             "artifacts_filtered": 0
         }
-
         logger.info(f"PyMuPDF4LLM fallback completed: {stats}")
         return enhanced_blocks, stats
-
     except Exception as e:
         logger.error(f"PyMuPDF4LLM fallback failed: {e}")
         return original_blocks, {
@@ -978,17 +982,13 @@ def _merge_extraction_results(
 ) -> List[Dict[str, Any]]:
     """Merge original and PyMuPDF4LLM extraction results, using the better version for each block."""
     merged_blocks = original_blocks.copy()
-
-    # Simple strategy: try to match blocks by content similarity and replace problematic ones
     for prob_idx in problematic_indices:
         if prob_idx >= len(original_blocks):
             continue
-
         original_text = original_blocks[prob_idx].get("text", "")
         best_match = _find_best_matching_block(
             original_text, pymupdf4llm_blocks
         )
-
         if best_match and _is_text_improvement(
             original_text, best_match.get("text", "")
         ):
@@ -996,7 +996,6 @@ def _merge_extraction_results(
             improved_block = original_blocks[prob_idx].copy()
             improved_block["text"] = best_match["text"]
             merged_blocks[prob_idx] = improved_block
-
     return merged_blocks
 
 
@@ -1007,26 +1006,20 @@ def _find_best_matching_block(
     """Find the block that best matches the target text."""
     if not target_text or not candidate_blocks:
         return None
-
     target_words = set(target_text.lower().split())
     best_match = None
     best_score = 0.0
-
     for block in candidate_blocks:
         candidate_text = block.get("text", "")
         if not candidate_text:
             continue
         candidate_words = set(candidate_text.lower().split())
-
-        # Calculate similarity based on word overlap
         intersection = target_words & candidate_words
         union = target_words | candidate_words
         similarity = len(intersection) / len(union) if union else 0.0
-
         if similarity > best_score and similarity > 0.3:
             best_score = similarity
             best_match = block
-
     return best_match
 
 
@@ -1034,17 +1027,12 @@ def _is_text_improvement(original: str, candidate: str) -> bool:
     """Determine if the candidate text is an improvement over the original."""
     if not original or not candidate:
         return False
-
     improvements = 0
-
-    # 1. Better word spacing (fewer glued words)
     import re
     original_glued = len(re.findall(r"[a-z][A-Z]", original))
     candidate_glued = len(re.findall(r"[a-z][A-Z]", candidate))
     if candidate_glued < original_glued:
         improvements += 1
-
-    # 2. Better sentence structure
     original_sentences = (
         original.count(".") +
         original.count("!") +
@@ -1057,152 +1045,14 @@ def _is_text_improvement(original: str, candidate: str) -> bool:
     )
     if candidate_sentences > original_sentences:
         improvements += 1
-
-    # 3. Better quote balance
     original_quote_balance = abs(original.count('"') % 2)
     candidate_quote_balance = abs(candidate.count('"') % 2)
     if candidate_quote_balance < original_quote_balance:
         improvements += 1
-
-    # 4. More complete text (not just longer, but complete sentences)
     if (
         len(candidate) > len(original) * 1.1 and
         candidate.strip().endswith((".", "!", "?")) and
         not original.strip().endswith((".", "!", "?"))
     ):
         improvements += 1
-
-    # Require at least 2 improvements to consider it better
     return improvements >= 2
-
-
-def _convert_markdown_to_blocks(md_text: str, pdf_path: str = None) -> list[dict]:
-    """
-    Convert PyMuPDF4LLM Markdown output to a list of structured blocks.
-    Each block is a dict with 'text' and 'metadata' keys.
-    Headings are detected by markdown headers (#, ##, etc.).
-    """
-    import re
-
-    if not md_text or not md_text.strip():
-        logger.warning("No markdown text provided to _convert_markdown_to_blocks")
-        return []
-
-    lines = md_text.split('\n')
-    blocks = []
-    current_paragraph = []
-    current_heading = None
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            # End of a paragraph
-            if current_paragraph:
-                para_text = '\n'.join(current_paragraph).strip()
-                if para_text:
-                    blocks.append({
-                        'text': para_text,
-                        'metadata': {
-                            'is_heading': False,
-                            'heading': current_heading,
-                            'source': 'pymupdf4llm'
-                        }
-                    })
-                current_paragraph = []
-            continue
-
-        # Detect markdown headings
-        heading_match = re.match(r'^(#{1,6})\s*(.+)', line)
-        if heading_match:
-            # Save any current paragraph before heading
-            if current_paragraph:
-                para_text = '\n'.join(current_paragraph).strip()
-                if para_text:
-                    blocks.append({
-                        'text': para_text,
-                        'metadata': {
-                            'is_heading': False,
-                            'heading': current_heading,
-                            'source': 'pymupdf4llm'
-                        }
-                    })
-                current_paragraph = []
-
-            heading_text = heading_match.group(2).strip()
-            heading_level = len(heading_match.group(1))
-            blocks.append({
-                'text': heading_text,
-                'metadata': {
-                    'is_heading': True,
-                    'heading_level': heading_level,
-                    'source': 'pymupdf4llm'
-                }
-            })
-            current_heading = heading_text
-        else:
-            current_paragraph.append(line)
-
-    # Add any trailing paragraph
-    if current_paragraph:
-        para_text = '\n'.join(current_paragraph).strip()
-        if para_text:
-            blocks.append({
-                'text': para_text,
-                'metadata': {
-                    'is_heading': False,
-                    'heading': current_heading,
-                    'source': 'pymupdf4llm'
-                }
-            })
-
-    return blocks
-
-
-def apply_pymupdf4llm_fallback(original_blocks: list[dict], pdf_path: str) -> tuple[list[dict], dict]:
-    """
-    Fallback: Attempt to re-extract using PyMuPDF4LLM and merge with original blocks.
-    If PyMuPDF4LLM fails, return the original blocks and stats.
-    """
-    logger.info("Attempting PyMuPDF4LLM fallback enhancement")
-
-    try:
-        # Try extracting with PyMuPDF4LLM
-        import pymupdf4llm
-        md_text = pymupdf4llm.to_markdown(pdf_path)
-        if not md_text or not md_text.strip():
-            logger.warning("PyMuPDF4LLM fallback returned empty markdown")
-            return original_blocks, {
-                "enhanced": 0,
-                "failed": 1,
-                "skipped": len(original_blocks),
-                "degraded": 0,
-                "artifacts_filtered": 0
-            }
-        new_blocks = _convert_markdown_to_blocks(md_text, pdf_path)
-        if not new_blocks:
-            logger.warning("PyMuPDF4LLM fallback produced no blocks")
-            return original_blocks, {
-                "enhanced": 0,
-                "failed": 1,
-                "skipped": len(original_blocks),
-                "degraded": 0,
-                "artifacts_filtered": 0
-            }
-        # Simple merge: prefer new_blocks if non-empty, else original
-        logger.info(f"PyMuPDF4LLM fallback produced {len(new_blocks)} blocks")
-        return new_blocks, {
-            "enhanced": len(new_blocks),
-            "failed": 0,
-            "skipped": 0,
-            "degraded": 0,
-            "artifacts_filtered": 0
-        }
-    except Exception as e:
-        logger.error(f"PyMuPDF4LLM fallback failed: {e}")
-        return original_blocks, {
-            "enhanced": 0,
-            "failed": 1,
-            "skipped": len(original_blocks),
-            "degraded": 0,
-            "artifacts_filtered": 0
-        }
