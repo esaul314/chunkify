@@ -1,0 +1,65 @@
+# Test Tag Configuration for PDF Chunker Validation
+# This file provides sample tag configurations for testing AI enrichment functionality
+
+# Basic dialogue tags
+dialogue:
+  description: "Identifies dialogue and conversation patterns"
+  patterns:
+    - "said"
+    - "replied"
+    - "asked"
+    - "\".*\""
+  confidence_threshold: 0.7
+  
+# Narrative text tags
+narrative:
+  description: "Identifies narrative and descriptive text"
+  patterns:
+    - "paragraph"
+    - "description"
+    - "story"
+  confidence_threshold: 0.6
+
+# Technical content tags  
+technical:
+  description: "Identifies technical and specialized content"
+  patterns:
+    - "algorithm"
+    - "function"
+    - "system"
+    - "processing"
+    - "PyMuPDF4LLM"
+  confidence_threshold: 0.8
+
+# List and structured content tags
+structured:
+  description: "Identifies lists and structured content"
+  patterns:
+    - "•"
+    - "1."
+    - "2."
+    - "3."
+    - "First"
+    - "Second" 
+    - "Third"
+  confidence_threshold: 0.5
+
+# Chapter and section headers
+headers:
+  description: "Identifies chapter and section headers"
+  patterns:
+    - "Chapter"
+    - "Section"
+    - "Introduction"
+    - "Conclusion"
+  confidence_threshold: 0.9
+
+# Test-specific tags for validation
+test_content:
+  description: "Identifies test-specific content patterns"
+  patterns:
+    - "test"
+    - "validation"
+    - "sample"
+    - "document"
+  confidence_threshold: 0.4

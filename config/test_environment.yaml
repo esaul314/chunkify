@@ -1,0 +1,56 @@
+# Test Environment Configuration for PDF Chunker Validation
+# This file provides sample environment settings for testing
+
+# Processing settings
+processing:
+  max_chunk_size: 1000
+  min_chunk_size: 50
+  overlap_size: 100
+  enable_pymupdf4llm: true
+  enable_ai_enrichment: true
+  
+# Text cleaning settings
+text_cleaning:
+  normalize_ligatures: true
+  normalize_quotes: true
+  fix_hyphenated_breaks: true
+  remove_extra_whitespace: true
+
+# AI enrichment settings
+ai_enrichment:
+  enabled: true
+  tag_config_path: "config/tags/test_tags.yaml"
+  confidence_threshold: 0.5
+  max_tags_per_chunk: 5
+
+# EPUB processing settings
+epub:
+  process_spine_items: true
+  exclude_navigation: false
+  extract_metadata: true
+  
+# PDF processing settings  
+pdf:
+  extract_metadata: true
+  process_all_pages: true
+  merge_continuation_blocks: true
+
+# Output settings
+output:
+  format: "json"
+  include_metadata: true
+  include_readability_scores: true
+  include_chunk_ids: true
+
+# Validation settings
+validation:
+  enable_chunk_quality_checks: true
+  min_readability_score: 0.0
+  max_chunk_length: 2000
+  require_non_empty_chunks: true
+
+# Test data paths
+test_data:
+  pdf_file: "test_data/sample_test.pdf"
+  epub_file: "test_data/sample_test.epub"
+  output_directory: "test_output"
