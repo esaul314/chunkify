@@ -46,10 +46,10 @@ def snippet_for(word, text, window=20):
 
 def semantic_llm_validate(original, split, snippet):
     prompt = (
-        f"Does the phrase '{split}' make sense in context '{snippet}'? "
-        "If yes, return '{split}'. If not, return '{original}'."
+        f"In the context '{snippet}', is '{split}' the correct form of '{original}'? "
+        f"Reply only with the correct form: either '{split}' or '{original}'."
     )
-    return correct_word(original, prompt)
+    return correct_word(original, prompt).strip("'\" ")
 
 # ─── Enhanced Correction Step ───────────────────────────────
 
@@ -64,6 +64,7 @@ def enhanced_correction_step(words, texts, workers=5):
             if split_words != word:
                 validated = semantic_llm_validate(word, split_words, snippet)
                 if validated != word:
+                    print(f"[CORRECTED] Record {i}: '{word}' → '{validated}'")
                     return (i, word, validated)
         return None
 
@@ -87,12 +88,16 @@ def main(path, output_path, summary=True):
     records = load_jsonl(path)
     texts = [record["text"] for record in records]
 
-    pipeline = compose(
+    candidates_pipeline = compose(
         aspell_bad,
         lambda texts: set(mapcat(extract_candidates, texts))
     )
 
-    suspicious = pipeline(texts)
+    print("[INFO] Extracting suspicious candidates...")
+    suspicious = candidates_pipeline(texts)
+    print(f"[INFO] Suspicious candidates detected: {len(suspicious)}")
+
+    print("[INFO] Starting enhanced correction step...")
     corrections = enhanced_correction_step(suspicious, texts)
 
     rec_word_corrections = defaultdict(dict)
@@ -109,7 +114,7 @@ def main(path, output_path, summary=True):
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     if summary:
-        print("Detected and corrected glued words:")
+        print("\n[SUMMARY] Detected and corrected glued words:")
         for (i, original), corrected in corrections.items():
             print(f"Record {i}: {original} → {corrected}")
 
