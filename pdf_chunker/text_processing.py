@@ -3,7 +3,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 def normalize_quotes(text: str) -> str:
     """
     Normalize smart quotes to standard ASCII quotes and fix spacing around quotes.
@@ -16,29 +15,28 @@ def normalize_quotes(text: str) -> str:
     if not text:
         return text
 
-    # 1) Map smart quotes → ASCII
+    # 1. Map smart quotes to ASCII
     text = text.translate(str.maketrans({
         '“': '"', '”': '"', '„': '"', '«': '"', '»': '"',
         '‘': "'", '’': "'", '‚': "'", '`': "'"
     }))
 
-    # 2) Add space before opening quote if missing (only for opening quotes)
-    # Opening quote: quote followed by a word character
-    text = re.sub(r'(?<=[\w.,;!?])(["\'])(?=\w)', r' \1', text)
+    # 2. Add space before opening quote if missing (opening quote = quote followed by word char)
+    # Use positive lookbehind for any non-space (so both word and punctuation)
+    text = re.sub(r'(?<!\s)(["\'])(?=\w)', r' \1', text)
 
-    # 3) Remove any space after opening quote (e.g. " Hello" -> "Hello")
+    # 3. Remove any space after opening quote (e.g. " Hello" -> "Hello")
     text = re.sub(r'(["\'])\s+(\w)', r'\1\2', text)
 
-    # 4) Remove any space before closing quote (e.g. Hello " -> Hello")
+    # 4. Remove any space before closing quote (e.g. Hello " -> Hello)
     text = re.sub(r'(\w)\s+(["\'])', r'\1\2', text)
 
-    # 5) Add space after closing quote if missing (e.g. "Hello"and -> "Hello" and)
+    # 5. Add space after closing quote if missing (e.g. "Hello"and -> "Hello" and)
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
 
     # Remove multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
-
 
 def _fix_case_transition_gluing(text: str) -> str:
     """
@@ -61,14 +59,12 @@ def _fix_case_transition_gluing(text: str) -> str:
     text = pattern.sub(split_camel, text)
     return text
 
-
 def _fix_page_boundary_gluing(text: str) -> str:
     """
     Fix word gluing at page boundaries (e.g. hereThe -> here The),
     but preserve legitimate compound words.
     """
     return _fix_case_transition_gluing(text)
-
 
 def _fix_quote_boundary_gluing(text: str) -> str:
     """
@@ -80,28 +76,27 @@ def _fix_quote_boundary_gluing(text: str) -> str:
     if not text:
         return text
 
-    # 1) Map smart quotes → ASCII
+    # 1. Map smart quotes to ASCII
     text = text.translate(str.maketrans({
         '“': '"', '”': '"', '„': '"', '«': '"', '»': '"',
         '‘': "'", '’': "'", '‚': "'", '`': "'"
     }))
 
-    # 2) Add space before opening quote if missing (only for opening quotes)
-    text = re.sub(r'(?<=[\w.,;!?])(["\'])(?=\w)', r' \1', text)
+    # 2. Add space before opening quote if missing (opening quote = quote followed by word char)
+    text = re.sub(r'(?<!\s)(["\'])(?=\w)', r' \1', text)
 
-    # 3) Remove any space after opening quote
+    # 3. Remove any space after opening quote
     text = re.sub(r'(["\'])\s+(\w)', r'\1\2', text)
 
-    # 4) Remove any space before closing quote
+    # 4. Remove any space before closing quote
     text = re.sub(r'(\w)\s+(["\'])', r'\1\2', text)
 
-    # 5) Add space after closing quote if missing
+    # 5. Add space after closing quote if missing
     text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
 
     # Remove multiple spaces
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
-
 
 def detect_and_fix_word_gluing(text: str) -> str:
     """
@@ -115,7 +110,6 @@ def detect_and_fix_word_gluing(text: str) -> str:
     text = _fix_page_boundary_gluing(text)
     text = _fix_quote_boundary_gluing(text)
     return text
-
 
 def _repair_json_escaping_issues(text: str) -> str:
     """
@@ -132,13 +126,11 @@ def _detect_text_reordering(*args, **kwargs):
     """
     return False
 
-
 def _validate_chunk_integrity(chunks, original_text=None):
     """
     Stub for test compatibility. Returns chunks unchanged.
     """
     return chunks
-
 
 def _repair_json_escaping_issues(text):
     """
@@ -157,51 +149,65 @@ def _repair_json_escaping_issues(text):
     text = re.sub(r'^["\s]*,\s*', '', text)
     return text.strip()
 
-
 def _remove_control_characters(text):
     import re
     return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', text)
 
-
 def _fix_quote_splitting_issues(chunks):
-    """
-    Merge chunks that were incorrectly split at quotes.
-    Merge any two chunks where the first ends with a quote and the second starts with '",'
-    (with or without whitespace), as in the test case.
-    """
     if not chunks or len(chunks) < 2:
         return chunks
 
-    # Check if we have exactly 2 chunks and they match the splitting pattern
-    if (len(chunks) == 2 and
-        chunks[0].rstrip().endswith('"') and
-        re.match(r'^\s*",', chunks[1])):
-        merged_text = chunks[0] + chunks[1]
-        return [merged_text]
+    # if exactly two chunks and second chunk begins with '",' → merge
+    if len(chunks) == 2 and chunks[1].lstrip().startswith('",'):
+        return [chunks[0] + chunks[1]]
 
-    # General case: merge any such adjacent chunks
     merged = []
     i = 0
     while i < len(chunks):
-        current = chunks[i]
-        if (i + 1 < len(chunks) and
-            current.rstrip().endswith('"') and
-            re.match(r'^\s*",', chunks[i + 1])):
-            merged_chunk = current + chunks[i + 1]
-            merged.append(merged_chunk)
+        # whenever you see the next chunk start with '",'
+        if i + 1 < len(chunks) and chunks[i+1].lstrip().startswith('",'):
+            merged.append(chunks[i] + chunks[i+1])
             i += 2
         else:
-            merged.append(current)
+            merged.append(chunks[i])
             i += 1
     return merged
 
+# def _fix_quote_splitting_issues(chunks):
+    # """
+    # Merge chunks that were incorrectly split at quotes.
+    # Merge any two chunks where the first ends with a quote and the second starts with '",'
+    # (with or without whitespace), as in the test case.
+    # """
+    # if not chunks or len(chunks) < 2:
+        # return chunks
+
+    # # Check if we have exactly 2 chunks and they match the splitting pattern
+    # if (len(chunks) == 2 and
+        # chunks[0].rstrip().endswith('"') and
+        # re.match(r'^\s*",', chunks[1])):
+        # merged_text = chunks[0] + chunks[1]
+        # return [merged_text]
+
+    # # General case: merge any such adjacent chunks
+    # merged = []
+    # i = 0
+    # while i < len(chunks):
+        # current = chunks[i]
+        # if (i + 1 < len(chunks) and
+            # current.rstrip().endswith('"') and
+            # re.match(r'^\s*",', chunks[i + 1])):
+            # merged_chunk = current + chunks[i + 1]
+            # merged.append(merged_chunk)
+            # i += 2
+        # else:
+            # merged.append(current)
+            # i += 1
+    # return merged
 
 def _validate_json_safety(text):
     """
     Stub for test compatibility. Returns (True, []) if text can be JSON serialized, else (False, [issue]).
-    Merge chunks that were incorrectly split at quotes.
-    Merge any two chunks where the first ends with a quote and the second starts with '",'
-    (with or without whitespace), as in the test case.
     """
     import json
     try:
@@ -209,30 +215,5 @@ def _validate_json_safety(text):
         return True, []
     except Exception as e:
         return False, [str(e)]
-    if not chunks or len(chunks) < 2:
-        return chunks
-
-    # Special case: merge if first chunk ends with quote and second starts with '",'
-    if (len(chunks) == 2 and
-        chunks[0].rstrip().endswith('"') and
-        chunks[1].lstrip().startswith('",')):
-        merged_text = chunks[0] + chunks[1]
-        return [merged_text]
-
-    # General case: merge any such adjacent chunks
-    merged = []
-    i = 0
-    while i < len(chunks):
-        current = chunks[i]
-        if (i + 1 < len(chunks) and
-            current.rstrip().endswith('"') and
-            chunks[i + 1].lstrip().startswith('",')):
-            merged_chunk = current + chunks[i + 1]
-            merged.append(merged_chunk)
-            i += 2
-        else:
-            merged.append(current)
-            i += 1
-    return merged
-
+    
 # ... existing code ...
