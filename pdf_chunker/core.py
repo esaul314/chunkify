@@ -1,190 +1,12 @@
 from .parsing import extract_structured_text
 from .splitter import semantic_chunker
 from .ai_enrichment import init_llm
+from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
+from haystack.dataclasses import Document
 
 import sys
 import logging
 logger = logging.getLogger(__name__)
-
-def format_chunks_with_metadata(
-    chunks: list,
-    original_blocks: list,
-    filename: str = None,
-    min_chunk_size: int = None,
-    enable_dialogue_detection: bool = False
-) -> list:
-    """Format chunks with metadata and validate JSON serialization."""
-    logger.debug(f"format_chunks_with_metadata called with {len(chunks)} chunks and {len(original_blocks)} original blocks")
-    logger.debug(f"min_chunk_size={min_chunk_size}, enable_dialogue_detection={enable_dialogue_detection}")
-
-    formatted_chunks = []
-
-    for i, chunk_text in enumerate(chunks):
-        logger.debug(f"process_chunk() ENTRY - chunk {i}")
-        logger.debug(f"process_chunk() - chunk {i} has {len(chunk_text)} characters")
-
-        chunk_preview = chunk_text[:100].replace('\n', '\\n')
-        logger.debug(f"process_chunk() - chunk {i} preview: '{chunk_preview}...'")
-
-        # Check for potential JSON escaping issues
-        quote_count = chunk_text.count('"')
-        if quote_count > 0:
-            logger.debug(f"process_chunk() - chunk {i} contains {quote_count} quote characters")
-
-        # Placeholder for metadata generation (should be replaced with actual logic)
-        metadata = {
-            "source": filename,
-            "chunk_index": i,
-            "min_chunk_size": min_chunk_size,
-            "enable_dialogue_detection": enable_dialogue_detection
-        }
-
-        try:
-            # Normalize quotes before creating chunk object
-            normalized_text = _normalize_quotes_for_json(chunk_text)
-
-            # Create the chunk object
-            chunk_obj = {
-                "text": normalized_text,
-                "metadata": metadata
-            }
-
-            # Test JSON serialization to catch escaping issues early
-            import json
-            json_test = json.dumps(chunk_obj, ensure_ascii=False)
-            logger.debug(f"process_chunk() - chunk {i} JSON serialization test passed")
-
-            formatted_chunks.append(chunk_obj)
-            logger.debug(f"process_chunk() EXIT - chunk {i} SUCCESS - result has {len(normalized_text)} chars")
-
-        except (json.JSONEncodeError, UnicodeEncodeError) as e:
-            logger.error(f"process_chunk() - chunk {i} JSON serialization FAILED: {e}")
-            logger.error(f"Problematic text preview: '{chunk_text[:200]}'")
-
-            # Try progressive repair strategies
-            repaired_text = _repair_json_escaping_issues(chunk_text)
-
-            try:
-                chunk_obj = {
-                    "text": repaired_text,
-                    "metadata": metadata
-                }
-                json.dumps(chunk_obj, ensure_ascii=False)
-                formatted_chunks.append(chunk_obj)
-                logger.warning(f"process_chunk() - chunk {i} repaired with advanced escaping fixes")
-            except Exception as e2:
-                logger.error(f"process_chunk() - chunk {i} still failing after repair attempt: {e2}")
-                # Create a safe fallback version
-                safe_text = _create_safe_fallback_text(chunk_text)
-                chunk_obj = {
-                    "text": safe_text,
-                    "metadata": metadata
-                }
-                formatted_chunks.append(chunk_obj)
-                logger.warning(f"process_chunk() - chunk {i} using safe fallback text")
-
-    logger.info(f"Final pipeline output: {len(formatted_chunks)} chunks")
-
-    return formatted_chunks
-
-def _normalize_quotes_for_json(text: str) -> str:
-    """Normalize quotes in text to prevent JSON serialization issues."""
-    if not text:
-        return text
-
-    import re
-
-    # Step 1: Normalize different quote types to standard quotes
-    # Convert smart quotes to standard quotes
-    text = text.replace('“', '"').replace('”', '"')  # Smart double quotes
-    text = text.replace("‘", "'").replace("’", "'")  # Smart single quotes
-
-    # Step 2: Fix common quote escaping patterns that cause issues
-    # Remove any existing backslash escaping that might be incorrect
-    text = text.replace('\\\\\"', '\\"').replace("\\\\'", "\\'")
-
-    # Step 3: Handle problematic quote sequences
-    # Fix quotes at the beginning of text that might cause issues
-    text = re.sub(r'^[\\"\\s]*\\"([^\\"])', r'"\1', text)
-
-    # Fix quotes at the end of text
-    text = re.sub(r'([^\\"])\"[\"\\s]*$', r'\1\"', text)
-
-    # Step 4: Ensure balanced quotes where possible
-    text = _balance_quotes_if_possible(text)
-
-    return text
-
-def _balance_quotes_if_possible(text: str) -> str:
-    """Attempt to balance quotes in text without changing meaning."""
-    if not text:
-        return text
-
-    # Count unescaped quotes
-    double_quote_count = text.count('"')
-    single_quote_count = text.count("'")
-
-    # If we have an odd number of double quotes, try to fix
-    if double_quote_count % 2 == 1:
-        import logging
-        logger = logging.getLogger(__name__)
-        # Pattern 1: Quote at start but no closing quote
-        if text.startswith('"') and not text.rstrip().endswith('"'):
-            if len(text) > 10 and not text[1:].startswith('"'):
-                text = text + '"'
-        # Pattern 2: Quote at end but no opening quote
-        elif text.rstrip().endswith('"') and not text.startswith('"'):
-            if len(text) > 10:
-                text = '"' + text
-        # Pattern 3: Quote in middle - more complex, be conservative
-        else:
-            logger.debug(f"Unbalanced quotes detected but no simple fix available: '{text[:50]}...'")
-    return text
-
-def _repair_json_escaping_issues(text: str) -> str:
-    """Apply progressive repair strategies for JSON escaping issues."""
-    if not text:
-        return text
-    import re
-
-    repaired = text
-
-    # Strategy 1: Fix common problematic patterns
-    # Pattern: '", ' at start
-    if repaired.startswith('", '):
-        repaired = repaired[3:]
-    # Pattern: Unescaped quotes in the middle of text
-    repaired = re.sub(r'([a-zA-Z])"([a-zA-Z])', r'\1\\\"\2', repaired)
-    # Strategy 2: Handle control characters that might cause issues
-    repaired = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', '', repaired)
-    # Strategy 3: Fix newline handling
-    repaired = repaired.replace('\r\n', '\\n').replace('\r', '\\n')
-    # Strategy 4: Handle Unicode issues
-    try:
-        repaired = repaired.encode('utf-8').decode('utf-8')
-    except UnicodeError:
-        repaired = repaired.encode('utf-8', errors='replace').decode('utf-8')
-    return repaired
-
-def _create_safe_fallback_text(text: str) -> str:
-    """Create a safe fallback version of text that will definitely serialize to JSON."""
-    if not text:
-        return ""
-    import re
-
-    safe_text = text
-    # Remove all quotes to eliminate escaping issues
-    safe_text = safe_text.replace('"', '').replace("'", "")
-    # Remove problematic characters
-    safe_text = re.sub(r'[^\w\s\.\,!\?\:\;\-\(\)]', ' ', safe_text)
-    # Normalize whitespace
-    safe_text = ' '.join(safe_text.split())
-    # Truncate if too long (safety measure)
-    if len(safe_text) > 1000:
-        safe_text = safe_text[:997] + "..."
-    # Add a note that this is a fallback
-    safe_text = "[TEXT CLEANED] " + safe_text
-    return safe_text
 
 def process_document(
     filepath: str,
@@ -209,6 +31,7 @@ def process_document(
         min_chunk_size: Minimum chunk size in words (defaults to max(8, chunk_size // 10))
         enable_dialogue_detection: Whether to enable dialogue pattern detection for conversational text
     """
+
     # Set default minimum chunk size if not provided
     if min_chunk_size is None:
         min_chunk_size = max(8, chunk_size // 10)  # Minimum 8 words or 10% of target size
@@ -223,9 +46,51 @@ def process_document(
             print(f"AI Enrichment disabled: {e}", file=sys.stderr)
             perform_ai_enrichment = False
 
-    # 1. Structural Pass: Extract text into structured blocks
 
-    structured_blocks = extract_structured_text(filepath, exclude_pages=exclude_pages)
+    # Parse excluded pages as a set of integers
+    excluded_pages_set = set()
+    if exclude_pages:
+        try:
+            from .page_utils import parse_page_ranges
+            excluded_pages_set = parse_page_ranges(exclude_pages)
+            print(f"DEBUG: Parsed excluded pages: {sorted(excluded_pages_set)}", file=sys.stderr)
+        except Exception as e:
+            print(f"Error parsing exclude_pages: {e}", file=sys.stderr)
+            excluded_pages_set = set()
+
+    # 1. Structural Pass: Extract text into structured blocks, passing excluded pages
+    from .pdf_parsing import extract_text_blocks_from_pdf
+    structured_blocks = extract_text_blocks_from_pdf(filepath, exclude_pages=exclude_pages)
+    print(f"DEBUG: After PDF extraction, got {len(structured_blocks)} blocks", file=sys.stderr)
+
+    # Filter out any blocks from excluded pages (defensive, in case enhancement/fallbacks leak them)
+    filtered_blocks = []
+    for block in structured_blocks:
+        page = block.get("source", {}).get("page")
+        if page is not None and page in excluded_pages_set:
+            print(f"DEBUG: Filtering out block from excluded page {page}", file=sys.stderr)
+            continue
+        filtered_blocks.append(block)
+
+    print(f"DEBUG: After filtering excluded pages, have {len(filtered_blocks)} blocks", file=sys.stderr)
+    structured_blocks = filtered_blocks
+
+    # Verify no excluded pages remain
+    remaining_pages = set()
+    for block in structured_blocks:
+        page = block.get("source", {}).get("page")
+        if page is not None:
+            remaining_pages.add(page)
+
+    print(f"DEBUG: Remaining pages after filtering: {sorted(remaining_pages)}", file=sys.stderr)
+
+    # Check for any intersection with excluded pages
+    leaked_pages = remaining_pages.intersection(excluded_pages_set)
+    if leaked_pages:
+        print(f"DEBUG: ERROR - Excluded pages still present after filtering: {sorted(leaked_pages)}", file=sys.stderr)
+    else:
+        print(f"DEBUG: SUCCESS - No excluded pages found in structured blocks", file=sys.stderr)
+    
 
     # Debug: Show what we got from the structural pass
     print(f"Extracted {len(structured_blocks)} structured blocks", file=sys.stderr)
@@ -243,7 +108,6 @@ def process_document(
     print(f"Total characters in all blocks: {total_all_chars}", file=sys.stderr)
 
     # 2. Semantic Pass: Chunk the blocks into coherent documents with conversational text handling
-    # FIX: Convert list of block texts to a single string for semantic_chunker
     full_text = "\n\n".join(block.get("text", "") for block in structured_blocks if block.get("text", ""))
     haystack_chunks = semantic_chunker(
         full_text,
@@ -255,7 +119,7 @@ def process_document(
 
     # Debug: Validate chunk sizes after conversational text handling
     print(f"Semantic chunking with conversational text handling produced {len(haystack_chunks)} chunks", file=sys.stderr)
-
+    
     if haystack_chunks:
         chunk_sizes = [len(chunk) for chunk in haystack_chunks]
         word_counts = [len(chunk.split()) for chunk in haystack_chunks]
@@ -300,10 +164,19 @@ def process_document(
             for i in extreme_chunks:
                 print(f"    Chunk {i}: {chunk_sizes[i]} characters", file=sys.stderr)
 
-    # 3. Final Formatting and AI Enrichment with conversational text metadata
-    final_chunks = format_chunks_with_metadata(
-        haystack_chunks,
+    # 3. Convert text chunks to Haystack Document objects for utils compatibility
+    haystack_documents = []
+    for i, chunk_text in enumerate(haystack_chunks):
+        doc = Document(content=chunk_text, id=f"chunk_{i}")
+        haystack_documents.append(doc)
+
+    # 4. Final Formatting and AI Enrichment using utils function with proper schema
+    final_chunks = utils_format_chunks_with_metadata(
+        haystack_documents,
         structured_blocks,
+        generate_metadata=generate_metadata,
+        perform_ai_enrichment=perform_ai_enrichment,
+        max_workers=10,
         min_chunk_size=min_chunk_size,
         enable_dialogue_detection=enable_dialogue_detection
     )

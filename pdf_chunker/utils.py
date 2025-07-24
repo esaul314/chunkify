@@ -6,30 +6,49 @@ from .ai_enrichment import classify_chunk_utterance
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def _compute_readability(text: str) -> dict:
-    """Computes readability scores and returns them as a dictionary."""
+    """Computes readability scores and returns them as a dictionary matching canonical schema."""
+    flesch_kincaid = textstat.flesch_kincaid_grade(text)
+
+    # Map grade level to difficulty description
+    if flesch_kincaid <= 6:
+        difficulty = "elementary"
+    elif flesch_kincaid <= 8:
+        difficulty = "middle_school"
+    elif flesch_kincaid <= 12:
+        difficulty = "high_school"
+    elif flesch_kincaid <= 16:
+        difficulty = "college_level"
+    else:
+        difficulty = "graduate_level"
+
     return {
-        "flesch_kincaid_grade": textstat.flesch_kincaid_grade(text),
-        "difficulty": textstat.difficult_words(text)
+        "flesch_kincaid_grade": flesch_kincaid,
+        "difficulty": difficulty
     }
-
+    
 def _generate_chunk_id(filename: str, page: int, chunk_index: int) -> str:
-    """Generates a unique chunk ID."""
-    return f"{filename}-p{page}-c{chunk_index}"
-
+    """Generates a unique chunk ID using underscores as separators."""
+    # Ensure filename does not contain underscores that would break the pattern
+    # (but preserve the extension)
+    # If page is None or 0, use 0
+    page_part = page if page is not None else 0
+    return f"{filename}_p{page_part}_c{chunk_index}"
+    
 def format_chunks_with_metadata(
     haystack_chunks: list[Document],
     original_blocks: list[dict],
     generate_metadata: bool = True,
-    perform_ai_enrichment: bool = False, # New flag
+    perform_ai_enrichment: bool = False,
     max_workers: int = 10,
     min_chunk_size: int = None,
     enable_dialogue_detection: bool = True
 ) -> list[dict]:
     """
     Formats final chunks, enriching them in parallel with detailed metadata.
-    Accepts conversational text parameters for future use and compatibility.
+    Follows the canonical schema from README.ai with all required fields.
     """
     import sys
+    import os
 
     print(f"DEBUG: format_chunks_with_metadata called with {len(haystack_chunks)} chunks and {len(original_blocks)} original blocks", file=sys.stderr)
     print(f"DEBUG: min_chunk_size={min_chunk_size}, enable_dialogue_detection={enable_dialogue_detection}", file=sys.stderr)
@@ -91,7 +110,7 @@ def format_chunks_with_metadata(
                         final_text = final_text[:truncate_point].strip()
 
             print(f"DEBUG: process_chunk() - chunk {chunk_index} truncated to {len(final_text)} characters", file=sys.stderr)
-    
+
         print(f"DEBUG: process_chunk() - chunk {chunk_index} checking metadata generation flag", file=sys.stderr)
 
         if not generate_metadata:
@@ -106,6 +125,7 @@ def format_chunks_with_metadata(
 
         filename = source_block.get("source", {}).get("filename", "Unknown")
         page = source_block.get("source", {}).get("page", 0)
+        location = source_block.get("source", {}).get("location")  # For EPUBs, null for PDFs
         
         print(f"DEBUG: process_chunk() - chunk {chunk_index} mapped to page {page}, filename {filename}", file=sys.stderr)
 
@@ -115,42 +135,56 @@ def format_chunks_with_metadata(
         if perform_ai_enrichment:
             print(f"DEBUG: process_chunk() - chunk {chunk_index} CALLING AI ENRICHMENT", file=sys.stderr)
             try:
-                utterance_type = classify_chunk_utterance(final_text)
+                utterance_result = classify_chunk_utterance(final_text)
+                utterance_type = {
+                    "classification": utterance_result.get("classification", "unclassified"),
+                    "tags": utterance_result.get("tags", [])
+                }
                 print(f"DEBUG: process_chunk() - chunk {chunk_index} AI enrichment SUCCESS: {utterance_type}", file=sys.stderr)
             except Exception as e:
                 print(f"DEBUG: process_chunk() - chunk {chunk_index} AI enrichment FAILED: {e}", file=sys.stderr)
-                utterance_type = {"classification": "error", "tags": []}
+                utterance_type = {
+                    "classification": "error",
+                    "tags": []
+                }
         else:
             print(f"DEBUG: process_chunk() - chunk {chunk_index} AI enrichment DISABLED", file=sys.stderr)
-            utterance_type = "disabled"
+            utterance_type = {
+                "classification": "disabled",
+                "tags": []
+            }
 
         print(f"DEBUG: process_chunk() - chunk {chunk_index} building metadata", file=sys.stderr)
-        
+
+        # Determine location: null for PDFs, internal file path for EPUBs
+        # If 'location' is missing, set to None
+        if location is None and filename.lower().endswith('.pdf'):
+            location_value = None
+        else:
+            location_value = location if location is not None else None
+
+        # Ensure page is an integer or None
+        page_value = page if isinstance(page, int) and page > 0 else None
+
         metadata = {
             "source": filename,
-            "chunk_id": _generate_chunk_id(filename, page, chunk_index),
-            "page": page,
-            "location": source_block.get("source", {}).get("location"),
-            "block_type": source_block.get("type", "paragraph"),
-            "language": source_block.get("language", "un"),
-            "readability": _compute_readability(final_text),
-            "utterance_type": utterance_type,
-            "importance": "medium",
+            "chunk_id": _generate_chunk_id(filename, page_value if page_value is not None else 0, chunk_index),
+            "page": page_value,
+            "location": location_value,  # null for PDFs, internal file path for EPUBs
+            "block_type": source_block.get("type", "paragraph"),  # "heading" or "paragraph"
+            "language": source_block.get("language", "un"),  # ISO language code, "un" for unknown
+            "readability": _compute_readability(final_text),  # Object with flesch_kincaid_grade and difficulty
+            "utterance_type": utterance_type,  # Object with classification and tags
+            "importance": "medium"  # Currently defaults to "medium"
         }
-
-        # Optionally add conversational metadata if provided
-        if min_chunk_size is not None:
-            metadata["min_chunk_size"] = min_chunk_size
-        if enable_dialogue_detection is not None:
-            metadata["enable_dialogue_detection"] = enable_dialogue_detection
 
         print(f"DEBUG: process_chunk() - chunk {chunk_index} building final result", file=sys.stderr)
-        
+
         result = {
             "text": final_text,
-            "metadata": {k: v for k, v in metadata.items() if v is not None}
+            "metadata": {k: v for k, v in metadata.items() if k != "location" or v is None or v}  # Always include location, even if None
         }
-        
+
         print(f"DEBUG: process_chunk() EXIT - chunk {chunk_index} SUCCESS - result has {len(result.get('text', ''))} chars", file=sys.stderr)
         return result
 
@@ -158,7 +192,7 @@ def format_chunks_with_metadata(
     if perform_ai_enrichment:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_chunk = {
-                executor.submit(process_chunk, chunk, i): chunk 
+                executor.submit(process_chunk, chunk, i): chunk
                 for i, chunk in enumerate(haystack_chunks)
             }
             processed_chunks = [future.result() for future in as_completed(future_to_chunk)]
@@ -197,8 +231,8 @@ def _build_char_map(blocks: list[dict]) -> dict:
         print(f"DEBUG: Block {i} (page {page}): {text_len} chars at position {current_pos}-{current_pos + text_len}", file=sys.stderr)
         
         char_entry = {
-            "start": current_pos, 
-            "end": current_pos + text_len, 
+            "start": current_pos,
+            "end": current_pos + text_len,
             "original_index": i
         }
         char_map.append(char_entry)
@@ -207,14 +241,35 @@ def _build_char_map(blocks: list[dict]) -> dict:
     print(f"DEBUG: Character map built with {len(char_map)} entries", file=sys.stderr)
     return {"char_positions": char_map}
 
-
 def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[dict]) -> dict | None:
     """
     Finds the original source block for a chunk using robust text matching.
     Handles cases where chunk text spans multiple source blocks, starts with headers,
     or has special formatting. Uses fallback logic to ensure all chunks are mapped.
+    Ensures the returned block always has a valid 'source' dictionary with filename, page, and location.
     """
     import sys
+    import os
+
+    def ensure_source(block):
+        """Ensure block has a valid source dictionary with filename, page, and location."""
+        if "source" not in block or not isinstance(block["source"], dict):
+            block["source"] = {}
+        # Set filename
+        if "filename" not in block["source"]:
+            block["source"]["filename"] = "unknown"
+        # Set page (None if missing or invalid)
+        if "page" not in block["source"] or not isinstance(block["source"]["page"], int):
+            block["source"]["page"] = None
+        # Set location (None for PDFs)
+        if "location" not in block["source"]:
+            # Try to infer from filename extension
+            filename = block["source"].get("filename", "")
+            if filename.lower().endswith(".epub"):
+                block["source"]["location"] = block["source"].get("location", None)
+            else:
+                block["source"]["location"] = None
+        return block
 
     if not chunk or not chunk.content or not original_blocks:
         print(f"DEBUG: _find_source_block early return - chunk: {bool(chunk)}, content: {bool(chunk.content if chunk else False)}, blocks: {len(original_blocks) if original_blocks else 0}", file=sys.stderr)
@@ -228,8 +283,8 @@ def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[di
     for i, block in enumerate(original_blocks):
         block_text = block.get("text", "")
         if chunk_start and chunk_start in block_text:
-            page = block.get('source', {}).get('page', 'unknown')
-            print(f"DEBUG: Found matching source block {i} on page {page} (substring match)", file=sys.stderr)
+            block = ensure_source(block)
+            print(f"DEBUG: Found matching source block {i} on page {block['source'].get('page', None)} (substring match)", file=sys.stderr)
             return block
 
     # 2. Try matching the start of the chunk to the start of any block (ignoring whitespace/case)
@@ -239,8 +294,8 @@ def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[di
             continue
         block_start = block_text[:max(20, len(chunk_start))].replace('\n', ' ').strip()
         if chunk_start.lower().startswith(block_start.lower()) or block_start.lower().startswith(chunk_start.lower()):
-            page = block.get('source', {}).get('page', 'unknown')
-            print(f"DEBUG: Found matching source block {i} on page {page} (start match)", file=sys.stderr)
+            block = ensure_source(block)
+            print(f"DEBUG: Found matching source block {i} on page {block['source'].get('page', None)} (start match)", file=sys.stderr)
             return block
 
     # 3. Try fuzzy matching: ignore whitespace, punctuation, and case
@@ -253,8 +308,8 @@ def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[di
         block_text = block.get("text", "")
         block_start = block_text[:max(20, len(chunk_start))]
         if norm_chunk_start and normalize(block_start).startswith(norm_chunk_start[:15]):
-            page = block.get('source', {}).get('page', 'unknown')
-            print(f"DEBUG: Found matching source block {i} on page {page} (fuzzy match)", file=sys.stderr)
+            block = ensure_source(block)
+            print(f"DEBUG: Found matching source block {i} on page {block['source'].get('page', None)} (fuzzy match)", file=sys.stderr)
             return block
 
     # 4. Try overlap: find the block with the largest text overlap with the chunk start
@@ -271,14 +326,15 @@ def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[di
             best_overlap = overlap
             best_i = i
     if best_i is not None and best_overlap > 0:
-        page = original_blocks[best_i].get('source', {}).get('page', 'unknown')
-        print(f"DEBUG: Found best-overlap source block {best_i} on page {page} (overlap {best_overlap})", file=sys.stderr)
-        return original_blocks[best_i]
+        block = ensure_source(original_blocks[best_i])
+        print(f"DEBUG: Found best-overlap source block {best_i} on page {block['source'].get('page', None)} (overlap {best_overlap})", file=sys.stderr)
+        return block
 
     # 5. As a last resort, map to the first block if chunk starts with a known header or special formatting
     if chunk_start and (chunk_start.isupper() or chunk_start.startswith("CHAPTER") or chunk_start.startswith("SECTION")):
+        block = ensure_source(original_blocks[0])
         print(f"DEBUG: Fallback: mapping to first block due to header/special formatting", file=sys.stderr)
-        return original_blocks[0]
+        return block
 
     # 6. If all else fails, map to the block with the most similar start (Levenshtein distance, if available)
     try:
@@ -287,13 +343,13 @@ def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[di
         matches = difflib.get_close_matches(chunk_start, block_starts, n=1, cutoff=0.6)
         if matches:
             idx = block_starts.index(matches[0])
-            page = original_blocks[idx].get('source', {}).get('page', 'unknown')
-            print(f"DEBUG: Fallback: difflib matched block {idx} on page {page}", file=sys.stderr)
-            return original_blocks[idx]
+            block = ensure_source(original_blocks[idx])
+            print(f"DEBUG: Fallback: difflib matched block {idx} on page {block['source'].get('page', None)}", file=sys.stderr)
+            return block
     except Exception as e:
         print(f"DEBUG: difflib fallback failed: {e}", file=sys.stderr)
 
     # 7. If still no match, log a warning and return the first block as a last resort
+    block = ensure_source(original_blocks[0])
     print(f"WARNING: No matching source block found for chunk starting with: '{chunk_start}...'. Mapping to first block.", file=sys.stderr)
-    return original_blocks[0]
-    
+    return block
