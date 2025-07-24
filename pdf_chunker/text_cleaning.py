@@ -41,14 +41,14 @@ def collapse_artifact_breaks(text: str) -> str:
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
-    
+
     # First, protect paragraph breaks (2+ newlines) by replacing with placeholder
     text = re.sub(r'\n{2,}', '[[PARAGRAPH_BREAK]]', text)
     # Replace all remaining single newlines with spaces
     text = text.replace('\n', ' ')
     # Restore paragraph breaks
     text = text.replace('[[PARAGRAPH_BREAK]]', '\n\n')
-    
+
     logger.debug(f"Output text preview: {repr(text[:100])}")
     return text
 
@@ -67,6 +67,12 @@ def normalize_quotes(text: str) -> str:
         text = text.replace(smart, ascii_q)
     for pattern, repl in QUOTE_PATTERNS:
         text = pattern.sub(repl, text)
+    return text
+
+def normalize_newlines(text: str) -> str:
+    # Convert all CRLF and CR to LF, and unicode separators to LF as well
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = text.replace('\u2028', '\n').replace('\u2029', '\n')
     return text
 
 def remove_control_characters(text: str) -> str:
@@ -159,6 +165,9 @@ def clean_text(text: str) -> str:
 
     logger.debug("Using traditional text cleaning path")
 
+    # Normalize newlines first
+    logger.debug("Calling normalize_newlines")
+    text = normalize_newlines(text)
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)
@@ -178,4 +187,3 @@ def clean_text(text: str) -> str:
 
     logger.debug(f"Final clean_text result preview: {repr(result[:100])}")
     return result
-    

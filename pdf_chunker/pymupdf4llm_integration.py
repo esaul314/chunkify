@@ -210,10 +210,103 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     cleaned_block = block.copy()
     cleaned_block['text'] = text.strip()
 
+
     return cleaned_block
+
+def _convert_markdown_to_blocks(markdown_text: str, pdf_path: str) -> List[Dict[str, Any]]:
+    """
+    Convert PyMuPDF4LLM Markdown output to structured blocks.
+
+    This function parses the markdown text from PyMuPDF4LLM and converts it
+    into structured blocks that match the expected format for the PDF chunking pipeline.
+
+    Args:
+        markdown_text: Raw markdown text from PyMuPDF4LLM
+        pdf_path: Path to the source PDF file
+
+    Returns:
+        List of structured blocks with text, type, and source information
+    """
+    if not markdown_text or not markdown_text.strip():
+        return []
+
+    blocks = []
+    lines = markdown_text.split('\n')
+    current_block_lines = []
+    current_block_type = "paragraph"
+
+    for line in lines:
+        line = line.strip()
+
+        # Skip empty lines but use them as block separators
+        if not line:
+            if current_block_lines:
+                # Finish current block
+                block_text = '\n'.join(current_block_lines).strip()
+                if block_text:
+                    blocks.append({
+                        "type": current_block_type,
+                        "text": block_text,
+                        "language": "en",  # Default language
+                        "source": {
+                            "filename": pdf_path,
+                            "page": None,  # Page info not available from markdown
+                            "location": None
+                        }
+                    })
+                current_block_lines = []
+                current_block_type = "paragraph"
+            continue
+
+        # Check if this line is a heading
+        if line.startswith('#'):
+            # Finish previous block if it exists
+            if current_block_lines:
+                block_text = '\n'.join(current_block_lines).strip()
+                if block_text:
+                    blocks.append({
+                        "type": current_block_type,
+                        "text": block_text,
+                        "language": "en",
+                        "source": {
+                            "filename": pdf_path,
+                            "page": None,
+                            "location": None
+                        }
+                    })
+                current_block_lines = []
+
+            # Start new heading block
+            heading_text = line.lstrip('#').strip()
+            if heading_text:
+                current_block_lines = [heading_text]
+                current_block_type = "heading"
+        else:
+            # Regular text line
+            current_block_lines.append(line)
+            if current_block_type != "heading":
+                current_block_type = "paragraph"
+
+    # Handle final block
+    if current_block_lines:
+        block_text = '\n'.join(current_block_lines).strip()
+        if block_text:
+            blocks.append({
+                "type": current_block_type,
+                "text": block_text,
+                "language": "en",
+                "source": {
+                    "filename": pdf_path,
+                    "page": None,
+                    "location": None
+                }
+            })
+
+    return blocks
 
 
 def _convert_markdown_to_clean_text(markdown_text: str) -> str:
+    
     """
     Convert PyMuPDF4LLM Markdown output to clean text for text cleaning purposes.
 
