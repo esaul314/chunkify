@@ -28,83 +28,83 @@ def _should_merge_blocks(curr_block: Dict[str, Any], next_block: Dict[str, Any])
     """Determine if two blocks should be merged and return the reason."""
     curr_text = curr_block.get('text', '').strip()
     next_text = next_block.get('text', '').strip()
-    
+
     if not curr_text or not next_text:
         logger.debug(f"Merge check: Empty text - curr: {bool(curr_text)}, next: {bool(next_text)}")
         return False, "empty_text"
-    
+
     curr_page = curr_block.get("source", {}).get("page")
     next_page = next_block.get("source", {}).get("page")
-    
+
     logger.debug(f"Merge check: Pages curr={curr_page}, next={next_page}")
     logger.debug(f"Merge check: Text endings - curr: '{curr_text[-10:]}', next: '{next_text[:10]}'")
-    
+
     # Check for quote-related splitting issues
     curr_has_quote = '"' in curr_text or "'" in curr_text
     next_has_quote = '"' in next_text or "'" in next_text
-    
+
     if curr_has_quote or next_has_quote:
         logger.debug(f"Merge check: Quote detection - curr: {curr_has_quote}, next: {next_has_quote}")
-        
+
         # Special handling for quoted text that may have been incorrectly split
         if _is_quote_continuation(curr_text, next_text):
             logger.debug("Merge decision: QUOTE_CONTINUATION")
             return True, "quote_continuation"
-    
+
     # Case 1: Hyphenated word continuation
-    if (curr_text.endswith('-') and 
+    if (curr_text.endswith('-') and
         not curr_text.endswith('--') and  # Not em-dash
         next_text and next_text[0].islower()):
         logger.debug("Merge decision: HYPHENATED_CONTINUATION")
         return True, "hyphenated_continuation"
-    
+
     # Case 2: Same page, sentence continuation (no punctuation at end)
     elif (curr_page == next_page and
           not curr_text.endswith(('.', '!', '?', ':', ';')) and
           next_text and next_text[0].islower()):
         logger.debug("Merge decision: SAME_PAGE_CONTINUATION")
         return True, "sentence_continuation"
-    
+
     # Case 3: Cross-page sentence continuation (no punctuation at end)
     # Enhanced to be more careful with quoted text
-    elif (curr_text and next_text and 
+    elif (curr_text and next_text and
           not curr_text.endswith(('.', '!', '?')) and
           not next_text[0].isupper() and
           curr_page != next_page and
           not _looks_like_quote_boundary(curr_text, next_text)):
         logger.debug("Merge decision: CROSS_PAGE_CONTINUATION")
         return True, "sentence_continuation"
-    
+
     logger.debug("Merge decision: NO_MERGE")
     return False, "no_merge"
-    
+
 def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
     """Check if the next block is a continuation of quoted text from current block."""
     import re
-    
+
     # Look for incomplete quotes in current text
     curr_open_quotes = curr_text.count('"') - curr_text.count('\\"')
     curr_open_single = curr_text.count("'") - curr_text.count("\\'")
-    
+
     # If current text has unmatched opening quotes, next might be continuation
     if curr_open_quotes % 2 == 1 or curr_open_single % 2 == 1:
         # Check if next text starts in a way that suggests quote continuation
-        if (not next_text[0].isupper() or 
+        if (not next_text[0].isupper() or
             next_text.startswith(('and', 'but', 'or', 'so', 'yet', 'for'))):
             return True
-    
+
     # Look for patterns where quotes were split incorrectly
     # Pattern: current ends with quote, next starts with comma/period + space + text
-    if (curr_text.endswith('"') and 
+    if (curr_text.endswith('"') and
         re.match(r'^[,.;:]\s+[a-z]', next_text)):
         return True
-    
+
     # Pattern: current ends mid-sentence, next starts with quote
     if (not curr_text.endswith(('.', '!', '?')) and
         next_text.startswith('"') and
         len(next_text) > 1 and next_text[1].islower()):
         return True
-    
+
     return False
 
 def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
@@ -113,13 +113,13 @@ def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     if (curr_text.endswith(('."', ".'", '!"', "!'", '?"', "?'")) and
         next_text and next_text[0].isupper()):
         return True
-    
+
     # If current ends with quote and next starts with attribution
     attribution_starters = ['said', 'asked', 'replied', 'continued', 'added', 'noted']
     if (curr_text.endswith(('"', "'")) and
         any(next_text.lower().startswith(starter) for starter in attribution_starters)):
         return True
-    
+
     return False
 
 import logging
@@ -155,10 +155,10 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     for b in filtered:
         raw_text = b[4]
         logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
-        
+
         block_text = clean_text(raw_text)
         logger.debug(f"Block text after cleaning: {repr(block_text[:50])}")
-        
+
         if not block_text:
             continue
 
@@ -213,6 +213,11 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         r'^\d+\s*$',  # Page numbers with whitespace
         r'^chapter\s+\d+$',  # Standalone "Chapter X"
         r'^\d+\s+chapter',  # "1 Chapter", "2 Chapter", etc.
+        # "Introduction | 1"
+        r'^\w+\s*\|\s*\d+$',  # "Introduction | 1", "Summary | 2"
+        # "60 | Chapter 3: How and When to Get Started"
+        r'^\d+\s*\|\s*[\w\s:]+$',  # "60 | Chapter 3: How and When to Get Started"
+
     ]
 
     text_lower = text.lower()
@@ -402,7 +407,7 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM','').lower() not in ('false','0','no','off')
     logger.debug(f"PDF_CHUNKER_USE_PYMUPDF4LLM environment check: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}")
     logger.debug(f"use_pymupdf4llm evaluated to: {use_pymupdf4llm}")
-    
+
     enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
     enhanced_blocks = None
 
@@ -411,7 +416,7 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
         try:
             # Pass excluded pages as a set to the enhancement function
             enhanced_blocks, enhancement_stats = extract_with_pymupdf4llm(filepath, exclude_pages=excluded)
-            
+
             # Defensive: filter out any blocks from excluded pages if present
             if enhanced_blocks:
                 pre_filter_count = len(enhanced_blocks)
@@ -423,10 +428,10 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                         continue
                     filtered_enhanced_blocks.append(block)
                 enhanced_blocks = filtered_enhanced_blocks
-                
+
                 if len(enhanced_blocks) != pre_filter_count:
                     logger.info(f"Filtered out {pre_filter_count - len(enhanced_blocks)} enhanced blocks from excluded pages")
-            
+
             # If enhancement was successful and high quality, use enhanced blocks
             if enhanced_blocks and enhancement_stats.get("enhanced", 0) > 0:
                 if enhancement_stats.get("degraded", 0) == 0:
