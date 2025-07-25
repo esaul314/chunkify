@@ -145,6 +145,13 @@ def is_artifact_block(block, page_height, frac=0.15, max_words=6):
             return True
     return False
 
+
+def _remove_page_artifact_lines(text: str, page_num: int) -> str:
+    """Strip lines that look like page artifacts."""
+    lines = text.splitlines()
+    kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
+    return "\n".join(kept)
+
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     Extract and classify text blocks from a PDF page,
@@ -158,6 +165,9 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     for b in filtered:
         raw_text = b[4]
         logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
+
+        # Remove obvious header/footer lines before full cleaning
+        raw_text = _remove_page_artifact_lines(raw_text, page_num)
 
         block_text = clean_text(raw_text)
         logger.debug(f"Block text after cleaning: {repr(block_text[:50])}")
