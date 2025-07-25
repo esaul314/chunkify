@@ -67,11 +67,14 @@ def _should_merge_blocks(curr_block: Dict[str, Any], next_block: Dict[str, Any])
 
     # Case 3: Cross-page sentence continuation (no punctuation at end)
     # Enhanced to be more careful with quoted text
-    elif (curr_text and next_text and
-          not curr_text.endswith(('.', '!', '?')) and
-          not next_text[0].isupper() and
-          curr_page != next_page and
-          not _looks_like_quote_boundary(curr_text, next_text)):
+    elif (
+        curr_text
+        and next_text
+        and not curr_text.endswith((".", "!", "?"))
+        and curr_page != next_page
+        and not _looks_like_quote_boundary(curr_text, next_text)
+        and not _detect_heading_fallback(next_text)
+    ):
         logger.debug("Merge decision: CROSS_PAGE_CONTINUATION")
         return True, "sentence_continuation"
 
@@ -142,6 +145,13 @@ def is_artifact_block(block, page_height, frac=0.15, max_words=6):
             return True
     return False
 
+
+def _remove_page_artifact_lines(text: str, page_num: int) -> str:
+    """Strip lines that look like page artifacts."""
+    lines = text.splitlines()
+    kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
+    return "\n".join(kept)
+
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     Extract and classify text blocks from a PDF page,
@@ -156,10 +166,20 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
         raw_text = b[4]
         logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
 
+        # Remove obvious header/footer lines before full cleaning
+        raw_text = _remove_page_artifact_lines(raw_text, page_num)
+
         block_text = clean_text(raw_text)
         logger.debug(f"Block text after cleaning: {repr(block_text[:50])}")
 
         if not block_text:
+            continue
+
+        # Filter out headers, footers, and similar page artifacts
+        if is_page_artifact({"text": block_text}, page_num):
+            logger.debug(
+                f"Skipping page artifact on page {page_num}: {repr(block_text)}"
+            )
             continue
 
         # Determine heading via font flags or fallback
