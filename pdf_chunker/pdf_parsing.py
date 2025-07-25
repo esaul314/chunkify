@@ -67,11 +67,14 @@ def _should_merge_blocks(curr_block: Dict[str, Any], next_block: Dict[str, Any])
 
     # Case 3: Cross-page sentence continuation (no punctuation at end)
     # Enhanced to be more careful with quoted text
-    elif (curr_text and next_text and
-          not curr_text.endswith(('.', '!', '?')) and
-          not next_text[0].isupper() and
-          curr_page != next_page and
-          not _looks_like_quote_boundary(curr_text, next_text)):
+    elif (
+        curr_text
+        and next_text
+        and not curr_text.endswith((".", "!", "?"))
+        and curr_page != next_page
+        and not _looks_like_quote_boundary(curr_text, next_text)
+        and not _detect_heading_fallback(next_text)
+    ):
         logger.debug("Merge decision: CROSS_PAGE_CONTINUATION")
         return True, "sentence_continuation"
 
