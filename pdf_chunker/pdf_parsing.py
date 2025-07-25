@@ -162,6 +162,13 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
         if not block_text:
             continue
 
+        # Filter out headers, footers, and similar page artifacts
+        if is_page_artifact({"text": block_text}, page_num):
+            logger.debug(
+                f"Skipping page artifact on page {page_num}: {repr(block_text)}"
+            )
+            continue
+
         # Determine heading via font flags or fallback
         is_heading = False
         if len(block_text.split()) < 15:
