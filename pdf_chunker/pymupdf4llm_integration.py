@@ -206,6 +206,11 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if _re2.match(r'^\s*(page|chapter|section)\s+\d+\s*$', text.strip().lower()):
         return None
 
+    # Use shared artifact detection for complex patterns
+    if is_page_artifact_text(text, block.get('source', {}).get('page', 0)):
+        logger.debug(f"Skipping PyMuPDF4LLM page artifact: {repr(text[:50])}")
+        return None
+
     # Update the block with cleaned text
     cleaned_block = block.copy()
     cleaned_block['text'] = text.strip()
@@ -843,6 +848,7 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
         r'^\d+\s*$',
         r'^chapter\s+\d+$',
         r'^\d+\s+chapter',
+        r'^\d+\s*\|\s*[\w\s:]+$',
         r'^table\s+of\s+contents',
         r'^bibliography',
         r'^index$',
