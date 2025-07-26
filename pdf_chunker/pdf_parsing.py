@@ -147,10 +147,33 @@ def is_artifact_block(block, page_height, frac=0.15, max_words=6):
 
 
 def _remove_page_artifact_lines(text: str, page_num: int) -> str:
-    """Strip lines that look like page artifacts."""
+    """Strip lines that look like page artifacts or footnotes."""
+
     lines = text.splitlines()
-    kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
-    return "\n".join(kept)
+
+    def _is_artifact(idx: int) -> bool:
+        ln = clean_text(lines[idx])
+        return is_page_artifact({"text": ln}, page_num)
+
+    filtered = [
+        ln
+        for i, ln in enumerate(lines)
+        if not (
+            _is_artifact(i)
+            and (
+                i == len(lines) - 1
+                or _is_artifact(i + 1)
+            )
+        )
+    ]
+
+    return "\n".join(filtered)
+
+    """I like this implementation with a comprehension a lot more. Please, stick to declarative and functional"""
+    #lines = text.splitlines()
+    #kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
+    #return "\n".join(kept)
+
 
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
@@ -236,7 +259,9 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         r'^\d+\s+chapter',           # "1 Chapter", "2 Chapter", etc.
         r'^\w+\s*\|\s*\d+$',      # "Introduction | 1", "Summary | 2"
         r'^\d+\s*\|\s*[\w\s:]+$', # "60 | Chapter 3: How and When to Get Started"
-        r'^\d+[.)]?\s+[a-z]',        # "1 Some footnote text" or "23) See example"
+        r'^[0-9]{1,3}[.)]?\s+[A-Z]', # Footnotes like "1 See example"
+        #r'^\d+[.)]?\s+[a-z]',        # "1 Some footnote text" or "23) See example"
+
     ]
 
     text_lower = text.lower()
