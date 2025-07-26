@@ -1,23 +1,24 @@
 ## config/tags/AGENTS.md
 
-```markdown
+`````markdown
 # AGENTS
 
-YAML-based domain vocabularies that guide semantic enrichment during the AI pass.
+YAML-based vocabularies for semantic enrichment during the AI pass.
 
 ## Purpose
-- External configuration of structured tags
-- Allows modular tagging by domain (e.g., philosophy, technical, PM)
+- External configuration of structured tags.
+- Modular tagging by domain (generic, philosophy, psychology, technical, PM).
 
 ## AI Agent Guidance
-- Never modify existing tag files without intent review
-- Add new vocabularies using lowercase, underscore filenames
-- Tags should be layered, non-destructive, and human-legible
-- Ensure YAML validity and UTF-8 safety
+- Do not delete or rename existing YAML files.
+- Add new vocabularies with lowercase, underscore filenames.
+- Ensure YAML syntax and UTF-8 compliance.
+- Tags should be additive and non-destructive.
 
 ## Known Issues
-- Some tag vocabularies may be under-used due to misalignment between classifiers and YAML scopes.
-```
+- Some tag files may not align with current classifier logic.
+- Nested or overlapping domain tags may not be handled.
+`````
 
 ---
 

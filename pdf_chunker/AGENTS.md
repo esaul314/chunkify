@@ -1,31 +1,32 @@
 ## pdf\_chunker/pdf\_chunker/AGENTS.md
 
-```markdown
+`````markdown
 # AGENTS
 
-Contains all core modules implementing the document processing pipeline.
+Core modules implementing document processing pipeline passes.
 
 ## Responsibilities
-- `core.py`: Top-level orchestrator
-- `parsing.py`: Structural block parsing from fonts/layouts
-- `text_cleaning.py`: Cleans ligatures, quotes, and control characters
-- `heading_detection.py`: Extracts heading hierarchy heuristically
-- `extraction_fallbacks.py`: Quality-aware fallback logic
-- `page_utils.py`: Range filtering and validation
-- `epub_parsing.py`: EPUB-specific spine exclusion
-- `splitter.py`: Breaks text into safe, bounded, coherent chunks
-- `ai_enrichment.py`: Applies tags using YAML vocabularies
-- `utils.py`: Metadata mapping, glue logic
+- ```core.py`: Orchestrates all passes.
+- `parsing.py`: Structural block extraction.
+- `text_cleaning.py`: Ligature repair, quote normalization, control-character removal.
+- `heading_detection.py`: Infers heading hierarchy.
+- `extraction_fallbacks.py`: Fallback strategies with scoring.
+- `page_utils.py`: Page range parsing/filtering.
+- `epub_parsing.py`: Spine discovery and exclusion.
+- `splitter.py`: Enforces chunk boundaries and semantic cohesion.
+- `ai_enrichment.py`: Applies YAML-based tags.
+- `utils.py`: Metadata mapping and helper functions.
 
 ## AI Agent Guidance
-- Never blur pass boundaries: Structural, Semantic, Enrichment must remain distinct
-- Fallback logic must log both failure and quality score
-- Avoid embedding AI config logic (always use `config/tags/`)
-- Do not mix PDF and EPUB logic in the same module
+- Respect strict separation of passes.
+- Log fallback reasons and quality metrics.
+- Use `text_cleaning.py` transforms before splitting.
+- Do not mix EPUB logic into PDF modules.
 
 ## Known Issues
-- Word reconstruction during text cleaning may be broken — some logic may exist but not be applied
-- Footnote content often breaks sentence continuity across JSONL lines
+- Footnote anchors may appear in the middle of chunks.
+- Hyphenated word reassembly logic may not execute.
+- Metadata fields sometimes missing when fallback triggers.
 ```
 
 ---
