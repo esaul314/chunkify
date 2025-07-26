@@ -131,6 +131,12 @@ tzdata==2025.2
 url-normalize==2.2.1
 urllib3==2.5.0
 utils==1.0.2
+ftfy
+pymupdf4llm
+reportlab
+lxml
+langdetect
+textstat
 wcwidth==0.2.13
 wordfreq==3.1.1
 wordninja==2.0.0

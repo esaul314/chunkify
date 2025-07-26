@@ -228,16 +228,14 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
 
     # Check for common header/footer patterns
     header_footer_patterns = [
-        r'^\d+$',  # Just page numbers
-        r'^page\s+\d+',  # "Page 1", "Page 2", etc.
-        r'^\d+\s*$',  # Page numbers with whitespace
-        r'^chapter\s+\d+$',  # Standalone "Chapter X"
-        r'^\d+\s+chapter',  # "1 Chapter", "2 Chapter", etc.
-        # "Introduction | 1"
-        r'^\w+\s*\|\s*\d+$',  # "Introduction | 1", "Summary | 2"
-        # "60 | Chapter 3: How and When to Get Started"
-        r'^\d+\s*\|\s*[\w\s:]+$',  # "60 | Chapter 3: How and When to Get Started"
-
+        r'^\d+$',                     # Just page numbers
+        r'^page\s+\d+',              # "Page 1", "Page 2", etc.
+        r'^\d+\s*$',                 # Page numbers with whitespace
+        r'^chapter\s+\d+$',          # Standalone "Chapter X"
+        r'^\d+\s+chapter',           # "1 Chapter", "2 Chapter", etc.
+        r'^\w+\s*\|\s*\d+$',      # "Introduction | 1", "Summary | 2"
+        r'^\d+\s*\|\s*[\w\s:]+$', # "60 | Chapter 3: How and When to Get Started"
+        r'^\d+[.)]?\s+[a-z]',        # "1 Some footnote text" or "23) See example"
     ]
 
     text_lower = text.lower()
