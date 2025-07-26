@@ -169,6 +169,7 @@ def _remove_page_artifact_lines(text: str, page_num: int) -> str:
 
     return "\n".join(filtered)
 
+
     """I like this implementation with a comprehension a lot more. Please, stick to declarative and functional"""
     #lines = text.splitlines()
     #kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
@@ -261,6 +262,7 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         r'^\d+\s*\|\s*[\w\s:]+$', # "60 | Chapter 3: How and When to Get Started"
         r'^[0-9]{1,3}[.)]?\s+[A-Z]', # Footnotes like "1 See example"
         #r'^\d+[.)]?\s+[a-z]',        # "1 Some footnote text" or "23) See example"
+
 
     ]
 
