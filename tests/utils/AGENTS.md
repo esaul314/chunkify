@@ -3,11 +3,15 @@
 ```markdown
 # AGENTS
 
-Shared test logic and shell functions for orchestration.
+Shared logic for test orchestration and validation.
 
 ## AI Agent Guidance
-- Shell must be POSIX-compliant
-- Common routines should emit consistent logs
-- Tools should fail gracefully and be reusable
+- Keep shell POSIX-compatible
+- Allow override of paths via env vars
+- Formatters must not modify logic
+- Prefer logging functions to inline `echo`
+
+## Known Issues
+- Logging consistency may vary across utilities
 ```
 

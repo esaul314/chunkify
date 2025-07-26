@@ -3,20 +3,20 @@
 ```markdown
 # AGENTS
 
-CLI scripts for triggering pipeline components and validating results.
+CLI entry points and automation utilities for triggering pipeline behavior and validating outputs.
 
 ## Responsibilities
-- `chunk_pdf.py`: CLI interface to run the 3-pass pipeline
-- `validate_chunks.sh`: Ensures semantic and size boundary correctness
-- `detect_duplicates.py`: Scans for repeated chunk content
+- `chunk_pdf.py`: Main CLI for processing documents end-to-end
+- `validate_chunks.sh`: Structural integrity checker
+- `detect_duplicates.py`: Duplicate/overlap detection in output
 
 ## AI Agent Guidance
-- Scripts must use CLI args and never hardcode paths
-- Avoid business logic — delegate to core modules
-- Output logs should be human-readable or JSON where applicable
-- There are a couple of standalone scripts that are nevertheless potentially very useful.
-- Notably, find_glued_words.py, but really, this folder contains additional scripts that it may be useful to integrate some of the logic or to run manually.
+- Do not duplicate core logic — import from main modules
+- All scripts must use `argparse` or shell `getopts`
+- Scripts must fail loudly and emit actionable logs
 
+## Known Issues
+- Some script usage modes are undocumented or outdated
 ```
 
 ---

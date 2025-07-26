@@ -3,20 +3,24 @@
 ```markdown
 # AGENTS
 
-Testing infrastructure for validating transformations and pipeline correctness.
+Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
-- `pdf_extraction_test.py`: Structural parsing and fallback validation
-- `ai_enrichment_test.py`: Tag application and vocabulary use
-- `semantic_chunking_test.py`: Chunk size rules and force truncation
-- `page_exclusion_test.py`: PDF page-level filtering logic
-- `epub_spine_test.py`: EPUB range and spine exclusions
-- `run_all_tests.sh`: Full validation orchestration
+- `pdf_extraction_test.py`: Extractor accuracy and fallback thresholds
+- `ai_enrichment_test.py`: Classification correctness and tag injection
+- `semantic_chunking_test.py`: Boundary conditions and oversize protection
+- `page_exclusion_test.py`: Page range and filter correctness
+- `epub_spine_test.py`: Spine index parsing and exclusion logic
+- `run_all_tests.sh`: Orchestrates full suite
 
 ## AI Agent Guidance
-- Write functional tests for every public module
-- Tests must avoid disk writes unless explicitly tested
-- Compose shared logic using `tests/utils/common.sh`
+- Use clear input/output examples
+- Avoid asserting on intermediate state unless necessary
+- Shell and Python tests must pass independently
+
+## Known Issues
+- Test suite may not fully reflect current pipeline logic
+- Some modules (e.g. `text_cleaning`) are not tested against known real-world PDF defects
 ```
 
 ---
