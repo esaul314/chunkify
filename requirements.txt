@@ -21,7 +21,7 @@ docopt==0.6.2
 docstring_parser==0.16
 EbookLib==0.19
 Events==0.5
-farm-haystack==1.26.4.post0
+#farm-haystack==1.26.4.post0
 filelock==3.18.0
 filetype==1.2.0
 frozenlist==1.7.0
