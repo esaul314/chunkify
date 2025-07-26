@@ -404,6 +404,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         from .text_cleaning import (
             normalize_newlines,
             collapse_single_newlines,
+            fix_hyphenated_linebreaks,
             normalize_ligatures,
             consolidate_whitespace,
         )
@@ -416,6 +417,10 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
         text = collapse_single_newlines(text)
         logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
+
+        logger.debug("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
+        text = fix_hyphenated_linebreaks(text)
+        logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
         
         # Apply other cleaning steps paragraph by paragraph
         paragraphs = []
