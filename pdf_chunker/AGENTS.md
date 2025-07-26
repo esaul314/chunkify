@@ -3,25 +3,29 @@
 ```markdown
 # AGENTS
 
-Houses the core modules orchestrating the pipeline.
+Contains all core modules implementing the document processing pipeline.
 
 ## Responsibilities
-- `core.py`: Orchestrates the three-pass architecture
-- `parsing.py`: Font-based structural parsing
-- `text_cleaning.py`: Ligature cleanup and text normalization
-- `heading_detection.py`: Heading detection heuristics
-- `extraction_fallbacks.py`: Resilient fallback strategies
-- `page_utils.py`: Page and range filtering
-- `epub_parsing.py`: EPUB spine parsing and exclusion
-- `splitter.py`: Chunk boundary enforcement
-- `ai_enrichment.py`: Applies YAML-based classification
-- `utils.py`: Metadata transformation glue layer
+- `core.py`: Top-level orchestrator
+- `parsing.py`: Structural block parsing from fonts/layouts
+- `text_cleaning.py`: Cleans ligatures, quotes, and control characters
+- `heading_detection.py`: Extracts heading hierarchy heuristically
+- `extraction_fallbacks.py`: Quality-aware fallback logic
+- `page_utils.py`: Range filtering and validation
+- `epub_parsing.py`: EPUB-specific spine exclusion
+- `splitter.py`: Breaks text into safe, bounded, coherent chunks
+- `ai_enrichment.py`: Applies tags using YAML vocabularies
+- `utils.py`: Metadata mapping, glue logic
 
 ## AI Agent Guidance
-- Maintain strict separation between passes
-- Do not hardcode tag values — always use external YAMLs
-- Prefer pure functions; log and test all exceptions
-- Do not conflate EPUB and PDF logic
+- Never blur pass boundaries: Structural, Semantic, Enrichment must remain distinct
+- Fallback logic must log both failure and quality score
+- Avoid embedding AI config logic (always use `config/tags/`)
+- Do not mix PDF and EPUB logic in the same module
+
+## Known Issues
+- Word reconstruction during text cleaning may be broken — some logic may exist but not be applied
+- Footnote content often breaks sentence continuity across JSONL lines
 ```
 
 ---
