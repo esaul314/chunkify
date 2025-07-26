@@ -219,7 +219,6 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         True if block appears to be a page artifact
     """
     text = block.get("text", "").strip()
-    logger.debug(f"is_page_artifact():  {text[:30]}... (page {page_num})")
 
     if not text:
         return True
@@ -243,6 +242,7 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
     text_lower = text.lower()
     for pattern in header_footer_patterns:
         if re.match(pattern, text_lower):
+            logger.info(f"is_page_artifact():  {text[:30]}... (page {page_num})")
             return True
 
     # Check for very short text that might be artifacts
