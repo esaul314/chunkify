@@ -1,22 +1,24 @@
 ## scripts/AGENTS.md
 
-```markdown
+`````markdown
 # AGENTS
 
-CLI entry points and automation utilities for triggering pipeline behavior and validating outputs.
+CLI entry points and automation scripts.
 
 ## Responsibilities
-- `chunk_pdf.py`: Main CLI for processing documents end-to-end
-- `validate_chunks.sh`: Structural integrity checker
-- `detect_duplicates.py`: Duplicate/overlap detection in output
+- ```chunk_pdf.py`: Full pipeline runner.
+- `validate_chunks.sh`: Semantic and size checks.
+- `detect_duplicates.py`: Overlap/duplicate analysis.
+- `_apply.sh`: Batch orchestration.
 
 ## AI Agent Guidance
-- Do not duplicate core logic — import from main modules
-- All scripts must use `argparse` or shell `getopts`
-- Scripts must fail loudly and emit actionable logs
+- Delegate core logic to library modules.
+- CLI must use `argparse` or POSIX `getopts`.
+- Output logs and JSON forming for downstream tools.
 
 ## Known Issues
-- Some script usage modes are undocumented or outdated
+- Command-line help may be outdated.
+- `_apply.sh` exit codes not consistently handled.
 ```
 
 ---
