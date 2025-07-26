@@ -849,6 +849,7 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
         r'^chapter\s+\d+$',
         r'^\d+\s+chapter',
         r'^\d+\s*\|\s*[\w\s:]+$',
+        r'^[0-9]{1,3}[.)]?\s+[A-Z]',
         r'^table\s+of\s+contents',
         r'^bibliography',
         r'^index$',
