@@ -219,6 +219,8 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         True if block appears to be a page artifact
     """
     text = block.get("text", "").strip()
+    logger.debug(f"is_page_artifact():  {text[:30]}... (page {page_num})")
+
     if not text:
         return True
 
