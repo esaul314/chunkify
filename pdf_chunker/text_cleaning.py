@@ -27,10 +27,17 @@ QUOTE_PATTERNS: List[Tuple[re.Pattern, str]] = [
 
 # Hyphenation (handles soft hyphens at line breaks and artifacts)
 def fix_hyphenated_linebreaks(text: str) -> str:
-    # Handle: word-reali-\nties → word-realities
-    text = re.sub(r'(\w)[‐-]\n(\w)', r'\1\2', text)
-    # Remove soft hyphens
-    text = text.replace('\u00ad', '')
+    """Join words split across lines by hyphens."""
+
+    # Handle explicit line breaks ("word-\nnext" -> "wordnext")
+    text = re.sub(r"(\w)[‐-]\s*\n\s*(\w)", r"\1\2", text)
+
+    # Handle collapsed line breaks that became spaces ("word- next" -> "wordnext")
+    text = re.sub(r"(\w)[‐-]\s+([a-z])", r"\1\2", text)
+
+    # Remove soft hyphen characters entirely
+    text = text.replace("\u00ad", "")
+
     return text
 
 def collapse_artifact_breaks(text: str) -> str:
