@@ -169,6 +169,12 @@ def _remove_page_artifact_lines(text: str, page_num: int) -> str:
 
     return "\n".join(filtered)
 
+    """I like this implementation with a comprehension a lot more. Please, stick to declarative and functional"""
+    #lines = text.splitlines()
+    #kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
+    #return "\n".join(kept)
+
+
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     Extract and classify text blocks from a PDF page,
@@ -236,6 +242,7 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         True if block appears to be a page artifact
     """
     text = block.get("text", "").strip()
+
     if not text:
         return True
 
@@ -253,11 +260,14 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         r'^\w+\s*\|\s*\d+$',      # "Introduction | 1", "Summary | 2"
         r'^\d+\s*\|\s*[\w\s:]+$', # "60 | Chapter 3: How and When to Get Started"
         r'^[0-9]{1,3}[.)]?\s+[A-Z]', # Footnotes like "1 See example"
+        #r'^\d+[.)]?\s+[a-z]',        # "1 Some footnote text" or "23) See example"
+
     ]
 
     text_lower = text.lower()
     for pattern in header_footer_patterns:
         if re.match(pattern, text_lower):
+            logger.info(f"is_page_artifact():  {text[:30]}... (page {page_num})")
             return True
 
     # Check for very short text that might be artifacts
