@@ -3,7 +3,8 @@ logger = logging.getLogger(__name__)
 import re
 from typing import List, Dict, Any, Tuple, Optional
 from haystack.components.preprocessors import DocumentSplitter
-from haystack.dataclasses import Document
+# from haystack.dataclasses import Document
+from haystack import Document
 
 
 # Try importing RecursiveCharacterTextSplitter from both possible locations
@@ -17,9 +18,9 @@ except ImportError:
     except ImportError:
         RecursiveCharacterTextSplitter = None
         _LANGCHAIN_SPLITTER_AVAILABLE = False
-        
 
-    
+
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Centralized chunk threshold constants
@@ -432,7 +433,7 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
             chunks.append(current_chunk)
         logger.info(f"Fallback splitter produced {len(chunks)} chunks")
         return chunks
-    
+
 
 def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
     """Post-process chunks to fix quote-related splitting issues."""
@@ -490,26 +491,26 @@ def _validate_chunk_integrity(chunks: List[str], original_text: str) -> List[str
         return chunks
 
     logger.debug(f"Validating integrity of {len(chunks)} chunks")
-    
+
     # Check 1: Ensure all text is preserved
     combined_chunks = ' '.join(chunks)
     original_words = set(original_text.split())
     combined_words = set(combined_chunks.split())
-    
+
     missing_words = original_words - combined_words
     extra_words = combined_words - original_words
-    
+
     if missing_words:
         logger.warning(f"Missing words detected: {list(missing_words)[:5]}...")
     if extra_words:
         logger.warning(f"Extra words detected: {list(extra_words)[:5]}...")
-    
+
     # Check 2: Validate quote balance
     for i, chunk in enumerate(chunks):
         quote_balance = _check_quote_balance(chunk)
         if quote_balance != 0:
             logger.warning(f"Chunk {i} has unbalanced quotes (balance: {quote_balance})")
-    
+
     # Check 3: Look for obvious corruption patterns
     validated_chunks = []
     for i, chunk in enumerate(chunks):
@@ -523,7 +524,7 @@ def _validate_chunk_integrity(chunks: List[str], original_text: str) -> List[str
                 logger.error(f"Could not repair chunk {i}, skipping")
         else:
             validated_chunks.append(chunk)
-    
+
     return validated_chunks
 
 def _ends_with_opening_quote(text: str) -> bool:
@@ -628,9 +629,9 @@ def semantic_chunker(
     # Apply conversational merging if enabled
     if enable_dialogue_detection and min_chunk_size:
         merged_chunks, merge_stats = _merge_short_chunks(
-            initial_chunks, 
-            min_chunk_size, 
-            very_short_threshold, 
+            initial_chunks,
+            min_chunk_size,
+            very_short_threshold,
             short_threshold
         )
         logger.info(f"Conversational merging completed: {merge_stats}")
@@ -645,7 +646,7 @@ def semantic_chunker(
     final_short_count = sum(1 for chunk in validated_chunks if len(chunk.split()) <= short_threshold)
     final_very_short_count = sum(1 for chunk in validated_chunks if len(chunk.split()) <= very_short_threshold)
 
-    logger.info(f"Final chunking results:")
+    logger.info("Final chunking results:")
     logger.info(f"  Total chunks: {len(validated_chunks)}")
     logger.info(f"  Short chunks (≤{short_threshold} words): {final_short_count} (reduced from {initial_short_count})")
     logger.info(f"  Very short chunks (≤{very_short_threshold} words): {final_very_short_count} (reduced from {initial_very_short_count})")
