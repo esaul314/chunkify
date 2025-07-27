@@ -154,11 +154,15 @@ def clean_text(text: str) -> str:
     logger.debug(f"clean_text called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
-    use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', '').lower() in ('true', '1', 'yes', 'on')
-    logger.debug(f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}")
-    logger.debug(f"use_pymupdf4llm evaluated to: {use_pymupdf4llm}")
+    from .env_utils import use_pymupdf4llm as _use_pymupdf4llm
+
+    enabled = _use_pymupdf4llm()
+    logger.debug(
+        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}"
+    )
+    logger.debug(f"use_pymupdf4llm evaluated to: {enabled}")
     
-    if use_pymupdf4llm:
+    if enabled:
         logger.debug("Using PyMuPDF4LLM text cleaning path")
         try:
             from .pymupdf4llm_integration import is_pymupdf4llm_available, clean_text_with_pymupdf4llm
