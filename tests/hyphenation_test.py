@@ -26,6 +26,19 @@ class TestHyphenationFix(unittest.TestCase):
         self.assertNotIn("special- ists", cleaned)
         self.assertNotIn("man- agement", cleaned)
 
+    def test_unicode_hyphenation_fix(self):
+        sample = "Storage engi\u2010\n neer"
+        os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "true"
+        original = p4l.is_pymupdf4llm_available
+        try:
+            p4l.is_pymupdf4llm_available = lambda: True
+            cleaned = clean_text(sample)
+        finally:
+            p4l.is_pymupdf4llm_available = original
+            del os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"]
+        self.assertIn("Storage engineer", cleaned)
+        self.assertNotIn("eng\u2010 neer", cleaned)
+
 
 if __name__ == "__main__":
     unittest.main()
