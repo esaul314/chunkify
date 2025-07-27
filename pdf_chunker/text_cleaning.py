@@ -25,18 +25,20 @@ QUOTE_PATTERNS: List[Tuple[re.Pattern, str]] = [
     (re.compile(r'\s+"([^\"]*?)"\s+'), r' "\1" '),
 ]
 
-# Hyphenation (handles soft hyphens at line breaks and artifacts)
+# Hyphenation (handles soft and unicode hyphens across line breaks)
+HYPHEN_CHARS = "-\u2010\u2011"
+
+
 def fix_hyphenated_linebreaks(text: str) -> str:
-    """Join words split across lines by hyphens."""
+    """Join words split across lines by hyphen-like characters."""
 
-    # Handle explicit line breaks ("word-\nnext" -> "wordnext")
-    text = re.sub(r"(\w)[‐-]\s*\n\s*(\w)", r"\1\2", text)
+    pattern_break = rf"(\w)[{HYPHEN_CHARS}]\s*\n\s*(\w)"
+    text = re.sub(pattern_break, r"\1\2", text)
 
-    # Handle collapsed line breaks that became spaces ("word- next" -> "wordnext")
-    text = re.sub(r"(\w)[‐-]\s+([a-z])", r"\1\2", text)
+    pattern_space = rf"(\w)[{HYPHEN_CHARS}]\s+([a-z])"
+    text = re.sub(pattern_space, r"\1\2", text)
 
-    # Remove soft hyphen characters entirely
-    text = text.replace("\u00ad", "")
+    text = re.sub(r"[\u00ad\u2010\u2011]", "", text)
 
     return text
 
