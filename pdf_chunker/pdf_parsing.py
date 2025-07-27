@@ -4,7 +4,7 @@ import os
 import sys
 import re
 import fitz  # PyMuPDF
-from .text_cleaning import clean_text, HYPHEN_CHARS
+from .text_cleaning import clean_text, HYPHEN_CHARS_ESC
 from .heading_detection import _detect_heading_fallback
 from .page_utils import parse_page_ranges, validate_page_exclusions
 from .extraction_fallbacks import (
@@ -52,8 +52,8 @@ def _should_merge_blocks(curr_block: Dict[str, Any], next_block: Dict[str, Any])
             return True, "quote_continuation"
 
     # Case 1: Hyphenated word continuation
-    hyphen_pattern = rf"[{HYPHEN_CHARS}]$"
-    double_hyphen_pattern = rf"[{HYPHEN_CHARS}]{{2,}}$"
+    hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]$"
+    double_hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]{{2,}}$"
     if (
         re.search(hyphen_pattern, curr_text)
         and not re.search(double_hyphen_pattern, curr_text)
@@ -318,7 +318,7 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
 
                 # Perform the merge
                 if merge_reason == "hyphenated_continuation":
-                    merged_text = re.sub(rf"[{HYPHEN_CHARS}]$", "", current_text) + next_text
+                    merged_text = re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + next_text
                 elif merge_reason == "sentence_continuation":
                     # Merge with space for sentence continuation
                     merged_text = current_text + ' ' + next_text
