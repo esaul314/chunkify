@@ -27,10 +27,11 @@ class TestHyphenationFix(unittest.TestCase):
         self.assertNotIn("man- agement", cleaned)
 
     def test_clean_block_hyphen_fix(self):
-        block = {"text": "Storage engi-\nneer", "source": {"page": 1}}
+        block = {"text": "Storage engi‐\n neer", "source": {"page": 1}}
         cleaned = p4l._clean_pymupdf4llm_block(block)
         self.assertIsNotNone(cleaned)
         self.assertEqual(cleaned["text"], "Storage engineer")
+
 
 
 if __name__ == "__main__":
