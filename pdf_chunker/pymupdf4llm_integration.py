@@ -30,7 +30,7 @@ class PyMuPDF4LLMExtractionError(Exception):
 def is_pymupdf4llm_available() -> bool:
     """Check if PyMuPDF4LLM is available for use"""
     available = PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
-    logger.info(f"PyMuPDF4LLM availability check: {available}")
+    logger.debug(f"PyMuPDF4LLM availability check: {available}")
     return available
 
 
@@ -380,8 +380,8 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
     Returns:
         Cleaned text with improved formatting
     """
-    logger.debug(f"clean_text_with_pymupdf4llm called with {len(text)} chars")
-    logger.debug(f"Input text preview: {repr(text[:100])}")
+    logger.info(f"clean_text_with_pymupdf4llm called with {len(text)} chars")
+    logger.info(f"Input text preview: {repr(text[:100])}")
 
     if not is_pymupdf4llm_available():
         logger.debug("PyMuPDF4LLM not available, falling back to traditional cleaning")

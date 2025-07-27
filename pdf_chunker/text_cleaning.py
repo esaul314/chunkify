@@ -26,19 +26,22 @@ QUOTE_PATTERNS: List[Tuple[re.Pattern, str]] = [
 ]
 
 # Hyphenation (handles soft and unicode hyphens across line breaks)
-HYPHEN_CHARS = "-\u2010\u2011"
+HYPHEN_CHARS_ESC = re.escape("\u2010\u2011\u002d\u00ad\u1400\ufe63‐-")
+# HYPHEN_CHARS = "\u2010\u2011\u002d\u00ad\u1400\ufe63-"
+# HYPHEN_CHARS = "-\u2010\u2011\u002d\u00ad\u1400\ufe63"
+# HYPHEN_CHARS = "\u2010\u2011\u002d\u00ad\u1400\ufe63"
 
 
 def fix_hyphenated_linebreaks(text: str) -> str:
     """Join words split across lines by hyphen-like characters."""
 
-    pattern_break = rf"(\w)[{HYPHEN_CHARS}]\s*\n\s*(\w)"
+    pattern_break = rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*(\w)"
     text = re.sub(pattern_break, r"\1\2", text)
 
-    pattern_space = rf"(\w)[{HYPHEN_CHARS}]\s+([a-z])"
+    pattern_space = rf"(\w)[{HYPHEN_CHARS_ESC}]\s+([a-z])"
     text = re.sub(pattern_space, r"\1\2", text)
 
-    text = re.sub(r"[\u00ad\u2010\u2011]", "", text)
+    text = re.sub(r"[\u00ad\u2010\u2011\u002d\u1400\ufe63‐-]", "", text)
 
     return text
 
@@ -163,7 +166,7 @@ def clean_text(text: str) -> str:
         f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}"
     )
     logger.debug(f"use_pymupdf4llm evaluated to: {enabled}")
-    
+
     if enabled:
         logger.debug("Using PyMuPDF4LLM text cleaning path")
         try:
@@ -185,7 +188,7 @@ def clean_text(text: str) -> str:
     logger.debug("Calling normalize_newlines")
     text = normalize_newlines(text)
     logger.debug(f"After normalize_newlines: {repr(text[:100])}")
-    
+
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)
