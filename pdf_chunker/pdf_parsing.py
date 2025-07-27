@@ -451,8 +451,12 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                      f"text: {repr(text_preview)}")
 
     # Apply PyMuPDF4LLM enhancement if requested and beneficial
-    use_pymupdf4llm = os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM','').lower() not in ('false','0','no','off')
-    logger.debug(f"PDF_CHUNKER_USE_PYMUPDF4LLM environment check: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}")
+    from .env_utils import use_pymupdf4llm as _use_pymupdf4llm
+
+    use_pymupdf4llm = _use_pymupdf4llm()
+    logger.debug(
+        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment check: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}"
+    )
     logger.debug(f"use_pymupdf4llm evaluated to: {use_pymupdf4llm}")
 
     enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
