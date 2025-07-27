@@ -180,20 +180,29 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
     import re as _re2
+    from .text_cleaning import (
+        pipe,
+        fix_hyphenated_linebreaks,
+        normalize_ligatures,
+        normalize_quotes,
+        remove_control_characters,
+        consolidate_whitespace,
+    )
 
-    # Remove markdown headers that weren't converted properly
-    text = _re2.sub(r'^#{1,6}\s*', '', text, flags=_re2.MULTILINE)
-
-    # Remove markdown emphasis that wasn't converted
-    text = _re2.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Bold
-    text = _re2.sub(r'\*(.*?)\*', r'\1', text)      # Italic
-
-    # Remove markdown links
-    text = _re2.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-
-    # Clean up excessive whitespace
-    text = _re2.sub(r'\n{3,}', '\n\n', text)
-    text = _re2.sub(r' {2,}', ' ', text)
+    text = pipe(
+        text,
+        lambda s: _re2.sub(r'^#{1,6}\s*', '', s, flags=_re2.MULTILINE),
+        lambda s: _re2.sub(r'\*\*(.*?)\*\*', r'\1', s),
+        lambda s: _re2.sub(r'\*(.*?)\*', r'\1', s),
+        lambda s: _re2.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', s),
+        lambda s: _re2.sub(r'\n{3,}', '\n\n', s),
+        lambda s: _re2.sub(r' {2,}', ' ', s),
+        fix_hyphenated_linebreaks,
+        normalize_ligatures,
+        normalize_quotes,
+        remove_control_characters,
+        consolidate_whitespace,
+    )
 
     # Skip blocks that are too short or look like artifacts
     if len(text.strip()) < 10:
