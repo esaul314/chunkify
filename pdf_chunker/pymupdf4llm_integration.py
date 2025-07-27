@@ -30,9 +30,9 @@ class PyMuPDF4LLMExtractionError(Exception):
 def is_pymupdf4llm_available() -> bool:
     """Check if PyMuPDF4LLM is available for use"""
     available = PYMUPDF4LLM_AVAILABLE and pymupdf4llm is not None
-    logger.debug(f"PyMuPDF4LLM availability check: {available}")
+    logger.info(f"PyMuPDF4LLM availability check: {available}")
     return available
-    
+
 
 def extract_with_pymupdf4llm(pdf_path: str, exclude_pages: set = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -82,7 +82,7 @@ def extract_with_pymupdf4llm(pdf_path: str, exclude_pages: set = None) -> Tuple[
             return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
 
         # Filter blocks to only include those from non-excluded pages (if possible)
-        # Since markdown output may not have page info, this is a best-effort; 
+        # Since markdown output may not have page info, this is a best-effort;
         # but since we only processed the allowed pages, this should be sufficient.
 
         # Validate enhancement quality
@@ -122,7 +122,7 @@ def extract_with_pymupdf4llm(pdf_path: str, exclude_pages: set = None) -> Tuple[
     except Exception as e:
         logger.error(f"PyMuPDF4LLM extraction failed: {e}")
         return [], {"enhanced": 0, "failed": 1, "skipped": 0, "degraded": 0, "artifacts_filtered": 0}
-    
+
 
 def _validate_enhancement_quality(blocks: List[Dict[str, Any]]) -> float:
     """Validate the quality of PyMuPDF4LLM enhancement and return a quality score (0-1)."""
@@ -320,7 +320,7 @@ def _convert_markdown_to_blocks(markdown_text: str, pdf_path: str) -> List[Dict[
 
 
 def _convert_markdown_to_clean_text(markdown_text: str) -> str:
-    
+
     """
     Convert PyMuPDF4LLM Markdown output to clean text for text cleaning purposes.
 
@@ -382,7 +382,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
     """
     logger.debug(f"clean_text_with_pymupdf4llm called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
-    
+
     if not is_pymupdf4llm_available():
         logger.debug("PyMuPDF4LLM not available, falling back to traditional cleaning")
         # Fallback to traditional text cleaning
@@ -394,12 +394,12 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
 
     try:
         logger.debug("Using PyMuPDF4LLM text cleaning path")
-        
+
         # Check if we need to apply newline collapsing in PyMuPDF4LLM path
         logger.debug("Checking if text contains single newlines that need collapsing")
         single_newlines_count = text.count('\n') - text.count('\n\n') * 2
         logger.debug(f"Found {single_newlines_count} single newlines in input text")
-        
+
         # Apply traditional cleaning functions directly to ensure newline handling
         from .text_cleaning import (
             normalize_newlines,
@@ -408,20 +408,20 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
             normalize_ligatures,
             consolidate_whitespace,
         )
-        
-        # Apply the cleaning steps in the correct order
-        logger.debug("Applying normalize_newlines in PyMuPDF4LLM path")
-        text = normalize_newlines(text)
-        logger.debug(f"After normalize_newlines: {repr(text[:100])}")
-        
-        logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
-        text = collapse_single_newlines(text)
-        logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
 
-        logger.debug("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
+        # Apply the cleaning steps in the correct order
+        logger.info("Applying normalize_newlines in PyMuPDF4LLM path")
+        text = normalize_newlines(text)
+        logger.info(f"After normalize_newlines: {repr(text[:100])}")
+
+        logger.info("Applying collapse_single_newlines in PyMuPDF4LLM path")
+        text = collapse_single_newlines(text)
+        logger.info(f"After collapse_single_newlines: {repr(text[:100])}")
+
+        logger.info("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
         text = fix_hyphenated_linebreaks(text)
-        logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
-        
+        logger.info(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
+
         # Apply other cleaning steps paragraph by paragraph
         paragraphs = []
         for p in text.split('\n\n'):
@@ -429,9 +429,9 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
                 p = normalize_ligatures(p)
                 p = consolidate_whitespace(p)
                 paragraphs.append(p)
-        
+
         cleaned = '\n\n'.join(paragraphs)
-        logger.debug(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")
+        logger.info(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")
         return cleaned
 
     except Exception as e:
@@ -644,14 +644,14 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> Dict[
 def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[str, Any]:
     """
     Detect if PyMuPDF4LLM cleaning has degraded text flow quality.
-    
+
     This function specifically looks for issues that can occur when cleaning
     text that spans page boundaries or contains page artifacts.
-    
+
     Args:
         original_text: Original text before cleaning
         cleaned_text: Text after PyMuPDF4LLM cleaning
-        
+
     Returns:
         Dictionary with degradation assessment and specific issues found
     """
@@ -677,7 +677,7 @@ def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[
         degradation_score += 0.3
 
     contamination_patterns = [
-        r'\b\d+\s*$', 
+        r'\b\d+\s*$',
         r'^\s*\d+\b',
         r'\bchapter\s+\d+\b.*\bpage\s+\d+\b',
         r'\bfootnote\s*\d+\b',
@@ -730,7 +730,7 @@ def detect_text_flow_degradation(original_text: str, cleaned_text: str) -> Dict[
 
     return {
         'degraded': degraded,
-        'degradation_score': degradationation_score,
+        'degradation_score': degradation_score,
         'issues': issues,
         'recommendation': recommendation,
         'original_length': original_length,
@@ -828,16 +828,16 @@ def _has_page_boundary_issues(blocks: List[Dict[str, Any]]) -> bool:
         return problem_ratio > 0.3
 
     return False
-    
+
 
 def is_page_artifact_text(text: str, page_num: int) -> bool:
     """
     Check if text appears to be a page artifact (header, footer, page number).
-    
+
     Args:
         text: Text to check
         page_num: Page number for context
-        
+
     Returns:
         True if text appears to be a page artifact
     """
@@ -874,10 +874,10 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
 def is_text_already_clean(text: str) -> bool:
     """
     Check if text is already clean and doesn't need PyMuPDF4LLM processing.
-    
+
     Args:
         text: Text to check
-        
+
     Returns:
         True if text appears to already be clean
     """
@@ -894,10 +894,10 @@ def is_text_already_clean(text: str) -> bool:
 def has_cleaning_opportunities(text: str) -> bool:
     """
     Check if text has characteristics that would benefit from PyMuPDF4LLM cleaning.
-    
+
     Args:
         text: Text to check
-        
+
     Returns:
         True if text would likely benefit from cleaning
     """
