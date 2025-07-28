@@ -32,6 +32,11 @@ class TestHyphenationFix(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual(cleaned["text"], "Storage engineer")
 
+    def test_preserve_existing_hyphens(self):
+        text = "We sell business-critical, off-the-shelf solutions."
+        cleaned = clean_text(text)
+        self.assertIn("business-critical", cleaned)
+        self.assertIn("off-the-shelf", cleaned)
 
 
 if __name__ == "__main__":
