@@ -11,6 +11,7 @@ import re
 import time
 from typing import List, Dict, Any, Optional, Tuple
 import logging
+from . import page_artifacts
 
 try:
     import pymupdf4llm
@@ -953,44 +954,8 @@ def _has_page_boundary_issues(blocks: List[Dict[str, Any]]) -> bool:
 
 
 def is_page_artifact_text(text: str, page_num: int) -> bool:
-    """
-    Check if text appears to be a page artifact (header, footer, page number).
-
-    Args:
-        text: Text to check
-        page_num: Page number for context
-
-    Returns:
-        True if text appears to be a page artifact
-    """
-    import re as _re6
-
-    text_lower = text.lower().strip()
-
-    if _re6.match(r"^\d+$", text_lower):
-        return True
-
-    artifact_patterns = [
-        r"^page\s+\d+",
-        r"^\d+\s*$",
-        r"^chapter\s+\d+$",
-        r"^\d+\s+chapter",
-        r"^\d+\s*\|\s*[\w\s:]+$",
-        r"^[0-9]{1,3}[.)]?\s+[A-Z]",
-        r"^table\s+of\s+contents",
-        r"^bibliography",
-        r"^index$",
-        r"^appendix\s+[a-z]$",
-    ]
-
-    for pattern in artifact_patterns:
-        if _re6.match(pattern, text_lower):
-            return True
-
-    if len(text.split()) <= 3 and len(text) <= 30:
-        return any(char.isdigit() for char in text)
-
-    return False
+    """Delegate to shared page artifact detection logic."""
+    return page_artifacts.is_page_artifact_text(text, page_num)
 
 
 def is_text_already_clean(text: str) -> bool:
