@@ -103,6 +103,32 @@ def consolidate_whitespace(text: str) -> str:
     return re.sub(r"[ \t\r\f\v]+", " ", text).strip()
 
 
+def _is_probable_heading(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped or len(stripped) > 60:
+        return False
+    if re.match(r"^[\-•*]\s", stripped):
+        return True
+    if stripped.isupper() and len(stripped.split()) <= 10:
+        return True
+    if stripped.istitle() and not re.search(r"[.!?]$", stripped):
+        return True
+    return False
+
+
+def merge_spurious_paragraph_breaks(text: str) -> str:
+    parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
+    merged: List[str] = []
+    for part in parts:
+        if merged and not any(_is_probable_heading(seg) for seg in (merged[-1], part)):
+            prev = merged[-1]
+            if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                continue
+        merged.append(part)
+    return "\n\n".join(merged)
+
+
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
     issues: List[str] = []
     try:
@@ -216,6 +242,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)
     logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling merge_spurious_paragraph_breaks")
+    text = merge_spurious_paragraph_breaks(text)
+    logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
 
     # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
