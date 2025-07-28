@@ -21,6 +21,34 @@ class TestNewlineCleanup(unittest.TestCase):
         cleaned = clean_text(text)
         self.assertIn("\n\n", cleaned)
 
+    def test_merge_break_in_quoted_title(self):
+        text = (
+            '" Vulnerability sounds like truth": Brené Brown, '
+            "_Daring Greatly: How the Courage to Be Vulnerable_\n\n"
+            "_Transforms the Way We Live..."
+        )
+        expected = (
+            '" Vulnerability sounds like truth": Brené Brown, '
+            "_Daring Greatly: How the Courage to Be Vulnerable_ _Transforms the Way We Live..."
+        )
+        self.assertEqual(clean_text(text), expected)
+
+    def test_merge_break_in_quoted_phrase(self):
+        text = (
+            'Reese Witherspoon confessing: Reese Witherspoon, " Reese Witherspoon Shares Her Lean In Story," '
+            "Lean\n\nIn."
+        )
+        expected = (
+            'Reese Witherspoon confessing: Reese Witherspoon, " Reese Witherspoon Shares Her Lean In Story," '
+            "Lean In."
+        )
+        self.assertEqual(clean_text(text), expected)
+
+    def test_merge_break_in_quoted_headline(self):
+        text = '" President Draws Planning Moral: Recalls Army Days to Show\n\nValue of Preparedness in Time of Crisis,"'
+        expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
