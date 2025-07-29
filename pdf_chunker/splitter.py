@@ -557,24 +557,42 @@ def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
     return fixed_chunks
 
 
+def _extract_trailing_heading(chunk: str) -> Tuple[str, Optional[str]]:
+    """Return body text and trailing heading if present."""
+    lines = chunk.rstrip().splitlines()
+    if not lines:
+        return chunk, None
+
+    last_line = lines[-1].strip()
+    if _is_probable_heading(last_line):
+        body = "\n".join(lines[:-1]).rstrip()
+        return body, last_line
+    return chunk, None
+
+
 def _fix_heading_splitting_issues(chunks: List[str]) -> List[str]:
-    """Ensure headings are grouped with their following content."""
+    """Attach headings to the following chunk."""
     if not chunks:
         return chunks
 
-    normalized = chunks[:]
-    for i in range(len(normalized) - 1):
-        lines = normalized[i].rstrip().splitlines()
-        if not lines:
-            continue
-        last_line = lines[-1].strip()
-        if _is_probable_heading(last_line):
-            body = "\n".join(lines[:-1]).rstrip()
-            next_chunk = normalized[i + 1].lstrip()
-            normalized[i + 1] = f"{last_line}\n{next_chunk}".strip()
-            normalized[i] = body
+    result: List[str] = []
+    pending_heading: Optional[str] = None
 
-    return [c for c in normalized if c.strip()]
+    for chunk in chunks:
+        if pending_heading:
+            chunk = f"{pending_heading}\n{chunk.lstrip()}".strip()
+            pending_heading = None
+
+        body, heading = _extract_trailing_heading(chunk)
+        if body:
+            result.append(body)
+        if heading:
+            pending_heading = heading
+
+    if pending_heading:
+        result.append(pending_heading)
+
+    return [c for c in result if c.strip()]
 
 
 def _validate_chunk_integrity(chunks: List[str], original_text: str) -> List[str]:
