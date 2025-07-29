@@ -471,21 +471,21 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         )
 
         # Apply the cleaning steps in the correct order
-        logger.info("Applying normalize_newlines in PyMuPDF4LLM path")
+        logger.debug("Applying normalize_newlines in PyMuPDF4LLM path")
         text = normalize_newlines(text)
-        logger.info(f"After normalize_newlines: {repr(text[:100])}")
+        logger.debug(f"After normalize_newlines: {repr(text[:100])}")
 
-        logger.info("Applying collapse_single_newlines in PyMuPDF4LLM path")
+        logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
         text = collapse_single_newlines(text)
-        logger.info(f"After collapse_single_newlines: {repr(text[:100])}")
+        logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
 
-        logger.info("Applying merge_spurious_paragraph_breaks in PyMuPDF4LLM path")
+        logger.debug("Applying merge_spurious_paragraph_breaks in PyMuPDF4LLM path")
         text = merge_spurious_paragraph_breaks(text)
-        logger.info(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
+        logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
 
-        logger.info("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
+        logger.debug("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
         text = fix_hyphenated_linebreaks(text)
-        logger.info(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
+        logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
 
         # Apply other cleaning steps paragraph by paragraph
         paragraphs = []
@@ -496,7 +496,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
                 paragraphs.append(p)
 
         cleaned = "\n\n".join(paragraphs)
-        logger.info(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")
+        logger.debug(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")
         return cleaned
 
     except Exception as e:
