@@ -7,44 +7,54 @@ import fitz  # PyMuPDF
 from .text_cleaning import clean_text, HYPHEN_CHARS_ESC
 from .heading_detection import _detect_heading_fallback
 from .page_utils import parse_page_ranges, validate_page_exclusions
+from .page_artifacts import is_page_artifact_text
 from .extraction_fallbacks import (
     _detect_language,
     _assess_text_quality,
     _extract_with_pdftotext,
     _extract_with_pdfminer,
-    PDFMINER_AVAILABLE
+    PDFMINER_AVAILABLE,
 )
 from .pymupdf4llm_integration import (
     extract_with_pymupdf4llm,
     is_pymupdf4llm_available,
     PyMuPDF4LLMExtractionError,
     should_apply_pymupdf4llm_cleaning,
-    PyMuPDF4LLMExtractionError
+    PyMuPDF4LLMExtractionError,
 )
 
 from typing import List, Dict, Any, Tuple
 
-def _should_merge_blocks(curr_block: Dict[str, Any], next_block: Dict[str, Any]) -> Tuple[bool, str]:
+
+def _should_merge_blocks(
+    curr_block: Dict[str, Any], next_block: Dict[str, Any]
+) -> Tuple[bool, str]:
     """Determine if two blocks should be merged and return the reason."""
-    curr_text = curr_block.get('text', '').strip()
-    next_text = next_block.get('text', '').strip()
+    curr_text = curr_block.get("text", "").strip()
+    next_text = next_block.get("text", "").strip()
 
     if not curr_text or not next_text:
-        logger.debug(f"Merge check: Empty text - curr: {bool(curr_text)}, next: {bool(next_text)}")
+        logger.debug(
+            f"Merge check: Empty text - curr: {bool(curr_text)}, next: {bool(next_text)}"
+        )
         return False, "empty_text"
 
     curr_page = curr_block.get("source", {}).get("page")
     next_page = next_block.get("source", {}).get("page")
 
     logger.debug(f"Merge check: Pages curr={curr_page}, next={next_page}")
-    logger.debug(f"Merge check: Text endings - curr: '{curr_text[-10:]}', next: '{next_text[:10]}'")
+    logger.debug(
+        f"Merge check: Text endings - curr: '{curr_text[-10:]}', next: '{next_text[:10]}'"
+    )
 
     # Check for quote-related splitting issues
     curr_has_quote = '"' in curr_text or "'" in curr_text
     next_has_quote = '"' in next_text or "'" in next_text
 
     if curr_has_quote or next_has_quote:
-        logger.debug(f"Merge check: Quote detection - curr: {curr_has_quote}, next: {next_has_quote}")
+        logger.debug(
+            f"Merge check: Quote detection - curr: {curr_has_quote}, next: {next_has_quote}"
+        )
 
         # Special handling for quoted text that may have been incorrectly split
         if _is_quote_continuation(curr_text, next_text):
@@ -64,9 +74,12 @@ def _should_merge_blocks(curr_block: Dict[str, Any], next_block: Dict[str, Any])
         return True, "hyphenated_continuation"
 
     # Case 2: Same page, sentence continuation (no punctuation at end)
-    elif (curr_page == next_page and
-          not curr_text.endswith(('.', '!', '?', ':', ';')) and
-          next_text and next_text[0].islower()):
+    elif (
+        curr_page == next_page
+        and not curr_text.endswith((".", "!", "?", ":", ";"))
+        and next_text
+        and next_text[0].islower()
+    ):
         logger.debug("Merge decision: SAME_PAGE_CONTINUATION")
         return True, "sentence_continuation"
 
@@ -86,6 +99,7 @@ def _should_merge_blocks(curr_block: Dict[str, Any], next_block: Dict[str, Any])
     logger.debug("Merge decision: NO_MERGE")
     return False, "no_merge"
 
+
 def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
     """Check if the next block is a continuation of quoted text from current block."""
     import re
@@ -97,42 +111,52 @@ def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
     # If current text has unmatched opening quotes, next might be continuation
     if curr_open_quotes % 2 == 1 or curr_open_single % 2 == 1:
         # Check if next text starts in a way that suggests quote continuation
-        if (not next_text[0].isupper() or
-            next_text.startswith(('and', 'but', 'or', 'so', 'yet', 'for'))):
+        if not next_text[0].isupper() or next_text.startswith(
+            ("and", "but", "or", "so", "yet", "for")
+        ):
             return True
 
     # Look for patterns where quotes were split incorrectly
     # Pattern: current ends with quote, next starts with comma/period + space + text
-    if (curr_text.endswith('"') and
-        re.match(r'^[,.;:]\s+[a-z]', next_text)):
+    if curr_text.endswith('"') and re.match(r"^[,.;:]\s+[a-z]", next_text):
         return True
 
     # Pattern: current ends mid-sentence, next starts with quote
-    if (not curr_text.endswith(('.', '!', '?')) and
-        next_text.startswith('"') and
-        len(next_text) > 1 and next_text[1].islower()):
+    if (
+        not curr_text.endswith((".", "!", "?"))
+        and next_text.startswith('"')
+        and len(next_text) > 1
+        and next_text[1].islower()
+    ):
         return True
 
     return False
+
 
 def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     """Check if the boundary between texts looks like a legitimate quote boundary."""
     # If current ends with closing quote and punctuation, and next starts with capital
-    if (curr_text.endswith(('."', ".'", '!"', "!'", '?"', "?'")) and
-        next_text and next_text[0].isupper()):
+    if (
+        curr_text.endswith(('."', ".'", '!"', "!'", '?"', "?'"))
+        and next_text
+        and next_text[0].isupper()
+    ):
         return True
 
     # If current ends with quote and next starts with attribution
-    attribution_starters = ['said', 'asked', 'replied', 'continued', 'added', 'noted']
-    if (curr_text.endswith(('"', "'")) and
-        any(next_text.lower().startswith(starter) for starter in attribution_starters)):
+    attribution_starters = ["said", "asked", "replied", "continued", "added", "noted"]
+    if curr_text.endswith(('"', "'")) and any(
+        next_text.lower().startswith(starter) for starter in attribution_starters
+    ):
         return True
 
     return False
 
+
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 def is_artifact_block(block, page_height, frac=0.15, max_words=6):
     """
@@ -146,7 +170,11 @@ def is_artifact_block(block, page_height, frac=0.15, max_words=6):
     if y0 < page_height * frac or y0 > page_height * (1 - frac):
         cleaned = clean_text(raw_text)
         words = cleaned.split()
-        if words and len(words) <= max_words and any(any(c.isdigit() for c in w) for w in words):
+        if (
+            words
+            and len(words) <= max_words
+            and any(any(c.isdigit() for c in w) for w in words)
+        ):
             return True
     return False
 
@@ -158,27 +186,20 @@ def _remove_page_artifact_lines(text: str, page_num: int) -> str:
 
     def _is_artifact(idx: int) -> bool:
         ln = clean_text(lines[idx])
-        return is_page_artifact({"text": ln}, page_num)
+        return is_page_artifact_text(ln, page_num)
 
     filtered = [
         ln
         for i, ln in enumerate(lines)
-        if not (
-            _is_artifact(i)
-            and (
-                i == len(lines) - 1
-                or _is_artifact(i + 1)
-            )
-        )
+        if not (_is_artifact(i) and (i == len(lines) - 1 or _is_artifact(i + 1)))
     ]
 
     return "\n".join(filtered)
 
-
     """I like this implementation with a comprehension a lot more. Please, stick to declarative and functional"""
-    #lines = text.splitlines()
-    #kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
-    #return "\n".join(kept)
+    # lines = text.splitlines()
+    # kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
+    # return "\n".join(kept)
 
 
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
@@ -223,18 +244,17 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
 
         block_type = "heading" if is_heading else "paragraph"
         # Always include a source dictionary with filename, page, and location (None for PDFs)
-        structured.append({
-            "type": block_type,
-            "text": block_text,
-            "language": _detect_language(block_text),
-            "source": {
-                "filename": filename,
-                "page": page_num,
-                "location": None
+        structured.append(
+            {
+                "type": block_type,
+                "text": block_text,
+                "language": _detect_language(block_text),
+                "source": {"filename": filename, "page": page_num, "location": None},
             }
-        })
+        )
 
     return structured
+
 
 def is_page_artifact(block: dict, page_num: int) -> bool:
     """
@@ -248,41 +268,8 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
         True if block appears to be a page artifact
     """
     text = block.get("text", "").strip()
+    return is_page_artifact_text(text, page_num)
 
-    if not text:
-        return True
-
-    # Check for page numbers (standalone numbers)
-    if text.isdigit() and len(text) <= 3:
-        return True
-
-    # Check for common header/footer patterns
-    header_footer_patterns = [
-        r'^\d+$',                     # Just page numbers
-        r'^page\s+\d+',              # "Page 1", "Page 2", etc.
-        r'^\d+\s*$',                 # Page numbers with whitespace
-        r'^chapter\s+\d+$',          # Standalone "Chapter X"
-        r'^\d+\s+chapter',           # "1 Chapter", "2 Chapter", etc.
-        r'^\w+\s*\|\s*\d+$',      # "Introduction | 1", "Summary | 2"
-        r'^\d+\s*\|\s*[\w\s:]+$', # "60 | Chapter 3: How and When to Get Started"
-        r'^[0-9]{1,3}[.)]?\s+[A-Z]', # Footnotes like "1 See example"
-        #r'^\d+[.)]?\s+[a-z]',        # "1 Some footnote text" or "23) See example"
-
-
-    ]
-
-    text_lower = text.lower()
-    for pattern in header_footer_patterns:
-        if re.match(pattern, text_lower):
-            logger.info(f"is_page_artifact():  {text[:30]}... (page {page_num})")
-            return True
-
-    # Check for very short text that might be artifacts
-    if len(text.split()) <= 2 and len(text) <= 20:
-        # Could be header/footer, but be conservative
-        return False
-
-    return False
 
 def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Merge blocks that are continuations of each other."""
@@ -297,9 +284,11 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
 
     while i < len(blocks):
         current_block = blocks[i]
-        current_text = current_block.get('text', '').strip()
+        current_text = current_block.get("text", "").strip()
 
-        logger.debug(f"Processing block {i}: {len(current_text)} chars, preview: '{current_text[:50].replace(chr(10), '\\n')}'")
+        logger.debug(
+            f"Processing block {i}: {len(current_text)} chars, preview: '{current_text[:50].replace(chr(10), '\\n')}'"
+        )
 
         # Look ahead for potential merges
         j = i + 1
@@ -307,51 +296,66 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
 
         while j < len(blocks):
             next_block = blocks[j]
-            next_text = next_block.get('text', '').strip()
+            next_text = next_block.get("text", "").strip()
 
             should_merge, merge_reason = _should_merge_blocks(current_block, next_block)
 
             if should_merge:
                 logger.debug(f"MERGE: Block {i} + Block {j} (reason: {merge_reason})")
-                logger.debug(f"  Before merge - Block {i}: '{current_text[:30].replace(chr(10), '\\n')}'")
-                logger.debug(f"  Before merge - Block {j}: '{next_text[:30].replace(chr(10), '\\n')}'")
+                logger.debug(
+                    f"  Before merge - Block {i}: '{current_text[:30].replace(chr(10), '\\n')}'"
+                )
+                logger.debug(
+                    f"  Before merge - Block {j}: '{next_text[:30].replace(chr(10), '\\n')}'"
+                )
 
                 # Perform the merge
                 if merge_reason == "hyphenated_continuation":
-                    merged_text = re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + next_text
+                    merged_text = (
+                        re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + next_text
+                    )
                 elif merge_reason == "sentence_continuation":
                     # Merge with space for sentence continuation
-                    merged_text = current_text + ' ' + next_text
+                    merged_text = current_text + " " + next_text
                 else:
                     # Default merge with space
-                    merged_text = current_text + ' ' + next_text
+                    merged_text = current_text + " " + next_text
 
-                logger.debug(f"  After merge: '{merged_text[:50].replace(chr(10), '\\n')}'")
+                logger.debug(
+                    f"  After merge: '{merged_text[:50].replace(chr(10), '\\n')}'"
+                )
 
                 # Update current block with merged content
-                current_block['text'] = merged_text
+                current_block["text"] = merged_text
                 current_text = merged_text
                 merge_count += 1
                 merged_any = True
                 j += 1
             else:
-                logger.debug(f"NO MERGE: Block {i} + Block {j} (different pages/contexts)")
+                logger.debug(
+                    f"NO MERGE: Block {i} + Block {j} (different pages/contexts)"
+                )
                 break
 
         merged_blocks.append(current_block)
         i = j if merged_any else i + 1
 
-    logger.info(f"Block merging complete: {len(blocks)} → {len(merged_blocks)} blocks ({merge_count} merges)")
+    logger.info(
+        f"Block merging complete: {len(blocks)} → {len(merged_blocks)} blocks ({merge_count} merges)"
+    )
 
     # Log final block statistics
     for idx, block in enumerate(merged_blocks):
-        text = block.get('text', '')
-        text_preview = text[:100].replace('\n', '\\n')
+        text = block.get("text", "")
+        text_preview = text[:100].replace("\n", "\\n")
         logger.debug(f"Final block {idx}: {len(text)} chars - {text_preview}...")
 
     return merged_blocks
 
-def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
+
+def extract_text_blocks_from_pdf(
+    filepath: str, exclude_pages: str = None
+) -> list[dict]:
     """
     Extract structured text from a PDF using traditional extraction with optional PyMuPDF4LLM text cleaning.
 
@@ -369,16 +373,20 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     and error handling while optionally enhancing text quality with PyMuPDF4LLM.
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     logger.info(f"Starting PDF text extraction from: {filepath}")
-    logger.info(f"PyMuPDF4LLM enhancement: {'enabled' if os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM','').lower() not in ('false','0','no','off') else 'disabled'}")
+    logger.info(
+        f"PyMuPDF4LLM enhancement: {'enabled' if os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM','').lower() not in ('false','0','no','off') else 'disabled'}"
+    )
 
     # Parse excluded pages first
     excluded_pages_set = set()
     if exclude_pages:
         try:
             from .page_utils import parse_page_ranges
+
             excluded_pages_set = parse_page_ranges(exclude_pages)
             logger.info(f"Excluding pages: {sorted(excluded_pages_set)}")
         except Exception as e:
@@ -409,23 +417,29 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
             continue
 
         logger.debug(f"Processing page {page_num}/{len(doc)}")
-        page_blocks = extract_blocks_from_page(page, page_num, os.path.basename(filepath))
+        page_blocks = extract_blocks_from_page(
+            page, page_num, os.path.basename(filepath)
+        )
         page_block_counts[page_num] = len(page_blocks)
         logger.debug(f"Page {page_num}: extracted {len(page_blocks)} blocks")
 
         # Log block details for debugging
         for i, block in enumerate(page_blocks):
-            text_preview = block.get('text', '')[:100].replace('\n', '\\n')
-            logger.debug(f"Page {page_num}, Block {i}: {len(block.get('text', ''))} chars - {text_preview}...")
+            text_preview = block.get("text", "")[:100].replace("\n", "\\n")
+            logger.debug(
+                f"Page {page_num}, Block {i}: {len(block.get('text', ''))} chars - {text_preview}..."
+            )
         all_blocks.extend(page_blocks)
 
     doc.close()
-    logger.info(f"Raw extraction complete: {len(all_blocks)} total blocks from pages: {sorted(page_block_counts.keys())}")
+    logger.info(
+        f"Raw extraction complete: {len(all_blocks)} total blocks from pages: {sorted(page_block_counts.keys())}"
+    )
     logger.debug(f"Page block distribution: {page_block_counts}")
 
     # Debug: Log sample text from first few blocks to trace cleaning
     for i, block in enumerate(all_blocks[:3]):
-        text_preview = block.get('text', '')[:100].replace('\n', '\\n')
+        text_preview = block.get("text", "")[:100].replace("\n", "\\n")
         logger.debug(f"Raw block {i} text preview: {repr(text_preview)}")
 
     # Defensive filter: ensure no excluded pages made it through
@@ -438,7 +452,9 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
         filtered_blocks.append(block)
 
     if len(filtered_blocks) != len(all_blocks):
-        logger.info(f"Filtered out {len(all_blocks) - len(filtered_blocks)} blocks from excluded pages")
+        logger.info(
+            f"Filtered out {len(all_blocks) - len(filtered_blocks)} blocks from excluded pages"
+        )
     all_blocks = filtered_blocks
 
     # Apply improved continuation merging with page boundary handling
@@ -448,11 +464,13 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     logger.debug(f"Total blocks after merging: {len(merged_blocks)}")
     # Log text flow analysis for debugging
     for idx, block in enumerate(merged_blocks[:3]):  # Log first 3 blocks for debugging
-        text_preview = block.get("text", "")[:100].replace('\n', '\\n')
+        text_preview = block.get("text", "")[:100].replace("\n", "\\n")
         page_info = block.get("source", {})
-        logger.debug(f"Merged block {idx}: page {page_info.get('page', 'unknown')}, "
-                     f"type {block.get('type', 'unknown')}, "
-                     f"text: {repr(text_preview)}")
+        logger.debug(
+            f"Merged block {idx}: page {page_info.get('page', 'unknown')}, "
+            f"type {block.get('type', 'unknown')}, "
+            f"text: {repr(text_preview)}"
+        )
 
     # Apply PyMuPDF4LLM enhancement if requested and beneficial
     from .env_utils import use_pymupdf4llm as _use_pymupdf4llm
@@ -463,14 +481,22 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     )
     logger.debug(f"use_pymupdf4llm evaluated to: {use_pymupdf4llm}")
 
-    enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
+    enhancement_stats = {
+        "enhanced": 0,
+        "failed": 0,
+        "skipped": len(merged_blocks),
+        "degraded": 0,
+        "artifacts_filtered": 0,
+    }
     enhanced_blocks = None
 
     if use_pymupdf4llm and should_apply_pymupdf4llm_cleaning(merged_blocks):
         logger.info("Applying PyMuPDF4LLM enhancement")
         try:
             # Pass excluded pages as a set to the enhancement function
-            enhanced_blocks, enhancement_stats = extract_with_pymupdf4llm(filepath, exclude_pages=excluded)
+            enhanced_blocks, enhancement_stats = extract_with_pymupdf4llm(
+                filepath, exclude_pages=excluded
+            )
 
             # Defensive: filter out any blocks from excluded pages if present
             if enhanced_blocks:
@@ -479,57 +505,100 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                 for block in enhanced_blocks:
                     page = block.get("source", {}).get("page")
                     if page is not None and page in excluded:
-                        logger.warning(f"Filtering out enhanced block from excluded page {page}")
+                        logger.warning(
+                            f"Filtering out enhanced block from excluded page {page}"
+                        )
                         continue
                     filtered_enhanced_blocks.append(block)
                 enhanced_blocks = filtered_enhanced_blocks
 
                 if len(enhanced_blocks) != pre_filter_count:
-                    logger.info(f"Filtered out {pre_filter_count - len(enhanced_blocks)} enhanced blocks from excluded pages")
+                    logger.info(
+                        f"Filtered out {pre_filter_count - len(enhanced_blocks)} enhanced blocks from excluded pages"
+                    )
 
             # If enhancement was successful and high quality, use enhanced blocks
             if enhanced_blocks and enhancement_stats.get("enhanced", 0) > 0:
                 if enhancement_stats.get("degraded", 0) == 0:
-                    logger.info(f"PyMuPDF4LLM enhancement successful: {enhancement_stats}")
+                    logger.info(
+                        f"PyMuPDF4LLM enhancement successful: {enhancement_stats}"
+                    )
                     merged_blocks = enhanced_blocks
                 else:
-                    logger.warning("PyMuPDF4LLM enhancement quality degraded, falling back to traditional text cleaning")
-                    logger.debug("Ensuring traditional text cleaning pipeline is used for all blocks")
+                    logger.warning(
+                        "PyMuPDF4LLM enhancement quality degraded, falling back to traditional text cleaning"
+                    )
+                    logger.debug(
+                        "Ensuring traditional text cleaning pipeline is used for all blocks"
+                    )
                     # Re-apply traditional text cleaning to all blocks
                     for block in merged_blocks:
-                        if 'text' in block:
+                        if "text" in block:
                             from .text_cleaning import clean_text
-                            logger.debug(f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}")
-                            block['text'] = clean_text(block['text'])
-                            logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
+
+                            logger.debug(
+                                f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
+                            )
+                            block["text"] = clean_text(block["text"])
+                            logger.debug(
+                                f"After traditional cleaning: {repr(block['text'][:50])}"
+                            )
             else:
-                logger.warning("PyMuPDF4LLM enhancement failed, falling back to traditional text cleaning")
-                logger.debug("Ensuring traditional text cleaning pipeline is used for all blocks")
+                logger.warning(
+                    "PyMuPDF4LLM enhancement failed, falling back to traditional text cleaning"
+                )
+                logger.debug(
+                    "Ensuring traditional text cleaning pipeline is used for all blocks"
+                )
                 # Re-apply traditional text cleaning to all blocks
                 for block in merged_blocks:
-                    if 'text' in block:
+                    if "text" in block:
                         from .text_cleaning import clean_text
-                        logger.debug(f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}")
-                        block['text'] = clean_text(block['text'])
-                        logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
+
+                        logger.debug(
+                            f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
+                        )
+                        block["text"] = clean_text(block["text"])
+                        logger.debug(
+                            f"After traditional cleaning: {repr(block['text'][:50])}"
+                        )
         except Exception as e:
             logger.error(f"PyMuPDF4LLM enhancement failed with error: {e}")
             logger.info("Falling back to traditional text cleaning pipeline")
-            logger.debug("Ensuring traditional text cleaning pipeline is used for all blocks")
+            logger.debug(
+                "Ensuring traditional text cleaning pipeline is used for all blocks"
+            )
             # Re-apply traditional text cleaning to all blocks
             for block in merged_blocks:
-                if 'text' in block:
+                if "text" in block:
                     from .text_cleaning import clean_text
-                    logger.debug(f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}")
-                    block['text'] = clean_text(block['text'])
-                    logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
+
+                    logger.debug(
+                        f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
+                    )
+                    block["text"] = clean_text(block["text"])
+                    logger.debug(
+                        f"After traditional cleaning: {repr(block['text'][:50])}"
+                    )
     elif use_pymupdf4llm:
         logger.info("PyMuPDF4LLM enhancement skipped - not beneficial for this content")
         logger.debug("Using traditional text cleaning pipeline")
-        enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
+        enhancement_stats = {
+            "enhanced": 0,
+            "failed": 0,
+            "skipped": len(merged_blocks),
+            "degraded": 0,
+            "artifacts_filtered": 0,
+        }
     else:
         logger.debug("PyMuPDF4LLM disabled by environment variable")
-        enhancement_stats = {"enhanced": 0, "failed": 0, "skipped": len(merged_blocks), "degraded": 0, "artifacts_filtered": 0}
+        enhancement_stats = {
+            "enhanced": 0,
+            "failed": 0,
+            "skipped": len(merged_blocks),
+            "degraded": 0,
+            "artifacts_filtered": 0,
+        }
 
     # Log final enhancement statistics
     logger.info(f"PyMuPDF4LLM enhancement completed: {enhancement_stats}")
@@ -538,10 +607,14 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     text_blob = "\n".join(block["text"] for block in merged_blocks)
     quality = _assess_text_quality(text_blob)
 
-    logger.debug(f"Text quality assessment: score={quality.get('quality_score', 0):.2f}")
+    logger.debug(
+        f"Text quality assessment: score={quality.get('quality_score', 0):.2f}"
+    )
 
     if quality["quality_score"] < 0.7:
-        logger.warning(f"Low quality score ({quality['quality_score']:.2f}), attempting fallback extraction")
+        logger.warning(
+            f"Low quality score ({quality['quality_score']:.2f}), attempting fallback extraction"
+        )
         fallback = _extract_with_pdftotext(filepath, exclude_pages)
         if fallback:
             logger.info("Using pdftotext fallback extraction")
@@ -554,7 +627,11 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
 
     # --- Ensure all blocks have a proper source dictionary with filename, page, and location ---
     # If PyMuPDF4LLM enhancement was applied, propagate page numbers from original blocks if missing
-    if merged_blocks and isinstance(merged_blocks[0], dict) and "source" in merged_blocks[0]:
+    if (
+        merged_blocks
+        and isinstance(merged_blocks[0], dict)
+        and "source" in merged_blocks[0]
+    ):
         # Try to propagate page numbers from original blocks to enhanced blocks if missing
         # Build a list of original page numbers for each block index
         original_pages = []
