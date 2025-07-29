@@ -1,0 +1,19 @@
+import unittest
+from pdf_chunker.splitter import _fix_heading_splitting_issues
+
+
+class TestHeadingBoundaryFix(unittest.TestCase):
+    def test_heading_moved_to_next_chunk(self):
+        chunks = [
+            "Some text about a topic.\n\nNext Section",
+            "The section continues here with more details.",
+        ]
+        fixed = _fix_heading_splitting_issues(chunks)
+        self.assertEqual(len(fixed), 2)
+        self.assertEqual(fixed[0], "Some text about a topic.")
+        self.assertTrue(fixed[1].startswith("Next Section"))
+        self.assertIn("The section continues", fixed[1])
+
+
+if __name__ == "__main__":
+    unittest.main()
