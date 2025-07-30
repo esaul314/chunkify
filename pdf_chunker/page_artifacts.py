@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Optional
 
 from .text_cleaning import clean_text
 
@@ -25,13 +26,21 @@ def _match_common_patterns(text_lower: str) -> bool:
     return any(re.match(p, text_lower) for p in patterns)
 
 
-def _match_page_number_suffix(text: str, page_num: int) -> bool:
+def _normalize_page_num(page_num: Optional[int]) -> int:
+    """Return a safe page number for comparisons."""
+
+    return page_num if isinstance(page_num, int) else 0
+
+
+def _match_page_number_suffix(text: str, page_num: Optional[int]) -> bool:
     """Detect page-number fragments at line ends or near the end.
 
     If ``page_num`` is ``0`` or negative, the numeric check is skipped.
     """
 
     # Exact trailing page number
+    page_num = _normalize_page_num(page_num)
+
     m = re.search(r"(\d{1,3})\s*$", text)
     if m:
         trailing = int(m.group(1))
@@ -59,7 +68,7 @@ def _match_page_number_suffix(text: str, page_num: int) -> bool:
     return False
 
 
-def is_page_artifact_text(text: str, page_num: int) -> bool:
+def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
     """Return True if the text looks like a header or footer artifact."""
     text_lower = text.lower().strip()
     if not text_lower:
@@ -87,7 +96,7 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
     return False
 
 
-def strip_page_artifact_suffix(text: str, page_num: int) -> str:
+def strip_page_artifact_suffix(text: str, page_num: Optional[int]) -> str:
     """Return the line with any trailing ``"| N"`` footer fragment removed."""
 
     pattern = re.compile(r"\|\s*(\d{1,3})(?!\d)")
@@ -96,6 +105,7 @@ def strip_page_artifact_suffix(text: str, page_num: int) -> str:
         return text
 
     trailing = int(match.group(1))
+    page_num = _normalize_page_num(page_num)
     if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(
         text
     ) - match.end() <= 20:
@@ -105,14 +115,15 @@ def strip_page_artifact_suffix(text: str, page_num: int) -> str:
     return text
 
 
-def _remove_inline_footer(text: str, page_num: int) -> str:
+def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
     """Remove footer fragments embedded inside a paragraph."""
 
     pattern = re.compile(r"\n\n([A-Z][^|\n]{0,60}?\|\s*(\d{1,3})(?!\d))")
 
     def repl(match: re.Match[str]) -> str:
         trailing = int(match.group(2))
-        if page_num <= 0 or abs(trailing - page_num) <= 1:
+        page_num_checked = _normalize_page_num(page_num)
+        if page_num_checked <= 0 or abs(trailing - page_num_checked) <= 1:
             logger.info("_remove_inline_footer removed footer: %s", match.group(1)[:30])
             return "\n\n"
         return match.group(0)
@@ -120,7 +131,7 @@ def _remove_inline_footer(text: str, page_num: int) -> str:
     return pattern.sub(repl, text)
 
 
-def remove_page_artifact_lines(text: str, page_num: int) -> str:
+def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     """Remove header or footer artifact lines from a block."""
 
     text = _remove_inline_footer(text, page_num)
