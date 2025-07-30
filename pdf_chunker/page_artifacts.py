@@ -59,3 +59,15 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
         return True
 
     return False
+
+
+def strip_page_artifact_suffix(text: str, page_num: int) -> str:
+    """Remove trailing footer text like "Foo | 123" if it matches the page."""
+    pattern = re.compile(r"\|\s*(\d{1,3})\s*$")
+    match = pattern.search(text)
+    if match:
+        trailing = int(match.group(1))
+        if abs(trailing - page_num) <= 1 or len(text) - match.start() <= 40:
+            logger.info(f"strip_page_artifact_suffix() removed: {text[:30]}…")
+            return text[: match.start()].rstrip()
+    return text
