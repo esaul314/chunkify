@@ -22,9 +22,11 @@ def _detect_heading_fallback(text: str) -> bool:
         return True
 
     # Title case text without ending punctuation might be a heading
-    if (text.istitle() and
-        len(words) <= 10 and
-        not text.endswith(('.', '!', '?', ';', ':'))):
+    if (
+        text.istitle()
+        and len(words) <= 10
+        and not text.endswith((".", "!", "?", ";", ":"))
+    ):
         return True
 
     # Text that starts with common heading patterns
