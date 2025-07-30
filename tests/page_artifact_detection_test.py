@@ -25,10 +25,21 @@ class TestPageArtifactDetection(unittest.TestCase):
         stripped = strip_page_artifact_suffix(line, 123)
         self.assertEqual(stripped, "An Introduction to Something")
 
+    def test_footer_with_trailing_text(self):
+        line = "Footer Text | 55the next paragraph"
+        self.assertTrue(is_page_artifact_text(line, 55))
+        stripped = strip_page_artifact_suffix(line, 55)
+        self.assertEqual(stripped, "Footer Text")
+
     def test_remove_page_artifact_lines(self):
         text = "Hello\nA Successful Implementation: How To Do It | 123\nWorld"
         cleaned = remove_page_artifact_lines(text, 123)
         self.assertEqual(cleaned, "Hello\nWorld")
+
+    def test_inline_footer_fragment(self):
+        text = "Intro paragraph\n\nFooter Text | 55next line"
+        cleaned = remove_page_artifact_lines(text, 55)
+        self.assertEqual(cleaned, "Intro paragraph\nnext line")
 
 
 if __name__ == "__main__":
