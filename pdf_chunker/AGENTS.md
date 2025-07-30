@@ -4,6 +4,7 @@
 # AGENTS
 
 Core modules implementing document processing pipeline passes.
+Please, keep this file up-to-date with the latest code structure. If you notice that the code structure has changed, please update this file accordingly.
 
 ## Responsibilities
 - ```core.py`: Orchestrates all passes.
@@ -25,7 +26,7 @@ Core modules implementing document processing pipeline passes.
 
 ## Known Issues
 - Footnote anchors may appear in the middle of chunks.
-- Hyphenated word reassembly logic may not execute.
+- Page exclusion feature is not working reliably.
 - Metadata fields sometimes missing when fallback triggers.
 ```
 

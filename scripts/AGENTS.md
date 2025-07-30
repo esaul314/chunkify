@@ -4,6 +4,7 @@
 # AGENTS
 
 CLI entry points and automation scripts.
+Please, keep this file up-to-date with the latest code structure. If you notice that the code structure has changed, please update this file accordingly.
 
 ## Responsibilities
 - ```chunk_pdf.py`: Full pipeline runner.
