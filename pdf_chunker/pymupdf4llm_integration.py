@@ -953,7 +953,7 @@ def _has_page_boundary_issues(blocks: List[Dict[str, Any]]) -> bool:
     return False
 
 
-def is_page_artifact_text(text: str, page_num: int) -> bool:
+def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
     """Delegate to shared page artifact detection logic."""
     return page_artifacts.is_page_artifact_text(text, page_num)
 
