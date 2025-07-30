@@ -26,7 +26,9 @@ def _match_common_patterns(text_lower: str) -> bool:
 
 
 def _match_page_number_suffix(text: str, page_num: int) -> bool:
-    """Detect trailing page numbers that align with the page number."""
+    """Detect page-number fragments at line ends or near the end."""
+
+    # Exact trailing page number
     m = re.search(r"(\d{1,3})\s*$", text)
     if m:
         trailing = int(m.group(1))
@@ -34,6 +36,14 @@ def _match_page_number_suffix(text: str, page_num: int) -> bool:
             words = text.split()
             if "|" in text or len(words) <= 8:
                 return True
+
+    # Page number followed by stray characters from the next line
+    m = re.search(r"\|\s*(\d{1,3})(?!\d)", text)
+    if m:
+        trailing = int(m.group(1))
+        if abs(trailing - page_num) <= 1 and len(text) - m.end() <= 20:
+            return True
+
     return False
 
 
@@ -66,13 +76,13 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
 def strip_page_artifact_suffix(text: str, page_num: int) -> str:
     """Return the line with any trailing ``"| N"`` footer fragment removed."""
 
-    pattern = re.compile(r"\|\s*(\d{1,3})\s*$")
+    pattern = re.compile(r"\|\s*(\d{1,3})(?!\d)")
     match = pattern.search(text)
     if not match:
         return text
 
     trailing = int(match.group(1))
-    if abs(trailing - page_num) <= 1 or len(text) - match.start() <= 40:
+    if abs(trailing - page_num) <= 1 and len(text) - match.end() <= 20:
         logger.info("strip_page_artifact_suffix removed footer fragment: %s", text[:30])
         return text[: match.start()].rstrip()
 
