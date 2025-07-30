@@ -109,6 +109,8 @@ def _is_probable_heading(text: str) -> bool:
     if not stripped or len(stripped) > 80:
         return False
 
+    words = [w for w in re.split(r"\s+", stripped) if w]
+
     # Quoted fragments are likely part of sentences, not headings
     opens = stripped.startswith(('"', "'"))
     closes = stripped.endswith(('"', "'"))
@@ -125,7 +127,12 @@ def _is_probable_heading(text: str) -> bool:
     if ":" in stripped and not re.search(r"[.!?]$", stripped):
         return True
 
-    words = [w for w in re.split(r"\s+", stripped) if w]
+    # Short phrases ending with ! or ? are often enthusiastic or question
+    # style headings that should accompany the following section.
+    if re.search(r"[!?]$", stripped):
+        word_count = len(words)
+        if 1 < word_count <= 6 and len(stripped) <= 60:
+            return True
     if not words:
         return False
 
