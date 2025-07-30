@@ -109,6 +109,25 @@ def _is_probable_heading(text: str) -> bool:
     if not stripped or len(stripped) > 80:
         return False
 
+    words = [w for w in re.split(r"\s+", stripped) if w]
+
+    # Lines ending with a bare vertical bar are usually headers or footers,
+    # not actual headings. Treat them as non-headings so they remain with the
+    # preceding body text rather than being attached to the next chunk.
+    if stripped.endswith("|"):
+        return False
+
+    # Short phrases with at least one capitalized word are often headings even
+    # without terminal punctuation. This helps catch cases like "Assimilate and
+    # expand" that follow removed footers.
+    # Allow short 2-3 word phrases with an initial capital as possible headings
+    if (
+        1 < len(words) <= 3
+        and stripped[0].isupper()
+        and not re.search(r"[.!?]$", stripped)
+    ):
+        return True
+
     # Quoted fragments are likely part of sentences, not headings
     opens = stripped.startswith(('"', "'"))
     closes = stripped.endswith(('"', "'"))
@@ -125,7 +144,12 @@ def _is_probable_heading(text: str) -> bool:
     if ":" in stripped and not re.search(r"[.!?]$", stripped):
         return True
 
-    words = [w for w in re.split(r"\s+", stripped) if w]
+    # Short phrases ending with ! or ? are often enthusiastic or question
+    # style headings that should accompany the following section.
+    if re.search(r"[!?]$", stripped):
+        word_count = len(words)
+        if 1 < word_count <= 6 and len(stripped) <= 60:
+            return True
     if not words:
         return False
 
