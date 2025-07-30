@@ -188,18 +188,13 @@ def _remove_page_artifact_lines(text: str, page_num: int) -> str:
         ln = clean_text(lines[idx])
         return is_page_artifact_text(ln, page_num)
 
-    cleaned = [
+    cleaned_lines = [
         strip_page_artifact_suffix(ln, page_num)
-        for i, ln in enumerate(lines)
-        if not (_is_artifact(i) and (i == len(lines) - 1 or _is_artifact(i + 1)))
+        for idx, ln in enumerate(lines)
+        if not _is_artifact(idx)
     ]
 
-    return "\n".join(cleaned)
-
-    """I like this implementation with a comprehension a lot more. Please, stick to declarative and functional"""
-    # lines = text.splitlines()
-    # kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
-    # return "\n".join(kept)
+    return "\n".join(cleaned_lines)
 
 
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:

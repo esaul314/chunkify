@@ -4,6 +4,7 @@ from pdf_chunker.page_artifacts import (
     is_page_artifact_text,
     strip_page_artifact_suffix,
 )
+from pdf_chunker.pdf_parsing import _remove_page_artifact_lines
 
 
 class TestPageArtifactDetection(unittest.TestCase):
@@ -23,6 +24,11 @@ class TestPageArtifactDetection(unittest.TestCase):
         line = "An Introduction to Something | 123"
         stripped = strip_page_artifact_suffix(line, 123)
         self.assertEqual(stripped, "An Introduction to Something")
+
+    def test_remove_page_artifact_lines(self):
+        text = "Hello\nA Successful Implementation: How To Do It | 123\nWorld"
+        cleaned = _remove_page_artifact_lines(text, 123)
+        self.assertEqual(cleaned, "Hello\nWorld")
 
 
 if __name__ == "__main__":
