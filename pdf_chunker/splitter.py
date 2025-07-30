@@ -564,6 +564,17 @@ def _extract_trailing_heading(chunk: str) -> Tuple[str, Optional[str]]:
         return chunk, None
 
     last_line = lines[-1].strip()
+
+    # Handle cases where a footer line ends with a delimiter followed by a
+    # heading on the same line, e.g. "Footer text | Heading". Split on the last
+    # vertical bar and treat the trailing portion as a heading if it qualifies.
+    if "|" in last_line:
+        pre, post = last_line.rsplit("|", 1)
+        candidate = post.strip()
+        if _is_probable_heading(candidate):
+            body_lines = lines[:-1] + [pre.rstrip()]
+            return "\n".join(body_lines).rstrip(), candidate
+
     if _is_probable_heading(last_line):
         body = "\n".join(lines[:-1]).rstrip()
         return body, last_line

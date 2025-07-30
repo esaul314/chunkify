@@ -24,6 +24,16 @@ class TestHeadingBoundaryFix(unittest.TestCase):
         self.assertEqual(fixed[0], "Preceding section text.")
         self.assertTrue(fixed[1].startswith("Keep It Fun!"))
 
+    def test_footer_line_not_treated_as_heading(self):
+        chunks = [
+            "Intro text.\nProduct Discovery and Market Analysis |\n\nAssimilate and expand",
+            "The section body follows here.",
+        ]
+        fixed = _fix_heading_splitting_issues(chunks)
+        self.assertEqual(len(fixed), 2)
+        self.assertTrue(fixed[0].endswith("|"))
+        self.assertTrue(fixed[1].startswith("Assimilate and expand"))
+
 
 if __name__ == "__main__":
     unittest.main()
