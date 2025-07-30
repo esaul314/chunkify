@@ -300,6 +300,7 @@ def _find_source_block(chunk: Document, char_map: dict, original_blocks: list[di
 
     # 3. Try fuzzy matching: ignore whitespace, punctuation, and case
     import re
+
     def normalize(s):
         return re.sub(r'[\W_]+', '', s).lower()
 
