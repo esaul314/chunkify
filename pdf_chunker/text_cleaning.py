@@ -104,16 +104,37 @@ def consolidate_whitespace(text: str) -> str:
 
 
 def _is_probable_heading(text: str) -> bool:
+    """Heuristically determine whether a line looks like a heading."""
     stripped = text.strip()
-    if not stripped or len(stripped) > 60:
+    if not stripped or len(stripped) > 80:
         return False
-    if re.match(r"^[\-•*]\s", stripped):
+
+    # Quoted fragments are likely part of sentences, not headings
+    opens = stripped.startswith(('"', "'"))
+    closes = stripped.endswith(('"', "'"))
+    if opens != closes:
+        return False
+
+    # Bulleted or explicitly upper-cased lines are strong indicators
+    if re.match(r"^[\-\u2022*]\s", stripped):
         return True
-    if stripped.isupper() and len(stripped.split()) <= 10:
+    if stripped.isupper():
         return True
-    if stripped.istitle() and not re.search(r"[.!?]$", stripped):
+
+    # Headings often contain a colon or digits without terminal punctuation
+    if ":" in stripped and not re.search(r"[.!?]$", stripped):
         return True
-    return False
+
+    words = [w for w in re.split(r"\s+", stripped) if w]
+    if not words:
+        return False
+
+    alpha_words = [w for w in words if w[0].isalpha()]
+    if not alpha_words:
+        return False
+
+    upper_ratio = sum(w[0].isupper() for w in alpha_words) / len(alpha_words)
+    return upper_ratio >= 0.5 and not re.search(r"[.!?]$", stripped)
 
 
 def _has_unbalanced_quotes(text: str) -> bool:
