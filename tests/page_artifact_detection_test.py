@@ -36,6 +36,11 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(text, 123)
         self.assertEqual(cleaned, "Hello\nWorld")
 
+    def test_inline_footer_fragment(self):
+        text = "Intro paragraph\n\nFooter Text | 55next line"
+        cleaned = remove_page_artifact_lines(text, 55)
+        self.assertEqual(cleaned, "Intro paragraph\nnext line")
+
 
 if __name__ == "__main__":
     unittest.main()

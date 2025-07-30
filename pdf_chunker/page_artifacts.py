@@ -89,8 +89,25 @@ def strip_page_artifact_suffix(text: str, page_num: int) -> str:
     return text
 
 
+def _remove_inline_footer(text: str, page_num: int) -> str:
+    """Remove footer fragments embedded inside a paragraph."""
+
+    pattern = re.compile(r"\n\n([A-Z][^|\n]{0,60}?\|\s*(\d{1,3})(?!\d))")
+
+    def repl(match: re.Match[str]) -> str:
+        trailing = int(match.group(2))
+        if abs(trailing - page_num) <= 1:
+            logger.info("_remove_inline_footer removed footer: %s", match.group(1)[:30])
+            return "\n\n"
+        return match.group(0)
+
+    return pattern.sub(repl, text)
+
+
 def remove_page_artifact_lines(text: str, page_num: int) -> str:
     """Remove header or footer artifact lines from a block."""
+
+    text = _remove_inline_footer(text, page_num)
 
     lines = text.splitlines()
 
