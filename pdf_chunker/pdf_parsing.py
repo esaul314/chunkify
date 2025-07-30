@@ -7,7 +7,7 @@ import fitz  # PyMuPDF
 from .text_cleaning import clean_text, HYPHEN_CHARS_ESC
 from .heading_detection import _detect_heading_fallback
 from .page_utils import parse_page_ranges, validate_page_exclusions
-from .page_artifacts import is_page_artifact_text
+from .page_artifacts import is_page_artifact_text, strip_page_artifact_suffix
 from .extraction_fallbacks import (
     _detect_language,
     _assess_text_quality,
@@ -188,13 +188,13 @@ def _remove_page_artifact_lines(text: str, page_num: int) -> str:
         ln = clean_text(lines[idx])
         return is_page_artifact_text(ln, page_num)
 
-    filtered = [
-        ln
+    cleaned = [
+        strip_page_artifact_suffix(ln, page_num)
         for i, ln in enumerate(lines)
         if not (_is_artifact(i) and (i == len(lines) - 1 or _is_artifact(i + 1)))
     ]
 
-    return "\n".join(filtered)
+    return "\n".join(cleaned)
 
     """I like this implementation with a comprehension a lot more. Please, stick to declarative and functional"""
     # lines = text.splitlines()
