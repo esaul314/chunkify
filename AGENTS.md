@@ -7,7 +7,8 @@ This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other
 ## Project Structure for OpenAI Codex Navigation
 
 The codebase follows a modular structure rooted in Unix philosophy (single responsibility, composability via interface boundaries):
-
+The directory structure may have changed. If any new files or folders have been created, they should be added to the structure below. This will help OpenAI Codex understand the project better and assist in generating code or documentation.
+If possible, check to make sure the tree below reflects the current state of the project, and update it if necessary.
 ```
 pdf_chunker/
 ├── .env                           # API keys and configuration secrets
@@ -171,7 +172,7 @@ All CLI scripts follow these conventions:
 * Tests may not fully cover all critical features or edge cases
 * Some code descriptions in `AGENTS.md` may be outdated due to drift
 * **Footnote defect**: footnotes inserted mid-sentence split content
-* **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined
+* **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- this has been fixed. Make sure you update AGENTS.md whenever you make changes. This file must reflect the reality.
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts
