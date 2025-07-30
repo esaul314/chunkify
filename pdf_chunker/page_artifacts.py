@@ -4,7 +4,7 @@ import re
 from .text_cleaning import clean_text
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 
 def _match_common_patterns(text_lower: str) -> bool:
     """Return True if text matches common header/footer patterns."""
