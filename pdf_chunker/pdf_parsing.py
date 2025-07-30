@@ -7,7 +7,11 @@ import fitz  # PyMuPDF
 from .text_cleaning import clean_text, HYPHEN_CHARS_ESC
 from .heading_detection import _detect_heading_fallback
 from .page_utils import parse_page_ranges, validate_page_exclusions
-from .page_artifacts import is_page_artifact_text
+from .page_artifacts import (
+    is_page_artifact_text,
+    remove_page_artifact_lines,
+    strip_page_artifact_suffix,
+)
 from .extraction_fallbacks import (
     _detect_language,
     _assess_text_quality,
@@ -179,29 +183,6 @@ def is_artifact_block(block, page_height, frac=0.15, max_words=6):
     return False
 
 
-def _remove_page_artifact_lines(text: str, page_num: int) -> str:
-    """Strip lines that look like page artifacts or footnotes."""
-
-    lines = text.splitlines()
-
-    def _is_artifact(idx: int) -> bool:
-        ln = clean_text(lines[idx])
-        return is_page_artifact_text(ln, page_num)
-
-    filtered = [
-        ln
-        for i, ln in enumerate(lines)
-        if not (_is_artifact(i) and (i == len(lines) - 1 or _is_artifact(i + 1)))
-    ]
-
-    return "\n".join(filtered)
-
-    """I like this implementation with a comprehension a lot more. Please, stick to declarative and functional"""
-    # lines = text.splitlines()
-    # kept = [ln for ln in lines if not is_page_artifact({"text": clean_text(ln)}, page_num)]
-    # return "\n".join(kept)
-
-
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     Extract and classify text blocks from a PDF page,
@@ -217,7 +198,7 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
         logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
 
         # Remove obvious header/footer lines before full cleaning
-        raw_text = _remove_page_artifact_lines(raw_text, page_num)
+        raw_text = remove_page_artifact_lines(raw_text, page_num)
 
         block_text = clean_text(raw_text)
         logger.debug(f"Block text after cleaning: {repr(block_text[:50])}")

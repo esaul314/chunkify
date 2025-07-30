@@ -1,5 +1,7 @@
-import re
 import logging
+import re
+
+from .text_cleaning import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -59,3 +61,37 @@ def is_page_artifact_text(text: str, page_num: int) -> bool:
         return True
 
     return False
+
+
+def strip_page_artifact_suffix(text: str, page_num: int) -> str:
+    """Return the line with any trailing ``"| N"`` footer fragment removed."""
+
+    pattern = re.compile(r"\|\s*(\d{1,3})\s*$")
+    match = pattern.search(text)
+    if not match:
+        return text
+
+    trailing = int(match.group(1))
+    if abs(trailing - page_num) <= 1 or len(text) - match.start() <= 40:
+        logger.info("strip_page_artifact_suffix removed footer fragment: %s", text[:30])
+        return text[: match.start()].rstrip()
+
+    return text
+
+
+def remove_page_artifact_lines(text: str, page_num: int) -> str:
+    """Remove header or footer artifact lines from a block."""
+
+    lines = text.splitlines()
+
+    def _is_artifact(idx: int) -> bool:
+        ln = clean_text(lines[idx])
+        return is_page_artifact_text(ln, page_num)
+
+    cleaned_lines = [
+        strip_page_artifact_suffix(ln, page_num)
+        for idx, ln in enumerate(lines)
+        if not _is_artifact(idx)
+    ]
+
+    return "\n".join(cleaned_lines)
