@@ -1,5 +1,7 @@
-import re
 import logging
+import re
+
+from .text_cleaning import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -75,3 +77,21 @@ def strip_page_artifact_suffix(text: str, page_num: int) -> str:
         return text[: match.start()].rstrip()
 
     return text
+
+
+def remove_page_artifact_lines(text: str, page_num: int) -> str:
+    """Remove header or footer artifact lines from a block."""
+
+    lines = text.splitlines()
+
+    def _is_artifact(idx: int) -> bool:
+        ln = clean_text(lines[idx])
+        return is_page_artifact_text(ln, page_num)
+
+    cleaned_lines = [
+        strip_page_artifact_suffix(ln, page_num)
+        for idx, ln in enumerate(lines)
+        if not _is_artifact(idx)
+    ]
+
+    return "\n".join(cleaned_lines)
