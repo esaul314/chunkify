@@ -36,9 +36,13 @@ HYPHEN_CHARS_ESC = re.escape("\u2010\u2011\u002d\u00ad\u1400\ufe63‐-")
 SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
+BULLET_CHARS_ESC = re.escape("*•")
+
+
 def _join_broken_words(text: str) -> str:
-    pattern_break = rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*(\w)"
-    pattern_space = rf"(\w)[{HYPHEN_CHARS_ESC}]\s+([a-z])"
+    bullet_opt = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
+    pattern_break = rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}(\w)"
+    pattern_space = rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([a-z])"
     text = re.sub(pattern_break, r"\1\2", text)
     return re.sub(pattern_space, r"\1\2", text)
 
