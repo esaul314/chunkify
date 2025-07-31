@@ -41,6 +41,15 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(text, 55)
         self.assertEqual(cleaned, "Intro paragraph\nnext line")
 
+    def test_trailing_pipe_footer(self):
+        text = (
+            "Intro paragraph\n"
+            "The Gardening Approach to the Product Management |\n"
+            "Next paragraph"
+        )
+        cleaned = remove_page_artifact_lines(text, 0)
+        self.assertEqual(cleaned, "Intro paragraph\nNext paragraph")
+
     def test_footer_without_page_context(self):
         line = "Footer Text | 9"
         self.assertTrue(is_page_artifact_text(line, 0))
