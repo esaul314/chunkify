@@ -4,6 +4,20 @@ from typing import Optional
 
 from .text_cleaning import clean_text
 
+
+def _looks_like_footnote(text: str) -> bool:
+    """Return ``True`` if ``text`` resembles a footnote line."""
+
+    stripped = text.strip()
+    if len(stripped.split()) < 3:
+        return False
+
+    if stripped.lower().startswith("footnote"):
+        return True
+
+    return bool(re.match(r"^(?:\d{1,3}|[\*\u2020])\s+[A-Z]", stripped))
+
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -22,6 +36,7 @@ def _match_common_patterns(text_lower: str) -> bool:
         r"^bibliography",
         r"^index$",
         r"^appendix\s+[a-z]$",
+        r"^[a-z][^|]{0,60}\|$",
     ]
     return any(re.match(p, text_lower) for p in patterns)
 
@@ -86,6 +101,10 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
         )
         return True
 
+    if _looks_like_footnote(text):
+        logger.info("is_page_artifact_text() footnote detected: %s", text[:30])
+        return True
+
     if (
         len(text.split()) <= 3
         and len(text) <= 30
@@ -116,40 +135,69 @@ def strip_page_artifact_suffix(text: str, page_num: Optional[int]) -> str:
 
 
 def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
-    """Remove footer fragments embedded inside a paragraph."""
+    """Remove footer or header fragments embedded in text."""
 
-    pattern = re.compile(r"\n\n([A-Z][^|\n]{0,60}?\|\s*(\d{1,3})(?!\d))")
+    patterns = [
+        re.compile(
+            r"(?:^|\n)(?P<footer>[A-Z][^|\n]{0,60}?\|\s*(?P<page>\d{1,3})(?!\d))\n?"
+        ),
+        re.compile(
+            r"(?:^|\n)(?P<footer>(?P<page>\d{1,3})\s*\|\s*[A-Z][^|\n]{0,60})\n?"
+        ),
+        re.compile(r"(?:^|\n)(?P<footer>\|\s*[A-Z][^|\n]{0,60})\n?"),
+        re.compile(r"(?:^|\n)(?P<footer>[A-Z][^|\n]{0,60}\|)\n?"),
+    ]
 
     def repl(match: re.Match[str]) -> str:
-        trailing = int(match.group(2))
-        page_num_checked = _normalize_page_num(page_num)
-        if page_num_checked <= 0 or abs(trailing - page_num_checked) <= 1:
-            logger.info("_remove_inline_footer removed footer: %s", match.group(1)[:30])
-            return "\n\n"
-        return match.group(0)
+        page_str = match.groupdict().get("page")
+        if page_str:
+            trailing = int(page_str)
+            page_num_checked = _normalize_page_num(page_num)
+            if page_num_checked <= 0 or abs(trailing - page_num_checked) <= 1:
+                logger.info(
+                    "_remove_inline_footer removed footer: %s",
+                    match.group("footer")[:30],
+                )
+                return "" if match.start() == 0 else "\n"
+            return match.group(0)
 
-    return pattern.sub(repl, text)
+        logger.info(
+            "_remove_inline_footer removed footer: %s",
+            match.group("footer")[:30],
+        )
+        return "" if match.start() == 0 else "\n"
+
+    for pattern in patterns:
+        text = pattern.sub(repl, text)
+
+    return text
+
+
+def _remove_embedded_footnote(text: str) -> str:
+    """Remove footnote lines merged into surrounding text."""
+
+    pattern = re.compile(
+        r"(?m)^\s*(?:\d{1,3}|[\*\u2020])\s+[A-Z][^.]{0,120}\.(?:\s*|$)\n?"
+    )
+    return pattern.sub("", text)
 
 
 def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     """Remove header or footer artifact lines from a block."""
 
     text = _remove_inline_footer(text, page_num)
+    text = _remove_embedded_footnote(text)
 
     lines = text.splitlines()
 
-    def _is_artifact(idx: int) -> bool:
-        ln = clean_text(lines[idx])
-        return is_page_artifact_text(ln, page_num)
-
-    cleaned_lines = []
-    for idx, ln in enumerate(lines):
-        if _is_artifact(idx):
+    def _clean_line(ln: str) -> Optional[str]:
+        if is_page_artifact_text(clean_text(ln), page_num):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
-            continue
+            return None
         stripped = strip_page_artifact_suffix(ln, page_num)
         if stripped != ln:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
-        cleaned_lines.append(stripped)
+        return stripped
 
-    return "\n".join(cleaned_lines)
+    cleaned = filter(None, (_clean_line(ln) for ln in lines))
+    return "\n".join(cleaned)
