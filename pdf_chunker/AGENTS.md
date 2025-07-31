@@ -28,6 +28,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - Footnote anchors may appear in the middle of chunks.
 - Page exclusion feature is not working reliably.
 - Metadata fields sometimes missing when fallback triggers.
+- Hyphenated continuation lines starting with bullet markers were not rejoined; this is now fixed in `text_cleaning._join_broken_words`.
 ```
 
 ---

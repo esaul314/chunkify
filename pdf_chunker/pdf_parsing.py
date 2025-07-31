@@ -267,8 +267,9 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
         current_block = blocks[i]
         current_text = current_block.get("text", "").strip()
 
+        preview = current_text[:50].replace(chr(10), "\n")
         logger.debug(
-            f"Processing block {i}: {len(current_text)} chars, preview: '{current_text[:50].replace(chr(10), '\\n')}'"
+            f"Processing block {i}: {len(current_text)} chars, preview: {preview}"
         )
 
         # Look ahead for potential merges
@@ -283,12 +284,10 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
 
             if should_merge:
                 logger.debug(f"MERGE: Block {i} + Block {j} (reason: {merge_reason})")
-                logger.debug(
-                    f"  Before merge - Block {i}: '{current_text[:30].replace(chr(10), '\\n')}'"
-                )
-                logger.debug(
-                    f"  Before merge - Block {j}: '{next_text[:30].replace(chr(10), '\\n')}'"
-                )
+                before_i = current_text[:30].replace(chr(10), "\n")
+                logger.debug("  Before merge - Block %s: %s", i, before_i)
+                before_j = next_text[:30].replace(chr(10), "\n")
+                logger.debug("  Before merge - Block %s: %s", j, before_j)
 
                 # Perform the merge
                 if merge_reason == "hyphenated_continuation":
@@ -302,11 +301,8 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     # Default merge with space
                     merged_text = current_text + " " + next_text
 
-                logger.debug(
-                    f"  After merge: '{merged_text[:50].replace(chr(10), '\\n')}'"
-                )
-
-                # Update current block with merged content
+                after_merge = merged_text[:50].replace(chr(10), "\n")
+                logger.debug("  After merge: %s", after_merge)
                 current_block["text"] = merged_text
                 current_text = merged_text
                 merge_count += 1
