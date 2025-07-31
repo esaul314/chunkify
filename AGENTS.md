@@ -172,7 +172,7 @@ All CLI scripts follow these conventions:
 * Tests may not fully cover all critical features or edge cases
 * Some code descriptions in `AGENTS.md` may be outdated due to drift
 * **Footnote handling improved**: footnote lines detected and removed to prevent mid-sentence splits; detection tuned to avoid false positives
-* **Header/footer cleanup**: inline page headers removed when found at paragraph boundaries
+* **Header/footer cleanup**: headers and footers stripped when they appear at page breaks or within paragraphs
 * **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- this has been fixed. Make sure you update AGENTS.md whenever you make changes. This file must reflect the reality.
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning

@@ -71,6 +71,20 @@ class TestPageArtifactDetection(unittest.TestCase):
             cleaned, "First part of sentence\nThe sentence continues here."
         )
 
+    def test_header_inserted_mid_sentence(self):
+        text = (
+            "A sentence on the last line of the page and it continues on the next page\n"
+            "| Chapter 3: Welcome to the Jungle\n"
+            "4 And then there is a footnote at the bottom of the second page.\n"
+            "the sentence continues here, on the next page."
+        )
+        cleaned = remove_page_artifact_lines(text, 115)
+        expected = (
+            "A sentence on the last line of the page and it continues on the next page\n"
+            "the sentence continues here, on the next page."
+        )
+        self.assertEqual(cleaned, expected)
+
 
 if __name__ == "__main__":
     unittest.main()
