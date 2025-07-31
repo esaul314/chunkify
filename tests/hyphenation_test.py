@@ -38,6 +38,12 @@ class TestHyphenationFix(unittest.TestCase):
         self.assertIn("business-critical", cleaned)
         self.assertIn("off-the-shelf", cleaned)
 
+    def test_bullet_hyphen_continuation(self):
+        text = "* Some text before ambig-\n* uous word"
+        cleaned = clean_text(text)
+        self.assertIn("ambiguous", cleaned)
+        self.assertEqual(cleaned.count("*"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
