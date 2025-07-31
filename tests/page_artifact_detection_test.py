@@ -41,11 +41,58 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(text, 55)
         self.assertEqual(cleaned, "Intro paragraph\nnext line")
 
+    def test_trailing_pipe_footer(self):
+        text = (
+            "Intro paragraph\n"
+            "The Gardening Approach to the Product Management |\n"
+            "Next paragraph"
+        )
+        cleaned = remove_page_artifact_lines(text, 0)
+        self.assertEqual(cleaned, "Intro paragraph\nNext paragraph")
+
     def test_footer_without_page_context(self):
         line = "Footer Text | 9"
         self.assertTrue(is_page_artifact_text(line, 0))
         cleaned = remove_page_artifact_lines(line, 0)
         self.assertEqual(cleaned, "")
+
+    def test_footnote_detection(self):
+        line = "4 This is a sample footnote text."
+        self.assertTrue(is_page_artifact_text(line, 2))
+
+    def test_no_false_footnote(self):
+        line = "2 a.m. In our experience, this failed"
+        self.assertFalse(is_page_artifact_text(line, 0))
+
+    def test_remove_footnote_line(self):
+        text = "Paragraph text\n4 This is a sample footnote text.\nNext paragraph"
+        cleaned = remove_page_artifact_lines(text, 2)
+        self.assertEqual(cleaned, "Paragraph text\nNext paragraph")
+
+    def test_remove_header_and_footnote(self):
+        text = (
+            "First part of sentence\n\n"
+            "115 | Chapter 3: Welcome to the Jungle\n"
+            "4 Footnote text. The sentence continues here."
+        )
+        cleaned = remove_page_artifact_lines(text, 115)
+        self.assertEqual(
+            cleaned, "First part of sentence\nThe sentence continues here."
+        )
+
+    def test_header_inserted_mid_sentence(self):
+        text = (
+            "A sentence on the last line of the page and it continues on the next page\n"
+            "| Chapter 3: Welcome to the Jungle\n"
+            "4 And then there is a footnote at the bottom of the second page.\n"
+            "the sentence continues here, on the next page."
+        )
+        cleaned = remove_page_artifact_lines(text, 115)
+        expected = (
+            "A sentence on the last line of the page and it continues on the next page\n"
+            "the sentence continues here, on the next page."
+        )
+        self.assertEqual(cleaned, expected)
 
 
 if __name__ == "__main__":
