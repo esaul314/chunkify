@@ -6,13 +6,16 @@ from .text_cleaning import clean_text
 
 
 def _looks_like_footnote(text: str) -> bool:
-    """Return True if a line looks like a footnote entry."""
+    """Return ``True`` if ``text`` resembles a footnote line."""
+
     stripped = text.strip()
-    if len(stripped.split()) < 2:
+    if len(stripped.split()) < 3:
         return False
-    if re.match(r"^[\d\*]+\s+\S", stripped):
+
+    if stripped.lower().startswith("footnote"):
         return True
-    return stripped.lower().startswith("footnote")
+
+    return bool(re.match(r"^(?:\d{1,3}|[\*\u2020])\s+[A-Z]", stripped))
 
 
 logger = logging.getLogger(__name__)
@@ -133,23 +136,39 @@ def strip_page_artifact_suffix(text: str, page_num: Optional[int]) -> str:
 def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
     """Remove footer fragments embedded inside a paragraph."""
 
-    pattern = re.compile(r"\n\n([A-Z][^|\n]{0,60}?\|\s*(\d{1,3})(?!\d))")
+    patterns = [
+        re.compile(r"\n\n(?P<footer>[A-Z][^|\n]{0,60}?\|\s*(?P<page>\d{1,3})(?!\d))"),
+        re.compile(r"\n\n(?P<footer>(?P<page>\d{1,3})\s*\|\s*[A-Z][^|\n]{0,60})"),
+    ]
 
     def repl(match: re.Match[str]) -> str:
-        trailing = int(match.group(2))
+        trailing = int(match.group("page"))
         page_num_checked = _normalize_page_num(page_num)
         if page_num_checked <= 0 or abs(trailing - page_num_checked) <= 1:
-            logger.info("_remove_inline_footer removed footer: %s", match.group(1)[:30])
+            logger.info(
+                "_remove_inline_footer removed footer: %s", match.group("footer")[:30]
+            )
             return "\n\n"
         return match.group(0)
 
-    return pattern.sub(repl, text)
+    for pattern in patterns:
+        text = pattern.sub(repl, text)
+
+    return text
+
+
+def _remove_embedded_footnote(text: str) -> str:
+    """Remove footnote lines merged into surrounding text."""
+
+    pattern = re.compile(r"(?m)^(?:\d{1,3}|[\*\u2020])\s+[A-Z][^.]{0,120}\.(?:\s+|$)")
+    return pattern.sub("", text)
 
 
 def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     """Remove header or footer artifact lines from a block."""
 
     text = _remove_inline_footer(text, page_num)
+    text = _remove_embedded_footnote(text)
 
     lines = text.splitlines()
 

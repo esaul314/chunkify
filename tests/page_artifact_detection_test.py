@@ -51,10 +51,25 @@ class TestPageArtifactDetection(unittest.TestCase):
         line = "4 This is a sample footnote text."
         self.assertTrue(is_page_artifact_text(line, 2))
 
+    def test_no_false_footnote(self):
+        line = "2 a.m. In our experience, this failed"
+        self.assertFalse(is_page_artifact_text(line, 0))
+
     def test_remove_footnote_line(self):
         text = "Paragraph text\n4 This is a sample footnote text.\nNext paragraph"
         cleaned = remove_page_artifact_lines(text, 2)
         self.assertEqual(cleaned, "Paragraph text\nNext paragraph")
+
+    def test_remove_header_and_footnote(self):
+        text = (
+            "First part of sentence\n\n"
+            "115 | Chapter 3: Welcome to the Jungle\n"
+            "4 Footnote text. The sentence continues here."
+        )
+        cleaned = remove_page_artifact_lines(text, 115)
+        self.assertEqual(
+            cleaned, "First part of sentence\nThe sentence continues here."
+        )
 
 
 if __name__ == "__main__":
