@@ -4,6 +4,17 @@ from typing import Optional
 
 from .text_cleaning import clean_text
 
+
+def _looks_like_footnote(text: str) -> bool:
+    """Return True if a line looks like a footnote entry."""
+    stripped = text.strip()
+    if len(stripped.split()) < 2:
+        return False
+    if re.match(r"^[\d\*]+\s+\S", stripped):
+        return True
+    return stripped.lower().startswith("footnote")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +95,10 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
             text[:30],
             page_num,
         )
+        return True
+
+    if _looks_like_footnote(text):
+        logger.info("is_page_artifact_text() footnote detected: %s", text[:30])
         return True
 
     if (
