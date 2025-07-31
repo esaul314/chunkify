@@ -70,6 +70,32 @@ def _clean_fallback_text(text: str) -> str:
     return "\f".join(cleaned_pages)
 
 
+def _filter_text_by_pages(text: str, excluded: set[int]) -> str:
+    """Return text with pages in ``excluded`` removed."""
+    if not excluded:
+        return text
+    return "\f".join(
+        page for i, page in enumerate(text.split("\f"), start=1) if i not in excluded
+    )
+
+
+def _is_heading(text: str) -> bool:
+    return len(text.split()) < 15 and text.istitle() and not text.endswith(".")
+
+
+def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
+    return [
+        {
+            "type": "heading" if _is_heading(t) else "paragraph",
+            "text": t,
+            "language": _detect_language(t),
+            "source": {"filename": os.path.basename(filepath), "method": method},
+        }
+        for t in (clean_text(p) for p in text.split("\n\n"))
+        if t
+    ]
+
+
 def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[dict]:
     """
     Fallback extraction using pdftotext with layout preservation.
@@ -109,7 +135,7 @@ def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[di
             )
             return []
 
-        raw_text = result.stdout
+        raw_text = _filter_text_by_pages(result.stdout, excluded_pages)
         quality = _assess_text_quality(raw_text)
         print(
             f"pdftotext extraction quality: {quality['quality_score']:.2f}",
@@ -121,35 +147,7 @@ def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[di
 
         raw_text = _clean_fallback_text(raw_text)
 
-        # Parse the text into structured blocks
-        structured_blocks = []
-        paragraphs = raw_text.split("\n\n")
-
-        for paragraph in paragraphs:
-            block_text = clean_text(paragraph)
-            if block_text:
-                # Simple heuristic: short paragraphs with title case might be headings
-                is_heading = (
-                    len(block_text.split()) < 15
-                    and block_text.istitle()
-                    and not block_text.endswith(".")
-                )
-
-                block_type = "heading" if is_heading else "paragraph"
-                lang = _detect_language(block_text)
-                structured_blocks.append(
-                    {
-                        "type": block_type,
-                        "text": block_text,
-                        "language": lang,
-                        "source": {
-                            "filename": os.path.basename(filepath),
-                            "method": "pdftotext",
-                        },
-                    }
-                )
-
-        return structured_blocks
+        return _text_to_blocks(raw_text, filepath, "pdftotext")
 
     except subprocess.TimeoutExpired:
         print("pdftotext timed out", file=sys.stderr)
@@ -194,9 +192,8 @@ def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dic
         for i, laparams in enumerate(configs):
             print(f"Trying pdfminer config {i+1}/3", file=sys.stderr)
             raw_text = extract_text(filepath, laparams=laparams)
-
-            # Apply post-processing to fix missing spaces
-            repaired_text = re.sub(r"([a-z])([A-Z])", r"\1 \2", raw_text)
+            filtered = _filter_text_by_pages(raw_text, excluded_pages)
+            repaired_text = re.sub(r"([a-z])([A-Z])", r"\1 \2", filtered)
             repaired_text = _clean_fallback_text(repaired_text)
 
             quality = _assess_text_quality(repaired_text)
@@ -206,35 +203,7 @@ def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dic
             )
 
             if quality["quality_score"] >= 0.7:
-                # Parse the text into structured blocks
-                structured_blocks = []
-                paragraphs = repaired_text.split("\n\n")
-
-                for paragraph in paragraphs:
-                    block_text = clean_text(paragraph)
-                    if block_text:
-                        # Simple heuristic for headings
-                        is_heading = (
-                            len(block_text.split()) < 15
-                            and block_text.istitle()
-                            and not block_text.endswith(".")
-                        )
-
-                        block_type = "heading" if is_heading else "paragraph"
-                        lang = _detect_language(block_text)
-                        structured_blocks.append(
-                            {
-                                "type": block_type,
-                                "text": block_text,
-                                "language": lang,
-                                "source": {
-                                    "filename": os.path.basename(filepath),
-                                    "method": "pdfminer",
-                                },
-                            }
-                        )
-
-                return structured_blocks
+                return _text_to_blocks(repaired_text, filepath, "pdfminer")
 
         print("All pdfminer configurations failed quality check", file=sys.stderr)
         return []
