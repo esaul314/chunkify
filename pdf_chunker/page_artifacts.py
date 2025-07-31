@@ -36,6 +36,7 @@ def _match_common_patterns(text_lower: str) -> bool:
         r"^bibliography",
         r"^index$",
         r"^appendix\s+[a-z]$",
+        r"^[a-z][^|]{0,60}\|$",
     ]
     return any(re.match(p, text_lower) for p in patterns)
 
@@ -144,6 +145,7 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
             r"(?:^|\n)(?P<footer>(?P<page>\d{1,3})\s*\|\s*[A-Z][^|\n]{0,60})\n?"
         ),
         re.compile(r"(?:^|\n)(?P<footer>\|\s*[A-Z][^|\n]{0,60})\n?"),
+        re.compile(r"(?:^|\n)(?P<footer>[A-Z][^|\n]{0,60}\|)\n?"),
     ]
 
     def repl(match: re.Match[str]) -> str:
