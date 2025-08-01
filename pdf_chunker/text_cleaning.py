@@ -223,6 +223,25 @@ LINE_START_BULLET_RE = re.compile(
 INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)\s*[{BULLET_CHARS_ESC}]\s*(?=\w)")
 
 
+def normalize_bullet_lines(text: str) -> str:
+    """Join wrapped lines that belong to the same bullet item."""
+
+    bullet_start = re.compile(rf"^\s*[{BULLET_CHARS_ESC}]")
+    lines = text.splitlines()
+    merged: List[str] = []
+    for line in lines:
+        if (
+            merged
+            and bullet_start.match(merged[-1])
+            and not bullet_start.match(line)
+            and line.strip()
+        ):
+            merged[-1] = f"{merged[-1].rstrip()} {line.lstrip()}"
+        else:
+            merged.append(line)
+    return "\n".join(merged)
+
+
 def collapse_inline_bullet_artifacts(text: str) -> str:
     """Remove stray bullet markers that interrupt sentences."""
     logger.debug("collapse_inline_bullet_artifacts invoked")
@@ -350,6 +369,7 @@ def clean_text(text: str) -> str:
         text,
         [
             ("normalize_newlines", normalize_newlines),
+            ("normalize_bullet_lines", normalize_bullet_lines),
             ("collapse_single_newlines", collapse_single_newlines),
             ("merge_spurious_paragraph_breaks", merge_spurious_paragraph_breaks),
             ("collapse_spurious_double_newlines", collapse_spurious_double_newlines),
