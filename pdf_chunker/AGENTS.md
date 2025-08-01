@@ -17,6 +17,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `splitter.py`: Enforces chunk boundaries and semantic cohesion.
 - `ai_enrichment.py`: Applies YAML-based tags.
 - `utils.py`: Metadata mapping and helper functions.
+- `env_utils.py`: Environment flag helpers.
+- `page_artifacts.py`: Header/footer detection utilities.
+- `pdf_parsing.py`: High-level PDF parsing entry point.
+- `pymupdf4llm_integration.py`: Optional PyMuPDF4LLM extraction and cleanup.
+- `text_processing.py`: Additional text-repair helpers.
 
 ## AI Agent Guidance
 - Respect strict separation of passes.
@@ -29,6 +34,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - Page exclusion feature is not working reliably.
 - Metadata fields sometimes missing when fallback triggers.
 - Hyphenated continuation lines starting with bullet markers were not rejoined; this is now fixed in `text_cleaning._join_broken_words`.
+- Underscore emphasis is stripped during PyMuPDF4LLM cleanup.
 ```
 
 ---
