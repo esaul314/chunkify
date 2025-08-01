@@ -67,9 +67,7 @@ def extract_with_pymupdf4llm(
 
         # Extract with PyMuPDF4LLM, passing the correct pages
         if zero_based_pages:
-            md_text = pymupdf4llm.to_markdown(
-                pdf_path, pages=zero_based_pages, rich_text=False
-            )
+            md_text = pymupdf4llm.to_markdown(pdf_path, pages=zero_based_pages)
         else:
             # If all pages are excluded, return empty
             logger.warning("All pages are excluded; returning empty block list.")
@@ -588,14 +586,14 @@ def _call_pymupdf4llm_api(pdf_path: str, pages: Optional[List[int]] = None) -> s
     api_methods = [
         (
             "to_markdown",
-            lambda: pymupdf4llm.to_markdown(pdf_path, pages=pages, rich_text=False),
+            lambda: pymupdf4llm.to_markdown(pdf_path, pages=pages),
         ),
         ("extract", lambda: pymupdf4llm.extract(pdf_path, pages=pages)),
         ("convert", lambda: pymupdf4llm.convert(pdf_path, pages=pages)),
         ("parse", lambda: pymupdf4llm.parse(pdf_path, pages=pages)),
         (
             "to_markdown_simple",
-            lambda: pymupdf4llm.to_markdown(pdf_path, rich_text=False),
+            lambda: pymupdf4llm.to_markdown(pdf_path),
         ),
         ("extract_simple", lambda: pymupdf4llm.extract(pdf_path)),
         ("convert_simple", lambda: pymupdf4llm.convert(pdf_path)),
