@@ -495,6 +495,12 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         text = fix_hyphenated_linebreaks(text)
         logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
 
+        from .text_cleaning import collapse_spurious_double_newlines
+
+        logger.debug("Applying collapse_spurious_double_newlines in PyMuPDF4LLM path")
+        text = collapse_spurious_double_newlines(text)
+        logger.debug(f"After collapse_spurious_double_newlines: {repr(text[:100])}")
+
         # Apply other cleaning steps paragraph by paragraph
         paragraphs = []
         for p in text.split("\n\n"):
