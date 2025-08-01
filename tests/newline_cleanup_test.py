@@ -74,7 +74,7 @@ class TestNewlineCleanup(unittest.TestCase):
     def test_preserve_bullet_list(self):
         text = "* item 1\n* item 2"
         cleaned = clean_text(text)
-        self.assertEqual(cleaned.count("*"), 1)
+        self.assertEqual(cleaned.count("*"), 2)
 
     def test_join_bullet_continuation_line(self):
         text = "\u2022 item one\n  continuation"
