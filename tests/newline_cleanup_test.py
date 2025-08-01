@@ -63,6 +63,10 @@ class TestNewlineCleanup(unittest.TestCase):
             "includes data) such as metrics",
         )
 
+    def test_collapse_line_start_bullet_artifact(self):
+        text = "and also\n\n• correlated"
+        self.assertEqual(clean_text(text), "and also correlated")
+
     def test_collapse_bullet_linebreak(self):
         text = "and also\n• correlated"
         self.assertEqual(clean_text(text), "and also correlated")

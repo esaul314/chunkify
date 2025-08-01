@@ -36,7 +36,7 @@ HYPHEN_CHARS_ESC = re.escape("\u2010\u2011\u002d\u00ad\u1400\ufe63‐-")
 SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
-BULLET_CHARS_ESC = re.escape("*•")
+BULLET_CHARS_ESC = re.escape("*•◦▪‣·●◉○‧")
 
 
 def _join_broken_words(text: str) -> str:
@@ -208,12 +208,16 @@ def collapse_spurious_double_newlines(text: str) -> str:
 BULLET_LINEBREAK_RE = re.compile(
     rf"(?<=[{HYPHEN_CHARS_ESC}])\n\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
 )
+LINE_START_BULLET_RE = re.compile(
+    rf"(?<=[A-Za-z0-9,;:\)\]])\n+\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
+)
 INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)\s*[{BULLET_CHARS_ESC}]\s*(?=\w)")
 
 
 def collapse_inline_bullet_artifacts(text: str) -> str:
     """Remove stray bullet markers that interrupt sentences."""
 
+    text = LINE_START_BULLET_RE.sub(" ", text)
     text = BULLET_LINEBREAK_RE.sub(" ", text)
     return INLINE_BULLET_RE.sub(" ", text)
 
