@@ -253,6 +253,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         lambda s: _re2.sub(r" {2,}", " ", s),
         remove_underscore_emphasis,
         fix_hyphenated_linebreaks,
+        remove_underscore_emphasis,
         normalize_ligatures,
         normalize_quotes,
         remove_control_characters,
