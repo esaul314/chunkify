@@ -76,9 +76,14 @@ def collapse_single_newlines(text: str) -> str:
 
     # First, protect paragraph breaks (2+ newlines) by replacing with placeholder
     text = re.sub(r"\n{2,}", "[[PARAGRAPH_BREAK]]", text)
+    # Also protect bullet list boundaries so separate items remain on new lines
+    bullet_pattern = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
+    text = re.sub(bullet_pattern, "[[PARAGRAPH_BREAK]]", text)
+
     # Replace all remaining single newlines with spaces
     text = text.replace("\n", " ")
-    # Restore paragraph breaks
+
+    # Restore paragraph and bullet breaks
     text = text.replace("[[PARAGRAPH_BREAK]]", "\n\n")
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
@@ -204,7 +209,7 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
 # Any lowercase letter following a double newline likely means the break was
 # introduced mid-sentence. Allow a handful of punctuation characters before the
 # break so constructs like "words)\n\ncontinue" also collapse correctly.
-PUNCT_BEFORE_BREAK = r"[A-Za-z0-9,;:\)\]\"'”’]"
+PUNCT_BEFORE_BREAK = r"[A-Za-z,;:\)\]\"'”’]"
 SPURIOUS_DOUBLE_NL = re.compile(rf"(?<={PUNCT_BEFORE_BREAK})\n{{2}}(?=[a-z])")
 
 
@@ -218,9 +223,9 @@ BULLET_LINEBREAK_RE = re.compile(
     rf"(?<=[{HYPHEN_CHARS_ESC}])\n\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
 )
 LINE_START_BULLET_RE = re.compile(
-    rf"(?<={PUNCT_BEFORE_BREAK})\n+\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
+    rf"(?<!\n\n)(?<={PUNCT_BEFORE_BREAK})\n+\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
 )
-INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)\s*[{BULLET_CHARS_ESC}]\s*(?=\w)")
+INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)[^\S\n]*[{BULLET_CHARS_ESC}]\s*(?=\w)")
 
 
 def normalize_bullet_lines(text: str) -> str:
