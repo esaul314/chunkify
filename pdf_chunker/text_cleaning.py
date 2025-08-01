@@ -196,7 +196,8 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
 # Any lowercase letter following a double newline likely means the break was
 # introduced mid-sentence. Allow a handful of punctuation characters before the
 # break so constructs like "words)\n\ncontinue" also collapse correctly.
-SPURIOUS_DOUBLE_NL = re.compile(r"(?<=[A-Za-z0-9,;:\)\]])\n{2}(?=[a-z])")
+PUNCT_BEFORE_BREAK = r"[A-Za-z0-9,;:\)\]\"'”’]"
+SPURIOUS_DOUBLE_NL = re.compile(rf"(?<={PUNCT_BEFORE_BREAK})\n{{2}}(?=[a-z])")
 
 
 def collapse_spurious_double_newlines(text: str) -> str:
@@ -209,7 +210,7 @@ BULLET_LINEBREAK_RE = re.compile(
     rf"(?<=[{HYPHEN_CHARS_ESC}])\n\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
 )
 LINE_START_BULLET_RE = re.compile(
-    rf"(?<=[A-Za-z0-9,;:\)\]])\n+\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
+    rf"(?<={PUNCT_BEFORE_BREAK})\n+\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
 )
 INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)\s*[{BULLET_CHARS_ESC}]\s*(?=\w)")
 
