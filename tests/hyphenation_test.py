@@ -44,6 +44,13 @@ class TestHyphenationFix(unittest.TestCase):
         self.assertIn("ambiguous", cleaned)
         self.assertEqual(cleaned.count("*"), 1)
 
+    def test_underscore_hyphen_cleanup(self):
+        """Ensure underscore emphasis and hyphen breaks are cleaned."""
+        block = {"text": "_respon-\n_sibility_", "source": {"page": 1}}
+        cleaned = p4l._clean_pymupdf4llm_block(block)
+        self.assertIsNotNone(cleaned)
+        self.assertEqual(cleaned["text"], "responsibility")
+
 
 if __name__ == "__main__":
     unittest.main()
