@@ -491,30 +491,27 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         text = merge_spurious_paragraph_breaks(text)
         logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
 
-        logger.debug("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
-        text = fix_hyphenated_linebreaks(text)
-        logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
-
         from .text_cleaning import (
             collapse_spurious_double_newlines,
             collapse_inline_bullet_artifacts,
         )
 
-        logger.debug("Applying collapse_spurious_double_newlines in PyMuPDF4LLM path")
-        text = collapse_spurious_double_newlines(text)
-        logger.debug(f"After collapse_spurious_double_newlines: {repr(text[:100])}")
+        steps = [
+            ("fix_hyphenated_linebreaks", fix_hyphenated_linebreaks),
+            ("collapse_spurious_double_newlines", collapse_spurious_double_newlines),
+            ("collapse_inline_bullet_artifacts", collapse_inline_bullet_artifacts),
+        ]
 
-        logger.debug("Applying collapse_inline_bullet_artifacts in PyMuPDF4LLM path")
-        text = collapse_inline_bullet_artifacts(text)
-        logger.debug(f"After collapse_inline_bullet_artifacts: {repr(text[:100])}")
+        for name, fn in steps:
+            logger.debug(f"Applying {name} in PyMuPDF4LLM path")
+            text = fn(text)
+            logger.debug(f"After {name}: {repr(text[:100])}")
 
-        # Apply other cleaning steps paragraph by paragraph
-        paragraphs = []
-        for p in text.split("\n\n"):
-            if p.strip():
-                p = normalize_ligatures(p)
-                p = consolidate_whitespace(p)
-                paragraphs.append(p)
+        paragraphs = [
+            consolidate_whitespace(normalize_ligatures(p))
+            for p in text.split("\n\n")
+            if p.strip()
+        ]
 
         cleaned = "\n\n".join(paragraphs)
         logger.debug(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")

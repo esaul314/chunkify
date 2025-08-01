@@ -193,7 +193,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
     return "\n\n".join(merged)
 
 
-SPURIOUS_DOUBLE_NL = re.compile(r"(?<=[a-z,;:])\n{2}(?=[a-z])")
+# Any lowercase letter following a double newline likely means the break was
+# introduced mid-sentence. Allow a handful of punctuation characters before the
+# break so constructs like "words)\n\ncontinue" also collapse correctly.
+SPURIOUS_DOUBLE_NL = re.compile(r"(?<=[A-Za-z0-9,;:\)\]])\n{2}(?=[a-z])")
 
 
 def collapse_spurious_double_newlines(text: str) -> str:
