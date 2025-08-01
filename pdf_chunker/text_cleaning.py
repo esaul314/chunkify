@@ -202,6 +202,19 @@ def collapse_spurious_double_newlines(text: str) -> str:
     return SPURIOUS_DOUBLE_NL.sub(" ", text)
 
 
+BULLET_LINEBREAK_RE = re.compile(
+    rf"(?<=[{HYPHEN_CHARS_ESC}])\n\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
+)
+INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)\s*[{BULLET_CHARS_ESC}]\s*(?=\w)")
+
+
+def collapse_inline_bullet_artifacts(text: str) -> str:
+    """Remove stray bullet markers that interrupt sentences."""
+
+    text = BULLET_LINEBREAK_RE.sub(" ", text)
+    return INLINE_BULLET_RE.sub(" ", text)
+
+
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
     issues: List[str] = []
     try:
@@ -323,6 +336,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling collapse_spurious_double_newlines")
     text = collapse_spurious_double_newlines(text)
     logger.debug(f"After collapse_spurious_double_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling collapse_inline_bullet_artifacts")
+    text = collapse_inline_bullet_artifacts(text)
+    logger.debug(f"After collapse_inline_bullet_artifacts: {repr(text[:100])}")
 
     # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]

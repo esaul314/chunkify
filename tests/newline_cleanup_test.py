@@ -56,6 +56,15 @@ class TestNewlineCleanup(unittest.TestCase):
             "Moving to modern environments requires care.",
         )
 
+    def test_collapse_bullet_linebreak(self):
+        text = "and also\n• correlated"
+        self.assertEqual(clean_text(text), "and also correlated")
+
+    def test_preserve_bullet_list(self):
+        text = "* item 1\n* item 2"
+        cleaned = clean_text(text)
+        self.assertEqual(cleaned.count("*"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
