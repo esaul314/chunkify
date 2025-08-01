@@ -92,6 +92,12 @@ def normalize_quotes(text: str) -> str:
     return text
 
 
+def remove_underscore_emphasis(text: str) -> str:
+    """Remove single or double underscore emphasis markers."""
+
+    return re.sub(r"_{1,2}([^_]+)_{1,2}", r"\1", text)
+
+
 def normalize_newlines(text: str) -> str:
     # Convert all CRLF and CR to LF, and unicode separators to LF as well
     text = text.replace("\r\n", "\n").replace("\r", "\n")

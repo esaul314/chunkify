@@ -221,7 +221,12 @@ def _validate_enhancement_quality(blocks: List[Dict[str, Any]]) -> float:
 
 
 def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Clean and validate a block from PyMuPDF4LLM output."""
+    """Clean and validate a block from PyMuPDF4LLM output.
+
+    The cleaning pipeline strips markdown emphasis, removes underscore
+    wrappers, fixes hyphenated line breaks, normalizes quotes, and collapses
+    extraneous whitespace before validating the block.
+    """
     text = block.get("text", "")
 
     if not text or not text.strip():
@@ -230,6 +235,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     import re as _re2
     from .text_cleaning import (
         pipe,
+        remove_underscore_emphasis,
         fix_hyphenated_linebreaks,
         normalize_ligatures,
         normalize_quotes,
@@ -245,6 +251,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         lambda s: _re2.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", s),
         lambda s: _re2.sub(r"\n{3,}", "\n\n", s),
         lambda s: _re2.sub(r" {2,}", " ", s),
+        remove_underscore_emphasis,
         fix_hyphenated_linebreaks,
         normalize_ligatures,
         normalize_quotes,
