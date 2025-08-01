@@ -93,9 +93,10 @@ def normalize_quotes(text: str) -> str:
 
 
 def remove_underscore_emphasis(text: str) -> str:
-    """Remove single or double underscore emphasis markers."""
+    """Remove single/double underscore emphasis markers and stray edges."""
 
-    return re.sub(r"_{1,2}([^_]+)_{1,2}", r"\1", text)
+    cleaned = re.sub(r"_{1,2}([^_]+)_{1,2}", r"\1", text)
+    return cleaned.strip("_")
 
 
 def normalize_newlines(text: str) -> str:
