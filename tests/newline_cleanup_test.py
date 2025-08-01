@@ -76,6 +76,10 @@ class TestNewlineCleanup(unittest.TestCase):
         cleaned = clean_text(text)
         self.assertEqual(cleaned.count("*"), 1)
 
+    def test_join_bullet_continuation_line(self):
+        text = "\u2022 item one\n  continuation"
+        self.assertEqual(clean_text(text), "\u2022 item one continuation")
+
     def test_collapse_line_start_bullet_after_quote(self):
         text = 'end of quote"\n\n• continuation'
         self.assertEqual(clean_text(text), 'end of quote" continuation')

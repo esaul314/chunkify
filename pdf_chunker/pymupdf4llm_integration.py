@@ -482,6 +482,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         from .text_cleaning import (
             collapse_spurious_double_newlines,
             collapse_inline_bullet_artifacts,
+            normalize_bullet_lines,
             _apply_steps,
         )
 
@@ -489,6 +490,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
             text,
             [
                 ("normalize_newlines", normalize_newlines),
+                ("normalize_bullet_lines", normalize_bullet_lines),
                 ("collapse_single_newlines", collapse_single_newlines),
                 ("merge_spurious_paragraph_breaks", merge_spurious_paragraph_breaks),
                 ("fix_hyphenated_linebreaks", fix_hyphenated_linebreaks),
