@@ -225,9 +225,21 @@ INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
 
 def collapse_inline_bullet_artifacts(text: str) -> str:
     """Remove stray bullet markers that interrupt sentences."""
+    logger.debug("collapse_inline_bullet_artifacts invoked")
     text = _sub_with_log(LINE_START_BULLET_RE, " ", text, "line_start_bullet")
     text = _sub_with_log(BULLET_LINEBREAK_RE, " ", text, "bullet_linebreak")
     return _sub_with_log(INLINE_BULLET_RE, " ", text, "inline_bullet")
+
+
+def _apply_steps(text: str, steps: List[Tuple[str, Callable[[str], str]]]) -> str:
+    """Run cleaning steps sequentially with logging."""
+    for name, fn in steps:
+        logger.debug(f"Applying {name}")
+        new_text = fn(text)
+        if new_text != text:
+            logger.debug(f"After {name}: {repr(new_text[:100])}")
+        text = new_text
+    return text
 
 
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
@@ -334,33 +346,20 @@ def clean_text(text: str) -> str:
 
     logger.debug("Using traditional text cleaning path")
 
-    # Normalize newlines first
-    logger.debug("Calling normalize_newlines")
-    text = normalize_newlines(text)
-    logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+    text = _apply_steps(
+        text,
+        [
+            ("normalize_newlines", normalize_newlines),
+            ("collapse_single_newlines", collapse_single_newlines),
+            ("merge_spurious_paragraph_breaks", merge_spurious_paragraph_breaks),
+            ("collapse_spurious_double_newlines", collapse_spurious_double_newlines),
+            ("collapse_inline_bullet_artifacts", collapse_inline_bullet_artifacts),
+        ],
+    )
 
-    # Collapse single line breaks except paragraph breaks
-    logger.debug("Calling collapse_single_newlines")
-    text = collapse_single_newlines(text)
-    logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
-
-    logger.debug("Calling merge_spurious_paragraph_breaks")
-    text = merge_spurious_paragraph_breaks(text)
-    logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
-
-    logger.debug("Calling collapse_spurious_double_newlines")
-    text = collapse_spurious_double_newlines(text)
-    logger.debug(f"After collapse_spurious_double_newlines: {repr(text[:100])}")
-
-    logger.debug("Calling collapse_inline_bullet_artifacts")
-    text = collapse_inline_bullet_artifacts(text)
-    logger.debug(f"After collapse_inline_bullet_artifacts: {repr(text[:100])}")
-
-    # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     logger.debug(f"Split into {len(paragraphs)} paragraphs")
-    cleaned_paragraphs = [clean_paragraph(p) for p in paragraphs]
-    result = "\n\n".join(cleaned_paragraphs)
+    result = "\n\n".join(clean_paragraph(p) for p in paragraphs)
 
     # Final JSON safety check
     safe, issues = validate_json_safety(result)
