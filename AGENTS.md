@@ -26,7 +26,12 @@ pdf_chunker/
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── extraction_fallbacks.py    # Fallback strategies (pdftotext, pdfminer)
 │   ├── page_utils.py              # Page range parsing and validation
+│   ├── pdf_parsing.py             # Core PDF extraction logic
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
+│   ├── pymupdf4llm_integration.py # Optional PyMuPDF4LLM enhancement
+│   ├── page_artifacts.py          # Header/footer detection helpers
+│   ├── env_utils.py               # Environment flag helpers
+│   ├── text_processing.py         # Shared text manipulation utilities
 │   ├── splitter.py                # Semantic Pass: chunk splitting and boundaries
 │   ├── utils.py                   # Metadata mapping and glue logic
 │   └── ai_enrichment.py           # AI Pass: classification and YAML-based tagging
