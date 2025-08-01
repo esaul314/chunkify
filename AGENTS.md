@@ -29,7 +29,12 @@ pdf_chunker/
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── splitter.py                # Semantic Pass: chunk splitting and boundaries
 │   ├── utils.py                   # Metadata mapping and glue logic
-│   └── ai_enrichment.py           # AI Pass: classification and YAML-based tagging
+│   ├── ai_enrichment.py           # AI Pass: classification and YAML-based tagging
+│   ├── env_utils.py               # Environment flags for optional features
+│   ├── page_artifacts.py          # Header/footer artifact detection helpers
+│   ├── pdf_parsing.py             # Combined PDF extraction wrapper
+│   ├── pymupdf4llm_integration.py # PyMuPDF4LLM extraction and cleanup
+│   └── text_processing.py         # Additional word-gluing and quote fixes
 ├── scripts/
 │   ├── chunk_pdf.py               # CLI for running the full pipeline
 │   ├── validate_chunks.sh         # Quality and boundary validation
@@ -175,6 +180,7 @@ All CLI scripts follow these conventions:
 * **Header/footer cleanup**: headers and footers stripped when they appear at page breaks or within paragraphs, including trailing "|" fragments
 * **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- fixed.
 * **Bullet hyphen fix**: words split at line breaks within bullet lists now rejoin correctly without duplicating the bullet marker.
+* **Underscore emphasis removed**: PyMuPDF4LLM cleanup strips single and double underscore wrappers.
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts
