@@ -14,6 +14,14 @@ def pipe(value, *funcs):
     return value
 
 
+def _sub_with_log(pattern: re.Pattern, repl: str, text: str, label: str) -> str:
+    """Wrapper for re.sub that logs substitution count when non-zero."""
+    new_text, count = pattern.subn(repl, text)
+    if count:
+        logger.debug(f"{label}: removed {count} occurrence{'s' if count > 1 else ''}")
+    return new_text
+
+
 # Patterns
 PARAGRAPH_BREAK = re.compile(r"\n{2,}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
@@ -217,10 +225,9 @@ INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
 
 def collapse_inline_bullet_artifacts(text: str) -> str:
     """Remove stray bullet markers that interrupt sentences."""
-
-    text = LINE_START_BULLET_RE.sub(" ", text)
-    text = BULLET_LINEBREAK_RE.sub(" ", text)
-    return INLINE_BULLET_RE.sub(" ", text)
+    text = _sub_with_log(LINE_START_BULLET_RE, " ", text, "line_start_bullet")
+    text = _sub_with_log(BULLET_LINEBREAK_RE, " ", text, "bullet_linebreak")
+    return _sub_with_log(INLINE_BULLET_RE, " ", text, "inline_bullet")
 
 
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
