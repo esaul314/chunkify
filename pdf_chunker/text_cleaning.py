@@ -158,9 +158,10 @@ def _is_probable_heading(text: str) -> bool:
     if opens != closes:
         return False
 
-    # Bulleted or explicitly upper-cased lines are strong indicators
-    if re.match(r"^[\-\u2022*]\s", stripped):
-        return True
+    # Bulleted lines are list items, not headings
+    if re.match(rf"^[{BULLET_CHARS_ESC}]\s", stripped) or re.match(r"^[-]\s", stripped):
+        return False
+    # Explicitly upper-cased lines are strong indicators
     if stripped.isupper():
         return True
 
@@ -185,6 +186,19 @@ def _is_probable_heading(text: str) -> bool:
     return upper_ratio >= 0.5 and not re.search(r"[.!?]$", stripped)
 
 
+def _is_list_item(text: str) -> bool:
+    """Return True if the line looks like a list item."""
+    if re.match(rf"^\s*[{BULLET_CHARS_ESC}]\s+", text):
+        return True
+    if re.match(r"^\s*[-]\s+", text):
+        return True
+    if re.match(r"^\s*\(?\d+[\.)]\s+", text):
+        return True
+    if re.match(r"^\s*[A-Za-z]\.", text) and len(text.split()) > 1:
+        return True
+    return False
+
+
 def _has_unbalanced_quotes(text: str) -> bool:
     """Return True if the text contains an odd number of quotes."""
     return text.count('"') % 2 == 1 or text.count("'") % 2 == 1
@@ -194,7 +208,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     merged: List[str] = []
     for part in parts:
-        if merged and not any(_is_probable_heading(seg) for seg in (merged[-1], part)):
+        if merged and not any(
+            _is_probable_heading(seg) or _is_list_item(seg)
+            for seg in (merged[-1], part)
+        ):
             prev = merged[-1]
             if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
                 merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
