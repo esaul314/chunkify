@@ -479,33 +479,26 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         )
 
         # Apply the cleaning steps in the correct order
-        logger.debug("Applying normalize_newlines in PyMuPDF4LLM path")
-        text = normalize_newlines(text)
-        logger.debug(f"After normalize_newlines: {repr(text[:100])}")
-
-        logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
-        text = collapse_single_newlines(text)
-        logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
-
-        logger.debug("Applying merge_spurious_paragraph_breaks in PyMuPDF4LLM path")
-        text = merge_spurious_paragraph_breaks(text)
-        logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
-
         from .text_cleaning import (
             collapse_spurious_double_newlines,
             collapse_inline_bullet_artifacts,
+            _apply_steps,
         )
 
-        steps = [
-            ("fix_hyphenated_linebreaks", fix_hyphenated_linebreaks),
-            ("collapse_spurious_double_newlines", collapse_spurious_double_newlines),
-            ("collapse_inline_bullet_artifacts", collapse_inline_bullet_artifacts),
-        ]
-
-        for name, fn in steps:
-            logger.debug(f"Applying {name} in PyMuPDF4LLM path")
-            text = fn(text)
-            logger.debug(f"After {name}: {repr(text[:100])}")
+        text = _apply_steps(
+            text,
+            [
+                ("normalize_newlines", normalize_newlines),
+                ("collapse_single_newlines", collapse_single_newlines),
+                ("merge_spurious_paragraph_breaks", merge_spurious_paragraph_breaks),
+                ("fix_hyphenated_linebreaks", fix_hyphenated_linebreaks),
+                (
+                    "collapse_spurious_double_newlines",
+                    collapse_spurious_double_newlines,
+                ),
+                ("collapse_inline_bullet_artifacts", collapse_inline_bullet_artifacts),
+            ],
+        )
 
         paragraphs = [
             consolidate_whitespace(normalize_ligatures(p))
