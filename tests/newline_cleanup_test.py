@@ -56,6 +56,13 @@ class TestNewlineCleanup(unittest.TestCase):
             "Moving to modern environments requires care.",
         )
 
+    def test_collapse_mid_sentence_double_newline_with_punctuation(self):
+        text = "includes data)\n\nsuch as metrics"
+        self.assertEqual(
+            clean_text(text),
+            "includes data) such as metrics",
+        )
+
     def test_collapse_bullet_linebreak(self):
         text = "and also\n• correlated"
         self.assertEqual(clean_text(text), "and also correlated")
