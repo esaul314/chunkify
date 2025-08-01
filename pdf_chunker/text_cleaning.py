@@ -193,6 +193,15 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
     return "\n\n".join(merged)
 
 
+SPURIOUS_DOUBLE_NL = re.compile(r"(?<=[a-z,;:])\n{2}(?=[a-z])")
+
+
+def collapse_spurious_double_newlines(text: str) -> str:
+    """Collapse double newlines that interrupt clauses."""
+
+    return SPURIOUS_DOUBLE_NL.sub(" ", text)
+
+
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
     issues: List[str] = []
     try:
@@ -310,6 +319,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling merge_spurious_paragraph_breaks")
     text = merge_spurious_paragraph_breaks(text)
     logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
+
+    logger.debug("Calling collapse_spurious_double_newlines")
+    text = collapse_spurious_double_newlines(text)
+    logger.debug(f"After collapse_spurious_double_newlines: {repr(text[:100])}")
 
     # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]

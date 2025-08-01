@@ -49,6 +49,13 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
         self.assertEqual(clean_text(text), expected)
 
+    def test_collapse_mid_sentence_double_newline(self):
+        text = "Moving to modern\n\nenvironments requires care."
+        self.assertEqual(
+            clean_text(text),
+            "Moving to modern environments requires care.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
