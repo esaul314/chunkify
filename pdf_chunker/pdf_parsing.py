@@ -30,14 +30,14 @@ from .pymupdf4llm_integration import (
 from typing import List, Dict, Any, Tuple
 
 
-BULLET_CHARS = "•*"
+BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 
 
 def _is_bullet_continuation(curr: str, nxt: str) -> bool:
     return curr.rstrip().endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
 
-
+  
 def _starts_with_bullet(text: str) -> bool:
     return text.lstrip().startswith(tuple(BULLET_CHARS))
 
@@ -62,7 +62,7 @@ def _is_indented_continuation(curr: dict, nxt: dict) -> bool:
     indent_diff = next_x0 - curr_x0
     return indent_diff > 10 and vertical_gap < 8
 
-
+  
 def _should_merge_blocks(
     curr_block: Dict[str, Any], next_block: Dict[str, Any]
 ) -> Tuple[bool, str]:
