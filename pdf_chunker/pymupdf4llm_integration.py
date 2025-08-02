@@ -24,6 +24,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _is_meaningful_text(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped) and (
+        len(stripped) >= 10 or any(ch.isalpha() for ch in stripped)
+    )
+
+
 class PyMuPDF4LLMExtractionError(Exception):
     """Exception raised when PyMuPDF4LLM extraction fails"""
 
@@ -258,8 +265,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         consolidate_whitespace,
     )
 
-    # Skip blocks that are too short or look like artifacts
-    if len(text.strip()) < 10:
+    if not _is_meaningful_text(text):
         return None
 
     # Skip blocks that look like page numbers or headers/footers
