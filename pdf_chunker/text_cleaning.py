@@ -14,6 +14,14 @@ def pipe(value, *funcs):
     return value
 
 
+def _sub_with_log(pattern: re.Pattern, repl: str, text: str, label: str) -> str:
+    """Wrapper for re.sub that logs substitution count when non-zero."""
+    new_text, count = pattern.subn(repl, text)
+    if count:
+        logger.debug(f"{label}: removed {count} occurrence{'s' if count > 1 else ''}")
+    return new_text
+
+
 # Patterns
 PARAGRAPH_BREAK = re.compile(r"\n{2,}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
@@ -36,7 +44,7 @@ HYPHEN_CHARS_ESC = re.escape("\u2010\u2011\u002d\u00ad\u1400\ufe63‐-")
 SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
-BULLET_CHARS_ESC = re.escape("*•")
+BULLET_CHARS_ESC = re.escape("*•◦▪‣·●◉○‧")
 
 
 def _join_broken_words(text: str) -> str:
@@ -68,9 +76,14 @@ def collapse_single_newlines(text: str) -> str:
 
     # First, protect paragraph breaks (2+ newlines) by replacing with placeholder
     text = re.sub(r"\n{2,}", "[[PARAGRAPH_BREAK]]", text)
+    # Also protect bullet list boundaries so separate items remain on new lines
+    bullet_pattern = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
+    text = re.sub(bullet_pattern, "[[PARAGRAPH_BREAK]]", text)
+
     # Replace all remaining single newlines with spaces
     text = text.replace("\n", " ")
-    # Restore paragraph breaks
+
+    # Restore paragraph and bullet breaks
     text = text.replace("[[PARAGRAPH_BREAK]]", "\n\n")
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
@@ -145,9 +158,10 @@ def _is_probable_heading(text: str) -> bool:
     if opens != closes:
         return False
 
-    # Bulleted or explicitly upper-cased lines are strong indicators
-    if re.match(r"^[\-\u2022*]\s", stripped):
-        return True
+    # Bulleted lines are list items, not headings
+    if re.match(rf"^[{BULLET_CHARS_ESC}]\s", stripped) or re.match(r"^[-]\s", stripped):
+        return False
+    # Explicitly upper-cased lines are strong indicators
     if stripped.isupper():
         return True
 
@@ -172,6 +186,19 @@ def _is_probable_heading(text: str) -> bool:
     return upper_ratio >= 0.5 and not re.search(r"[.!?]$", stripped)
 
 
+def _is_list_item(text: str) -> bool:
+    """Return True if the line looks like a list item."""
+    if re.match(rf"^\s*[{BULLET_CHARS_ESC}]\s+", text):
+        return True
+    if re.match(r"^\s*[-]\s+", text):
+        return True
+    if re.match(r"^\s*\(?\d+[\.)]\s+", text):
+        return True
+    if re.match(r"^\s*[A-Za-z]\.", text) and len(text.split()) > 1:
+        return True
+    return False
+
+
 def _has_unbalanced_quotes(text: str) -> bool:
     """Return True if the text contains an odd number of quotes."""
     return text.count('"') % 2 == 1 or text.count("'") % 2 == 1
@@ -181,7 +208,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     merged: List[str] = []
     for part in parts:
-        if merged and not any(_is_probable_heading(seg) for seg in (merged[-1], part)):
+        if merged and not any(
+            _is_probable_heading(seg) or _is_list_item(seg)
+            for seg in (merged[-1], part)
+        ):
             prev = merged[-1]
             if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
                 merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
@@ -191,6 +221,66 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 continue
         merged.append(part)
     return "\n\n".join(merged)
+
+
+# Any lowercase letter following a double newline likely means the break was
+# introduced mid-sentence. Allow a handful of punctuation characters before the
+# break so constructs like "words)\n\ncontinue" also collapse correctly.
+PUNCT_BEFORE_BREAK = r"[A-Za-z,;:\)\]\"'”’]"
+SPURIOUS_DOUBLE_NL = re.compile(rf"(?<={PUNCT_BEFORE_BREAK})\n{{2}}(?=[a-z])")
+
+
+def collapse_spurious_double_newlines(text: str) -> str:
+    """Collapse double newlines that interrupt clauses."""
+
+    return SPURIOUS_DOUBLE_NL.sub(" ", text)
+
+
+BULLET_LINEBREAK_RE = re.compile(
+    rf"(?<=[{HYPHEN_CHARS_ESC}])\n\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
+)
+LINE_START_BULLET_RE = re.compile(
+    rf"(?<!\n\n)(?<={PUNCT_BEFORE_BREAK})\n+\s*[{BULLET_CHARS_ESC}]\s*(?=\w)"
+)
+INLINE_BULLET_RE = re.compile(rf"(?<!\n)(?<!\A)[^\S\n]*[{BULLET_CHARS_ESC}]\s*(?=\w)")
+
+
+def normalize_bullet_lines(text: str) -> str:
+    """Join wrapped lines that belong to the same bullet item."""
+
+    bullet_start = re.compile(rf"^\s*[{BULLET_CHARS_ESC}]")
+    lines = text.splitlines()
+    merged: List[str] = []
+    for line in lines:
+        if (
+            merged
+            and bullet_start.match(merged[-1])
+            and not bullet_start.match(line)
+            and line.strip()
+        ):
+            merged[-1] = f"{merged[-1].rstrip()} {line.lstrip()}"
+        else:
+            merged.append(line)
+    return "\n".join(merged)
+
+
+def collapse_inline_bullet_artifacts(text: str) -> str:
+    """Remove stray bullet markers that interrupt sentences."""
+    logger.debug("collapse_inline_bullet_artifacts invoked")
+    text = _sub_with_log(LINE_START_BULLET_RE, " ", text, "line_start_bullet")
+    text = _sub_with_log(BULLET_LINEBREAK_RE, " ", text, "bullet_linebreak")
+    return _sub_with_log(INLINE_BULLET_RE, " ", text, "inline_bullet")
+
+
+def _apply_steps(text: str, steps: List[Tuple[str, Callable[[str], str]]]) -> str:
+    """Run cleaning steps sequentially with logging."""
+    for name, fn in steps:
+        logger.debug(f"Applying {name}")
+        new_text = fn(text)
+        if new_text != text:
+            logger.debug(f"After {name}: {repr(new_text[:100])}")
+        text = new_text
+    return text
 
 
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
@@ -297,25 +387,21 @@ def clean_text(text: str) -> str:
 
     logger.debug("Using traditional text cleaning path")
 
-    # Normalize newlines first
-    logger.debug("Calling normalize_newlines")
-    text = normalize_newlines(text)
-    logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+    text = _apply_steps(
+        text,
+        [
+            ("normalize_newlines", normalize_newlines),
+            ("normalize_bullet_lines", normalize_bullet_lines),
+            ("collapse_single_newlines", collapse_single_newlines),
+            ("merge_spurious_paragraph_breaks", merge_spurious_paragraph_breaks),
+            ("collapse_spurious_double_newlines", collapse_spurious_double_newlines),
+            ("collapse_inline_bullet_artifacts", collapse_inline_bullet_artifacts),
+        ],
+    )
 
-    # Collapse single line breaks except paragraph breaks
-    logger.debug("Calling collapse_single_newlines")
-    text = collapse_single_newlines(text)
-    logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
-
-    logger.debug("Calling merge_spurious_paragraph_breaks")
-    text = merge_spurious_paragraph_breaks(text)
-    logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
-
-    # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     logger.debug(f"Split into {len(paragraphs)} paragraphs")
-    cleaned_paragraphs = [clean_paragraph(p) for p in paragraphs]
-    result = "\n\n".join(cleaned_paragraphs)
+    result = "\n\n".join(clean_paragraph(p) for p in paragraphs)
 
     # Final JSON safety check
     safe, issues = validate_json_safety(result)

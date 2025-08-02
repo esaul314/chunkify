@@ -479,29 +479,34 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         )
 
         # Apply the cleaning steps in the correct order
-        logger.debug("Applying normalize_newlines in PyMuPDF4LLM path")
-        text = normalize_newlines(text)
-        logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+        from .text_cleaning import (
+            collapse_spurious_double_newlines,
+            collapse_inline_bullet_artifacts,
+            normalize_bullet_lines,
+            _apply_steps,
+        )
 
-        logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
-        text = collapse_single_newlines(text)
-        logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
+        text = _apply_steps(
+            text,
+            [
+                ("normalize_newlines", normalize_newlines),
+                ("normalize_bullet_lines", normalize_bullet_lines),
+                ("collapse_single_newlines", collapse_single_newlines),
+                ("merge_spurious_paragraph_breaks", merge_spurious_paragraph_breaks),
+                ("fix_hyphenated_linebreaks", fix_hyphenated_linebreaks),
+                (
+                    "collapse_spurious_double_newlines",
+                    collapse_spurious_double_newlines,
+                ),
+                ("collapse_inline_bullet_artifacts", collapse_inline_bullet_artifacts),
+            ],
+        )
 
-        logger.debug("Applying merge_spurious_paragraph_breaks in PyMuPDF4LLM path")
-        text = merge_spurious_paragraph_breaks(text)
-        logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
-
-        logger.debug("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
-        text = fix_hyphenated_linebreaks(text)
-        logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
-
-        # Apply other cleaning steps paragraph by paragraph
-        paragraphs = []
-        for p in text.split("\n\n"):
-            if p.strip():
-                p = normalize_ligatures(p)
-                p = consolidate_whitespace(p)
-                paragraphs.append(p)
+        paragraphs = [
+            consolidate_whitespace(normalize_ligatures(p))
+            for p in text.split("\n\n")
+            if p.strip()
+        ]
 
         cleaned = "\n\n".join(paragraphs)
         logger.debug(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")

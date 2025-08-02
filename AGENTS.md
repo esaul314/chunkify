@@ -44,7 +44,8 @@ pdf_chunker/
 │   ├── chunk_pdf.py               # CLI for running the full pipeline
 │   ├── validate_chunks.sh         # Quality and boundary validation
 │   ├── detect_duplicates.py       # Overlap and duplicate detection
-│   └── _apply.sh                  # Batch apply scripts across multiple files
+│   ├── _apply.sh                  # Batch apply scripts across multiple files
+│   └── page_boundary_tool.py      # Page boundary comparison utility
 └── tests/                         # Modular test architecture
     ├── utils/
     │   └── common.sh              # Shared test utilities and formatting

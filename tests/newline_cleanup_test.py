@@ -49,6 +49,45 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
         self.assertEqual(clean_text(text), expected)
 
+    def test_collapse_mid_sentence_double_newline(self):
+        text = "Moving to modern\n\nenvironments requires care."
+        self.assertEqual(
+            clean_text(text),
+            "Moving to modern environments requires care.",
+        )
+
+    def test_collapse_mid_sentence_double_newline_with_punctuation(self):
+        text = "includes data)\n\nsuch as metrics"
+        self.assertEqual(
+            clean_text(text),
+            "includes data) such as metrics",
+        )
+
+    def test_collapse_line_start_bullet_artifact(self):
+        text = "and also\n\n• correlated"
+        self.assertEqual(clean_text(text), "and also correlated")
+
+    def test_collapse_bullet_linebreak(self):
+        text = "and also\n• correlated"
+        self.assertEqual(clean_text(text), "and also correlated")
+
+    def test_preserve_bullet_list(self):
+        text = "* item 1\n* item 2"
+        cleaned = clean_text(text)
+        self.assertEqual(cleaned.count("*"), 2)
+
+    def test_join_bullet_continuation_line(self):
+        text = "\u2022 item one\n  continuation"
+        self.assertEqual(clean_text(text), "\u2022 item one continuation")
+
+    def test_collapse_line_start_bullet_after_quote(self):
+        text = 'end of quote"\n\n• continuation'
+        self.assertEqual(clean_text(text), 'end of quote" continuation')
+
+    def test_collapse_mid_sentence_double_newline_after_quote(self):
+        text = 'this is "quote"\n\ncontinuation'
+        self.assertEqual(clean_text(text), 'this is "quote" continuation')
+
 
 if __name__ == "__main__":
     unittest.main()
