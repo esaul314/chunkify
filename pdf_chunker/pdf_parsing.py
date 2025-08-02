@@ -30,7 +30,7 @@ from .pymupdf4llm_integration import (
 from typing import List, Dict, Any, Tuple
 
 
-BULLET_CHARS = "•*"
+BULLET_CHARS = "•*◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 
 
