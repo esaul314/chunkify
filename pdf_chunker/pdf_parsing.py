@@ -30,6 +30,27 @@ from .pymupdf4llm_integration import (
 from typing import List, Dict, Any, Tuple
 
 
+BULLET_CHARS = "•*"
+BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
+
+
+def _is_bullet_continuation(curr: str, nxt: str) -> bool:
+    return curr.rstrip().endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
+
+
+def _starts_with_bullet(text: str) -> bool:
+    return text.lstrip().startswith(tuple(BULLET_CHARS))
+
+
+def _is_bullet_list_pair(curr: str, nxt: str) -> bool:
+    colon_bullet = re.search(rf":\s*[{BULLET_CHARS_ESC}]", curr)
+    return _starts_with_bullet(nxt) and (
+        _starts_with_bullet(curr)
+        or any(_starts_with_bullet(line) for line in curr.splitlines())
+        or colon_bullet is not None
+    )
+
+
 def _should_merge_blocks(
     curr_block: Dict[str, Any], next_block: Dict[str, Any]
 ) -> Tuple[bool, str]:
@@ -65,7 +86,14 @@ def _should_merge_blocks(
             logger.debug("Merge decision: QUOTE_CONTINUATION")
             return True, "quote_continuation"
 
-    # Case 1: Hyphenated word continuation
+    if _is_bullet_continuation(curr_text, next_text):
+        logger.debug("Merge decision: BULLET_CONTINUATION")
+        return True, "bullet_continuation"
+
+    if _is_bullet_list_pair(curr_text, next_text):
+        logger.debug("Merge decision: BULLET_LIST")
+        return True, "bullet_list"
+
     hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]$"
     double_hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]{{2,}}$"
     if (
@@ -77,7 +105,6 @@ def _should_merge_blocks(
         logger.debug("Merge decision: HYPHENATED_CONTINUATION")
         return True, "hyphenated_continuation"
 
-    # Case 2: Same page, sentence continuation (no punctuation at end)
     elif (
         curr_page == next_page
         and not curr_text.endswith((".", "!", "?", ":", ";"))
@@ -295,10 +322,15 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                         re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + next_text
                     )
                 elif merge_reason == "sentence_continuation":
-                    # Merge with space for sentence continuation
                     merged_text = current_text + " " + next_text
+                elif merge_reason == "bullet_continuation":
+                    merged_text = current_text.rstrip(" *•") + " " + next_text
+                elif merge_reason == "bullet_list":
+                    current_text = re.sub(
+                        rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", current_text
+                    )
+                    merged_text = current_text + "\n" + next_text
                 else:
-                    # Default merge with space
                     merged_text = current_text + " " + next_text
 
                 after_merge = merged_text[:50].replace(chr(10), "\n")
@@ -500,7 +532,7 @@ def extract_text_blocks_from_pdf(
                     logger.info(
                         f"PyMuPDF4LLM enhancement successful: {enhancement_stats}"
                     )
-                    merged_blocks = enhanced_blocks
+                    merged_blocks = merge_continuation_blocks(enhanced_blocks)
                 else:
                     logger.warning(
                         "PyMuPDF4LLM enhancement quality degraded, falling back to traditional text cleaning"
