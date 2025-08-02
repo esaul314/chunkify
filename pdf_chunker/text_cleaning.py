@@ -16,7 +16,7 @@ def pipe(value, *funcs):
 
 # Patterns
 PARAGRAPH_BREAK = re.compile(r"\n{2,}")
-CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
+CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\u202d\u202c]")
 
 # Quote normalization patterns
 QUOTE_PATTERNS: List[Tuple[re.Pattern, str]] = [
