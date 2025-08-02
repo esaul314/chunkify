@@ -19,5 +19,6 @@ def test_bullet_list_preservation():
         in items
     )
     assert all(not item.rstrip().endswith(".") for item in items)
+
     assert "\n\n•" not in blob
     assert "•\n\n•" not in blob
