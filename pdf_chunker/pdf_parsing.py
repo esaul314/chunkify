@@ -30,11 +30,25 @@ from .pymupdf4llm_integration import (
 from typing import List, Dict, Any, Tuple
 
 
-BULLET_CHARS = "•*"
+BULLET_CHARS = "•*◦▪‣·●◉○‧"
+BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 
 
 def _is_bullet_continuation(curr: str, nxt: str) -> bool:
     return curr.rstrip().endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
+
+
+def _starts_with_bullet(text: str) -> bool:
+    return text.lstrip().startswith(tuple(BULLET_CHARS))
+
+
+def _is_bullet_list_pair(curr: str, nxt: str) -> bool:
+    colon_bullet = re.search(rf":\s*[{BULLET_CHARS_ESC}]", curr)
+    return _starts_with_bullet(nxt) and (
+        _starts_with_bullet(curr)
+        or any(_starts_with_bullet(line) for line in curr.splitlines())
+        or colon_bullet is not None
+    )
 
 
 def _should_merge_blocks(
@@ -75,6 +89,10 @@ def _should_merge_blocks(
     if _is_bullet_continuation(curr_text, next_text):
         logger.debug("Merge decision: BULLET_CONTINUATION")
         return True, "bullet_continuation"
+
+    if _is_bullet_list_pair(curr_text, next_text):
+        logger.debug("Merge decision: BULLET_LIST")
+        return True, "bullet_list"
 
     hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]$"
     double_hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]{{2,}}$"
@@ -307,6 +325,11 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     merged_text = current_text + " " + next_text
                 elif merge_reason == "bullet_continuation":
                     merged_text = current_text.rstrip(" *•") + " " + next_text
+                elif merge_reason == "bullet_list":
+                    current_text = re.sub(
+                        rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", current_text
+                    )
+                    merged_text = current_text + "\n" + next_text
                 else:
                     merged_text = current_text + " " + next_text
 

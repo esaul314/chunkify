@@ -62,16 +62,30 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+def _preserve_bullet_newlines(text: str) -> str:
+    placeholder = "[[BULLET_BREAK]]"
+    pattern = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
+    text = re.sub(pattern, placeholder, text)
+    text = text.replace("\n", " ")
+    return text.replace(placeholder, "\n")
+
+
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
-    # First, protect paragraph breaks (2+ newlines) by replacing with placeholder
-    text = re.sub(r"\n{2,}", "[[PARAGRAPH_BREAK]]", text)
-    # Replace all remaining single newlines with spaces
+    bullet_break = "[[BULLET_BREAK]]"
+    para_break = "[[PARAGRAPH_BREAK]]"
+    bullet_re = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
+
+    # Normalize colon bullet starts and protect paragraph and bullet breaks
+    text = re.sub(rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", text)
+    text = re.sub(bullet_re, bullet_break, text)
+    text = re.sub(r"\n{2,}", para_break, text)
     text = text.replace("\n", " ")
-    # Restore paragraph breaks
-    text = text.replace("[[PARAGRAPH_BREAK]]", "\n\n")
+
+    # Restore preserved breaks
+    text = text.replace(para_break, "\n\n").replace(bullet_break, "\n")
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
     return text
@@ -245,7 +259,7 @@ def clean_paragraph(paragraph: str) -> str:
         paragraph,
         fix_hyphenated_linebreaks,
         collapse_artifact_breaks,
-        lambda t: t.replace("\n", " "),  # any internal newlines to space
+        _preserve_bullet_newlines,
         normalize_ligatures,
         normalize_quotes,
         remove_control_characters,

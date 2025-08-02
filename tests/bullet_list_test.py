@@ -9,9 +9,9 @@ from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 
 def test_bullet_list_preservation():
     blocks = extract_text_blocks_from_pdf("sample_book3.pdf")
-    text = "\n".join(b["text"] for b in blocks)
+    blob = "\n\n".join(b["text"] for b in blocks)
     items = [
-        line[line.index("•") :].strip() for line in text.splitlines() if "•" in line
+        line[line.index("•") :].strip() for line in blob.splitlines() if "•" in line
     ]
     assert len(items) == 3
     assert (
@@ -19,3 +19,6 @@ def test_bullet_list_preservation():
         in items
     )
     assert all(not item.rstrip().endswith(".") for item in items)
+
+    assert "\n\n•" not in blob
+    assert "•\n\n•" not in blob
