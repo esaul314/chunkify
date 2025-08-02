@@ -37,6 +37,7 @@ SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
 BULLET_CHARS_ESC = re.escape("*•")
+LIST_MARKER_PATTERN = rf"(?:[{BULLET_CHARS_ESC}]|\d+[.)])"
 
 
 def _join_broken_words(text: str) -> str:
@@ -62,16 +63,30 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+def _preserve_list_item_newlines(text: str) -> str:
+    placeholder = "[[LIST_BREAK]]"
+    pattern = rf"\n+(?=\s*{LIST_MARKER_PATTERN})"
+    text = re.sub(pattern, placeholder, text)
+    text = text.replace("\n", " ")
+    return text.replace(placeholder, "\n")
+
+
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
-    # First, protect paragraph breaks (2+ newlines) by replacing with placeholder
-    text = re.sub(r"\n{2,}", "[[PARAGRAPH_BREAK]]", text)
-    # Replace all remaining single newlines with spaces
+    list_break = "[[LIST_BREAK]]"
+    para_break = "[[PARAGRAPH_BREAK]]"
+    list_re = rf"\n+(?=\s*{LIST_MARKER_PATTERN})"
+
+    # Normalize colon-prefixed list starts and protect paragraph and list breaks
+    text = re.sub(rf":\s*(?={LIST_MARKER_PATTERN})", ":\n", text)
+    text = re.sub(list_re, list_break, text)
+    text = re.sub(r"\n{2,}", para_break, text)
     text = text.replace("\n", " ")
-    # Restore paragraph breaks
-    text = text.replace("[[PARAGRAPH_BREAK]]", "\n\n")
+
+    # Restore preserved breaks
+    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
     return text
@@ -245,7 +260,7 @@ def clean_paragraph(paragraph: str) -> str:
         paragraph,
         fix_hyphenated_linebreaks,
         collapse_artifact_breaks,
-        lambda t: t.replace("\n", " "),  # any internal newlines to space
+        _preserve_list_item_newlines,
         normalize_ligatures,
         normalize_quotes,
         remove_control_characters,
