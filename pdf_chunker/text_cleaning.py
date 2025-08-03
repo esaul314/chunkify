@@ -62,30 +62,31 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
-def _preserve_bullet_newlines(text: str) -> str:
-    placeholder = "[[BULLET_BREAK]]"
-    pattern = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
-    text = re.sub(pattern, placeholder, text)
-    text = text.replace("\n", " ")
-    return text.replace(placeholder, "\n")
+def _preserve_list_newlines(text: str) -> str:
+    """Keep newlines that precede bullets or enumerated items."""
+    placeholder = "[[LIST_BREAK]]"
+    pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
+    return (
+        re.sub(pattern, placeholder, text).replace("\n", " ").replace(placeholder, "\n")
+    )
 
 
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
-    bullet_break = "[[BULLET_BREAK]]"
+    list_break = "[[LIST_BREAK]]"
     para_break = "[[PARAGRAPH_BREAK]]"
-    bullet_re = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
+    list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
 
-    # Normalize colon bullet starts and protect paragraph and bullet breaks
+    # Normalize colon bullet starts and protect paragraph and list breaks
     text = re.sub(rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", text)
-    text = re.sub(bullet_re, bullet_break, text)
+    text = re.sub(list_re, list_break, text)
     text = re.sub(r"\n{2,}", para_break, text)
     text = text.replace("\n", " ")
 
     # Restore preserved breaks
-    text = text.replace(para_break, "\n\n").replace(bullet_break, "\n")
+    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
     return text
@@ -259,7 +260,7 @@ def clean_paragraph(paragraph: str) -> str:
         paragraph,
         fix_hyphenated_linebreaks,
         collapse_artifact_breaks,
-        _preserve_bullet_newlines,
+        _preserve_list_newlines,
         normalize_ligatures,
         normalize_quotes,
         remove_control_characters,

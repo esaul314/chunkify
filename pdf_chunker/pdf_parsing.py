@@ -37,7 +37,7 @@ BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 def _is_bullet_continuation(curr: str, nxt: str) -> bool:
     return curr.rstrip().endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
 
-  
+
 def _starts_with_bullet(text: str) -> bool:
     return text.lstrip().startswith(tuple(BULLET_CHARS))
 
@@ -48,6 +48,28 @@ def _is_bullet_list_pair(curr: str, nxt: str) -> bool:
         _starts_with_bullet(curr)
         or any(_starts_with_bullet(line) for line in curr.splitlines())
         or colon_bullet is not None
+    )
+
+
+NUMBERED_RE = re.compile(r"\s*\d+[.)]")
+
+
+def _starts_with_number(text: str) -> bool:
+    return bool(NUMBERED_RE.match(text))
+
+
+def _is_numbered_list_pair(curr: str, nxt: str) -> bool:
+    return _starts_with_number(nxt) and (
+        _starts_with_number(curr)
+        or any(_starts_with_number(line) for line in curr.splitlines())
+    )
+
+
+def _is_numbered_continuation(curr: str, nxt: str) -> bool:
+    return (
+        _starts_with_number(curr)
+        and not _starts_with_number(nxt)
+        and not curr.rstrip().endswith((".", "!", "?"))
     )
 
 
@@ -62,7 +84,7 @@ def _is_indented_continuation(curr: dict, nxt: dict) -> bool:
     indent_diff = next_x0 - curr_x0
     return indent_diff > 10 and vertical_gap < 8
 
-  
+
 def _should_merge_blocks(
     curr_block: Dict[str, Any], next_block: Dict[str, Any]
 ) -> Tuple[bool, str]:
@@ -105,6 +127,14 @@ def _should_merge_blocks(
     if _is_bullet_list_pair(curr_text, next_text):
         logger.debug("Merge decision: BULLET_LIST")
         return True, "bullet_list"
+
+    if _is_numbered_list_pair(curr_text, next_text):
+        logger.debug("Merge decision: NUMBERED_LIST")
+        return True, "numbered_list"
+
+    if _is_numbered_continuation(curr_text, next_text):
+        logger.debug("Merge decision: NUMBERED_CONTINUATION")
+        return True, "numbered_continuation"
 
     if _is_indented_continuation(
         curr_block, next_block
@@ -348,6 +378,10 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                         rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", current_text
                     )
                     merged_text = current_text + "\n" + next_text
+                elif merge_reason == "numbered_list":
+                    merged_text = current_text + "\n" + next_text
+                elif merge_reason == "numbered_continuation":
+                    merged_text = current_text + " " + next_text
                 elif merge_reason == "indented_continuation":
                     merged_text = current_text + "\n" + next_text
                 else:
