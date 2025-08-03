@@ -6,7 +6,7 @@ from typing import Iterable, List, Set
 
 from haystack.dataclasses import Document
 
-from .ai_enrichment import init_llm
+from .ai_enrichment import init_llm, classify_chunk_utterance
 from .splitter import semantic_chunker
 from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
 
@@ -254,6 +254,7 @@ def process_document(
         filtered_blocks,
         generate_metadata=generate_metadata,
         perform_ai_enrichment=perform_ai_enrichment,
+        enrichment_fn=classify_chunk_utterance,
         max_workers=10,
         min_chunk_size=min_chunk_size,
         enable_dialogue_detection=enable_dialogue_detection,
