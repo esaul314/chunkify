@@ -37,10 +37,12 @@ SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
 BULLET_CHARS_ESC = re.escape("*•")
+NUMBERED_BULLET_RE = r"\d+[.)]"
+BULLET_MARKER_RE = rf"(?:[{BULLET_CHARS_ESC}]|{NUMBERED_BULLET_RE})"
 
 
 def _join_broken_words(text: str) -> str:
-    bullet_opt = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
+    bullet_opt = rf"(?:{BULLET_MARKER_RE}\s*)?"
     pattern_break = rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}(\w)"
     pattern_space = rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([a-z])"
     text = re.sub(pattern_break, r"\1\2", text)
@@ -64,7 +66,7 @@ def collapse_artifact_breaks(text: str) -> str:
 
 def _preserve_bullet_newlines(text: str) -> str:
     placeholder = "[[BULLET_BREAK]]"
-    pattern = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
+    pattern = rf"\n+(?=\s*{BULLET_MARKER_RE})"
     text = re.sub(pattern, placeholder, text)
     text = text.replace("\n", " ")
     return text.replace(placeholder, "\n")
@@ -76,10 +78,10 @@ def collapse_single_newlines(text: str) -> str:
 
     bullet_break = "[[BULLET_BREAK]]"
     para_break = "[[PARAGRAPH_BREAK]]"
-    bullet_re = rf"\n(?=\s*[{BULLET_CHARS_ESC}])"
+    bullet_re = rf"\n+(?=\s*{BULLET_MARKER_RE})"
 
     # Normalize colon bullet starts and protect paragraph and bullet breaks
-    text = re.sub(rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", text)
+    text = re.sub(rf":\s*(?={BULLET_MARKER_RE})", ":\n", text)
     text = re.sub(bullet_re, bullet_break, text)
     text = re.sub(r"\n{2,}", para_break, text)
     text = text.replace("\n", " ")

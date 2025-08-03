@@ -49,6 +49,13 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
         self.assertEqual(clean_text(text), expected)
 
+    def test_numbered_list_no_extra_blank_lines(self):
+        text = "Intro\n\n" "1. First item\n\n" "2. Second item\n\n" "3. Third item"
+        cleaned = clean_text(text)
+        self.assertNotIn("\n\n1.", cleaned)
+        self.assertNotIn("1. First item\n\n2.", cleaned)
+        self.assertIn("1. First item\n2. Second item\n3. Third item", cleaned)
+
 
 if __name__ == "__main__":
     unittest.main()
