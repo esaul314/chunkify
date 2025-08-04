@@ -53,6 +53,7 @@ pdf_chunker/
     ├── semantic_chunking_test.py  # Chunk size and semantic rules tests
     ├── page_exclusion_test.py     # PDF page exclusion tests
     ├── epub_spine_test.py         # EPUB spine exclusion tests
+    ├── cross_page_sentence_test.py # Cross-page continuation merging tests
     └── run_all_tests.sh           # Orchestrates all test modules
 
 `````

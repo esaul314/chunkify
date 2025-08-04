@@ -32,6 +32,7 @@ from typing import List, Dict, Any, Tuple
 
 BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
+MIN_WORDS_FOR_CONTINUATION = 6
 
 
 def _is_bullet_continuation(curr: str, nxt: str) -> bool:
@@ -83,6 +84,24 @@ def _is_indented_continuation(curr: dict, nxt: dict) -> bool:
     vertical_gap = next_y0 - curr_y1
     indent_diff = next_x0 - curr_x0
     return indent_diff > 10 and vertical_gap < 8
+
+
+def _is_cross_page_continuation(
+    curr_text: str, next_text: str, curr_page: int, next_page: int
+) -> bool:
+    """Return True when text likely continues across a page break."""
+
+    return all(
+        (
+            curr_text,
+            next_text,
+            curr_page != next_page,
+            not curr_text.endswith((".", "!", "?")),
+            not _looks_like_quote_boundary(curr_text, next_text),
+            not _detect_heading_fallback(next_text)
+            or len(curr_text.split()) > MIN_WORDS_FOR_CONTINUATION,
+        )
+    )
 
 
 def _should_merge_blocks(
@@ -164,14 +183,7 @@ def _should_merge_blocks(
 
     # Case 3: Cross-page sentence continuation (no punctuation at end)
     # Enhanced to be more careful with quoted text
-    elif (
-        curr_text
-        and next_text
-        and not curr_text.endswith((".", "!", "?"))
-        and curr_page != next_page
-        and not _looks_like_quote_boundary(curr_text, next_text)
-        and not _detect_heading_fallback(next_text)
-    ):
+    elif _is_cross_page_continuation(curr_text, next_text, curr_page, next_page):
         logger.debug("Merge decision: CROSS_PAGE_CONTINUATION")
         return True, "sentence_continuation"
 
