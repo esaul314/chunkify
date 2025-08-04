@@ -27,11 +27,54 @@ from .pymupdf4llm_integration import (
     PyMuPDF4LLMExtractionError,
 )
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 
 BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
+MIN_WORDS_FOR_CONTINUATION = 6
+
+COMMON_SENTENCE_STARTERS = {
+    "The",
+    "This",
+    "That",
+    "A",
+    "An",
+    "In",
+    "On",
+    "At",
+    "As",
+    "By",
+    "For",
+    "From",
+    "If",
+    "When",
+    "While",
+    "After",
+    "Before",
+    "It",
+    "He",
+    "She",
+    "They",
+    "We",
+    "I",
+}
+
+
+def _word_count(text: str) -> int:
+    return sum(1 for _ in text.split())
+
+
+def _has_sufficient_context(text: str) -> bool:
+    return _word_count(text) >= MIN_WORDS_FOR_CONTINUATION
+
+
+def _fragment_tail(text: str) -> str:
+    return re.split(r"[.!?]\s*", text)[-1]
+
+
+def _is_common_sentence_starter(word: str) -> bool:
+    return word in COMMON_SENTENCE_STARTERS
 
 
 def _is_bullet_continuation(curr: str, nxt: str) -> bool:
@@ -83,6 +126,38 @@ def _is_indented_continuation(curr: dict, nxt: dict) -> bool:
     vertical_gap = next_y0 - curr_y1
     indent_diff = next_x0 - curr_x0
     return indent_diff > 10 and vertical_gap < 8
+
+
+def _is_cross_page_continuation(
+    curr_text: str,
+    next_text: str,
+    curr_page: Optional[int],
+    next_page: Optional[int],
+) -> bool:
+    """Return True when text likely continues across a page break."""
+
+    if not all((curr_text, next_text)):
+        return False
+    if (
+        all(page is not None for page in (curr_page, next_page))
+        and curr_page == next_page
+    ):
+        return False
+    if curr_text.endswith((".", "!", "?")):
+        return False
+    if _looks_like_quote_boundary(curr_text, next_text):
+        return False
+    if _detect_heading_fallback(next_text) and not _has_sufficient_context(curr_text):
+        return False
+    tail_words = _word_count(_fragment_tail(curr_text))
+    if tail_words > 12:
+        return False
+    first_word = next_text.split()[0]
+    if first_word[0].islower():
+        return True
+    if _is_common_sentence_starter(first_word):
+        return False
+    return True
 
 
 def _should_merge_blocks(
@@ -154,7 +229,8 @@ def _should_merge_blocks(
         return True, "hyphenated_continuation"
 
     elif (
-        curr_page == next_page
+        all(page is not None for page in (curr_page, next_page))
+        and curr_page == next_page
         and not curr_text.endswith((".", "!", "?", ":", ";"))
         and next_text
         and next_text[0].islower()
@@ -164,14 +240,7 @@ def _should_merge_blocks(
 
     # Case 3: Cross-page sentence continuation (no punctuation at end)
     # Enhanced to be more careful with quoted text
-    elif (
-        curr_text
-        and next_text
-        and not curr_text.endswith((".", "!", "?"))
-        and curr_page != next_page
-        and not _looks_like_quote_boundary(curr_text, next_text)
-        and not _detect_heading_fallback(next_text)
-    ):
+    elif _is_cross_page_continuation(curr_text, next_text, curr_page, next_page):
         logger.debug("Merge decision: CROSS_PAGE_CONTINUATION")
         return True, "sentence_continuation"
 
