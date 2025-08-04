@@ -1,14 +1,17 @@
 import logging
-
-logger = logging.getLogger(__name__)
+from collections import Counter
 import re
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
 from haystack.components.preprocessors import DocumentSplitter
 
 # from haystack.dataclasses import Document
 from haystack import Document
+
 from .text_cleaning import _is_probable_heading
 
+
+logger = logging.getLogger(__name__)
 
 # Try importing RecursiveCharacterTextSplitter from both possible locations
 try:
@@ -24,11 +27,6 @@ except ImportError:
         RecursiveCharacterTextSplitter = None
         _LANGCHAIN_SPLITTER_AVAILABLE = False
 
-
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
 # Centralized chunk threshold constants
 CHUNK_THRESHOLDS = {
     "very_short": 9,  # Very short chunks (≤5 words) - always merge
@@ -38,6 +36,144 @@ CHUNK_THRESHOLDS = {
     "fragment": 4,  # Very short fragments (≤4 words) - always merge
     "related_short": 9,  # Related short chunks threshold
 }
+
+# Common dialogue verbs for attribution detection
+DIALOGUE_VERBS = {
+    "said",
+    "replied",
+    "asked",
+    "answered",
+    "continued",
+    "added",
+    "noted",
+    "observed",
+    "remarked",
+    "stated",
+    "declared",
+    "exclaimed",
+    "whispered",
+    "shouted",
+    "muttered",
+    "explained",
+    "insisted",
+    "argued",
+    "suggested",
+    "wondered",
+    "thought",
+    "concluded",
+}
+
+
+def _is_dialogue_attribution(words: List[str]) -> bool:
+    """Return True if words represent a short dialogue attribution."""
+    return len(words) <= CHUNK_THRESHOLDS["dialogue_response"] and any(
+        word.lower() in DIALOGUE_VERBS for word in words
+    )
+
+
+def _is_incomplete_sentence(words: List[str], current: str, next_chunk: str) -> bool:
+    """Detect incomplete sentences that likely merge with following text."""
+    return (
+        len(words) <= CHUNK_THRESHOLDS["dialogue_response"]
+        and not current.endswith((".", "!", "?"))
+        and not next_chunk[0].isupper()
+    )
+
+
+def _is_very_short_fragment(words: List[str]) -> bool:
+    """Determine if a chunk is an extremely short fragment."""
+    return len(words) <= CHUNK_THRESHOLDS["fragment"]
+
+
+def _is_related_short_chunks(
+    current_words: List[str], next_words: List[str], current: str
+) -> bool:
+    """Check for adjacent related short chunks that should merge."""
+    return (
+        len(current_words) <= CHUNK_THRESHOLDS["related_short"]
+        and len(next_words) <= CHUNK_THRESHOLDS["short"]
+        and not current.endswith((".", "!", "?"))
+    )
+
+
+def _is_next_chunk_very_short(next_words: List[str]) -> bool:
+    """Return True when the following chunk is extremely short."""
+    return len(next_words) <= CHUNK_THRESHOLDS["very_short"]
+
+
+def _merge_reason(
+    current: str, next_chunk: str
+) -> Tuple[bool, Optional[str], List[str], List[str]]:
+    """Evaluate merge predicates and return decision metadata."""
+    current_words = current.split()
+    next_words = next_chunk.split()
+    conditions = [
+        (_is_dialogue_attribution(current_words), "short_dialogue_attribution"),
+        (
+            _is_incomplete_sentence(current_words, current, next_chunk),
+            "incomplete_sentence",
+        ),
+        (_is_very_short_fragment(current_words), "very_short_fragment"),
+        (
+            _is_related_short_chunks(current_words, next_words, current),
+            "related_short_chunks",
+        ),
+        (_is_next_chunk_very_short(next_words), "next_chunk_very_short"),
+    ]
+    reason = next((r for cond, r in conditions if cond), None)
+    return reason is not None, reason, current_words, next_words
+
+
+def _concat_chunks(first: str, second: str) -> str:
+    """Join two chunks with a space respecting sentence boundaries."""
+    return f"{first}{' ' if not first.endswith(('.', '!', '?', ',', ';', ':')) else ' '}{second}"
+
+
+def _merge_forward(
+    chunks: List[str], relationships: List[Dict[str, Any]], idx: int = 0
+) -> Tuple[List[str], Counter]:
+    """Recursively merge chunks based on precomputed relationships."""
+    if idx >= len(chunks):
+        return [], Counter()
+
+    current = chunks[idx].strip()
+    if not current:
+        return _merge_forward(chunks, relationships, idx + 1)
+
+    if (
+        idx < len(relationships)
+        and relationships[idx]["should_merge"]
+        and idx + 1 < len(chunks)
+    ):
+        next_chunk = chunks[idx + 1].strip()
+        rest, counter = _merge_forward(chunks, relationships, idx + 2)
+        reason = relationships[idx]["merge_reason"]
+        counter.update([reason])
+        return [_concat_chunks(current, next_chunk)] + rest, counter
+
+    rest, counter = _merge_forward(chunks, relationships, idx + 1)
+    return [current] + rest, counter
+
+
+def _second_pass_merge(
+    chunks: List[str], min_chunk_size: int, idx: int = 0
+) -> Tuple[List[str], Counter]:
+    """Recursively merge remaining short chunks after initial pass."""
+    if idx >= len(chunks):
+        return [], Counter()
+
+    current = chunks[idx].strip()
+    current_words = len(current.split())
+    if current_words < min_chunk_size and idx + 1 < len(chunks):
+        next_chunk = chunks[idx + 1].strip()
+        next_words = len(next_chunk.split())
+        if current_words + next_words <= min_chunk_size * 3:
+            rest, counter = _second_pass_merge(chunks, min_chunk_size, idx + 2)
+            counter.update(["second_pass_size"])
+            return [_concat_chunks(current, next_chunk)] + rest, counter
+
+    rest, counter = _second_pass_merge(chunks, min_chunk_size, idx + 1)
+    return [current] + rest, counter
 
 
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
@@ -91,104 +227,23 @@ def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
 
 
 def analyze_chunk_relationships(chunks: List[str]) -> List[Dict[str, Any]]:
-    """
-    Analyze relationships between chunks to identify those that should be merged.
+    """Analyze adjacent chunk relationships and merge heuristics."""
 
-    Args:
-        chunks: List of chunk texts
-
-    Returns:
-        List of relationship analysis results
-    """
-    relationships = []
-
-    for i in range(len(chunks) - 1):
-        current_chunk = chunks[i].strip()
-        next_chunk = chunks[i + 1].strip()
-
-        if not current_chunk or not next_chunk:
-            continue
-
-        current_words = current_chunk.split()
-        next_words = next_chunk.split()
-
-        relationship = {
+    def _relationship(i: int, current: str, nxt: str) -> Dict[str, Any]:
+        should_merge, reason, curr_words, next_words = _merge_reason(current, nxt)
+        return {
             "chunk_index": i,
-            "current_word_count": len(current_words),
+            "current_word_count": len(curr_words),
             "next_word_count": len(next_words),
-            "should_merge": False,
-            "merge_reason": None,
+            "should_merge": should_merge,
+            "merge_reason": reason,
         }
 
-        # Check for short chunks that should be merged using centralized thresholds
-        if len(current_words) <= CHUNK_THRESHOLDS["short"]:
-            # Short chunk - analyze context for merging
-
-            # Case 1: Short response after dialogue
-            if len(current_words) <= CHUNK_THRESHOLDS["dialogue_response"] and any(
-                word.lower()
-                in [
-                    "said",
-                    "replied",
-                    "asked",
-                    "answered",
-                    "continued",
-                    "added",
-                    "noted",
-                    "observed",
-                    "remarked",
-                    "stated",
-                    "declared",
-                    "exclaimed",
-                    "whispered",
-                    "shouted",
-                    "muttered",
-                    "explained",
-                    "insisted",
-                    "argued",
-                    "suggested",
-                    "wondered",
-                    "thought",
-                    "concluded",
-                ]
-                for word in current_words
-            ):
-                relationship["should_merge"] = True
-                relationship["merge_reason"] = "short_dialogue_attribution"
-
-            # Case 2: Short commentary or response
-            elif (
-                len(current_words) <= CHUNK_THRESHOLDS["dialogue_response"]
-                and not current_chunk.endswith((".", "!", "?"))
-                and not next_chunk[0].isupper()
-            ):
-                relationship["should_merge"] = True
-                relationship["merge_reason"] = "incomplete_sentence"
-
-            # Case 3: Very short fragments
-            elif len(current_words) <= CHUNK_THRESHOLDS["fragment"]:
-                relationship["should_merge"] = True
-                relationship["merge_reason"] = "very_short_fragment"
-
-            # Case 4: Short chunk followed by related content
-            elif (
-                len(current_words) <= CHUNK_THRESHOLDS["related_short"]
-                and len(next_words) <= CHUNK_THRESHOLDS["short"]
-                and not current_chunk.endswith((".", "!", "?"))
-            ):
-                relationship["should_merge"] = True
-                relationship["merge_reason"] = "related_short_chunks"
-
-        # Check for next chunk being very short
-        if len(next_words) <= CHUNK_THRESHOLDS["very_short"]:
-            # Next chunk is very short - likely should be merged with current
-            if not relationship["should_merge"]:
-                relationship["should_merge"] = True
-                relationship["merge_reason"] = "next_chunk_very_short"
-
-        relationships.append(relationship)
-
-    return relationships
+    return [
+        _relationship(i, c.strip(), n.strip())
+        for i, (c, n) in enumerate(zip(chunks, chunks[1:]))
+        if c.strip() and n.strip()
+    ]
 
 
 def merge_conversational_chunks(
@@ -207,109 +262,26 @@ def merge_conversational_chunks(
 
     if not chunks:
         return chunks, {}
-    # Use centralized threshold if not provided
-    if min_chunk_size is None:
-        min_chunk_size = CHUNK_THRESHOLDS["min_target"]
 
-    # Analyze relationships between chunks
+    min_chunk_size = min_chunk_size or CHUNK_THRESHOLDS["min_target"]
     relationships = analyze_chunk_relationships(chunks)
 
-    merged_chunks = []
+    first_pass, first_counter = _merge_forward(chunks, relationships)
+    second_pass, second_counter = _second_pass_merge(first_pass, min_chunk_size)
+
+    reason_counter = first_counter + second_counter
+    merged_chunks = second_pass
     merge_stats = {
         "original_count": len(chunks),
-        "merges_performed": 0,
-        "merge_reasons": {},
-        "final_count": 0,
-        "short_chunks_remaining": 0,
+        "merges_performed": sum(reason_counter.values()),
+        "merge_reasons": dict(reason_counter),
+        "final_count": len(merged_chunks),
+        "short_chunks_remaining": sum(
+            1 for chunk in merged_chunks if len(chunk.split()) < min_chunk_size
+        ),
     }
 
-    i = 0
-    while i < len(chunks):
-        current_chunk = chunks[i].strip()
-
-        if not current_chunk:
-            i += 1
-            continue
-
-        # Check if this chunk should be merged with the next one
-        should_merge_forward = False
-        merge_reason = None
-
-        if i < len(relationships):
-            rel = relationships[i]
-            should_merge_forward = rel["should_merge"]
-            merge_reason = rel["merge_reason"]
-
-        if should_merge_forward and i + 1 < len(chunks):
-            # Merge current chunk with next chunk
-            next_chunk = chunks[i + 1].strip()
-            if next_chunk:
-                # Determine appropriate separator
-                separator = " "
-                if current_chunk.endswith((".", "!", "?")):
-                    separator = " "
-                elif current_chunk.endswith((",", ";", ":")):
-                    separator = " "
-                else:
-                    separator = " "
-
-                merged_text = current_chunk + separator + next_chunk
-                merged_chunks.append(merged_text)
-
-                merge_stats["merges_performed"] += 1
-                if merge_reason:
-                    merge_stats["merge_reasons"][merge_reason] = (
-                        merge_stats["merge_reasons"].get(merge_reason, 0) + 1
-                    )
-
-                i += 2  # Skip both chunks since they were merged
-            else:
-                merged_chunks.append(current_chunk)
-                i += 1
-        else:
-            # Keep chunk as is
-            merged_chunks.append(current_chunk)
-            i += 1
-
-    # Second pass: merge any remaining very short chunks
-    final_chunks = []
-    i = 0
-    while i < len(merged_chunks):
-        current_chunk = merged_chunks[i].strip()
-        current_words = len(current_chunk.split())
-
-        if current_words < min_chunk_size and i + 1 < len(merged_chunks):
-            # Try to merge with next chunk
-            next_chunk = merged_chunks[i + 1].strip()
-            next_words = len(next_chunk.split())
-
-            # Merge if combined size is reasonable (use centralized threshold)
-            if current_words + next_words <= min_chunk_size * 3:
-                separator = " " if not current_chunk.endswith((".", "!", "?")) else " "
-                merged_text = current_chunk + separator + next_chunk
-                final_chunks.append(merged_text)
-
-                merge_stats["merges_performed"] += 1
-                merge_stats["merge_reasons"]["second_pass_size"] = (
-                    merge_stats["merge_reasons"].get("second_pass_size", 0) + 1
-                )
-
-                i += 2
-            else:
-                final_chunks.append(current_chunk)
-                i += 1
-        else:
-            final_chunks.append(current_chunk)
-            i += 1
-
-    # Count remaining short chunks
-    for chunk in final_chunks:
-        if len(chunk.split()) < min_chunk_size:
-            merge_stats["short_chunks_remaining"] += 1
-
-    merge_stats["final_count"] = len(final_chunks)
-
-    return final_chunks, merge_stats
+    return merged_chunks, merge_stats
 
 
 def _merge_short_chunks(
@@ -324,8 +296,12 @@ def _merge_short_chunks(
     Returns the merged chunks and merge statistics.
     """
     logger.info(
-        f"Running _merge_short_chunks: min_chunk_size={min_chunk_size}, very_short_threshold={very_short_threshold}, short_threshold={short_threshold}"
+        "Running _merge_short_chunks: min_chunk_size=%s, very_short_threshold=%s, short_threshold=%s",
+        min_chunk_size,
+        very_short_threshold,
+        short_threshold,
     )
+
     if not chunks:
         return [], {
             "merges_performed": 0,
@@ -333,71 +309,47 @@ def _merge_short_chunks(
             "short_chunks_remaining": 0,
         }
 
-    merged_chunks = []
+    def _helper(sequence: List[str]) -> Tuple[List[str], Counter]:
+        if not sequence:
+            return [], Counter()
+
+        current = sequence[0].strip()
+        current_words = len(current.split())
+
+        if current_words <= very_short_threshold and len(sequence) > 1:
+            merged = _concat_chunks(current, sequence[1].strip())
+            rest, counter = _helper(sequence[2:])
+            counter.update(["very_short"])
+            return [merged] + rest, counter
+
+        if (
+            current_words <= short_threshold
+            and len(sequence) > 1
+            and len(sequence[1].split()) <= short_threshold
+        ):
+            merged = _concat_chunks(current, sequence[1].strip())
+            rest, counter = _helper(sequence[2:])
+            counter.update(["short_pair"])
+            return [merged] + rest, counter
+
+        if current_words < min_chunk_size and len(sequence) > 1:
+            merged = _concat_chunks(current, sequence[1].strip())
+            rest, counter = _helper(sequence[2:])
+            counter.update(["below_min"])
+            return [merged] + rest, counter
+
+        rest, counter = _helper(sequence[1:])
+        return [current] + rest, counter
+
+    merged_chunks, reason_counter = _helper(chunks)
     merge_stats = {
-        "merges_performed": 0,
-        "final_count": 0,
-        "short_chunks_remaining": 0,
-        "merge_reasons": {},
+        "merges_performed": sum(reason_counter.values()),
+        "final_count": len(merged_chunks),
+        "short_chunks_remaining": sum(
+            1 for chunk in merged_chunks if len(chunk.split()) < min_chunk_size
+        ),
+        "merge_reasons": dict(reason_counter),
     }
-
-    i = 0
-    while i < len(chunks):
-        current_chunk = chunks[i].strip()
-        current_words = len(current_chunk.split())
-
-        # Always merge very short chunks (≤ very_short_threshold) with the next chunk
-        if current_words <= very_short_threshold and i + 1 < len(chunks):
-            next_chunk = chunks[i + 1].strip()
-            merged_text = current_chunk + " " + next_chunk
-            merged_chunks.append(merged_text)
-            merge_stats["merges_performed"] += 1
-            merge_stats["merge_reasons"]["very_short"] = (
-                merge_stats["merge_reasons"].get("very_short", 0) + 1
-            )
-            i += 2
-            continue
-
-        # Merge short chunks (≤ short_threshold) with the next chunk if both are short
-        elif current_words <= short_threshold and i + 1 < len(chunks):
-            next_chunk = chunks[i + 1].strip()
-            next_words = len(next_chunk.split())
-            if next_words <= short_threshold:
-                merged_text = current_chunk + " " + next_chunk
-                merged_chunks.append(merged_text)
-                merge_stats["merges_performed"] += 1
-                merge_stats["merge_reasons"]["short_pair"] = (
-                    merge_stats["merge_reasons"].get("short_pair", 0) + 1
-                )
-                i += 2
-                continue
-            else:
-                merged_chunks.append(current_chunk)
-                i += 1
-                continue
-
-        # Merge any chunk below min_chunk_size with the next chunk if possible
-        elif current_words < min_chunk_size and i + 1 < len(chunks):
-            next_chunk = chunks[i + 1].strip()
-            merged_text = current_chunk + " " + next_chunk
-            merged_chunks.append(merged_text)
-            merge_stats["merges_performed"] += 1
-            merge_stats["merge_reasons"]["below_min"] = (
-                merge_stats["merge_reasons"].get("below_min", 0) + 1
-            )
-            i += 2
-            continue
-
-        else:
-            merged_chunks.append(current_chunk)
-            i += 1
-
-    # Count remaining short chunks
-    for chunk in merged_chunks:
-        if len(chunk.split()) < min_chunk_size:
-            merge_stats["short_chunks_remaining"] += 1
-
-    merge_stats["final_count"] = len(merged_chunks)
     logger.info(f"_merge_short_chunks complete: {merge_stats}")
     return merged_chunks, merge_stats
 
@@ -850,3 +802,9 @@ def _attempt_chunk_repair(chunk: str) -> str:
         return ""
 
     return repaired
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
