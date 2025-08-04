@@ -51,7 +51,10 @@ def _load_tag_configs(config_dir: str = "config/tags") -> dict:
         {},
     )
 
-    return {k: list({tag for tag in v}) for k, v in merged.items()}
+    return {
+        k: sorted({tag.strip().lower() for tag in v if isinstance(tag, str)})
+        for k, v in merged.items()
+    }
 
 
 def init_llm(api_key: str | None = None) -> Callable[[str], str]:
@@ -121,11 +124,11 @@ Response:"""
             elif line.startswith("Tags:"):
                 tags_text = line.split(":", 1)[1].strip()
                 raw_tags = [
-                    tag.strip()
+                    tag.strip().lower()
                     for tag in tags_text.replace("[", "").replace("]", "").split(",")
                     if tag.strip()
                 ]
-                valid = {t for tags in tag_configs.values() for t in tags}
+                valid = {t.lower() for tags in tag_configs.values() for t in tags}
                 tags = [tag for tag in raw_tags if tag in valid]
         return {"classification": classification, "tags": tags}
     except Exception:
@@ -145,6 +148,8 @@ def _process_chunk_for_file(
     result = classify_chunk_utterance(
         chunk.get("text", ""), tag_configs=tag_configs, completion_fn=completion_fn
     )
+    chunk["utterance_type"] = result["classification"]
+    chunk["tags"] = result["tags"]
     if "metadata" not in chunk:
         chunk["metadata"] = {}
     chunk["metadata"]["utterance_type"] = result["classification"]
@@ -174,10 +179,12 @@ def _process_jsonl_file(
                     chunk,
                     tag_configs=tag_configs,
                     completion_fn=completion_fn,
-                ): chunk
-                for chunk in chunks
+                ): idx
+                for idx, chunk in enumerate(chunks)
             }
-            results = [future.result() for future in as_completed(futures)]
+            results = [None] * len(chunks)
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
 
         for result_chunk in results:
             outfile.write(json.dumps(result_chunk) + "\n")

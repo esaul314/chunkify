@@ -1,8 +1,12 @@
-from pdf_chunker.ai_enrichment import _load_tag_configs, classify_chunk_utterance
+from pdf_chunker.ai_enrichment import (
+    _load_tag_configs,
+    classify_chunk_utterance,
+    _process_chunk_for_file,
+)
 
 
 def _dummy_completion(_: str) -> str:
-    return "Classification: question\nTags: [technical, unknown]"
+    return "Classification: question\nTags: [Technical, unknown]"
 
 
 def test_load_tag_configs_deduplicates():
@@ -16,3 +20,13 @@ def test_classify_chunk_utterance_filters_invalid_tags():
         "What is AI?", tag_configs=tag_configs, completion_fn=_dummy_completion
     )
     assert result == {"classification": "question", "tags": ["technical"]}
+
+
+def test_process_chunk_for_file_populates_tags():
+    chunk = {"text": "What is AI?"}
+    tag_configs = {"generic": ["technical"]}
+    result = _process_chunk_for_file(
+        chunk, tag_configs=tag_configs, completion_fn=_dummy_completion
+    )
+    assert result["tags"] == ["technical"]
+    assert result["metadata"]["tags"] == ["technical"]
