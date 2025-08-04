@@ -54,6 +54,7 @@ pdf_chunker/
     ├── page_exclusion_test.py     # PDF page exclusion tests
     ├── epub_spine_test.py         # EPUB spine exclusion tests
     ├── cross_page_sentence_test.py # Cross-page continuation merging tests
+    ├── numbered_list_chunk_test.py # Numbered list chunking preservation
     └── run_all_tests.sh           # Orchestrates all test modules
 
 `````
