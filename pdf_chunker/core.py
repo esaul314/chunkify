@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Set
+from typing import Iterable, List, Sequence, Set
 from functools import partial
 
 from haystack.dataclasses import Document
@@ -38,10 +38,102 @@ def extract_blocks(filepath: str, exclude_pages: str | None) -> List[dict]:
     logger.debug("Starting PDF extraction for %s", filepath)
     blocks = extract_text_blocks_from_pdf(filepath, exclude_pages=exclude_pages)
     logger.debug("PDF extraction complete: %d blocks", len(blocks))
-    for i, block in enumerate(blocks[:3]):
-        text_preview = block.get("text", "")[:100].replace("\n", "\\n")
-        logger.debug("Block %d text preview: %r", i, text_preview)
+    [
+        logger.debug(
+            "Block %d text preview: %r",
+            i,
+            block.get("text", "")[:100].replace("\n", "\\n"),
+        )
+        for i, block in enumerate(blocks[:3])
+    ]
     return blocks
+
+
+def log_chunk_stats(chunks: Sequence[str], *, label: str = "Chunk") -> None:
+    """Log statistics about chunk sizes using a functional style."""
+    if not chunks:
+        return
+
+    chunk_sizes = list(map(len, chunks))
+    word_counts = list(map(lambda c: len(c.split()), chunks))
+    avg_size = sum(chunk_sizes) / len(chunk_sizes)
+    avg_words = sum(word_counts) / len(word_counts)
+    logger.debug(
+        "%s size statistics: average %.0f characters (%.1f words)",
+        label,
+        avg_size,
+        avg_words,
+    )
+    logger.debug(
+        "Maximum: %d characters (%d words)",
+        max(chunk_sizes),
+        max(word_counts),
+    )
+    logger.debug(
+        "Minimum: %d characters (%d words)",
+        min(chunk_sizes),
+        min(word_counts),
+    )
+
+    short_chunks = [i for i, words in enumerate(word_counts) if words <= 7]
+    very_short_chunks = [i for i, words in enumerate(word_counts) if words <= 3]
+    if short_chunks:
+        logger.debug("Short chunks (≤7 words): %d", len(short_chunks))
+        if len(short_chunks) <= 3:
+            list(
+                map(
+                    lambda i: logger.debug(
+                        "%s %d: %d words - %r",
+                        label,
+                        i,
+                        word_counts[i],
+                        chunks[i][:50].replace("\n", " "),
+                    ),
+                    short_chunks,
+                )
+            )
+    if very_short_chunks:
+        logger.warning("Very short chunks (≤3 words): %d", len(very_short_chunks))
+        list(
+            map(
+                lambda i: logger.debug(
+                    "%s %d: %d words - %r",
+                    label,
+                    i,
+                    word_counts[i],
+                    chunks[i][:50].replace("\n", " "),
+                ),
+                very_short_chunks,
+            )
+        )
+
+    oversized_chunks = [i for i, size in enumerate(chunk_sizes) if size > 10000]
+    if oversized_chunks:
+        logger.warning(
+            "%d %ss exceed 10k characters", len(oversized_chunks), label.lower()
+        )
+        list(
+            map(
+                lambda i: logger.debug(
+                    "%s %d: %d characters", label, i, chunk_sizes[i]
+                ),
+                oversized_chunks[:3],
+            )
+        )
+
+    extreme_chunks = [i for i, size in enumerate(chunk_sizes) if size > 25000]
+    if extreme_chunks:
+        logger.error(
+            "%d %ss exceed 25k characters!", len(extreme_chunks), label.lower()
+        )
+        list(
+            map(
+                lambda i: logger.debug(
+                    "%s %d: %d characters", label, i, chunk_sizes[i]
+                ),
+                extreme_chunks,
+            )
+        )
 
 
 def filter_blocks(blocks: Iterable[dict], excluded_pages: Set[int]) -> List[dict]:
@@ -93,48 +185,7 @@ def chunk_text(
         len(chunks),
     )
     if chunks:
-        chunk_sizes = [len(c) for c in chunks]
-        word_counts = [len(c.split()) for c in chunks]
-        avg_size = sum(chunk_sizes) / len(chunk_sizes)
-        avg_words = sum(word_counts) / len(word_counts)
-        logger.debug(
-            "Chunk size statistics: average %.0f characters (%.1f words)",
-            avg_size,
-            avg_words,
-        )
-        logger.debug(
-            "Maximum: %d characters (%d words)",
-            max(chunk_sizes),
-            max(word_counts),
-        )
-        logger.debug(
-            "Minimum: %d characters (%d words)",
-            min(chunk_sizes),
-            min(word_counts),
-        )
-        short_chunks = [i for i, words in enumerate(word_counts) if words <= 7]
-        very_short_chunks = [i for i, words in enumerate(word_counts) if words <= 3]
-        if short_chunks:
-            logger.debug("Short chunks (≤7 words): %d", len(short_chunks))
-            if len(short_chunks) <= 3:
-                for i in short_chunks:
-                    preview = chunks[i][:50].replace("\n", " ")
-                    logger.debug("Chunk %d: %d words - %r", i, word_counts[i], preview)
-        if very_short_chunks:
-            logger.warning("Very short chunks (≤3 words): %d", len(very_short_chunks))
-            for i in very_short_chunks:
-                preview = chunks[i][:50].replace("\n", " ")
-                logger.debug("Chunk %d: %d words - %r", i, word_counts[i], preview)
-        oversized_chunks = [i for i, size in enumerate(chunk_sizes) if size > 10000]
-        if oversized_chunks:
-            logger.warning("%d chunks exceed 10k characters", len(oversized_chunks))
-            for i in oversized_chunks[:3]:
-                logger.debug("Chunk %d: %d characters", i, chunk_sizes[i])
-        extreme_chunks = [i for i, size in enumerate(chunk_sizes) if size > 25000]
-        if extreme_chunks:
-            logger.error("%d chunks exceed 25k characters!", len(extreme_chunks))
-            for i in extreme_chunks:
-                logger.debug("Chunk %d: %d characters", i, chunk_sizes[i])
+        log_chunk_stats(chunks)
     return chunks
 
 
@@ -170,32 +221,22 @@ def validate_chunks(
 
     logger.debug("Final pipeline output: %d chunks", len(final_chunks))
     if final_chunks:
-        final_sizes = [len(chunk.get("text", "")) for chunk in final_chunks]
-        final_avg = sum(final_sizes) / len(final_sizes)
-        final_max = max(final_sizes)
-        final_min = min(final_sizes)
-        logger.debug("Final chunk size statistics: average %.0f characters", final_avg)
-        logger.debug("Maximum: %d characters", final_max)
-        logger.debug("Minimum: %d characters", final_min)
-        oversized_final = [i for i, size in enumerate(final_sizes) if size > 10000]
-        if oversized_final:
-            logger.error("%d final chunks exceed 10k characters!", len(oversized_final))
-            for i in oversized_final[:3]:
-                logger.debug("Final chunk %d: %d characters", i, final_sizes[i])
-        extreme_final = [i for i, size in enumerate(final_sizes) if size > 25000]
-        if extreme_final:
-            logger.critical(
-                "%d final chunks exceed 25k characters!", len(extreme_final)
+        log_chunk_stats(
+            [chunk.get("text", "") for chunk in final_chunks], label="Final chunk"
+        )
+        [
+            logger.debug("Final chunk %d: %d characters", i, len(chunk.get("text", "")))
+            for i, chunk in enumerate(final_chunks[:3])
+        ]
+        [
+            logger.error(
+                "Final chunk %d is still oversized (%d characters)!",
+                i,
+                len(chunk.get("text", "")),
             )
-            for i in extreme_final:
-                logger.debug("Final chunk %d: %d characters", i, final_sizes[i])
-        for i, chunk in enumerate(final_chunks[:3]):
-            text_len = len(chunk.get("text", ""))
-            logger.debug("Final chunk %d: %d characters", i, text_len)
-            if text_len > 10000:
-                logger.error(
-                    "Final chunk %d is still oversized (%d characters)!", i, text_len
-                )
+            for i, chunk in enumerate(final_chunks[:3])
+            if len(chunk.get("text", "")) > 10000
+        ]
     return final_chunks
 
 
