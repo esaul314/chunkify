@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from typing import Iterable, List, Set
+from functools import partial
 
 from haystack.dataclasses import Document
 
-from .ai_enrichment import init_llm, classify_chunk_utterance
+from .ai_enrichment import init_llm, classify_chunk_utterance, _load_tag_configs
 from .splitter import semantic_chunker
 from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
 
@@ -228,9 +229,16 @@ def process_document(
         min_chunk_size = max(8, chunk_size // 10)
 
     perform_ai_enrichment = generate_metadata and ai_enrichment
+    enrichment_fn = None
     if perform_ai_enrichment:
         try:
-            init_llm()
+            completion_fn = init_llm()
+            tag_configs = _load_tag_configs()
+            enrichment_fn = partial(
+                classify_chunk_utterance,
+                tag_configs=tag_configs,
+                completion_fn=completion_fn,
+            )
         except ValueError as exc:
             logger.warning("AI Enrichment disabled: %s", exc)
             perform_ai_enrichment = False
@@ -254,7 +262,7 @@ def process_document(
         filtered_blocks,
         generate_metadata=generate_metadata,
         perform_ai_enrichment=perform_ai_enrichment,
-        enrichment_fn=classify_chunk_utterance,
+        enrichment_fn=enrichment_fn,
         max_workers=10,
         min_chunk_size=min_chunk_size,
         enable_dialogue_detection=enable_dialogue_detection,
