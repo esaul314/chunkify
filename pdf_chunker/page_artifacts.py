@@ -1,8 +1,23 @@
 import logging
 import re
+from functools import reduce
 from typing import Optional
 
 from .text_cleaning import clean_text
+
+ROMAN_RE = r"[ivxlcdm]+"
+_ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+
+def _roman_to_int(value: str) -> int:
+    """Convert a Roman numeral to an integer."""
+
+    def _step(acc: tuple[int, int], ch: str) -> tuple[int, int]:
+        total, prev = acc
+        val = _ROMAN_MAP.get(ch, 0)
+        return (total - val, prev) if val < prev else (total + val, val)
+
+    return reduce(_step, reversed(value.lower()), (0, 0))[0]
 
 
 def _looks_like_footnote(text: str) -> bool:
@@ -21,6 +36,7 @@ def _looks_like_footnote(text: str) -> bool:
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+
 def _match_common_patterns(text_lower: str) -> bool:
     """Return True if text matches common header/footer patterns."""
     patterns = [
@@ -30,7 +46,9 @@ def _match_common_patterns(text_lower: str) -> bool:
         r"^chapter\s+\d+$",
         r"^\d+\s+chapter",
         r"^\w+\s*\|\s*\d+$",
+        rf"^\w+\s*\|\s*{ROMAN_RE}$",
         r"^\d+\s*\|\s*[\w\s:]+$",
+        rf"^{ROMAN_RE}$",
         r"^[0-9]{1,3}[.)]?\s+[A-Z]",
         r"^table\s+of\s+contents",
         r"^bibliography",
@@ -80,6 +98,30 @@ def _match_page_number_suffix(text: str, page_num: Optional[int]) -> bool:
             )
             return True
 
+    m = re.search(rf"(?:^|\s|\|)({ROMAN_RE})\s*$", text, re.IGNORECASE)
+    if m:
+        trailing = _roman_to_int(m.group(1))
+        if page_num <= 0 or abs(trailing - page_num) <= 1:
+            words = text.split()
+            if "|" in text or len(words) <= 8:
+                logger.debug(
+                    "_match_page_number_suffix trailing roman detected: %s",
+                    text[:30],
+                )
+                return True
+
+    m = re.search(rf"\|\s*({ROMAN_RE})(?![0-9ivxlcdm])", text, re.IGNORECASE)
+    if m:
+        trailing = _roman_to_int(m.group(1))
+        if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(
+            text
+        ) - m.end() <= 20:
+            logger.debug(
+                "_match_page_number_suffix roman pipe pattern detected: %s",
+                text[:30],
+            )
+            return True
+
     return False
 
 
@@ -118,12 +160,13 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
 def strip_page_artifact_suffix(text: str, page_num: Optional[int]) -> str:
     """Return the line with any trailing ``"| N"`` footer fragment removed."""
 
-    pattern = re.compile(r"\|\s*(\d{1,3})(?!\d)")
+    pattern = re.compile(rf"\|\s*(\d{{1,3}}|{ROMAN_RE})(?![0-9ivxlcdm])", re.IGNORECASE)
     match = pattern.search(text)
     if not match:
         return text
 
-    trailing = int(match.group(1))
+    page_str = match.group(1)
+    trailing = int(page_str) if page_str.isdigit() else _roman_to_int(page_str)
     page_num = _normalize_page_num(page_num)
     if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(
         text
@@ -139,10 +182,12 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
 
     patterns = [
         re.compile(
-            r"(?:^|\n)(?P<footer>[A-Z][^|\n]{0,60}?\|\s*(?P<page>\d{1,3})(?!\d))\n?"
+            rf"(?:^|\n)(?P<footer>[A-Z][^|\n]{{0,60}}?\|\s*(?P<page>\d{{1,3}}|{ROMAN_RE})(?![0-9ivxlcdm]))\n?",
+            re.IGNORECASE,
         ),
         re.compile(
-            r"(?:^|\n)(?P<footer>(?P<page>\d{1,3})\s*\|\s*[A-Z][^|\n]{0,60})\n?"
+            rf"(?:^|\n)(?P<footer>(?P<page>\d{{1,3}}|{ROMAN_RE})\s*\|\s*[A-Z][^|\n]{{0,60}})\n?",
+            re.IGNORECASE,
         ),
         re.compile(r"(?:^|\n)(?P<footer>\|\s*[A-Z][^|\n]{0,60})\n?"),
         re.compile(r"(?:^|\n)(?P<footer>[A-Z][^|\n]{0,60}\|)\n?"),
@@ -151,7 +196,7 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
     def repl(match: re.Match[str]) -> str:
         page_str = match.groupdict().get("page")
         if page_str:
-            trailing = int(page_str)
+            trailing = int(page_str) if page_str.isdigit() else _roman_to_int(page_str)
             page_num_checked = _normalize_page_num(page_num)
             if page_num_checked <= 0 or abs(trailing - page_num_checked) <= 1:
                 logger.info(

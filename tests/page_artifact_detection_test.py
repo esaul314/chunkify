@@ -94,6 +94,12 @@ class TestPageArtifactDetection(unittest.TestCase):
         )
         self.assertEqual(cleaned, expected)
 
+    def test_roman_numeral_footer(self):
+        line = "Preface | xix"
+        self.assertTrue(is_page_artifact_text(line, 19))
+        cleaned = remove_page_artifact_lines(line, 19)
+        self.assertEqual(cleaned, "")
+
 
 if __name__ == "__main__":
     unittest.main()
