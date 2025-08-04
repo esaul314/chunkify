@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Sequence, Set
+from typing import Callable, Iterable, List, Sequence, Set
 from functools import partial
 
 from haystack.dataclasses import Document
@@ -14,6 +14,11 @@ from .utils import format_chunks_with_metadata as utils_format_chunks_with_metad
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Type aliases enable dependency injection for testability
+Extractor = Callable[[str, str | None], List[dict]]
+Chunker = Callable[..., List[str]]
+Enricher = Callable[..., List[dict]]
 
 
 def parse_exclusions(exclude_pages: str | None) -> Set[int]:
@@ -240,6 +245,26 @@ def validate_chunks(
     return final_chunks
 
 
+def setup_enrichment(
+    generate_metadata: bool, ai_enrichment: bool
+) -> tuple[bool, Callable | None]:
+    """Initialize enrichment components based on configuration."""
+    perform_ai_enrichment = generate_metadata and ai_enrichment
+    if not perform_ai_enrichment:
+        return False, None
+    try:
+        completion_fn = init_llm()
+        tag_configs = _load_tag_configs()
+        return True, partial(
+            classify_chunk_utterance,
+            tag_configs=tag_configs,
+            completion_fn=completion_fn,
+        )
+    except ValueError as exc:  # pragma: no cover - defensive
+        logger.warning("AI Enrichment disabled: %s", exc)
+        return False, None
+
+
 def process_document(
     filepath: str,
     chunk_size: int,
@@ -250,8 +275,16 @@ def process_document(
     exclude_pages: str | None = None,
     min_chunk_size: int | None = None,
     enable_dialogue_detection: bool = True,
+    extractor: Extractor = extract_blocks,
+    chunker: Chunker = chunk_text,
+    enricher: Enricher = utils_format_chunks_with_metadata,
 ) -> List[dict]:
-    """Process a document through extraction, chunking and enrichment."""
+    """Process a document through extraction, chunking and enrichment.
+
+    Parameters allow injection of custom callables for each stage, enabling
+    alternate pipelines or simplified testing while defaulting to the standard
+    implementations.
+    """
 
     logger.debug(
         "process_document called with filepath=%s, chunk_size=%d, overlap=%d",
@@ -269,25 +302,14 @@ def process_document(
     if min_chunk_size is None:
         min_chunk_size = max(8, chunk_size // 10)
 
-    perform_ai_enrichment = generate_metadata and ai_enrichment
-    enrichment_fn = None
-    if perform_ai_enrichment:
-        try:
-            completion_fn = init_llm()
-            tag_configs = _load_tag_configs()
-            enrichment_fn = partial(
-                classify_chunk_utterance,
-                tag_configs=tag_configs,
-                completion_fn=completion_fn,
-            )
-        except ValueError as exc:
-            logger.warning("AI Enrichment disabled: %s", exc)
-            perform_ai_enrichment = False
+    perform_ai_enrichment, enrichment_fn = setup_enrichment(
+        generate_metadata, ai_enrichment
+    )
 
     excluded_pages = parse_exclusions(exclude_pages)
-    blocks = extract_blocks(filepath, exclude_pages)
+    blocks = extractor(filepath, exclude_pages)
     filtered_blocks = filter_blocks(blocks, excluded_pages)
-    haystack_chunks = chunk_text(
+    haystack_chunks = chunker(
         filtered_blocks,
         chunk_size,
         overlap,
@@ -298,7 +320,7 @@ def process_document(
         Document(content=text, id=f"chunk_{i}")
         for i, text in enumerate(haystack_chunks)
     ]
-    final_chunks = utils_format_chunks_with_metadata(
+    final_chunks = enricher(
         haystack_documents,
         filtered_blocks,
         generate_metadata=generate_metadata,

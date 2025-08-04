@@ -11,6 +11,7 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
+- `process_document_override_test.py`: Callable override injection
 - `run_all_tests.sh`: Orchestrates full suite
 - Duplicate detection thresholds (via `detect_duplicates.py`).
 
