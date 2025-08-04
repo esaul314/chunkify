@@ -4,6 +4,14 @@ from typing import Callable
 from itertools import accumulate
 from haystack.dataclasses import Document
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class CharSpan:
+    start: int
+    end: int
+    original_index: int
 
 
 def _compute_readability(text: str) -> dict:
@@ -169,11 +177,11 @@ def format_chunks_with_metadata(
     )
 
     # Debug: Check what pages are in the original blocks
-    original_pages = set()
-    for block in original_blocks:
-        page = block.get("source", {}).get("page")
-        if page:
-            original_pages.add(page)
+    original_pages = {
+        block.get("source", {}).get("page")
+        for block in original_blocks
+        if block.get("source", {}).get("page")
+    }
     print(
         f"DEBUG: Original blocks contain pages: {sorted(original_pages)}",
         file=sys.stderr,
@@ -201,7 +209,7 @@ def format_chunks_with_metadata(
             )
             return {"text": final_text}
 
-        source_block = _locate_source_block(chunk, char_map, original_blocks)
+        source_block = _find_source_block(chunk, char_map, original_blocks)
         if not source_block:
             print(
                 f"DEBUG: process_chunk() EXIT - chunk {chunk_index} - NO SOURCE BLOCK FOUND",
@@ -240,14 +248,12 @@ def format_chunks_with_metadata(
 
 
 def _build_char_map(blocks: list[dict]) -> dict:
-    """
-    Builds a character position mapping for locating chunks in original blocks.
-    """
+    """Build a character position mapping for locating chunks in original blocks."""
     import sys
 
     if not blocks:
-        print(f"DEBUG: _build_char_map called with empty blocks list", file=sys.stderr)
-        return {"char_positions": []}
+        print("DEBUG: _build_char_map called with empty blocks list", file=sys.stderr)
+        return {"char_positions": ()}
 
     print(f"DEBUG: Building character map for {len(blocks)} blocks", file=sys.stderr)
 
@@ -261,8 +267,8 @@ def _build_char_map(blocks: list[dict]) -> dict:
         file=sys.stderr,
     )
 
-    lengths = [len(block["text"]) + 2 for block in blocks]
-    starts = list(accumulate(lengths[:-1], initial=0))
+    lengths = (len(block["text"]) + 2 for block in blocks[:-1])
+    starts = list(accumulate(lengths, initial=0))
 
     for i, (block, start) in enumerate(zip(blocks, starts)):
         text_len = len(block["text"])
@@ -272,55 +278,36 @@ def _build_char_map(blocks: list[dict]) -> dict:
             file=sys.stderr,
         )
 
-    char_map = [
-        {
-            "start": start,
-            "end": start + len(block["text"]),
-            "original_index": i,
-        }
+    char_positions = tuple(
+        CharSpan(start, start + len(block["text"]), i)
         for i, (block, start) in enumerate(zip(blocks, starts))
-    ]
+    )
 
-    print(f"DEBUG: Character map built with {len(char_map)} entries", file=sys.stderr)
-    return {"char_positions": char_map}
+    print(
+        f"DEBUG: Character map built with {len(char_positions)} entries",
+        file=sys.stderr,
+    )
+    return {"char_positions": char_positions}
 
 
-def _locate_source_block(
+def _find_source_block(
     chunk: Document, _char_map: dict, original_blocks: list[dict]
 ) -> dict | None:
-    """
-    Finds the original source block for a chunk using robust text matching.
-    Handles cases where chunk text spans multiple source blocks, starts with headers,
-    or has special formatting. Uses fallback logic to ensure all chunks are mapped.
-    Ensures the returned block always has a valid 'source' dictionary with filename, page, and location.
-    """
+    """Find the original source block for a chunk using multiple heuristics."""
     import sys
 
     def ensure_source(block):
-        """Ensure block has a valid source dictionary with filename, page, and location."""
         if "source" not in block or not isinstance(block["source"], dict):
             block["source"] = {}
-        # Set filename
-        if "filename" not in block["source"]:
-            block["source"]["filename"] = "unknown"
-        # Set page (None if missing or invalid)
-        if "page" not in block["source"] or not isinstance(
-            block["source"]["page"], int
-        ):
+        block["source"].setdefault("filename", "unknown")
+        if not isinstance(block["source"].get("page"), int):
             block["source"]["page"] = None
-        # Set location (None for PDFs)
-        if "location" not in block["source"]:
-            # Try to infer from filename extension
-            filename = block["source"].get("filename", "")
-            if filename.lower().endswith(".epub"):
-                block["source"]["location"] = block["source"].get("location", None)
-            else:
-                block["source"]["location"] = None
+        block["source"].setdefault("location", None)
         return block
 
-    if not chunk or not chunk.content or not original_blocks:
+    if not (chunk and chunk.content and original_blocks):
         print(
-            f"DEBUG: _locate_source_block early return - chunk: {bool(chunk)}, content: {bool(chunk.content if chunk else False)}, blocks: {len(original_blocks) if original_blocks else 0}",
+            f"DEBUG: _find_source_block early return - chunk: {bool(chunk)}, content: {bool(chunk.content if chunk else False)}, blocks: {len(original_blocks) if original_blocks else 0}",
             file=sys.stderr,
         )
         return None
@@ -332,88 +319,64 @@ def _locate_source_block(
         file=sys.stderr,
     )
 
-    # 1. Try exact substring match (as before)
-    for i, block in enumerate(original_blocks):
-        block_text = block.get("text", "")
-        if chunk_start and chunk_start in block_text:
-            block = ensure_source(block)
-            print(
-                f"DEBUG: Found matching source block {i} on page {block['source'].get('page', None)} (substring match)",
-                file=sys.stderr,
-            )
-            return block
+    def substring_match(block: dict) -> bool:
+        return chunk_start and chunk_start in block.get("text", "")
 
-    # 2. Try matching the start of the chunk to the start of any block (ignoring whitespace/case)
-    for i, block in enumerate(original_blocks):
+    def start_match(block: dict) -> bool:
         block_text = block.get("text", "").strip()
         if not block_text:
-            continue
+            return False
         block_start = block_text[: max(20, len(chunk_start))].replace("\n", " ").strip()
-        if chunk_start.lower().startswith(
-            block_start.lower()
-        ) or block_start.lower().startswith(chunk_start.lower()):
-            block = ensure_source(block)
+        lower_chunk = chunk_start.lower()
+        lower_block = block_start.lower()
+        return lower_chunk.startswith(lower_block) or lower_block.startswith(
+            lower_chunk
+        )
+
+    def fuzzy_match(block: dict) -> bool:
+        import re
+
+        def normalize(s: str) -> str:
+            return re.sub(r"[\W_]+", "", s).lower()
+
+        block_start = block.get("text", "")[: max(20, len(chunk_start))]
+        return normalize(block_start).startswith(normalize(chunk_start)[:15])
+
+    def overlap_match(block: dict) -> bool:
+        block_text = block.get("text", "")
+        return any(chunk_start[:n] in block_text for n in range(30, 10, -5))
+
+    def header_match(block: dict) -> bool:
+        return (
+            block is original_blocks[0]
+            and chunk_start
+            and (
+                chunk_start.isupper()
+                or chunk_start.startswith("CHAPTER")
+                or chunk_start.startswith("SECTION")
+            )
+        )
+
+    predicates = [
+        ("substring match", substring_match),
+        ("start match", start_match),
+        ("fuzzy match", fuzzy_match),
+        ("overlap match", overlap_match),
+        ("header/special formatting", header_match),
+    ]
+
+    for label, predicate in predicates:
+        match = next(
+            (ensure_source(b) for b in original_blocks if predicate(b)),
+            None,
+        )
+        if match:
             print(
-                f"DEBUG: Found matching source block {i} on page {block['source'].get('page', None)} (start match)",
+                f"DEBUG: Found matching source block on page {match['source'].get('page', None)} ({label})",
                 file=sys.stderr,
             )
-            return block
+            return match
 
-    # 3. Try fuzzy matching: ignore whitespace, punctuation, and case
-    import re
-
-    def normalize(s):
-        return re.sub(r"[\W_]+", "", s).lower()
-
-    norm_chunk_start = normalize(chunk_start)
-    for i, block in enumerate(original_blocks):
-        block_text = block.get("text", "")
-        block_start = block_text[: max(20, len(chunk_start))]
-        if norm_chunk_start and normalize(block_start).startswith(
-            norm_chunk_start[:15]
-        ):
-            block = ensure_source(block)
-            print(
-                f"DEBUG: Found matching source block {i} on page {block['source'].get('page', None)} (fuzzy match)",
-                file=sys.stderr,
-            )
-            return block
-
-    # 4. Try overlap: find the block with the largest text overlap with the chunk start
-    best_i = None
-    best_overlap = 0
-    for i, block in enumerate(original_blocks):
-        block_text = block.get("text", "")
-        overlap = 0
-        for n in range(30, 10, -5):
-            if block_text and chunk_start[:n] in block_text:
-                overlap = n
-                break
-        if overlap > best_overlap:
-            best_overlap = overlap
-            best_i = i
-    if best_i is not None and best_overlap > 0:
-        block = ensure_source(original_blocks[best_i])
-        print(
-            f"DEBUG: Found best-overlap source block {best_i} on page {block['source'].get('page', None)} (overlap {best_overlap})",
-            file=sys.stderr,
-        )
-        return block
-
-    # 5. As a last resort, map to the first block if chunk starts with a known header or special formatting
-    if chunk_start and (
-        chunk_start.isupper()
-        or chunk_start.startswith("CHAPTER")
-        or chunk_start.startswith("SECTION")
-    ):
-        block = ensure_source(original_blocks[0])
-        print(
-            f"DEBUG: Fallback: mapping to first block due to header/special formatting",
-            file=sys.stderr,
-        )
-        return block
-
-    # 6. If all else fails, map to the block with the most similar start (Levenshtein distance, if available)
     try:
         import difflib
 
@@ -430,7 +393,6 @@ def _locate_source_block(
     except Exception as e:
         print(f"DEBUG: difflib fallback failed: {e}", file=sys.stderr)
 
-    # 7. If still no match, log a warning and return the first block as a last resort
     block = ensure_source(original_blocks[0])
     print(
         f"WARNING: No matching source block found for chunk starting with: '{chunk_start}...'. Mapping to first block.",
