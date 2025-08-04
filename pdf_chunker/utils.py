@@ -1,10 +1,11 @@
 import logging
 import re
-import textstat
+import textstat  # type: ignore[import]
 from typing import Callable
 from itertools import accumulate
 from haystack.dataclasses import Document
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from dataclasses import dataclass
 
 
@@ -150,6 +151,56 @@ def _build_metadata(
     return {k: v for k, v in metadata.items() if k != "location" or v is None or v}
 
 
+def process_chunk(
+    chunk: Document,
+    chunk_index: int,
+    *,
+    generate_metadata: bool,
+    perform_ai_enrichment: bool,
+    enrichment_fn: Callable[[str], dict] | None,
+    char_map: dict,
+    original_blocks: list[dict],
+) -> dict | None:
+    """Process a single chunk and return enriched metadata if requested."""
+    logger.debug("process_chunk() ENTRY - chunk %s", chunk_index)
+
+    final_text = _truncate_chunk((chunk.content or "").strip())
+    if not final_text:
+        logger.debug("process_chunk() EXIT - chunk %s - EMPTY CONTENT", chunk_index)
+        return None
+
+    if not generate_metadata:
+        logger.debug(
+            "process_chunk() EXIT - chunk %s - NO METADATA MODE",
+            chunk_index,
+        )
+        return {"text": final_text}
+
+    source_block = _find_source_block(chunk, char_map, original_blocks)
+    if not source_block:
+        logger.debug(
+            "process_chunk() EXIT - chunk %s - NO SOURCE BLOCK FOUND",
+            chunk_index,
+        )
+        return None
+
+    utterance_type = _enrich_chunk(final_text, perform_ai_enrichment, enrichment_fn)
+    metadata = _build_metadata(
+        final_text,
+        source_block,
+        chunk_index,
+        utterance_type,
+    )
+
+    result = {"text": final_text, "metadata": metadata}
+    logger.debug(
+        "process_chunk() EXIT - chunk %s SUCCESS - result has %s chars",
+        chunk_index,
+        len(result.get("text", "")),
+    )
+    return result
+
+
 def format_chunks_with_metadata(
     haystack_chunks: list[Document],
     original_blocks: list[dict],
@@ -157,7 +208,7 @@ def format_chunks_with_metadata(
     perform_ai_enrichment: bool = False,
     enrichment_fn: Callable[[str], dict] | None = None,
     max_workers: int = 10,
-    min_chunk_size: int = None,
+    min_chunk_size: int | None = None,
     enable_dialogue_detection: bool = True,
 ) -> list[dict]:
     """
@@ -185,58 +236,36 @@ def format_chunks_with_metadata(
 
     char_map = _build_char_map(original_blocks)
 
-    def process_chunk(chunk, chunk_index):
-        logger.debug("process_chunk() ENTRY - chunk %s", chunk_index)
-
-        final_text = _truncate_chunk(chunk.content.strip())
-        if not final_text:
-            logger.debug("process_chunk() EXIT - chunk %s - EMPTY CONTENT", chunk_index)
-            return None
-
-        if not generate_metadata:
-            logger.debug(
-                "process_chunk() EXIT - chunk %s - NO METADATA MODE",
-                chunk_index,
-            )
-            return {"text": final_text}
-
-        source_block = _find_source_block(chunk, char_map, original_blocks)
-        if not source_block:
-            logger.debug(
-                "process_chunk() EXIT - chunk %s - NO SOURCE BLOCK FOUND",
-                chunk_index,
-            )
-            return None
-
-        utterance_type = _enrich_chunk(final_text, perform_ai_enrichment, enrichment_fn)
-        metadata = _build_metadata(
-            final_text,
-            source_block,
-            chunk_index,
-            utterance_type,
-        )
-
-        result = {"text": final_text, "metadata": metadata}
-        logger.debug(
-            "process_chunk() EXIT - chunk %s SUCCESS - result has %s chars",
-            chunk_index,
-            len(result.get("text", "")),
-        )
-        return result
+    processor = partial(
+        process_chunk,
+        generate_metadata=generate_metadata,
+        perform_ai_enrichment=perform_ai_enrichment,
+        enrichment_fn=enrichment_fn,
+        char_map=char_map,
+        original_blocks=original_blocks,
+    )
 
     if perform_ai_enrichment:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(process_chunk, chunk, i)
-                for i, chunk in enumerate(haystack_chunks)
+            processed_chunks = [
+                result
+                for result in executor.map(
+                    lambda p: processor(chunk=p[1], chunk_index=p[0]),
+                    enumerate(haystack_chunks),
+                )
+                if result
             ]
-            processed_chunks = (future.result() for future in as_completed(futures))
     else:
-        processed_chunks = (
-            process_chunk(chunk, i) for i, chunk in enumerate(haystack_chunks)
-        )
+        processed_chunks = [
+            result
+            for result in map(
+                lambda p: processor(chunk=p[1], chunk_index=p[0]),
+                enumerate(haystack_chunks),
+            )
+            if result
+        ]
 
-    return list(filter(None, processed_chunks))
+    return processed_chunks
 
 
 def _build_char_map(blocks: list[dict]) -> dict:
@@ -308,7 +337,7 @@ def _find_source_block(
     )
 
     def substring_match(block: dict) -> bool:
-        return chunk_start and chunk_start in block.get("text", "")
+        return bool(chunk_start) and chunk_start in block.get("text", "")
 
     def start_match(block: dict) -> bool:
         block_text = block.get("text", "").strip()
@@ -337,7 +366,7 @@ def _find_source_block(
     def header_match(block: dict) -> bool:
         return (
             block is original_blocks[0]
-            and chunk_start
+            and bool(chunk_start)
             and (
                 chunk_start.isupper()
                 or chunk_start.startswith("CHAPTER")
