@@ -35,6 +35,14 @@ BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 MIN_WORDS_FOR_CONTINUATION = 6
 
 
+def _word_count(text: str) -> int:
+    return sum(1 for _ in text.split())
+
+
+def _has_sufficient_context(text: str) -> bool:
+    return _word_count(text) >= MIN_WORDS_FOR_CONTINUATION
+
+
 def _is_bullet_continuation(curr: str, nxt: str) -> bool:
     return curr.rstrip().endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
 
@@ -91,17 +99,17 @@ def _is_cross_page_continuation(
 ) -> bool:
     """Return True when text likely continues across a page break."""
 
-    return all(
-        (
-            curr_text,
-            next_text,
-            curr_page != next_page,
-            not curr_text.endswith((".", "!", "?")),
-            not _looks_like_quote_boundary(curr_text, next_text),
-            not _detect_heading_fallback(next_text)
-            or len(curr_text.split()) > MIN_WORDS_FOR_CONTINUATION,
-        )
-    )
+    if not all((curr_text, next_text)):
+        return False
+    if curr_page == next_page:
+        return False
+    if curr_text.endswith((".", "!", "?")):
+        return False
+    if _looks_like_quote_boundary(curr_text, next_text):
+        return False
+    if _detect_heading_fallback(next_text) and not _has_sufficient_context(curr_text):
+        return False
+    return True
 
 
 def _should_merge_blocks(
