@@ -27,7 +27,7 @@ from .pymupdf4llm_integration import (
     PyMuPDF4LLMExtractionError,
 )
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 
 BULLET_CHARS = "*•◦▪‣·●◉○‧"
@@ -95,13 +95,19 @@ def _is_indented_continuation(curr: dict, nxt: dict) -> bool:
 
 
 def _is_cross_page_continuation(
-    curr_text: str, next_text: str, curr_page: int, next_page: int
+    curr_text: str,
+    next_text: str,
+    curr_page: Optional[int],
+    next_page: Optional[int],
 ) -> bool:
     """Return True when text likely continues across a page break."""
 
     if not all((curr_text, next_text)):
         return False
-    if curr_page == next_page:
+    if (
+        all(page is not None for page in (curr_page, next_page))
+        and curr_page == next_page
+    ):
         return False
     if curr_text.endswith((".", "!", "?")):
         return False
@@ -181,7 +187,8 @@ def _should_merge_blocks(
         return True, "hyphenated_continuation"
 
     elif (
-        curr_page == next_page
+        all(page is not None for page in (curr_page, next_page))
+        and curr_page == next_page
         and not curr_text.endswith((".", "!", "?", ":", ";"))
         and next_text
         and next_text[0].islower()

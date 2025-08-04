@@ -36,3 +36,13 @@ def test_cross_page_sentence_with_min_word_context():
     merged = merge_continuation_blocks(blocks)
     assert len(merged) == 1
     assert "Gini coefficient" in merged[0]["text"]
+
+
+def test_cross_page_sentence_without_page_numbers():
+    blocks = [
+        {"text": "Economic inequality is usually measured by the"},
+        {"text": "Gini coefficient carries on."},
+    ]
+    merged = merge_continuation_blocks(blocks)
+    assert len(merged) == 1
+    assert "Gini coefficient" in merged[0]["text"]
