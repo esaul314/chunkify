@@ -63,6 +63,10 @@ DIALOGUE_VERBS = {
     "concluded",
 }
 
+# Patterns for detecting numbered list boundaries
+NUMBERED_ITEM_START = re.compile(r"^\s*(\d+)[.)]\s+")
+NUMBER_AT_END = re.compile(r"(\d+)[.)]?\s*$")
+
 
 def _is_dialogue_attribution(words: List[str]) -> bool:
     """Return True if words represent a short dialogue attribution."""
@@ -174,6 +178,91 @@ def _second_pass_merge(
 
     rest, counter = _second_pass_merge(chunks, min_chunk_size, idx + 1)
     return [current] + rest, counter
+
+
+def _starting_number(text: str) -> Optional[int]:
+    """Return leading list number if present."""
+    match = NUMBERED_ITEM_START.match(text)
+    return int(match.group(1)) if match else None
+
+
+def _ending_number(text: str) -> Optional[int]:
+    """Return trailing list number if present."""
+    match = NUMBER_AT_END.search(text)
+    return int(match.group(1)) if match else None
+
+
+def _last_number(text: str) -> Optional[int]:
+    """Return the highest numbered list item in text."""
+    matches = list(re.finditer(r"(\d+)[.)]", text))
+    return int(matches[-1].group(1)) if matches else None
+
+
+def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
+    """Merge chunks that split numbered lists across boundaries."""
+    merged: List[str] = []
+    i = 0
+    while i < len(chunks):
+        current = chunks[i].strip()
+        end_num = _ending_number(current)
+        if end_num is not None and i + 1 < len(chunks):
+            next_chunk = chunks[i + 1].strip()
+            combined = f"{current} {next_chunk}".strip()
+            i += 2
+            last = _last_number(combined) or end_num
+            expected = last + 1
+            while i < len(chunks):
+                candidate = chunks[i].strip()
+                start = _starting_number(candidate)
+                if start == expected:
+                    combined = f"{combined} {candidate}".strip()
+                    expected += 1
+                    i += 1
+                else:
+                    break
+            merged.append(combined)
+            continue
+
+        last_num = _last_number(current)
+        if last_num is not None and i + 1 < len(chunks):
+            next_chunk = chunks[i + 1].strip()
+            start = _starting_number(next_chunk)
+            if start == last_num + 1:
+                combined = f"{current} {next_chunk}".strip()
+                i += 2
+                expected = start + 1
+                while i < len(chunks):
+                    candidate = chunks[i].strip()
+                    start = _starting_number(candidate)
+                    if start == expected:
+                        combined = f"{combined} {candidate}".strip()
+                        expected += 1
+                        i += 1
+                    else:
+                        break
+                merged.append(combined)
+                continue
+
+        start_num = _starting_number(current)
+        if start_num is not None:
+            combined = current
+            i += 1
+            expected = start_num + 1
+            while i < len(chunks):
+                candidate = chunks[i].strip()
+                start = _starting_number(candidate)
+                if start == expected:
+                    combined = f"{combined} {candidate}".strip()
+                    expected += 1
+                    i += 1
+                else:
+                    break
+            merged.append(combined)
+            continue
+
+        merged.append(current)
+        i += 1
+    return merged
 
 
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
@@ -729,16 +818,19 @@ def semantic_chunker(
         _validate_chunk_integrity(merged_chunks, text)
     )
 
+    # Merge numbered list items that were split across chunks
+    numbered_chunks = _merge_numbered_list_chunks(validated_chunks)
+
     # Final statistics
     final_short_count = sum(
-        1 for chunk in validated_chunks if len(chunk.split()) <= short_threshold
+        1 for chunk in numbered_chunks if len(chunk.split()) <= short_threshold
     )
     final_very_short_count = sum(
-        1 for chunk in validated_chunks if len(chunk.split()) <= very_short_threshold
+        1 for chunk in numbered_chunks if len(chunk.split()) <= very_short_threshold
     )
 
     logger.info("Final chunking results:")
-    logger.info(f"  Total chunks: {len(validated_chunks)}")
+    logger.info(f"  Total chunks: {len(numbered_chunks)}")
     logger.info(
         f"  Short chunks (≤{short_threshold} words): {final_short_count} (reduced from {initial_short_count})"
     )
@@ -746,8 +838,8 @@ def semantic_chunker(
         f"  Very short chunks (≤{very_short_threshold} words): {final_very_short_count} (reduced from {initial_very_short_count})"
     )
 
-    if validated_chunks:
-        word_counts = [len(chunk.split()) for chunk in validated_chunks]
+    if numbered_chunks:
+        word_counts = [len(chunk.split()) for chunk in numbered_chunks]
         avg_words = sum(word_counts) / len(word_counts)
         min_words = min(word_counts)
         max_words = max(word_counts)
@@ -755,7 +847,7 @@ def semantic_chunker(
             f"  Chunk size stats: avg={avg_words:.1f} words, min={min_words} words, max={max_words} words"
         )
 
-    return validated_chunks
+    return numbered_chunks
 
 
 def _check_quote_balance(text: str) -> int:
