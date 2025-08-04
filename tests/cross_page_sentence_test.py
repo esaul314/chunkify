@@ -46,3 +46,23 @@ def test_cross_page_sentence_without_page_numbers():
     merged = merge_continuation_blocks(blocks)
     assert len(merged) == 1
     assert "Gini coefficient" in merged[0]["text"]
+
+
+def test_cross_page_does_not_merge_entire_document():
+    blocks = [
+        {
+            "text": "Economic inequality is usually measured by the",
+            "source": {"page": 1},
+        },
+        {
+            "text": "Gini coefficient completes the sentence.",
+            "source": {"page": 2},
+        },
+        {
+            "text": "New paragraph begins here with its own sentence.",
+            "source": {"page": 3},
+        },
+    ]
+    merged = merge_continuation_blocks(blocks)
+    assert len(merged) == 2
+    assert merged[1]["text"].startswith("New paragraph")

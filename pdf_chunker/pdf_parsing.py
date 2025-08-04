@@ -34,6 +34,32 @@ BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 MIN_WORDS_FOR_CONTINUATION = 6
 
+COMMON_SENTENCE_STARTERS = {
+    "The",
+    "This",
+    "That",
+    "A",
+    "An",
+    "In",
+    "On",
+    "At",
+    "As",
+    "By",
+    "For",
+    "From",
+    "If",
+    "When",
+    "While",
+    "After",
+    "Before",
+    "It",
+    "He",
+    "She",
+    "They",
+    "We",
+    "I",
+}
+
 
 def _word_count(text: str) -> int:
     return sum(1 for _ in text.split())
@@ -41,6 +67,14 @@ def _word_count(text: str) -> int:
 
 def _has_sufficient_context(text: str) -> bool:
     return _word_count(text) >= MIN_WORDS_FOR_CONTINUATION
+
+
+def _fragment_tail(text: str) -> str:
+    return re.split(r"[.!?]\s*", text)[-1]
+
+
+def _is_common_sentence_starter(word: str) -> bool:
+    return word in COMMON_SENTENCE_STARTERS
 
 
 def _is_bullet_continuation(curr: str, nxt: str) -> bool:
@@ -114,6 +148,14 @@ def _is_cross_page_continuation(
     if _looks_like_quote_boundary(curr_text, next_text):
         return False
     if _detect_heading_fallback(next_text) and not _has_sufficient_context(curr_text):
+        return False
+    tail_words = _word_count(_fragment_tail(curr_text))
+    if tail_words > 12:
+        return False
+    first_word = next_text.split()[0]
+    if first_word[0].islower():
+        return True
+    if _is_common_sentence_starter(first_word):
         return False
     return True
 
