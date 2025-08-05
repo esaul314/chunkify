@@ -52,8 +52,8 @@ class TestNewlineCleanup(unittest.TestCase):
     def test_preserve_heading_and_attribution(self):
         os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "0"
         text = (
-            "previous sections or pages...\nHeading At The Top of The Page\n\n"
-            "Quote by a famous author\n—Author Name, Book Name\n\n"
+            "previous sections or pages... Heading At The Top of The Page\n"
+            "    Quote by a famous author\n        —Author Name, Book Name\n\n"
             "The paragraph begins here..."
         )
         expected = (

@@ -3,7 +3,8 @@ import os
 import logging
 import json
 import ftfy
-from typing import List, Callable, Tuple, Iterable
+from functools import reduce
+from typing import Callable, Iterable, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,27 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+def _split_inline_heading(line: str) -> List[str]:
+    words = line.split()
+    for offset in range(len(words)):
+        idx = len(words) - offset - 1
+        candidate_words = words[idx:]
+        if len(candidate_words) < 2:
+            continue
+        candidate = " ".join(candidate_words)
+        prefix = " ".join(words[:idx]).strip()
+        if (
+            prefix
+            and re.search(r"(?:[.!?…]|\.\.\.)$", prefix)
+            and _is_probable_heading(candidate)
+        ):
+            return [prefix, candidate]
+    return [line]
+
+
 def ensure_heading_separation(text: str) -> str:
-    """Insert a paragraph break before lines that look like headings."""
-    lines = text.split("\n")
+    """Insert paragraph breaks around probable headings even when embedded."""
+    lines = [seg for line in text.split("\n") for seg in _split_inline_heading(line)]
 
     def iter_lines() -> Iterable[str]:
         if not lines:
@@ -86,9 +105,18 @@ def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets, enumerated items, or attributions."""
     placeholder = "[[LIST_BREAK]]"
     pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}{ATTRIBUTION_CHARS_ESC}]|\d+[.)]))"
-    return (
+    text = (
         re.sub(pattern, placeholder, text).replace("\n", " ").replace(placeholder, "\n")
     )
+    return re.sub(r"\n\s+", "\n", text)
+
+
+def _apply_substitutions(text: str, subs: Iterable[Tuple[str, str]]) -> str:
+    return reduce(lambda acc, s: re.sub(s[0], s[1], acc), subs, text)
+
+
+def _replace_placeholders(text: str, reps: Iterable[Tuple[str, str]]) -> str:
+    return reduce(lambda acc, r: acc.replace(*r), reps, text)
 
 
 def collapse_single_newlines(text: str) -> str:
@@ -96,17 +124,30 @@ def collapse_single_newlines(text: str) -> str:
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
     list_break = "[[LIST_BREAK]]"
+    indent_break = "[[INDENT_BREAK]]"
     para_break = "[[PARAGRAPH_BREAK]]"
-    list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}{ATTRIBUTION_CHARS_ESC}]|\d+[.)]))"
 
-    # Normalize colon bullet starts and protect paragraph and list breaks
-    text = re.sub(rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", text)
-    text = re.sub(list_re, list_break, text)
-    text = re.sub(r"\n{2,}", para_break, text)
+    substitutions = [
+        (rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n"),
+        (
+            rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}{ATTRIBUTION_CHARS_ESC}]|\d+[.)]))",
+            list_break,
+        ),
+        (r"\n(?=\s{4,}\S)", indent_break),
+        (r"\n{2,}", para_break),
+    ]
+
+    text = _apply_substitutions(text, substitutions)
     text = text.replace("\n", " ")
 
-    # Restore preserved breaks
-    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
+    text = _replace_placeholders(
+        text,
+        (
+            (para_break, "\n\n"),
+            (list_break, "\n"),
+            (indent_break, "\n\n"),
+        ),
+    )
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
     return text
