@@ -10,6 +10,7 @@ import json
 import sys
 from collections import Counter
 
+
 def diagnose(path):
     counts = Counter()
     with open(path, encoding="utf-8") as f:
@@ -28,9 +29,9 @@ def diagnose(path):
     for ch, cnt in counts.most_common():
         print(f"U+{ord(ch):04X}  {ch!r}    {cnt}")
 
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python diagnose_hyphens.py yourfile.jsonl")
         sys.exit(1)
     diagnose(sys.argv[1])
-

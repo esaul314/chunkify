@@ -12,30 +12,33 @@ import sys
 import zipfile
 from pathlib import Path
 
+
 def create_test_epub():
     """Create a test EPUB file manually"""
     # Create test_data directory if it doesn't exist
     test_data_dir = Path(__file__).parent.parent / "test_data"
     test_data_dir.mkdir(exist_ok=True)
-    
+
     epub_path = test_data_dir / "sample_test.epub"
-    
+
     # EPUB is essentially a ZIP file with specific structure
-    with zipfile.ZipFile(epub_path, 'w', zipfile.ZIP_DEFLATED) as epub:
+    with zipfile.ZipFile(epub_path, "w", zipfile.ZIP_DEFLATED) as epub:
         # mimetype file (must be first and uncompressed)
-        epub.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
-        
+        epub.writestr(
+            "mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED
+        )
+
         # META-INF/container.xml
-        container_xml = '''<?xml version="1.0" encoding="UTF-8"?>
+        container_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
     <rootfiles>
         <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
     </rootfiles>
-</container>'''
-        epub.writestr('META-INF/container.xml', container_xml)
-        
+</container>"""
+        epub.writestr("META-INF/container.xml", container_xml)
+
         # OEBPS/content.opf (package file)
-        content_opf = '''<?xml version="1.0" encoding="UTF-8"?>
+        content_opf = """<?xml version="1.0" encoding="UTF-8"?>
 <package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
     <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
         <dc:identifier id="uid">test-epub-001</dc:identifier>
@@ -56,11 +59,11 @@ def create_test_epub():
         <itemref idref="chapter2"/>
         <itemref idref="chapter3"/>
     </spine>
-</package>'''
-        epub.writestr('OEBPS/content.opf', content_opf)
-        
+</package>"""
+        epub.writestr("OEBPS/content.opf", content_opf)
+
         # OEBPS/nav.xhtml (navigation document)
-        nav_xhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+        nav_xhtml = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head>
@@ -76,11 +79,11 @@ def create_test_epub():
         </ol>
     </nav>
 </body>
-</html>'''
-        epub.writestr('OEBPS/nav.xhtml', nav_xhtml)
-        
+</html>"""
+        epub.writestr("OEBPS/nav.xhtml", nav_xhtml)
+
         # OEBPS/chapter1.xhtml
-        chapter1_xhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+        chapter1_xhtml = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -100,11 +103,11 @@ def create_test_epub():
     
     <p>This content should be processed by the EPUB chunking system to extract meaningful text blocks and validate the extraction pipeline.</p>
 </body>
-</html>'''
-        epub.writestr('OEBPS/chapter1.xhtml', chapter1_xhtml)
-        
+</html>"""
+        epub.writestr("OEBPS/chapter1.xhtml", chapter1_xhtml)
+
         # OEBPS/chapter2.xhtml
-        chapter2_xhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+        chapter2_xhtml = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -129,11 +132,11 @@ def create_test_epub():
     
     <p>Another paragraph with some technical terms like <em>PyMuPDF4LLM</em> and <strong>text processing algorithms</strong> to test specialized handling.</p>
 </body>
-</html>'''
-        epub.writestr('OEBPS/chapter2.xhtml', chapter2_xhtml)
-        
+</html>"""
+        epub.writestr("OEBPS/chapter2.xhtml", chapter2_xhtml)
+
         # OEBPS/chapter3.xhtml
-        chapter3_xhtml = '''<?xml version="1.0" encoding="UTF-8"?>
+        chapter3_xhtml = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -160,11 +163,12 @@ def create_test_epub():
     
     <p>End of test document.</p>
 </body>
-</html>'''
-        epub.writestr('OEBPS/chapter3.xhtml', chapter3_xhtml)
-    
+</html>"""
+        epub.writestr("OEBPS/chapter3.xhtml", chapter3_xhtml)
+
     print(f"Created test EPUB: {epub_path}")
     return str(epub_path)
+
 
 if __name__ == "__main__":
     create_test_epub()
