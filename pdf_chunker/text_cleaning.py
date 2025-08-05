@@ -67,14 +67,29 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
-def _split_inline_heading(line: str) -> List[str]:
-    words = line.split()
+def _forward_heading_split(words: List[str]) -> List[str] | None:
+    """Split lines where a heading sits between sentence text and body."""
+    for j in range(len(words)):
+        prefix = " ".join(words[:j]).rstrip()
+        if not prefix or not re.search(r"(?:[.!?…]|\.\.\.)$", prefix):
+            continue
+        for k in range(len(words), j, -1):
+            candidate = " ".join(words[j:k]).strip()
+            rest = " ".join(words[k:]).lstrip()
+            if (
+                rest
+                and _is_probable_heading(candidate)
+                and not _is_probable_heading(rest)
+            ):
+                return [prefix, candidate, rest]
+    return None
+
+
+def _backward_heading_split(words: List[str]) -> List[str] | None:
+    """Split lines where a heading trails after sentence text."""
     for offset in range(len(words)):
         idx = len(words) - offset - 1
-        candidate_words = words[idx:]
-        if len(candidate_words) < 2:
-            continue
-        candidate = " ".join(candidate_words)
+        candidate = " ".join(words[idx:])
         prefix = " ".join(words[:idx]).strip()
         if (
             prefix
@@ -82,7 +97,12 @@ def _split_inline_heading(line: str) -> List[str]:
             and _is_probable_heading(candidate)
         ):
             return [prefix, candidate]
-    return [line]
+    return None
+
+
+def _split_inline_heading(line: str) -> List[str]:
+    words = line.split()
+    return _forward_heading_split(words) or _backward_heading_split(words) or [line]
 
 
 def ensure_heading_separation(text: str) -> str:
@@ -90,13 +110,17 @@ def ensure_heading_separation(text: str) -> str:
     lines = [seg for line in text.split("\n") for seg in _split_inline_heading(line)]
 
     def iter_lines() -> Iterable[str]:
-        if not lines:
-            return
-        yield lines[0]
-        for prev, curr in zip(lines, lines[1:]):
-            if _is_probable_heading(curr) and prev.strip():
-                yield ""
-            yield curr
+        for i, line in enumerate(lines):
+            prev = lines[i - 1] if i else ""
+            nxt = lines[i + 1] if i + 1 < len(lines) else ""
+            if _is_probable_heading(line):
+                if prev.strip():
+                    yield ""
+                yield line
+                if nxt.strip():
+                    yield ""
+            else:
+                yield line
 
     return "\n".join(iter_lines())
 
