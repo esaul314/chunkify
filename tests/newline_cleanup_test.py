@@ -63,6 +63,12 @@ class TestNewlineCleanup(unittest.TestCase):
         )
         self.assertEqual(clean_text(text), expected)
 
+    def test_merge_long_quote_attribution(self):
+        long_quote = "This is a very long quote that certainly exceeds sixty characters in length and ends with a period."
+        text = f"{long_quote}\n" "—Author Name, Book Name\n\nNext paragraph begins."
+        expected = f"{long_quote}\n" "—Author Name, Book Name\n\nNext paragraph begins."
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

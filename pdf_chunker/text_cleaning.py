@@ -4,7 +4,7 @@ import logging
 import json
 import ftfy
 from functools import reduce
-from typing import Callable, Iterable, List, Tuple
+from typing import Callable, Iterable, List, Tuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -256,19 +256,40 @@ def _has_unbalanced_quotes(text: str) -> bool:
     return text.count('"') % 2 == 1 or text.count("'") % 2 == 1
 
 
+def _is_attribution_line(text: str) -> bool:
+    """Heuristically detect author attribution lines starting with an em dash."""
+    return text.lstrip().startswith("—")
+
+
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
-    merged: List[str] = []
-    for part in parts:
-        if merged and not any(_is_probable_heading(seg) for seg in (merged[-1], part)):
-            prev = merged[-1]
+
+    def reducer(acc: List[str], part: str) -> List[str]:
+        if not acc:
+            return [part]
+
+        prev = acc[-1]
+        if _is_attribution_line(part):
+            acc[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
+            return acc
+
+        if "\n—" in prev:
+            return acc + [part]
+
+        if not any(_is_probable_heading(seg) for seg in (prev, part)):
+            merged_part = None
             if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
-                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
-                continue
-            if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
-                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
-                continue
-        merged.append(part)
+                merged_part = f"{prev.rstrip()} {part.lstrip()}"
+            elif len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                merged_part = f"{prev.rstrip()} {part.lstrip()}"
+
+            if merged_part is not None:
+                acc[-1] = merged_part
+                return acc
+
+        return acc + [part]
+
+    merged: List[str] = reduce(reducer, parts, cast(List[str], []))
     return "\n\n".join(merged)
 
 
