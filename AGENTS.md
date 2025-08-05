@@ -30,6 +30,7 @@ pdf_chunker/
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── pymupdf4llm_integration.py # Optional PyMuPDF4LLM enhancement
 │   ├── page_artifacts.py          # Header/footer detection helpers
+│   ├── list_detection.py          # Bullet and numbered list detection helpers
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── text_processing.py         # Shared text manipulation utilities
 │   ├── splitter.py                # Semantic Pass: chunk splitting and boundaries
