@@ -72,26 +72,39 @@ sys.path.insert(0, '.')
 
 from pdf_chunker.parsing import extract_structured_text
 
-# Quick test to ensure PDF page exclusion still works
-test_files = []
-for root, dirs, files in os.walk('.'):
-    for file in files:
-        if file.lower().endswith('.pdf'):
-            test_files.append(os.path.join(root, file))
+# Gather available PDFs
+test_files = [
+    os.path.join(root, file)
+    for root, _, files in os.walk('.')
+    for file in files
+    if file.lower().endswith('.pdf')
+]
 
-if test_files:
-    pdf_file = test_files[0]  # Test with first PDF found
+# Choose first multi-page PDF using fitz for accuracy
+pdf_file = next(
+    (f for f in test_files if __import__('fitz').open(f).__len__() > 1),
+    None,
+)
+
+if pdf_file:
     print(f'Quick verification with: {pdf_file}')
-    
+
     try:
-        # Test basic PDF page exclusion
         baseline_blocks = extract_structured_text(pdf_file)
         excluded_blocks = extract_structured_text(pdf_file, exclude_pages='1')
-        
+
         if baseline_blocks and excluded_blocks:
-            baseline_pages = {block.get('source', {}).get('page') for block in baseline_blocks if block.get('source', {}).get('page')}
-            excluded_pages = {block.get('source', {}).get('page') for block in excluded_blocks if block.get('source', {}).get('page')}
-            
+            baseline_pages = {
+                b.get('source', {}).get('page')
+                for b in baseline_blocks
+                if b.get('source', {}).get('page')
+            }
+            excluded_pages = {
+                b.get('source', {}).get('page')
+                for b in excluded_blocks
+                if b.get('source', {}).get('page')
+            }
+
             if 1 in excluded_pages:
                 print('  ERROR: PDF page exclusion broken - page 1 still appears')
                 sys.exit(1)
@@ -99,12 +112,12 @@ if test_files:
                 print('  SUCCESS: PDF page exclusion functionality preserved')
         else:
             print('  WARNING: Could not verify PDF page exclusion')
-            
+
     except Exception as e:
         print(f'  ERROR: PDF page exclusion verification failed: {e}')
         sys.exit(1)
 else:
-    print('  SKIP: No PDF files available for verification')
+    print('  SKIP: No suitable PDF files available for verification')
 "
 
 if [ $? -eq 0 ]; then

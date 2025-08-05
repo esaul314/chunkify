@@ -1,3 +1,8 @@
+import sys
+
+# Ensure local package path for pdf_chunker imports
+sys.path.insert(0, ".")
+
 from pdf_chunker.ai_enrichment import (
     _load_tag_configs,
     classify_chunk_utterance,
