@@ -9,6 +9,7 @@ This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other
 The codebase follows a modular structure rooted in Unix philosophy (single responsibility, composability via interface boundaries):
 The directory structure may have changed. If any new files or folders have been created, they should be added to the structure below. This will help OpenAI Codex understand the project better and assist in generating code or documentation.
 If possible, check to make sure the tree below reflects the current state of the project, and update it if necessary.
+Document newly introduced modules (e.g., list detection utilities) here to keep this reference current.
 ```
 pdf_chunker/
 ├── .env                           # API keys and configuration secrets
@@ -20,46 +21,56 @@ pdf_chunker/
 │       ├── technical.yaml         # Technical domain tags
 │       └── project_management.yaml # PM domain tags
 ├── pdf_chunker/
-│   ├── core.py                    # Orchestrates the three-pass pipeline
-│   ├── parsing.py                 # Structural Pass: visual/font-based extraction
-│   ├── text_cleaning.py           # Ligature, quote, control-character cleanup
-│   ├── heading_detection.py       # Heading detection heuristics and fallbacks
-│   ├── extraction_fallbacks.py    # Fallback strategies (pdftotext, pdfminer)
-│   ├── page_utils.py              # Page range parsing and validation
-│   ├── pdf_parsing.py             # Core PDF extraction logic
-│   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
-│   ├── pymupdf4llm_integration.py # Optional PyMuPDF4LLM enhancement
-│   ├── page_artifacts.py          # Header/footer detection helpers
-│   ├── list_detection.py          # Bullet and numbered list detection helpers
-│   ├── env_utils.py               # Environment flag helpers
-│   ├── text_processing.py         # Shared text manipulation utilities
-│   ├── splitter.py                # Semantic Pass: chunk splitting and boundaries
-│   ├── utils.py                   # Metadata mapping and glue logic
+│   ├── __init__.py                # Package initializer
 │   ├── ai_enrichment.py           # AI Pass: classification and YAML-based tagging
-│   ├── env_utils.py               # Environment flags for optional features
-│   ├── page_artifacts.py          # Header/footer artifact detection helpers
-│   ├── pdf_parsing.py             # Combined PDF extraction wrapper
-│   ├── pymupdf4llm_integration.py # PyMuPDF4LLM extraction and cleanup
-│   └── text_processing.py         # Additional word-gluing and quote fixes
+│   ├── core.py                    # Orchestrates the three-pass pipeline
+│   ├── env_utils.py               # Environment flag helpers
+│   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
+│   ├── extraction_fallbacks.py    # Fallback strategies (pdftotext, pdfminer)
+│   ├── heading_detection.py       # Heading detection heuristics and fallbacks
+│   ├── list_detection.py          # Bullet and numbered list detection helpers
+│   ├── page_artifacts.py          # Header/footer detection helpers
+│   ├── page_utils.py              # Page range parsing and validation
+│   ├── parsing.py                 # Structural Pass: visual/font-based extraction
+│   ├── pdf_parsing.py             # Core PDF extraction logic
+│   ├── pymupdf4llm_integration.py # Optional PyMuPDF4LLM enhancement
+│   ├── source_matchers.py         # Source citation heuristics
+│   ├── splitter.py                # Semantic Pass: chunk splitting and boundaries
+│   ├── text_cleaning.py           # Ligature, quote, control-character cleanup
+│   ├── text_processing.py         # Shared text manipulation utilities
+│   └── utils.py                   # Metadata mapping and glue logic
 ├── scripts/
+│   ├── _apply.sh                  # Batch apply scripts across multiple files
 │   ├── chunk_pdf.py               # CLI for running the full pipeline
-│   ├── validate_chunks.sh         # Quality and boundary validation
 │   ├── detect_duplicates.py       # Overlap and duplicate detection
-│   └── _apply.sh                  # Batch apply scripts across multiple files
+│   └── validate_chunks.sh         # Quality and boundary validation
 └── tests/                         # Modular test architecture
+    ├── AGENTS.md
+    ├── ai_enrichment_test.py
+    ├── bullet_list_test.py
+    ├── cross_page_sentence_test.py
+    ├── epub_spine_test.py
+    ├── heading_boundary_test.py
+    ├── hyphenation_test.py
+    ├── indented_block_test.py
+    ├── newline_cleanup_test.py
+    ├── numbered_list_chunk_test.py
+    ├── numbered_list_test.py
+    ├── page_artifact_detection_test.py
+    ├── page_exclusion_test.py
+    ├── page_utils_test.py
+    ├── pdf_extraction_test.py
+    ├── process_document_override_test.py
+    ├── run_all_tests.sh           # Orchestrates all test modules
+    ├── semantic_chunking_test.py
+    ├── source_matchers_test.py
+    ├── test_text_processing.py
     ├── utils/
+    │   ├── AGENTS.md
     │   └── common.sh              # Shared test utilities and formatting
-    ├── pdf_extraction_test.py     # PDF extraction and fallback validation
-    ├── ai_enrichment_test.py      # Tagging and classification tests
-    ├── semantic_chunking_test.py  # Chunk size and semantic rules tests
-    ├── page_exclusion_test.py     # PDF page exclusion tests
-    ├── epub_spine_test.py         # EPUB spine exclusion tests
-    ├── cross_page_sentence_test.py # Cross-page continuation merging tests
-    ├── numbered_list_chunk_test.py # Numbered list chunking preservation
-    ├── process_document_override_test.py # Callable override injection test
-    └── run_all_tests.sh           # Orchestrates all test modules
-
+    └── utils_test.py
 `````
+
 
 ---
 
