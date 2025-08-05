@@ -23,6 +23,7 @@ import sys
 # Make sure you have `aspell` installed (`dnf install aspell`).
 SPELLER_CMD = ["aspell", "list"]
 
+
 def is_real_word(word: str) -> bool:
     """Return True if `word` is recognized by aspell."""
     # aspell list prints unknown words—so if our word does NOT show up,
@@ -31,10 +32,12 @@ def is_real_word(word: str) -> bool:
         SPELLER_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
     )
     out, _ = p.communicate(word + "\n")
-    return (out.strip() == "")
+    return out.strip() == ""
+
 
 # Regex to find letter‐only fragments separated by double‐newline.
 PAT = re.compile(r"([A-Za-z]+)\n\n([a-z][A-Za-z]+)")
+
 
 def repl(match: re.Match) -> str:
     head, tail = match.group(1), match.group(2)
@@ -47,16 +50,17 @@ def repl(match: re.Match) -> str:
         # e.g. "find an\n\naudience" -> "find an audience"
         return head + " " + tail
 
+
 def fix_stream(in_stream, out_stream):
     text = in_stream.read()
     # Perform a global substitution
     cleaned = PAT.sub(repl, text)
     out_stream.write(cleaned)
 
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        with open(sys.argv[1], 'r', encoding='utf-8') as f_in:
+        with open(sys.argv[1], "r", encoding="utf-8") as f_in:
             fix_stream(f_in, sys.stdout)
     else:
         fix_stream(sys.stdin, sys.stdout)
-

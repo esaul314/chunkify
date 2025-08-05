@@ -39,6 +39,7 @@ from pdf_chunker.text_cleaning import clean_text
 @dataclass
 class ExtractionResult:
     """Results from a single extraction method"""
+
     method: str
     text_length: int
     chunk_count: int
@@ -53,6 +54,7 @@ class ExtractionResult:
 @dataclass
 class ComparisonReport:
     """Comparison report between extraction methods"""
+
     pdf_file: str
     current_pipeline: ExtractionResult
     pymupdf4llm: ExtractionResult
@@ -60,44 +62,46 @@ class ComparisonReport:
     recommendations: List[str]
 
 
-def extract_with_current_pipeline(pdf_path: str, pages_to_exclude: Optional[List[int]] = None) -> ExtractionResult:
+def extract_with_current_pipeline(
+    pdf_path: str, pages_to_exclude: Optional[List[int]] = None
+) -> ExtractionResult:
     """Extract using the current pipeline"""
     start_time = time.time()
     errors = []
-    
+
     try:
 
         # Convert pages_to_exclude list to comma-separated string format
         exclude_pages_str = None
         if pages_to_exclude:
-            exclude_pages_str = ','.join(map(str, pages_to_exclude))
+            exclude_pages_str = ",".join(map(str, pages_to_exclude))
 
         # Use the full pipeline with correct parameter names and required arguments
         result = process_document(
             pdf_path,
-            chunk_size=8000,           # Default chunk size
-            overlap=200,               # Default overlap
+            chunk_size=8000,  # Default chunk size
+            overlap=200,  # Default overlap
             exclude_pages=exclude_pages_str,
             generate_metadata=True,
-            ai_enrichment=False        # Skip AI enrichment for comparison
+            ai_enrichment=False,  # Skip AI enrichment for comparison
         )
-        
+
         # Handle the actual return type from process_document (list of chunks)
         if isinstance(result, list):
             chunks = result
         else:
-            chunks = result.get('chunks', [])
-        
-        text_length = sum(len(chunk.get('text', '')) for chunk in chunks)
-        
+            chunks = result.get("chunks", [])
+
+        text_length = sum(len(chunk.get("text", "")) for chunk in chunks)
+
         # Extract headings from chunks
         headings = []
         for chunk in chunks:
-            if chunk.get('metadata', {}).get('is_heading', False):
-                headings.append(chunk.get('text', '').strip())
-        
+            if chunk.get("metadata", {}).get("is_heading", False):
+                headings.append(chunk.get("text", "").strip())
+
         processing_time = time.time() - start_time
-        
+
         return ExtractionResult(
             method="Current Pipeline",
             text_length=text_length,
@@ -106,14 +110,14 @@ def extract_with_current_pipeline(pdf_path: str, pages_to_exclude: Optional[List
             processing_time=processing_time,
             chunks=chunks,
             headings=headings,
-            metadata={'total_chunks': len(chunks)},
-            errors=errors
+            metadata={"total_chunks": len(chunks)},
+            errors=errors,
         )
-        
+
     except Exception as e:
         processing_time = time.time() - start_time
         errors.append(f"Pipeline error: {str(e)}")
-        
+
         return ExtractionResult(
             method="Current Pipeline",
             text_length=0,
@@ -123,44 +127,46 @@ def extract_with_current_pipeline(pdf_path: str, pages_to_exclude: Optional[List
             chunks=[],
             headings=[],
             metadata={},
-            errors=errors
+            errors=errors,
         )
 
 
-def extract_with_pymupdf4llm(pdf_path: str, pages_to_exclude: Optional[List[int]] = None) -> ExtractionResult:
+def extract_with_pymupdf4llm(
+    pdf_path: str, pages_to_exclude: Optional[List[int]] = None
+) -> ExtractionResult:
     """Extract using PyMuPDF4LLM"""
     start_time = time.time()
     errors = []
-    
+
     try:
 
         # Enhanced API discovery for PyMuPDF4LLM
         print(f"DEBUG: Inspecting pymupdf4llm module structure...")
-        
+
         # Check main module attributes
-        main_attrs = [attr for attr in dir(pymupdf4llm) if not attr.startswith('_')]
+        main_attrs = [attr for attr in dir(pymupdf4llm) if not attr.startswith("_")]
         print(f"DEBUG: Main module attributes: {main_attrs}")
-        
+
         # Check for submodules
         submodules = []
         for attr in main_attrs:
             try:
                 obj = getattr(pymupdf4llm, attr)
-                if hasattr(obj, '__module__') and hasattr(obj, '__dict__'):
+                if hasattr(obj, "__module__") and hasattr(obj, "__dict__"):
                     submodules.append(attr)
-                    sub_attrs = [a for a in dir(obj) if not a.startswith('_')]
+                    sub_attrs = [a for a in dir(obj) if not a.startswith("_")]
                     print(f"DEBUG: Submodule {attr} attributes: {sub_attrs}")
             except:
                 pass
-        
+
         print(f"DEBUG: Found submodules: {submodules}")
-        
+
         # Try different API patterns
         md_text = None
         extraction_method = None
-        
+
         # Pattern 1: Direct function call
-        for method_name in ['to_markdown', 'extract', 'convert', 'parse', 'process']:
+        for method_name in ["to_markdown", "extract", "convert", "parse", "process"]:
             if hasattr(pymupdf4llm, method_name):
                 try:
                     method = getattr(pymupdf4llm, method_name)
@@ -171,142 +177,172 @@ def extract_with_pymupdf4llm(pdf_path: str, pages_to_exclude: Optional[List[int]
                 except Exception as e:
                     print(f"DEBUG: Method {method_name} failed: {e}")
                     continue
-        
+
         # Pattern 2: Class-based API
         if md_text is None:
-            for class_name in ['LlamaParseReader', 'PyMuPDFReader', 'PDFReader', 'DocumentReader']:
+            for class_name in [
+                "LlamaParseReader",
+                "PyMuPDFReader",
+                "PDFReader",
+                "DocumentReader",
+            ]:
                 if hasattr(pymupdf4llm, class_name):
                     try:
                         cls = getattr(pymupdf4llm, class_name)
                         print(f"DEBUG: Trying class {class_name}")
                         reader = cls()
-                        
+
                         # Try different method names on the class
-                        for method_name in ['load_data', 'read', 'extract', 'parse', 'to_markdown']:
+                        for method_name in [
+                            "load_data",
+                            "read",
+                            "extract",
+                            "parse",
+                            "to_markdown",
+                        ]:
                             if hasattr(reader, method_name):
                                 try:
                                     method = getattr(reader, method_name)
                                     print(f"DEBUG: Trying {class_name}.{method_name}")
                                     result = method(pdf_path)
-                                    
+
                                     # Handle different return types
                                     if isinstance(result, str):
                                         md_text = result
                                     elif isinstance(result, list):
-                                        if result and hasattr(result[0], 'text'):
-                                            md_text = '\n'.join([doc.text for doc in result])
+                                        if result and hasattr(result[0], "text"):
+                                            md_text = "\n".join(
+                                                [doc.text for doc in result]
+                                            )
                                         else:
-                                            md_text = '\n'.join([str(doc) for doc in result])
+                                            md_text = "\n".join(
+                                                [str(doc) for doc in result]
+                                            )
                                     else:
                                         md_text = str(result)
-                                    
-                                    extraction_method = f"pymupdf4llm.{class_name}().{method_name}"
+
+                                    extraction_method = (
+                                        f"pymupdf4llm.{class_name}().{method_name}"
+                                    )
                                     break
                                 except Exception as e:
-                                    print(f"DEBUG: {class_name}.{method_name} failed: {e}")
+                                    print(
+                                        f"DEBUG: {class_name}.{method_name} failed: {e}"
+                                    )
                                     continue
-                        
+
                         if md_text is not None:
                             break
                     except Exception as e:
                         print(f"DEBUG: Class {class_name} instantiation failed: {e}")
                         continue
-        
+
         # Pattern 3: Check submodules for extraction functions
         if md_text is None:
             for submodule_name in submodules:
                 try:
                     submodule = getattr(pymupdf4llm, submodule_name)
-                    for method_name in ['to_markdown', 'extract', 'convert', 'parse']:
+                    for method_name in ["to_markdown", "extract", "convert", "parse"]:
                         if hasattr(submodule, method_name):
                             try:
                                 method = getattr(submodule, method_name)
                                 print(f"DEBUG: Trying {submodule_name}.{method_name}")
                                 md_text = method(pdf_path)
-                                extraction_method = f"pymupdf4llm.{submodule_name}.{method_name}"
+                                extraction_method = (
+                                    f"pymupdf4llm.{submodule_name}.{method_name}"
+                                )
                                 break
                             except Exception as e:
-                                print(f"DEBUG: {submodule_name}.{method_name} failed: {e}")
+                                print(
+                                    f"DEBUG: {submodule_name}.{method_name} failed: {e}"
+                                )
                                 continue
-                    
+
                     if md_text is not None:
                         break
                 except Exception as e:
                     print(f"DEBUG: Submodule {submodule_name} access failed: {e}")
                     continue
-        
+
         # If still no success, provide detailed error information
         if md_text is None:
             error_info = {
-                'main_attributes': main_attrs,
-                'submodules': submodules,
-                'module_file': getattr(pymupdf4llm, '__file__', 'Unknown'),
-                'module_version': getattr(pymupdf4llm, '__version__', 'Unknown')
+                "main_attributes": main_attrs,
+                "submodules": submodules,
+                "module_file": getattr(pymupdf4llm, "__file__", "Unknown"),
+                "module_version": getattr(pymupdf4llm, "__version__", "Unknown"),
             }
-            raise AttributeError(f"Could not find working extraction method in pymupdf4llm. Module info: {error_info}")
-        
+            raise AttributeError(
+                f"Could not find working extraction method in pymupdf4llm. Module info: {error_info}"
+            )
+
         print(f"DEBUG: Successfully extracted using {extraction_method}")
-    
-        
+
         # Parse the markdown to extract headings and create chunks
-        lines = md_text.split('\n')
+        lines = md_text.split("\n")
         headings = []
         chunks = []
         current_chunk = []
         current_heading = None
-        
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-                
+
             # Detect markdown headings
-            if line.startswith('#'):
+            if line.startswith("#"):
                 # Save previous chunk if it exists
                 if current_chunk:
-                    chunk_text = '\n'.join(current_chunk)
-                    chunks.append({
-                        'text': chunk_text,
-                        'metadata': {
-                            'is_heading': False,
-                            'heading': current_heading,
-                            'source': 'pymupdf4llm'
+                    chunk_text = "\n".join(current_chunk)
+                    chunks.append(
+                        {
+                            "text": chunk_text,
+                            "metadata": {
+                                "is_heading": False,
+                                "heading": current_heading,
+                                "source": "pymupdf4llm",
+                            },
                         }
-                    })
+                    )
                     current_chunk = []
-                
+
                 # Extract heading text
-                heading_text = line.lstrip('#').strip()
+                heading_text = line.lstrip("#").strip()
                 headings.append(heading_text)
                 current_heading = heading_text
-                
+
                 # Add heading as a chunk
-                chunks.append({
-                    'text': heading_text,
-                    'metadata': {
-                        'is_heading': True,
-                        'heading_level': len(line) - len(line.lstrip('#')),
-                        'source': 'pymupdf4llm'
+                chunks.append(
+                    {
+                        "text": heading_text,
+                        "metadata": {
+                            "is_heading": True,
+                            "heading_level": len(line) - len(line.lstrip("#")),
+                            "source": "pymupdf4llm",
+                        },
                     }
-                })
+                )
             else:
                 current_chunk.append(line)
-        
+
         # Add final chunk
         if current_chunk:
-            chunk_text = '\n'.join(current_chunk)
-            chunks.append({
-                'text': chunk_text,
-                'metadata': {
-                    'is_heading': False,
-                    'heading': current_heading,
-                    'source': 'pymupdf4llm'
+            chunk_text = "\n".join(current_chunk)
+            chunks.append(
+                {
+                    "text": chunk_text,
+                    "metadata": {
+                        "is_heading": False,
+                        "heading": current_heading,
+                        "source": "pymupdf4llm",
+                    },
                 }
-            })
-        
+            )
+
         text_length = len(md_text)
         processing_time = time.time() - start_time
-        
+
         return ExtractionResult(
             method="PyMuPDF4LLM",
             text_length=text_length,
@@ -315,14 +351,14 @@ def extract_with_pymupdf4llm(pdf_path: str, pages_to_exclude: Optional[List[int]
             processing_time=processing_time,
             chunks=chunks,
             headings=headings,
-            metadata={'markdown_length': len(md_text)},
-            errors=errors
+            metadata={"markdown_length": len(md_text)},
+            errors=errors,
         )
-        
+
     except Exception as e:
         processing_time = time.time() - start_time
         errors.append(f"PyMuPDF4LLM error: {str(e)}")
-        
+
         return ExtractionResult(
             method="PyMuPDF4LLM",
             text_length=0,
@@ -332,160 +368,204 @@ def extract_with_pymupdf4llm(pdf_path: str, pages_to_exclude: Optional[List[int]
             chunks=[],
             headings=[],
             metadata={},
-            errors=errors
+            errors=errors,
         )
 
 
-def calculate_comparison_metrics(current: ExtractionResult, pymupdf4llm: ExtractionResult) -> Dict[str, Any]:
+def calculate_comparison_metrics(
+    current: ExtractionResult, pymupdf4llm: ExtractionResult
+) -> Dict[str, Any]:
     """Calculate comparison metrics between the two extraction methods"""
-    
+
     metrics = {}
-    
+
     # Text length comparison
     if current.text_length > 0 and pymupdf4llm.text_length > 0:
         length_ratio = pymupdf4llm.text_length / current.text_length
-        metrics['text_length_ratio'] = length_ratio
-        metrics['text_length_difference'] = pymupdf4llm.text_length - current.text_length
+        metrics["text_length_ratio"] = length_ratio
+        metrics["text_length_difference"] = (
+            pymupdf4llm.text_length - current.text_length
+        )
     else:
-        metrics['text_length_ratio'] = 0
-        metrics['text_length_difference'] = 0
-    
+        metrics["text_length_ratio"] = 0
+        metrics["text_length_difference"] = 0
+
     # Chunk count comparison
-    metrics['chunk_count_difference'] = pymupdf4llm.chunk_count - current.chunk_count
-    
+    metrics["chunk_count_difference"] = pymupdf4llm.chunk_count - current.chunk_count
+
     # Heading detection comparison
-    metrics['heading_count_difference'] = pymupdf4llm.heading_count - current.heading_count
-    
+    metrics["heading_count_difference"] = (
+        pymupdf4llm.heading_count - current.heading_count
+    )
+
     # Performance comparison
     if current.processing_time > 0:
         speed_ratio = current.processing_time / pymupdf4llm.processing_time
-        metrics['speed_ratio'] = speed_ratio
+        metrics["speed_ratio"] = speed_ratio
     else:
-        metrics['speed_ratio'] = 0
-    
+        metrics["speed_ratio"] = 0
+
     # Error comparison
-    metrics['current_errors'] = len(current.errors)
-    metrics['pymupdf4llm_errors'] = len(pymupdf4llm.errors)
-    
+    metrics["current_errors"] = len(current.errors)
+    metrics["pymupdf4llm_errors"] = len(pymupdf4llm.errors)
+
     # Heading overlap analysis
     current_headings_lower = [h.lower().strip() for h in current.headings]
     pymupdf4llm_headings_lower = [h.lower().strip() for h in pymupdf4llm.headings]
-    
+
     common_headings = set(current_headings_lower) & set(pymupdf4llm_headings_lower)
-    metrics['heading_overlap_count'] = len(common_headings)
-    
+    metrics["heading_overlap_count"] = len(common_headings)
+
     if current.heading_count > 0:
-        metrics['heading_overlap_ratio'] = len(common_headings) / current.heading_count
+        metrics["heading_overlap_ratio"] = len(common_headings) / current.heading_count
     else:
-        metrics['heading_overlap_ratio'] = 0
-    
+        metrics["heading_overlap_ratio"] = 0
+
     return metrics
 
 
 def generate_recommendations(comparison: ComparisonReport) -> List[str]:
     """Generate recommendations based on comparison results"""
     recommendations = []
-    
+
     current = comparison.current_pipeline
     pymupdf4llm = comparison.pymupdf4llm
     metrics = comparison.comparison_metrics
-    
+
     # Error analysis
     if current.errors and not pymupdf4llm.errors:
-        recommendations.append("PyMuPDF4LLM shows better error handling - consider migration")
+        recommendations.append(
+            "PyMuPDF4LLM shows better error handling - consider migration"
+        )
     elif pymupdf4llm.errors and not current.errors:
-        recommendations.append("Current pipeline shows better error handling - keep current approach")
-    
+        recommendations.append(
+            "Current pipeline shows better error handling - keep current approach"
+        )
+
     # Text extraction quality
-    if metrics.get('text_length_ratio', 0) > 1.1:
-        recommendations.append("PyMuPDF4LLM extracts significantly more text - may indicate better extraction")
-    elif metrics.get('text_length_ratio', 0) < 0.9:
-        recommendations.append("Current pipeline extracts more text - PyMuPDF4LLM may be missing content")
-    
+    if metrics.get("text_length_ratio", 0) > 1.1:
+        recommendations.append(
+            "PyMuPDF4LLM extracts significantly more text - may indicate better extraction"
+        )
+    elif metrics.get("text_length_ratio", 0) < 0.9:
+        recommendations.append(
+            "Current pipeline extracts more text - PyMuPDF4LLM may be missing content"
+        )
+
     # Heading detection
-    if metrics.get('heading_count_difference', 0) > 5:
-        recommendations.append("PyMuPDF4LLM detects significantly more headings - may improve document structure")
-    elif metrics.get('heading_count_difference', 0) < -5:
-        recommendations.append("Current pipeline detects more headings - PyMuPDF4LLM may be missing structure")
-    
+    if metrics.get("heading_count_difference", 0) > 5:
+        recommendations.append(
+            "PyMuPDF4LLM detects significantly more headings - may improve document structure"
+        )
+    elif metrics.get("heading_count_difference", 0) < -5:
+        recommendations.append(
+            "Current pipeline detects more headings - PyMuPDF4LLM may be missing structure"
+        )
+
     # Performance
-    if metrics.get('speed_ratio', 0) > 2:
-        recommendations.append("PyMuPDF4LLM is significantly faster - performance benefit")
-    elif metrics.get('speed_ratio', 0) < 0.5:
-        recommendations.append("Current pipeline is faster - PyMuPDF4LLM has performance cost")
-    
+    if metrics.get("speed_ratio", 0) > 2:
+        recommendations.append(
+            "PyMuPDF4LLM is significantly faster - performance benefit"
+        )
+    elif metrics.get("speed_ratio", 0) < 0.5:
+        recommendations.append(
+            "Current pipeline is faster - PyMuPDF4LLM has performance cost"
+        )
+
     # Heading overlap
-    if metrics.get('heading_overlap_ratio', 0) < 0.5:
-        recommendations.append("Low heading overlap - methods detect different document structures")
-    elif metrics.get('heading_overlap_ratio', 0) > 0.8:
-        recommendations.append("High heading overlap - methods agree on document structure")
-    
+    if metrics.get("heading_overlap_ratio", 0) < 0.5:
+        recommendations.append(
+            "Low heading overlap - methods detect different document structures"
+        )
+    elif metrics.get("heading_overlap_ratio", 0) > 0.8:
+        recommendations.append(
+            "High heading overlap - methods agree on document structure"
+        )
+
     if not recommendations:
-        recommendations.append("Results are comparable - choice depends on specific requirements")
-    
+        recommendations.append(
+            "Results are comparable - choice depends on specific requirements"
+        )
+
     return recommendations
 
 
-def run_comparison(pdf_path: str, pages_to_exclude: Optional[List[int]] = None) -> ComparisonReport:
+def run_comparison(
+    pdf_path: str, pages_to_exclude: Optional[List[int]] = None
+) -> ComparisonReport:
     """Run comparison between current pipeline and PyMuPDF4LLM"""
-    
+
     print(f"Running comparison on: {pdf_path}")
     if pages_to_exclude:
         print(f"Excluding pages: {pages_to_exclude}")
-    
+
     print("\n1. Extracting with current pipeline...")
     current_result = extract_with_current_pipeline(pdf_path, pages_to_exclude)
-    
+
     print("2. Extracting with PyMuPDF4LLM...")
     pymupdf4llm_result = extract_with_pymupdf4llm(pdf_path, pages_to_exclude)
-    
+
     print("3. Calculating comparison metrics...")
     metrics = calculate_comparison_metrics(current_result, pymupdf4llm_result)
-    
+
     comparison = ComparisonReport(
         pdf_file=pdf_path,
         current_pipeline=current_result,
         pymupdf4llm=pymupdf4llm_result,
         comparison_metrics=metrics,
-        recommendations=[]
+        recommendations=[],
     )
-    
+
     comparison.recommendations = generate_recommendations(comparison)
-    
+
     return comparison
 
 
 def print_comparison_report(comparison: ComparisonReport):
     """Print a formatted comparison report"""
-    
+
     print(f"\n{'='*80}")
     print(f"PDF EXTRACTION COMPARISON REPORT")
     print(f"{'='*80}")
     print(f"File: {comparison.pdf_file}")
     print(f"{'='*80}")
-    
+
     current = comparison.current_pipeline
     pymupdf4llm = comparison.pymupdf4llm
     metrics = comparison.comparison_metrics
-    
-    # Summary table
-    print(f"\n{'EXTRACTION SUMMARY':<30} {'Current':<15} {'PyMuPDF4LLM':<15} {'Difference':<15}")
-    print(f"{'-'*75}")
-    print(f"{'Text Length':<30} {current.text_length:<15} {pymupdf4llm.text_length:<15} {metrics.get('text_length_difference', 0):<15}")
-    print(f"{'Chunk Count':<30} {current.chunk_count:<15} {pymupdf4llm.chunk_count:<15} {metrics.get('chunk_count_difference', 0):<15}")
-    print(f"{'Heading Count':<30} {current.heading_count:<15} {pymupdf4llm.heading_count:<15} {metrics.get('heading_count_difference', 0):<15}")
 
-    print(f"{'Processing Time (s)':<30} {current.processing_time:<15.2f} {pymupdf4llm.processing_time:<15.2f} {(pymupdf4llm.processing_time - current.processing_time):<15.2f}")
-    
-    print(f"{'Errors':<30} {len(current.errors):<15} {len(pymupdf4llm.errors):<15} {len(pymupdf4llm.errors) - len(current.errors):<15}")
+    # Summary table
+    print(
+        f"\n{'EXTRACTION SUMMARY':<30} {'Current':<15} {'PyMuPDF4LLM':<15} {'Difference':<15}"
+    )
+    print(f"{'-'*75}")
+    print(
+        f"{'Text Length':<30} {current.text_length:<15} {pymupdf4llm.text_length:<15} {metrics.get('text_length_difference', 0):<15}"
+    )
+    print(
+        f"{'Chunk Count':<30} {current.chunk_count:<15} {pymupdf4llm.chunk_count:<15} {metrics.get('chunk_count_difference', 0):<15}"
+    )
+    print(
+        f"{'Heading Count':<30} {current.heading_count:<15} {pymupdf4llm.heading_count:<15} {metrics.get('heading_count_difference', 0):<15}"
+    )
+
+    print(
+        f"{'Processing Time (s)':<30} {current.processing_time:<15.2f} {pymupdf4llm.processing_time:<15.2f} {(pymupdf4llm.processing_time - current.processing_time):<15.2f}"
+    )
+
+    print(
+        f"{'Errors':<30} {len(current.errors):<15} {len(pymupdf4llm.errors):<15} {len(pymupdf4llm.errors) - len(current.errors):<15}"
+    )
 
     # Detailed metrics
     print(f"\n{'DETAILED METRICS'}")
     print(f"{'-'*40}")
     print(f"Text Length Ratio: {metrics.get('text_length_ratio', 0):.2f}")
     print(f"Speed Ratio: {metrics.get('speed_ratio', 0):.2f}")
-    print(f"Heading Overlap: {metrics.get('heading_overlap_count', 0)} / {current.heading_count} ({metrics.get('heading_overlap_ratio', 0):.1%})")
-    
+    print(
+        f"Heading Overlap: {metrics.get('heading_overlap_count', 0)} / {current.heading_count} ({metrics.get('heading_overlap_ratio', 0):.1%})"
+    )
+
     # Errors
     if current.errors or pymupdf4llm.errors:
         print(f"\n{'ERRORS'}")
@@ -498,70 +578,77 @@ def print_comparison_report(comparison: ComparisonReport):
             print("PyMuPDF4LLM Errors:")
             for error in pymupdf4llm.errors:
                 print(f"  - {error}")
-    
+
     # Recommendations
     print(f"\n{'RECOMMENDATIONS'}")
     print(f"{'-'*40}")
     for i, rec in enumerate(comparison.recommendations, 1):
         print(f"{i}. {rec}")
-    
+
     print(f"\n{'='*80}")
 
 
 def save_detailed_report(comparison: ComparisonReport, output_file: str):
     """Save detailed comparison report to JSON file"""
-    
+
     # Convert dataclasses to dictionaries for JSON serialization
     report_data = {
-        'pdf_file': comparison.pdf_file,
-        'current_pipeline': asdict(comparison.current_pipeline),
-        'pymupdf4llm': asdict(comparison.pymupdf4llm),
-        'comparison_metrics': comparison.comparison_metrics,
-        'recommendations': comparison.recommendations,
-        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        "pdf_file": comparison.pdf_file,
+        "current_pipeline": asdict(comparison.current_pipeline),
+        "pymupdf4llm": asdict(comparison.pymupdf4llm),
+        "comparison_metrics": comparison.comparison_metrics,
+        "recommendations": comparison.recommendations,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
-    
-    with open(output_file, 'w', encoding='utf-8') as f:
+
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(report_data, f, indent=2, ensure_ascii=False)
-    
+
     print(f"\nDetailed report saved to: {output_file}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Compare PDF extraction methods')
-    parser.add_argument('pdf_file', help='Path to PDF file to analyze')
-    parser.add_argument('--pages-to-exclude', help='Comma-separated list of page numbers to exclude (e.g., 1,2,3)')
-    parser.add_argument('--output', help='Output file for detailed JSON report')
-    
+    parser = argparse.ArgumentParser(description="Compare PDF extraction methods")
+    parser.add_argument("pdf_file", help="Path to PDF file to analyze")
+    parser.add_argument(
+        "--pages-to-exclude",
+        help="Comma-separated list of page numbers to exclude (e.g., 1,2,3)",
+    )
+    parser.add_argument("--output", help="Output file for detailed JSON report")
+
     args = parser.parse_args()
-    
+
     # Validate PDF file
     if not os.path.exists(args.pdf_file):
         print(f"ERROR: PDF file not found: {args.pdf_file}")
         sys.exit(1)
-    
+
     # Parse pages to exclude
     pages_to_exclude = None
     if args.pages_to_exclude:
         try:
-            pages_to_exclude = [int(p.strip()) for p in args.pages_to_exclude.split(',')]
+            pages_to_exclude = [
+                int(p.strip()) for p in args.pages_to_exclude.split(",")
+            ]
         except ValueError:
-            print("ERROR: Invalid pages format. Use comma-separated integers (e.g., 1,2,3)")
+            print(
+                "ERROR: Invalid pages format. Use comma-separated integers (e.g., 1,2,3)"
+            )
             sys.exit(1)
-    
+
     # Run comparison
     try:
         comparison = run_comparison(args.pdf_file, pages_to_exclude)
         print_comparison_report(comparison)
-        
+
         # Save detailed report if requested
         if args.output:
             save_detailed_report(comparison, args.output)
-        
+
     except Exception as e:
         print(f"ERROR: Comparison failed: {str(e)}")
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

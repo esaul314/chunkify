@@ -11,38 +11,47 @@ import wordninja
 
 # ─── Helpers ───────────────────────────────────────────────
 
+
 def load_jsonl(path):
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f]
+
 
 def extract_candidates(text):
     return [
         m.group()
         for m in re.finditer(r"\b[a-z][^\W\d_]*\b", text)
-        if text[max(0, m.start()-2):m.start()] != "\n\n"
+        if text[max(0, m.start() - 2) : m.start()] != "\n\n"
     ]
+
 
 def aspell_bad(words, lang="en_US"):
     p = subprocess.Popen(
         ["aspell", "-l", lang, "list"],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
     )
     out, _ = p.communicate("\n".join(words))
     return set(out.splitlines())
 
+
 # ─── Improved Snippet Extraction ────────────────────────────
 
+
 def snippet_for(word, text, window=20):
-    pattern = re.compile(r'\b{}\b'.format(re.escape(word)))
+    pattern = re.compile(r"\b{}\b".format(re.escape(word)))
     match = pattern.search(text)
     if match:
         start, end = match.span()
         before = text[:start].split()[-window:]
         after = text[end:].split()[:window]
-        return ' '.join(before + [word] + after)
+        return " ".join(before + [word] + after)
     return None
 
+
 # ─── Semantic LLM Validation ────────────────────────────────
+
 
 def semantic_llm_validate(original, split, snippet):
     prompt = (
@@ -51,10 +60,17 @@ def semantic_llm_validate(original, split, snippet):
     )
     return correct_word(original, prompt).strip("'\" ")
 
+
 # ─── Enhanced Correction Step ───────────────────────────────
 
+
 def enhanced_correction_step(words, texts, workers=5):
-    pairs = [(i, word, text) for i, text in enumerate(texts) for word in words if word in text]
+    pairs = [
+        (i, word, text)
+        for i, text in enumerate(texts)
+        for word in words
+        if word in text
+    ]
 
     def correct(args):
         i, word, text = args
@@ -74,23 +90,26 @@ def enhanced_correction_step(words, texts, workers=5):
     corrections = {(i, word): corrected for i, word, corrected in results}
     return corrections
 
+
 # ─── Replacement Step ────────────────────────────────────────
+
 
 def apply_corrections_to_text(text, word_map):
     if not word_map:
         return text
-    pattern = re.compile(r'\b(' + '|'.join(map(re.escape, word_map.keys())) + r')\b')
+    pattern = re.compile(r"\b(" + "|".join(map(re.escape, word_map.keys())) + r")\b")
     return pattern.sub(lambda m: word_map[m.group()], text)
 
+
 # ─── Main pipeline ──────────────────────────────────────────
+
 
 def main(path, output_path, summary=True):
     records = load_jsonl(path)
     texts = [record["text"] for record in records]
 
     candidates_pipeline = compose(
-        aspell_bad,
-        lambda texts: set(mapcat(extract_candidates, texts))
+        aspell_bad, lambda texts: set(mapcat(extract_candidates, texts))
     )
 
     print("[INFO] Extracting suspicious candidates...")
@@ -105,7 +124,12 @@ def main(path, output_path, summary=True):
         rec_word_corrections[i][word] = corrected
 
     cleaned_records = [
-        {**record, "text": apply_corrections_to_text(record["text"], rec_word_corrections.get(i, {}))}
+        {
+            **record,
+            "text": apply_corrections_to_text(
+                record["text"], rec_word_corrections.get(i, {})
+            ),
+        }
         for i, record in enumerate(records)
     ]
 
@@ -118,9 +142,9 @@ def main(path, output_path, summary=True):
         for (i, original), corrected in corrections.items():
             print(f"Record {i}: {original} → {corrected}")
 
+
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.stderr.write(f"Usage: {sys.argv[0]} <input.jsonl> <output.jsonl>\n")
         sys.exit(1)
     main(sys.argv[1], sys.argv[2])
-
