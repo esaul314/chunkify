@@ -148,6 +148,10 @@ def _should_merge_blocks(
         f"Merge check: Text endings - curr: '{curr_text[-10:]}', next: '{next_text[:10]}'"
     )
 
+    if next_text.startswith("—"):
+        logger.debug("Merge decision: AUTHOR_ATTRIBUTION")
+        return True, "author_attribution"
+
     # Check for quote-related splitting issues
     curr_has_quote = '"' in curr_text or "'" in curr_text
     next_has_quote = '"' in next_text or "'" in next_text
@@ -422,6 +426,8 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     merged_text = current_text + " " + next_text
                 elif merge_reason == "indented_continuation":
                     merged_text = current_text + "\n" + next_text
+                elif merge_reason == "author_attribution":
+                    merged_text = current_text + " " + next_text
                 else:
                     merged_text = current_text + " " + next_text
 

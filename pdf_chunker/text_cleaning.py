@@ -196,14 +196,21 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     merged: List[str] = []
     for part in parts:
-        if merged and not any(_is_probable_heading(seg) for seg in (merged[-1], part)):
+        if merged:
             prev = merged[-1]
-            if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
-                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+            author_line = part.lstrip()
+            if author_line.startswith("—"):
+                merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
-            if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
-                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
-                continue
+            if not any(_is_probable_heading(seg) for seg in (prev, part)):
+                if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
+                    prev + part
+                ):
+                    merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                    continue
+                if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                    merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                    continue
         merged.append(part)
     return "\n\n".join(merged)
 
