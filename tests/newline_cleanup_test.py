@@ -49,6 +49,17 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
         self.assertEqual(clean_text(text), expected)
 
+    def test_merge_quote_with_author_line(self):
+        text = (
+            "What recommends commerce to me is its enterprise and bravery.\n\n"
+            "—Author Name, Book Name"
+        )
+        expected = (
+            "What recommends commerce to me is its enterprise and bravery. "
+            "—Author Name, Book Name"
+        )
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
