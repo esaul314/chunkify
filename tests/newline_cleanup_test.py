@@ -49,6 +49,26 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
         self.assertEqual(clean_text(text), expected)
 
+    def test_preserve_heading_and_attribution(self):
+        os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "0"
+        text = (
+            "previous sections or pages... Heading At The Top of The Page\n"
+            "Quote by a famous author\n—Author Name, Book Name\n\n"
+            "The paragraph begins here..."
+        )
+        expected = (
+            "previous sections or pages...\n\nHeading At The Top of The Page\n\n"
+            "Quote by a famous author\n—Author Name, Book Name\n\n"
+            "The paragraph begins here..."
+        )
+        self.assertEqual(clean_text(text), expected)
+
+    def test_merge_long_quote_attribution(self):
+        long_quote = "This is a very long quote that certainly exceeds sixty characters in length and ends with a period."
+        text = f"{long_quote}\n" "—Author Name, Book Name\n\nNext paragraph begins."
+        expected = f"{long_quote}\n" "—Author Name, Book Name\n\nNext paragraph begins."
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

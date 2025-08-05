@@ -3,7 +3,8 @@ import os
 import logging
 import json
 import ftfy
-from typing import List, Callable, Tuple
+from functools import reduce
+from typing import Callable, Iterable, List, Tuple, cast
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,11 @@ HYPHEN_CHARS_ESC = re.escape("\u2010\u2011\u002d\u00ad\u1400\ufe63‐-")
 SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
+# Characters that indicate a newline should be preserved when they appear at
+# the start of a line. Includes typical bullet markers and an em dash used for
+# quote attributions.
 BULLET_CHARS_ESC = re.escape("*•")
+ATTRIBUTION_CHARS_ESC = re.escape("—")
 
 
 def _join_broken_words(text: str) -> str:
@@ -62,13 +67,80 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+def _forward_heading_split(words: List[str]) -> List[str] | None:
+    """Split lines where a heading sits between sentence text and body."""
+    for j in range(len(words)):
+        prefix = " ".join(words[:j]).rstrip()
+        if not prefix or not re.search(r"(?:[.!?…]|\.\.\.)$", prefix):
+            continue
+        for k in range(len(words), j, -1):
+            candidate = " ".join(words[j:k]).strip()
+            rest = " ".join(words[k:]).lstrip()
+            if (
+                rest
+                and _is_probable_heading(candidate)
+                and not _is_probable_heading(rest)
+            ):
+                return [prefix, candidate, rest]
+    return None
+
+
+def _backward_heading_split(words: List[str]) -> List[str] | None:
+    """Split lines where a heading trails after sentence text."""
+    for offset in range(len(words)):
+        idx = len(words) - offset - 1
+        candidate = " ".join(words[idx:])
+        prefix = " ".join(words[:idx]).strip()
+        if (
+            prefix
+            and re.search(r"(?:[.!?…]|\.\.\.)$", prefix)
+            and _is_probable_heading(candidate)
+        ):
+            return [prefix, candidate]
+    return None
+
+
+def _split_inline_heading(line: str) -> List[str]:
+    words = line.split()
+    return _forward_heading_split(words) or _backward_heading_split(words) or [line]
+
+
+def ensure_heading_separation(text: str) -> str:
+    """Insert paragraph breaks around probable headings even when embedded."""
+    lines = [seg for line in text.split("\n") for seg in _split_inline_heading(line)]
+
+    def iter_lines() -> Iterable[str]:
+        for i, line in enumerate(lines):
+            prev = lines[i - 1] if i else ""
+            nxt = lines[i + 1] if i + 1 < len(lines) else ""
+            if _is_probable_heading(line):
+                if prev.strip():
+                    yield ""
+                yield line
+                if nxt.strip():
+                    yield ""
+            else:
+                yield line
+
+    return "\n".join(iter_lines())
+
+
 def _preserve_list_newlines(text: str) -> str:
-    """Keep newlines that precede bullets or enumerated items."""
+    """Keep newlines that precede bullets, enumerated items, or attributions."""
     placeholder = "[[LIST_BREAK]]"
-    pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
-    return (
+    pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}{ATTRIBUTION_CHARS_ESC}]|\d+[.)]))"
+    text = (
         re.sub(pattern, placeholder, text).replace("\n", " ").replace(placeholder, "\n")
     )
+    return re.sub(r"\n\s+", "\n", text)
+
+
+def _apply_substitutions(text: str, subs: Iterable[Tuple[str, str]]) -> str:
+    return reduce(lambda acc, s: re.sub(s[0], s[1], acc), subs, text)
+
+
+def _replace_placeholders(text: str, reps: Iterable[Tuple[str, str]]) -> str:
+    return reduce(lambda acc, r: acc.replace(*r), reps, text)
 
 
 def collapse_single_newlines(text: str) -> str:
@@ -76,17 +148,30 @@ def collapse_single_newlines(text: str) -> str:
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
     list_break = "[[LIST_BREAK]]"
+    indent_break = "[[INDENT_BREAK]]"
     para_break = "[[PARAGRAPH_BREAK]]"
-    list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
 
-    # Normalize colon bullet starts and protect paragraph and list breaks
-    text = re.sub(rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", text)
-    text = re.sub(list_re, list_break, text)
-    text = re.sub(r"\n{2,}", para_break, text)
+    substitutions = [
+        (rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n"),
+        (
+            rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}{ATTRIBUTION_CHARS_ESC}]|\d+[.)]))",
+            list_break,
+        ),
+        (r"\n(?=\s{4,}\S)", indent_break),
+        (r"\n{2,}", para_break),
+    ]
+
+    text = _apply_substitutions(text, substitutions)
     text = text.replace("\n", " ")
 
-    # Restore preserved breaks
-    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
+    text = _replace_placeholders(
+        text,
+        (
+            (para_break, "\n\n"),
+            (list_break, "\n"),
+            (indent_break, "\n\n"),
+        ),
+    )
 
     logger.debug(f"Output text preview: {repr(text[:100])}")
     return text
@@ -143,6 +228,9 @@ def _is_probable_heading(text: str) -> bool:
     if stripped.endswith("|"):
         return False
 
+    if stripped.startswith("—"):
+        return False
+
     # Short phrases with at least one capitalized word are often headings even
     # without terminal punctuation. This helps catch cases like "Assimilate and
     # expand" that follow removed footers.
@@ -192,19 +280,40 @@ def _has_unbalanced_quotes(text: str) -> bool:
     return text.count('"') % 2 == 1 or text.count("'") % 2 == 1
 
 
+def _is_attribution_line(text: str) -> bool:
+    """Heuristically detect author attribution lines starting with an em dash."""
+    return text.lstrip().startswith("—")
+
+
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
-    merged: List[str] = []
-    for part in parts:
-        if merged and not any(_is_probable_heading(seg) for seg in (merged[-1], part)):
-            prev = merged[-1]
+
+    def reducer(acc: List[str], part: str) -> List[str]:
+        if not acc:
+            return [part]
+
+        prev = acc[-1]
+        if _is_attribution_line(part):
+            acc[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
+            return acc
+
+        if "\n—" in prev:
+            return acc + [part]
+
+        if not any(_is_probable_heading(seg) for seg in (prev, part)):
+            merged_part = None
             if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
-                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
-                continue
-            if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
-                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
-                continue
-        merged.append(part)
+                merged_part = f"{prev.rstrip()} {part.lstrip()}"
+            elif len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                merged_part = f"{prev.rstrip()} {part.lstrip()}"
+
+            if merged_part is not None:
+                acc[-1] = merged_part
+                return acc
+
+        return acc + [part]
+
+    merged: List[str] = reduce(reducer, parts, cast(List[str], []))
     return "\n\n".join(merged)
 
 
@@ -316,6 +425,11 @@ def clean_text(text: str) -> str:
     logger.debug("Calling normalize_newlines")
     text = normalize_newlines(text)
     logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+
+    # Ensure headings start new paragraphs
+    logger.debug("Calling ensure_heading_separation")
+    text = ensure_heading_separation(text)
+    logger.debug(f"After ensure_heading_separation: {repr(text[:100])}")
 
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
