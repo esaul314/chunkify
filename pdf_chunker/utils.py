@@ -1,12 +1,12 @@
 import logging
-import re
 import textstat  # type: ignore[import]
-from typing import Callable
+from typing import Callable, Iterable
 from itertools import accumulate
 from haystack.dataclasses import Document
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from dataclasses import dataclass
+from pdf_chunker.source_matchers import MATCHERS, Matcher
 
 
 logger = logging.getLogger(__name__)
@@ -307,19 +307,60 @@ def _build_char_map(blocks: list[dict]) -> dict:
     return {"char_positions": char_positions}
 
 
-def _find_source_block(
-    chunk: Document, _char_map: dict, original_blocks: list[dict]
-) -> dict | None:
-    """Find the original source block for a chunk using multiple heuristics."""
+def _ensure_source(block: dict) -> dict:
+    if "source" not in block or not isinstance(block["source"], dict):
+        block["source"] = {}
+    block["source"].setdefault("filename", "unknown")
+    if not isinstance(block["source"].get("page"), int):
+        block["source"]["page"] = None
+    block["source"].setdefault("location", None)
+    return block
 
-    def ensure_source(block):
-        if "source" not in block or not isinstance(block["source"], dict):
-            block["source"] = {}
-        block["source"].setdefault("filename", "unknown")
-        if not isinstance(block["source"].get("page"), int):
-            block["source"]["page"] = None
-        block["source"].setdefault("location", None)
-        return block
+
+def _match_source_block(
+    chunk_start: str,
+    original_blocks: list[dict],
+    matchers: Iterable[tuple[str, Matcher]],
+) -> tuple[dict | None, str | None]:
+    return next(
+        (
+            (block, label)
+            for label, predicate in matchers
+            for block in original_blocks
+            if predicate(chunk_start, block, original_blocks)
+        ),
+        (None, None),
+    )
+
+
+def _difflib_fallback(chunk_start: str, original_blocks: list[dict]) -> dict | None:
+    try:
+        import difflib
+
+        block_starts = [block.get("text", "")[:50] for block in original_blocks]
+        matches = difflib.get_close_matches(chunk_start, block_starts, n=1, cutoff=0.6)
+        if matches:
+            idx = block_starts.index(matches[0])
+            block = original_blocks[idx]
+            logger.debug(
+                "Fallback: difflib matched block %s on page %s",
+                idx,
+                block.get("source", {}).get("page", None),
+            )
+            return block
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("difflib fallback failed: %s", exc)
+    return None
+
+
+def _find_source_block(
+    chunk: Document,
+    _char_map: dict,
+    original_blocks: list[dict],
+    *,
+    matchers: Iterable[tuple[str, Matcher]] = MATCHERS,
+) -> dict | None:
+    """Find the original source block for a chunk using matcher strategies."""
 
     if not (chunk and chunk.content and original_blocks):
         logger.debug(
@@ -336,83 +377,21 @@ def _find_source_block(
         "Looking for source block for chunk starting with: '%s...'", chunk_start
     )
 
-    def substring_match(block: dict) -> bool:
-        return bool(chunk_start) and chunk_start in block.get("text", "")
-
-    def start_match(block: dict) -> bool:
-        block_text = block.get("text", "").strip()
-        if not block_text:
-            return False
-        block_start = block_text[: max(20, len(chunk_start))].replace("\n", " ").strip()
-        lower_chunk = chunk_start.lower()
-        lower_block = block_start.lower()
-        return lower_chunk.startswith(lower_block) or lower_block.startswith(
-            lower_chunk
+    match, label = _match_source_block(chunk_start, original_blocks, matchers)
+    if match:
+        match = _ensure_source(match)
+        logger.debug(
+            "Found matching source block on page %s (%s)",
+            match["source"].get("page", None),
+            label,
         )
+        return match
 
-    def fuzzy_match(block: dict) -> bool:
-        import re
+    block = _difflib_fallback(chunk_start, original_blocks)
+    if block:
+        return _ensure_source(block)
 
-        def normalize(s: str) -> str:
-            return re.sub(r"[\W_]+", "", s).lower()
-
-        block_start = block.get("text", "")[: max(20, len(chunk_start))]
-        return normalize(block_start).startswith(normalize(chunk_start)[:15])
-
-    def overlap_match(block: dict) -> bool:
-        block_text = block.get("text", "")
-        return any(chunk_start[:n] in block_text for n in range(30, 10, -5))
-
-    def header_match(block: dict) -> bool:
-        return (
-            block is original_blocks[0]
-            and bool(chunk_start)
-            and (
-                chunk_start.isupper()
-                or chunk_start.startswith("CHAPTER")
-                or chunk_start.startswith("SECTION")
-            )
-        )
-
-    predicates = [
-        ("substring match", substring_match),
-        ("start match", start_match),
-        ("fuzzy match", fuzzy_match),
-        ("overlap match", overlap_match),
-        ("header/special formatting", header_match),
-    ]
-
-    for label, predicate in predicates:
-        match = next(
-            (ensure_source(b) for b in original_blocks if predicate(b)),
-            None,
-        )
-        if match:
-            logger.debug(
-                "Found matching source block on page %s (%s)",
-                match["source"].get("page", None),
-                label,
-            )
-            return match
-
-    try:
-        import difflib
-
-        block_starts = [block.get("text", "")[:50] for block in original_blocks]
-        matches = difflib.get_close_matches(chunk_start, block_starts, n=1, cutoff=0.6)
-        if matches:
-            idx = block_starts.index(matches[0])
-            block = ensure_source(original_blocks[idx])
-            logger.debug(
-                "Fallback: difflib matched block %s on page %s",
-                idx,
-                block["source"].get("page", None),
-            )
-            return block
-    except Exception as e:
-        logger.debug("difflib fallback failed: %s", e)
-
-    block = ensure_source(original_blocks[0])
+    block = _ensure_source(original_blocks[0])
     logger.warning(
         "No matching source block found for chunk starting with: '%s...'. Mapping to first block.",
         chunk_start,

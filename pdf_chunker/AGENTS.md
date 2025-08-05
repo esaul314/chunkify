@@ -22,6 +22,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `pdf_parsing.py`: High-level PDF parsing entry point.
 - `pymupdf4llm_integration.py`: Optional PyMuPDF4LLM extraction and cleanup.
 - `text_processing.py`: Additional text-repair helpers.
+- `source_matchers.py`: Matching strategies for locating original source blocks.
 
 ## AI Agent Guidance
 - Respect strict separation of passes.
