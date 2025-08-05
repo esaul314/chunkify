@@ -49,6 +49,20 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
         self.assertEqual(clean_text(text), expected)
 
+    def test_preserve_heading_and_attribution(self):
+        os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "0"
+        text = (
+            "previous sections or pages...\nHeading At The Top of The Page\n\n"
+            "Quote by a famous author\n—Author Name, Book Name\n\n"
+            "The paragraph begins here..."
+        )
+        expected = (
+            "previous sections or pages...\n\nHeading At The Top of The Page\n\n"
+            "Quote by a famous author\n—Author Name, Book Name\n\n"
+            "The paragraph begins here..."
+        )
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

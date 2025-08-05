@@ -3,7 +3,7 @@ import os
 import logging
 import json
 import ftfy
-from typing import List, Callable, Tuple
+from typing import List, Callable, Tuple, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,11 @@ HYPHEN_CHARS_ESC = re.escape("\u2010\u2011\u002d\u00ad\u1400\ufe63‐-")
 SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
+# Characters that indicate a newline should be preserved when they appear at
+# the start of a line. Includes typical bullet markers and an em dash used for
+# quote attributions.
 BULLET_CHARS_ESC = re.escape("*•")
+ATTRIBUTION_CHARS_ESC = re.escape("—")
 
 
 def _join_broken_words(text: str) -> str:
@@ -62,10 +66,26 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+def ensure_heading_separation(text: str) -> str:
+    """Insert a paragraph break before lines that look like headings."""
+    lines = text.split("\n")
+
+    def iter_lines() -> Iterable[str]:
+        if not lines:
+            return
+        yield lines[0]
+        for prev, curr in zip(lines, lines[1:]):
+            if _is_probable_heading(curr) and prev.strip():
+                yield ""
+            yield curr
+
+    return "\n".join(iter_lines())
+
+
 def _preserve_list_newlines(text: str) -> str:
-    """Keep newlines that precede bullets or enumerated items."""
+    """Keep newlines that precede bullets, enumerated items, or attributions."""
     placeholder = "[[LIST_BREAK]]"
-    pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
+    pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}{ATTRIBUTION_CHARS_ESC}]|\d+[.)]))"
     return (
         re.sub(pattern, placeholder, text).replace("\n", " ").replace(placeholder, "\n")
     )
@@ -77,7 +97,7 @@ def collapse_single_newlines(text: str) -> str:
 
     list_break = "[[LIST_BREAK]]"
     para_break = "[[PARAGRAPH_BREAK]]"
-    list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
+    list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}{ATTRIBUTION_CHARS_ESC}]|\d+[.)]))"
 
     # Normalize colon bullet starts and protect paragraph and list breaks
     text = re.sub(rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", text)
@@ -141,6 +161,9 @@ def _is_probable_heading(text: str) -> bool:
     # not actual headings. Treat them as non-headings so they remain with the
     # preceding body text rather than being attached to the next chunk.
     if stripped.endswith("|"):
+        return False
+
+    if stripped.startswith("—"):
         return False
 
     # Short phrases with at least one capitalized word are often headings even
@@ -316,6 +339,11 @@ def clean_text(text: str) -> str:
     logger.debug("Calling normalize_newlines")
     text = normalize_newlines(text)
     logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+
+    # Ensure headings start new paragraphs
+    logger.debug("Calling ensure_heading_separation")
+    text = ensure_heading_separation(text)
+    logger.debug(f"After ensure_heading_separation: {repr(text[:100])}")
 
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
