@@ -27,11 +27,17 @@ from .pymupdf4llm_integration import (
     PyMuPDF4LLMExtractionError,
 )
 
+from .list_detection import (
+    BULLET_CHARS,
+    BULLET_CHARS_ESC,
+    is_bullet_continuation,
+    is_bullet_list_pair,
+    is_numbered_continuation,
+    is_numbered_list_pair,
+)
 from typing import List, Dict, Any, Tuple, Optional
 
 
-BULLET_CHARS = "*•◦▪‣·●◉○‧"
-BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 MIN_WORDS_FOR_CONTINUATION = 6
 
 COMMON_SENTENCE_STARTERS = {
@@ -75,45 +81,6 @@ def _fragment_tail(text: str) -> str:
 
 def _is_common_sentence_starter(word: str) -> bool:
     return word in COMMON_SENTENCE_STARTERS
-
-
-def _is_bullet_continuation(curr: str, nxt: str) -> bool:
-    return curr.rstrip().endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
-
-
-def _starts_with_bullet(text: str) -> bool:
-    return text.lstrip().startswith(tuple(BULLET_CHARS))
-
-
-def _is_bullet_list_pair(curr: str, nxt: str) -> bool:
-    colon_bullet = re.search(rf":\s*[{BULLET_CHARS_ESC}]", curr)
-    return _starts_with_bullet(nxt) and (
-        _starts_with_bullet(curr)
-        or any(_starts_with_bullet(line) for line in curr.splitlines())
-        or colon_bullet is not None
-    )
-
-
-NUMBERED_RE = re.compile(r"\s*\d+[.)]")
-
-
-def _starts_with_number(text: str) -> bool:
-    return bool(NUMBERED_RE.match(text))
-
-
-def _is_numbered_list_pair(curr: str, nxt: str) -> bool:
-    return _starts_with_number(nxt) and (
-        _starts_with_number(curr)
-        or any(_starts_with_number(line) for line in curr.splitlines())
-    )
-
-
-def _is_numbered_continuation(curr: str, nxt: str) -> bool:
-    return (
-        _starts_with_number(curr)
-        and not _starts_with_number(nxt)
-        and not curr.rstrip().endswith((".", "!", "?"))
-    )
 
 
 def _is_indented_continuation(curr: dict, nxt: dict) -> bool:
@@ -195,19 +162,19 @@ def _should_merge_blocks(
             logger.debug("Merge decision: QUOTE_CONTINUATION")
             return True, "quote_continuation"
 
-    if _is_bullet_continuation(curr_text, next_text):
+    if is_bullet_continuation(curr_text, next_text):
         logger.debug("Merge decision: BULLET_CONTINUATION")
         return True, "bullet_continuation"
 
-    if _is_bullet_list_pair(curr_text, next_text):
+    if is_bullet_list_pair(curr_text, next_text):
         logger.debug("Merge decision: BULLET_LIST")
         return True, "bullet_list"
 
-    if _is_numbered_list_pair(curr_text, next_text):
+    if is_numbered_list_pair(curr_text, next_text):
         logger.debug("Merge decision: NUMBERED_LIST")
         return True, "numbered_list"
 
-    if _is_numbered_continuation(curr_text, next_text):
+    if is_numbered_continuation(curr_text, next_text):
         logger.debug("Merge decision: NUMBERED_CONTINUATION")
         return True, "numbered_continuation"
 
@@ -441,7 +408,9 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                 elif merge_reason == "sentence_continuation":
                     merged_text = current_text + " " + next_text
                 elif merge_reason == "bullet_continuation":
-                    merged_text = current_text.rstrip(" *•") + " " + next_text
+                    merged_text = (
+                        current_text.rstrip(" " + BULLET_CHARS) + " " + next_text
+                    )
                 elif merge_reason == "bullet_list":
                     current_text = re.sub(
                         rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", current_text
