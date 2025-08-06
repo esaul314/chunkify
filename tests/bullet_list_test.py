@@ -14,3 +14,5 @@ def test_bullet_list_preservation():
     assert len(items) == 3
     assert all(not item.rstrip().endswith(".") for item in items)
     assert "•\n\n•" not in blob
+    assert "\n\nswamp" not in blob
+    assert "swamp\n\nFollow" in blob

@@ -31,9 +31,11 @@ from .list_detection import (
     BULLET_CHARS,
     BULLET_CHARS_ESC,
     is_bullet_continuation,
+    is_bullet_fragment,
     is_bullet_list_pair,
     is_numbered_continuation,
     is_numbered_list_pair,
+    split_bullet_fragment,
 )
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -169,6 +171,10 @@ def _should_merge_blocks(
     if is_bullet_continuation(curr_text, next_text):
         logger.debug("Merge decision: BULLET_CONTINUATION")
         return True, "bullet_continuation"
+
+    if is_bullet_fragment(curr_text, next_text):
+        logger.debug("Merge decision: BULLET_FRAGMENT")
+        return True, "bullet_fragment"
 
     if is_bullet_list_pair(curr_text, next_text):
         logger.debug("Merge decision: BULLET_LIST")
@@ -411,6 +417,20 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     )
                 elif merge_reason == "sentence_continuation":
                     merged_text = current_text + " " + next_text
+                elif merge_reason == "bullet_fragment":
+                    fragment, remainder = split_bullet_fragment(next_text)
+                    merged_text = f"{current_text} {fragment}"
+                    after_merge = merged_text[:50].replace(chr(10), "\n")
+                    logger.debug("  After merge: %s", after_merge)
+                    current_block["text"] = merged_text
+                    current_text = merged_text
+                    merge_count += 1
+                    merged_any = True
+                    if remainder:
+                        next_block["text"] = remainder.lstrip()
+                        break
+                    j += 1
+                    continue
                 elif merge_reason == "bullet_continuation":
                     merged_text = (
                         current_text.rstrip(" " + BULLET_CHARS) + " " + next_text

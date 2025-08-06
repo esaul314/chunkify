@@ -1,4 +1,5 @@
 import re
+from typing import Tuple
 
 BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
@@ -10,9 +11,37 @@ def starts_with_bullet(text: str) -> bool:
     return text.lstrip().startswith(tuple(BULLET_CHARS))
 
 
+def _last_non_empty_line(text: str) -> str:
+    return next(
+        (line.strip() for line in reversed(text.splitlines()) if line.strip()),
+        "",
+    )
+
+
 def is_bullet_continuation(curr: str, nxt: str) -> bool:
     """Return True when ``nxt`` continues a bullet item from ``curr``."""
-    return curr.rstrip().endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
+    last_line = _last_non_empty_line(curr)
+    return last_line.endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
+
+
+def is_bullet_fragment(curr: str, nxt: str) -> bool:
+    """Return True when ``nxt`` starts with text that continues the last bullet in ``curr``."""
+    last_line = _last_non_empty_line(curr)
+    return (
+        starts_with_bullet(last_line)
+        and not last_line.rstrip().endswith((".", "!", "?"))
+        and nxt[:1].islower()
+    )
+
+
+def split_bullet_fragment(text: str) -> Tuple[str, str]:
+    """Split leading lowercase fragment from the rest of ``text``."""
+    match = re.match(r"([a-z0-9,;:'\"()\-\s]+)([A-Z].*)", text, re.DOTALL)
+    return (
+        (match.group(1).strip(), match.group(2).lstrip())
+        if match
+        else (text.strip(), "")
+    )
 
 
 def is_bullet_list_pair(curr: str, nxt: str) -> bool:
