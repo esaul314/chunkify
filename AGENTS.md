@@ -48,6 +48,7 @@ pdf_chunker/
     ├── AGENTS.md
     ├── ai_enrichment_test.py
     ├── bullet_list_test.py
+    ├── chunk_pdf_integration_test.py
     ├── cross_page_sentence_test.py
     ├── epub_spine_test.py
     ├── heading_boundary_test.py
@@ -61,6 +62,7 @@ pdf_chunker/
     ├── page_utils_test.py
     ├── pdf_extraction_test.py
     ├── process_document_override_test.py
+    ├── property_based_text_test.py
     ├── run_all_tests.sh           # Orchestrates all test modules
     ├── semantic_chunking_test.py
     ├── source_matchers_test.py
