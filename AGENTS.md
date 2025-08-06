@@ -12,7 +12,9 @@ If possible, check to make sure the tree below reflects the current state of the
 Document newly introduced modules (e.g., list detection utilities) here to keep this reference current.
 ```
 pdf_chunker/
-├── .env                           # API keys and configuration secrets
+├── _apply.sh                    # Batch apply scripts across multiple files
+├── _e2e_check.sh                # End-to-end pipeline check
+├── .env                         # API keys and configuration secrets
 ├── config/
 │   └── tags/                      # External tag configuration (YAML vocabularies)
 │       ├── generic.yaml           # Base tag categories
@@ -40,30 +42,47 @@ pdf_chunker/
 │   ├── text_processing.py         # Shared text manipulation utilities
 │   └── utils.py                   # Metadata mapping and glue logic
 ├── scripts/
-│   ├── _apply.sh                  # Batch apply scripts across multiple files
-│   ├── chunk_pdf.py               # CLI for running the full pipeline
-│   ├── detect_duplicates.py       # Overlap and duplicate detection
-│   └── validate_chunks.sh         # Quality and boundary validation
-└── tests/                         # Modular test architecture
+│   ├── AGENTS.md                # Guidance for maintenance scripts
+│   ├── benchmark_extraction.py  # Compare extraction strategies
+│   ├── chunk_pdf.py             # CLI for running the full pipeline
+│   ├── compare_text_quality.py  # Inspect text differences across engines
+│   ├── detect_duplicates.py     # Overlap and duplicate detection
+│   ├── diagnose_hyphens.py      # Report hyphenation issues
+│   ├── experiment_pymupdf4llm.py # Prototype PyMuPDF4LLM integration
+│   ├── find_glued_words.py      # Detect concatenated words
+│   ├── fix_newlines.py          # Normalize newlines in text
+│   ├── fix_newlines_jsonl.py    # Fix newline issues in JSONL chunks
+│   ├── generate_test_epub.py    # Build minimal EPUB fixtures
+│   ├── generate_test_pdf.py     # Build minimal PDF fixtures
+│   ├── llm_correction.py        # Apply LLM-based corrections
+│   ├── test_page_boundaries.py  # Inspect chunk boundaries against pages
+│   ├── validate_chunk_quality.py # Evaluate chunk content quality
+│   ├── validate_chunks.sh       # Quality and boundary validation
+│   └── validate_readme_functionality.py # Check README code snippets
+└── tests/                        # Modular test architecture
     ├── AGENTS.md
     ├── ai_enrichment_test.py
     ├── bullet_list_test.py
     ├── chunk_pdf_integration_test.py
     ├── cross_page_sentence_test.py
+    ├── env_utils_test.py
     ├── epub_spine_test.py
     ├── heading_boundary_test.py
     ├── hyphenation_test.py
     ├── indented_block_test.py
+    ├── list_detection_edge_case_test.py
     ├── newline_cleanup_test.py
     ├── numbered_list_chunk_test.py
     ├── numbered_list_test.py
     ├── page_artifact_detection_test.py
+    ├── page_artifacts_edge_case_test.py
     ├── page_exclusion_test.py
     ├── page_utils_test.py
     ├── pdf_extraction_test.py
     ├── process_document_override_test.py
     ├── property_based_text_test.py
     ├── run_all_tests.sh           # Orchestrates all test modules
+    ├── scripts_cli_test.py
     ├── semantic_chunking_test.py
     ├── source_matchers_test.py
     ├── test_text_processing.py
@@ -73,6 +92,11 @@ pdf_chunker/
     └── utils_test.py
 `````
 
+---
+
+## Formatting Standards
+
+All Python modules, scripts, and tests must be formatted with **Black**, linted with **flake8**, and type-checked using **mypy** before submission.
 
 ---
 
@@ -240,7 +264,7 @@ Tests must:
 
 ```bash
 black pdf_chunker/ scripts/ tests/
-flake8 pdf_chunker/
+flake8 pdf_chunker/ scripts/ tests/
 mypy pdf_chunker/
 bash scripts/validate_chunks.sh
 `````
