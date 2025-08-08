@@ -4,6 +4,7 @@ import logging
 import json
 import ftfy
 from typing import List, Callable, Tuple
+from itertools import groupby
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,16 @@ def pipe(value, *funcs):
     for fn in funcs:
         value = fn(value)
     return value
+
+
+def _log_step(fn: Callable[[str], str]) -> Callable[[str], str]:
+    def wrapped(text: str) -> str:
+        logger.debug(f"Calling {fn.__name__}")
+        result = fn(text)
+        logger.debug(f"After {fn.__name__}: {repr(result[:100])}")
+        return result
+
+    return wrapped
 
 
 # Patterns
@@ -127,6 +138,32 @@ def remove_control_characters(text: str) -> str:
 
 def consolidate_whitespace(text: str) -> str:
     return re.sub(r"[ \t\r\f\v]+", " ", text).strip()
+
+
+BR_PLACEHOLDER = "[[BR]]"
+
+
+def _replace_html_breaks(text: str) -> str:
+    return text.replace("<br>", BR_PLACEHOLDER)
+
+
+def _restore_html_breaks(text: str) -> str:
+    return text.replace(BR_PLACEHOLDER, "\n")
+
+
+def _remove_markdown_table(text: str) -> str:
+    return "\n".join(
+        (
+            line.strip("|").split("|")[0].strip()
+            if line.strip().startswith("|") and line.count("|") >= 2
+            else line
+        )
+        for line in text.splitlines()
+    )
+
+
+def _dedupe_consecutive_lines(text: str) -> str:
+    return "\n".join(next(group) for _, group in groupby(text.splitlines()))
 
 
 def _is_probable_heading(text: str) -> bool:
@@ -306,32 +343,29 @@ def clean_text(text: str) -> str:
                 logger.debug(
                     "PyMuPDF4LLM is available, calling clean_text_with_pymupdf4llm"
                 )
-                result = clean_text_with_pymupdf4llm(text)
-                logger.debug(f"PyMuPDF4LLM result preview: {repr(result[:100])}")
-                return result
+                text = clean_text_with_pymupdf4llm(text)
+                logger.debug(f"PyMuPDF4LLM result preview: {repr(text[:100])}")
             else:
                 logger.debug("PyMuPDF4LLM not available, falling back to traditional")
         except Exception as e:
             logger.debug(
                 f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional"
             )
-            pass
 
     logger.debug("Using traditional text cleaning path")
 
-    # Normalize newlines first
-    logger.debug("Calling normalize_newlines")
-    text = normalize_newlines(text)
-    logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+    transforms = (
+        normalize_newlines,
+        _replace_html_breaks,
+        _remove_markdown_table,
+        collapse_single_newlines,
+        _restore_html_breaks,
+        _dedupe_consecutive_lines,
+        merge_spurious_paragraph_breaks,
+    )
 
-    # Collapse single line breaks except paragraph breaks
-    logger.debug("Calling collapse_single_newlines")
-    text = collapse_single_newlines(text)
-    logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
-
-    logger.debug("Calling merge_spurious_paragraph_breaks")
-    text = merge_spurious_paragraph_breaks(text)
-    logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
+    text = pipe(text, *map(_log_step, transforms))
+    logger.debug(f"After text transforms: {repr(text[:100])}")
 
     # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
