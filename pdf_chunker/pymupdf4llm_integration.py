@@ -484,6 +484,8 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
             collapse_single_newlines,
             merge_spurious_paragraph_breaks,
             fix_hyphenated_linebreaks,
+            _fix_double_newlines,
+            _fix_split_words,
             normalize_ligatures,
             consolidate_whitespace,
         )
@@ -493,6 +495,14 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         text = normalize_newlines(text)
         logger.debug(f"After normalize_newlines: {repr(text[:100])}")
 
+        logger.debug("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
+        text = fix_hyphenated_linebreaks(text)
+        logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
+
+        logger.debug("Applying _fix_double_newlines in PyMuPDF4LLM path")
+        text = _fix_double_newlines(text)
+        logger.debug(f"After _fix_double_newlines: {repr(text[:100])}")
+
         logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
         text = collapse_single_newlines(text)
         logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
@@ -501,9 +511,9 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         text = merge_spurious_paragraph_breaks(text)
         logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
 
-        logger.debug("Applying fix_hyphenated_linebreaks in PyMuPDF4LLM path")
-        text = fix_hyphenated_linebreaks(text)
-        logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
+        logger.debug("Applying _fix_split_words in PyMuPDF4LLM path")
+        text = _fix_split_words(text)
+        logger.debug(f"After _fix_split_words: {repr(text[:100])}")
 
         # Apply other cleaning steps paragraph by paragraph
         paragraphs = []
