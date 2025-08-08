@@ -100,6 +100,21 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(line, 19)
         self.assertEqual(cleaned, "")
 
+    def test_markdown_table_header_normalization(self):
+        table_text = (
+            "|This closed car smells of salt fish|Col2|\n"
+            "|---|---|\n"
+            "|salt fish||\n"
+            "|Person Name, PMP<br>Alma, Quebec, Canada|Person Name, PMP<br>Alma, Quebec, Canada|"
+        )
+        expected = (
+            "This closed car smells of salt fish\n"
+            "Person Name, PMP\n"
+            "Alma, Quebec, Canada"
+        )
+        cleaned = remove_page_artifact_lines(table_text, 1)
+        self.assertEqual(cleaned, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 import logging
 import re
 from functools import reduce
+from itertools import takewhile
 from typing import Optional
 
 from .text_cleaning import clean_text
@@ -227,9 +228,27 @@ def _remove_embedded_footnote(text: str) -> str:
     return pattern.sub("", text)
 
 
+def _flatten_markdown_table(text: str) -> str:
+    """Collapse markdown table artifacts into newline-separated text."""
+
+    stripped = text.strip()
+    if not stripped.startswith("|") or "---" not in stripped:
+        return text
+
+    tokens = [t.strip() for t in stripped.strip("|").split("|")]
+    filtered = [t for t in tokens if t and t not in {"Col2", "---"}]
+    deduped = reduce(
+        lambda acc, t: acc if any(t in prev for prev in acc) else acc + [t],
+        filtered,
+        [],
+    )
+    return "\n".join(deduped).replace("<br>", "\n")
+
+
 def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     """Remove header or footer artifact lines from a block."""
 
+    text = _flatten_markdown_table(text)
     text = _remove_inline_footer(text, page_num)
     text = _remove_embedded_footnote(text)
 
