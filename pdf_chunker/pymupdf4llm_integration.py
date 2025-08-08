@@ -9,6 +9,7 @@ existing three-tier system when needed.
 
 import re
 import time
+import itertools
 from typing import List, Dict, Any, Optional, Tuple
 import logging
 from . import page_artifacts
@@ -439,6 +440,20 @@ def _convert_markdown_to_clean_text(markdown_text: str) -> str:
     return cleaned_text.strip()
 
 
+def _strip_md_table_artifacts(text: str) -> str:
+    """Remove markdown table lines and collapse consecutive duplicates."""
+
+    def _trim(line: str) -> str:
+        return re.sub(r"\|+$", "", line).strip()
+
+    lines = (
+        _trim(line)
+        for line in text.splitlines()
+        if "|---" not in line and not re.search(r"\|\s*Col", line)
+    )
+    return "\n".join(dict.fromkeys(line for line in lines if line))
+
+
 def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> str:
     """
     Clean text using PyMuPDF4LLM's superior text processing capabilities.
@@ -456,6 +471,8 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
     logger.debug(f"clean_text_with_pymupdf4llm called with {len(text)} chars")
     logger.debug(f"Input text preview: {repr(text[:100])}")
 
+    text = _strip_md_table_artifacts(text.replace("<br>", "\n\n"))
+
     if not is_pymupdf4llm_available():
         logger.debug("PyMuPDF4LLM not available, falling back to traditional cleaning")
         # Fallback to traditional text cleaning
@@ -464,7 +481,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         paragraphs = (clean_paragraph(p) for p in text.split("\n\n"))
         cleaned = "\n\n".join(p for p in paragraphs if p)
         logger.debug(f"Traditional fallback result preview: {repr(cleaned[:100])}")
-        return cleaned
+        return _strip_md_table_artifacts(cleaned)
 
     try:
         logger.debug("Using PyMuPDF4LLM text cleaning path")
@@ -511,7 +528,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
 
         cleaned = "\n\n".join(paragraphs)
         logger.debug(f"PyMuPDF4LLM cleaning result preview: {repr(cleaned[:100])}")
-        return cleaned
+        return _strip_md_table_artifacts(cleaned)
 
     except Exception as e:
         logger.warning(

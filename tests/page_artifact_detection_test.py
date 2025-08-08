@@ -5,6 +5,7 @@ from pdf_chunker.page_artifacts import (
     strip_page_artifact_suffix,
     remove_page_artifact_lines,
 )
+from pdf_chunker.pymupdf4llm_integration import clean_text_with_pymupdf4llm
 
 
 class TestPageArtifactDetection(unittest.TestCase):
@@ -99,6 +100,23 @@ class TestPageArtifactDetection(unittest.TestCase):
         self.assertTrue(is_page_artifact_text(line, 19))
         cleaned = remove_page_artifact_lines(line, 19)
         self.assertEqual(cleaned, "")
+
+    def test_header_deduplication_and_br_removal(self):
+        raw = (
+            "| Col1 | Col2 |\n"
+            "|---|---|\n"
+            "Title<br>\n"
+            "Author<br>\n"
+            "Location<br>\n"
+            "Title<br>\n"
+            "Author<br>\n"
+            "Location\n"
+        )
+        cleaned = clean_text_with_pymupdf4llm(raw)
+        self.assertEqual(cleaned.count("Title"), 1)
+        self.assertEqual(cleaned.count("Author"), 1)
+        self.assertEqual(cleaned.count("Location"), 1)
+        self.assertNotIn("<br>", cleaned)
 
 
 if __name__ == "__main__":
