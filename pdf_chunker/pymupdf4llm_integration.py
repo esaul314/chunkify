@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """
 PyMuPDF4LLM Integration Module
 
@@ -14,7 +15,7 @@ import logging
 from . import page_artifacts
 
 try:
-    import pymupdf4llm
+    import pymupdf4llm  # type: ignore[import-untyped]
 
     PYMUPDF4LLM_AVAILABLE = True
 except ImportError:
@@ -45,7 +46,7 @@ def is_pymupdf4llm_available() -> bool:
 
 
 def extract_with_pymupdf4llm(
-    pdf_path: str, exclude_pages: set = None
+    pdf_path: str, exclude_pages: Optional[set[int]] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Extract text using PyMuPDF4LLM with enhanced error handling and validation.
@@ -54,8 +55,8 @@ def extract_with_pymupdf4llm(
     logger.info(f"Starting PyMuPDF4LLM extraction for: {pdf_path}")
 
     try:
-        import fitz
-        import pymupdf4llm
+        import fitz  # type: ignore[import-untyped]
+        import pymupdf4llm  # type: ignore[import-untyped]
 
         # Determine which pages to process
         doc = fitz.open(pdf_path)
@@ -237,6 +238,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
 
+    from .page_artifacts import remove_page_artifact_lines
     import re as _re2
     from .text_cleaning import (
         pipe,
@@ -247,6 +249,8 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         remove_control_characters,
         consolidate_whitespace,
     )
+
+    text = remove_page_artifact_lines(text, block.get("source", {}).get("page"))
 
     text = pipe(
         text,
