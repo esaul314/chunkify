@@ -5,6 +5,7 @@ from pdf_chunker.page_artifacts import (
     strip_page_artifact_suffix,
     remove_page_artifact_lines,
 )
+from pdf_chunker.pymupdf4llm_integration import _clean_pymupdf4llm_block
 
 
 class TestPageArtifactDetection(unittest.TestCase):
@@ -114,6 +115,21 @@ class TestPageArtifactDetection(unittest.TestCase):
         )
         cleaned = remove_page_artifact_lines(table_text, 1)
         self.assertEqual(cleaned, expected)
+
+    def test_pymupdf4llm_block_normalization(self):
+        table_text = (
+            "|This closed car smells of salt fish|Col2|\n"
+            "|---|---|\n"
+            "|salt fish||\n"
+            "|Person Name, PMP<br>Alma, Quebec, Canada|Person Name, PMP<br>Alma, Quebec, Canada|"
+        )
+        block = {"text": table_text, "source": {"page": 1}}
+        cleaned = _clean_pymupdf4llm_block(block)
+        self.assertIsNotNone(cleaned)
+        self.assertEqual(
+            cleaned["text"],
+            "This closed car smells of salt fish\nPerson Name, PMP\nAlma, Quebec, Canada",
+        )
 
 
 if __name__ == "__main__":

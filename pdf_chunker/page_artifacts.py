@@ -229,20 +229,46 @@ def _remove_embedded_footnote(text: str) -> str:
 
 
 def _flatten_markdown_table(text: str) -> str:
-    """Collapse markdown table artifacts into newline-separated text."""
+    """Flatten leading markdown table rows into plain lines.
 
-    stripped = text.strip()
-    if not stripped.startswith("|") or "---" not in stripped:
+    The function targets artifacts where a header table encodes chapter
+    information. It strips alignment markers (``---``), generic column names
+    like ``Col2`` and collapses duplicate cells that merely repeat the chapter
+    title. ``<br>`` tags are expanded to newlines before deduplication to cover
+    cases where author name and location share a single cell.
+    """
+
+    stripped = text.lstrip()
+    if not stripped.startswith("|"):
         return text
 
-    tokens = [t.strip() for t in stripped.strip("|").split("|")]
-    filtered = [t for t in tokens if t and t not in {"Col2", "---"}]
-    deduped = reduce(
-        lambda acc, t: acc if any(t in prev for prev in acc) else acc + [t],
-        filtered,
-        [],
+    lines = list(
+        takewhile(lambda ln: ln.lstrip().startswith("|"), stripped.splitlines())
     )
-    return "\n".join(deduped).replace("<br>", "\n")
+    if not any("---" in ln for ln in lines):
+        return text
+
+    col_re = re.compile(r"^col\d+$", re.IGNORECASE)
+    rule_re = re.compile(r"^[-:]+$")
+
+    cells = (
+        cell.strip() for line in lines for cell in line.strip().strip("|").split("|")
+    )
+
+    filtered = (
+        c for c in cells if c and not col_re.fullmatch(c) and not rule_re.fullmatch(c)
+    )
+
+    expanded = (part.strip() for cell in filtered for part in cell.split("<br>"))
+
+    def _dedupe(acc: list[str], t: str) -> list[str]:
+        return acc if any(t in prev for prev in acc) else acc + [t]
+
+    deduped: list[str] = reduce(_dedupe, expanded, [])
+
+    remaining = stripped.splitlines()[len(lines) :]  # noqa: E203
+    flattened = "\n".join(deduped)
+    return "\n".join(filter(None, [flattened, *remaining]))
 
 
 def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:

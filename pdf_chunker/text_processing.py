@@ -17,21 +17,18 @@ def normalize_quotes(text: str) -> str:
         return text
 
     # 1. Map smart quotes to ASCII
-    text = text.translate(
-        str.maketrans(
-            {
-                "“": '"',
-                "”": '"',
-                "„": '"',
-                "«": '"',
-                "»": '"',
-                "‘": "'",
-                "’": "'",
-                "‚": "'",
-                "`": "'",
-            }
-        )
-    )
+    replacements = {
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "«": '"',
+        "»": '"',
+        "‘": "'",
+        "’": "'",
+        "‚": "'",
+        "`": "'",
+    }
+    text = text.translate({ord(k): v for k, v in replacements.items()})
 
     # # 2. Add space before opening quote if missing (opening quote = quote followed by word char)
     # # Use positive lookbehind for any non-space (so both word and punctuation)
@@ -141,21 +138,18 @@ def _fix_quote_boundary_gluing(text: str) -> str:
         return text
 
     # 1. Map smart quotes to ASCII
-    text = text.translate(
-        str.maketrans(
-            {
-                "“": '"',
-                "”": '"',
-                "„": '"',
-                "«": '"',
-                "»": '"',
-                "‘": "'",
-                "’": "'",
-                "‚": "'",
-                "`": "'",
-            }
-        )
-    )
+    replacements = {
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "«": '"',
+        "»": '"',
+        "‘": "'",
+        "’": "'",
+        "‚": "'",
+        "`": "'",
+    }
+    text = text.translate({ord(k): v for k, v in replacements.items()})
 
     # # 2. Add space before opening quote if missing (opening quote = quote followed by word char)
     # text = re.sub(r'(?<!\s)(["\'])(?=\w)', r' \1', text)
@@ -198,15 +192,6 @@ def detect_and_fix_word_gluing(text: str) -> str:
     text = _fix_page_boundary_gluing(text)
     text = _fix_quote_boundary_gluing(text)
     return text
-
-
-def _repair_json_escaping_issues(text: str) -> str:
-    """
-    Remove problematic JSON escaping fragments, especially leading '",'.
-    """
-    if not text:
-        return text
-    # Remove control characters first
 
 
 def _detect_text_reordering(*args, **kwargs):
