@@ -263,16 +263,21 @@ def clean_paragraph(paragraph: str) -> str:
     Cleans a single paragraph: removes mid-line hyphens, artifacts,
     collapses all newlines (if present) to spaces, and normalizes.
     """
-    return pipe(
-        paragraph,
-        fix_hyphenated_linebreaks,
-        collapse_artifact_breaks,
-        _preserve_list_newlines,
-        normalize_ligatures,
-        normalize_quotes,
-        remove_control_characters,
-        consolidate_whitespace,
+    parts = filter(None, re.split(r"<br>\s*|\n", paragraph))
+    cleaned_parts = (
+        pipe(
+            part,
+            fix_hyphenated_linebreaks,
+            collapse_artifact_breaks,
+            _preserve_list_newlines,
+            normalize_ligatures,
+            normalize_quotes,
+            remove_control_characters,
+            consolidate_whitespace,
+        )
+        for part in parts
     )
+    return "\n".join(cleaned_parts)
 
 
 def clean_text(text: str) -> str:
