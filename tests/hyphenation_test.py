@@ -53,3 +53,14 @@ def test_bullet_hyphen_continuation():
     cleaned = clean_text(text)
     assert "ambiguous" in cleaned
     assert cleaned.count("*") == 1
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("put-\n\nting", "putting"),
+        ("spea-\n\nking", "speaking"),
+    ],
+)
+def test_multi_newline_hyphenation(text, expected):
+    assert clean_text(text) == expected
