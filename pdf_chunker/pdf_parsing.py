@@ -129,6 +129,35 @@ def _is_cross_page_continuation(
     return True
 
 
+def _is_cross_page_paragraph_continuation(
+    curr_block: Dict[str, Any], next_block: Dict[str, Any]
+) -> bool:
+    """Detect when a paragraph is split across pages despite ending with punctuation."""
+
+    curr_page = curr_block.get("source", {}).get("page")
+    next_page = next_block.get("source", {}).get("page")
+    if curr_page is None or next_page is None or curr_page == next_page:
+        return False
+
+    curr_bbox = curr_block.get("bbox")
+    next_bbox = next_block.get("bbox")
+    if not curr_bbox or not next_bbox:
+        return False
+
+    curr_x0, _, _, _ = curr_bbox
+    next_x0, _, _, _ = next_bbox
+    indent_diff = next_x0 - curr_x0
+
+    if indent_diff > 10:
+        return False
+
+    next_text = next_block.get("text", "").strip()
+    if _detect_heading_fallback(next_text):
+        return False
+
+    return True
+
+
 def _should_merge_blocks(
     curr_block: Dict[str, Any], next_block: Dict[str, Any]
 ) -> Tuple[bool, str]:
@@ -219,6 +248,11 @@ def _should_merge_blocks(
     # Enhanced to be more careful with quoted text
     elif _is_cross_page_continuation(curr_text, next_text, curr_page, next_page):
         logger.debug("Merge decision: CROSS_PAGE_CONTINUATION")
+        return True, "sentence_continuation"
+
+    # Case 4: Cross-page paragraph continuation after punctuation
+    elif _is_cross_page_paragraph_continuation(curr_block, next_block):
+        logger.debug("Merge decision: CROSS_PAGE_PARAGRAPH")
         return True, "sentence_continuation"
 
     logger.debug("Merge decision: NO_MERGE")
