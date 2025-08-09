@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from dataclasses import dataclass
 from pdf_chunker.source_matchers import MATCHERS, Matcher
+from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
 
 
 logger = logging.getLogger(__name__)
@@ -165,6 +166,7 @@ def process_chunk(
     logger.debug("process_chunk() ENTRY - chunk %s", chunk_index)
 
     final_text = _truncate_chunk((chunk.content or "").strip())
+    final_text = _fix_split_words(_fix_double_newlines(final_text))
     if not final_text:
         logger.debug("process_chunk() EXIT - chunk %s - EMPTY CONTENT", chunk_index)
         return None
