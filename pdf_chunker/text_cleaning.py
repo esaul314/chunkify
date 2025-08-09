@@ -4,6 +4,7 @@ import logging
 import json
 import ftfy
 from typing import List, Callable, Tuple
+from wordfreq import zipf_frequency
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +40,80 @@ SOFT_HYPHEN_RE = re.compile("\u00ad")
 BULLET_CHARS_ESC = re.escape("*•")
 
 
-def _join_broken_words(text: str) -> str:
+def _join_hyphenated_words(text: str) -> str:
+    """Merge words broken with hyphenation across line breaks."""
+
     bullet_opt = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
-    pattern_break = rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}(\w)"
-    pattern_space = rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([a-z])"
-    text = re.sub(pattern_break, r"\1\2", text)
-    return re.sub(pattern_space, r"\1\2", text)
+    pattern_break = re.compile(
+        rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}([A-Za-z]+)"
+    )
+    pattern_space = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([A-Za-z]+)")
+
+    def repl(match: re.Match) -> str:
+        head, tail = match.group(1), match.group(2)
+        tail = tail[1:] if tail and tail[0].lower() == head.lower() else tail
+        return f"{head}{tail}"
+
+    return pattern_space.sub(repl, pattern_break.sub(repl, text))
+
+
+DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
+
+SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})[\s\u00A0]+([a-z]{2,})")
+STOPWORDS = {
+    "the",
+    "of",
+    "for",
+    "and",
+    "with",
+    "from",
+    "this",
+    "that",
+    "is",
+    "to",
+    "in",
+    "on",
+    "as",
+    "by",
+    "then",
+    "up",
+}
+
+
+def _maybe_join_words(head: str, tail: str) -> str:
+    """Return head+tail when the combined form is more plausible than separate words."""
+
+    if head.lower() in STOPWORDS or tail.lower() in STOPWORDS:
+        return f"{head} {tail}"
+
+    head_freq, tail_freq = map(lambda w: zipf_frequency(w, "en"), (head, tail))
+    word = head + tail
+
+    if zipf_frequency(word, "en") > 0 and (
+        len(head) <= 3 or len(tail) <= 3 or head_freq < 2 or tail_freq < 2
+    ):
+        return word
+
+    if head[-1].lower() == tail[0].lower():
+        dedup = head + tail[1:]
+        if zipf_frequency(dedup, "en") > 0:
+            return dedup
+
+    return f"{head} {tail}"
+
+
+def _fix_double_newlines(text: str) -> str:
+    """Resolve words or phrases separated by double newlines using word heuristics."""
+
+    return DOUBLE_NEWLINE_RE.sub(
+        lambda m: _maybe_join_words(m.group(1), m.group(2)), text
+    )
+
+
+def _fix_split_words(text: str) -> str:
+    """Join words erroneously split by whitespace using word heuristics."""
+
+    return SPLIT_WORD_RE.sub(lambda m: _maybe_join_words(m.group(1), m.group(2)), text)
 
 
 def _remove_soft_hyphens(text: str) -> str:
@@ -54,7 +123,7 @@ def _remove_soft_hyphens(text: str) -> str:
 def fix_hyphenated_linebreaks(text: str) -> str:
     """Join words split across lines without removing valid hyphens."""
 
-    return pipe(text, _join_broken_words, _remove_soft_hyphens)
+    return pipe(text, _join_hyphenated_words, _remove_soft_hyphens)
 
 
 def collapse_artifact_breaks(text: str) -> str:
@@ -319,10 +388,18 @@ def clean_text(text: str) -> str:
 
     logger.debug("Using traditional text cleaning path")
 
-    # Normalize newlines first
+    # Normalize newlines and fix broken words before other cleanup
     logger.debug("Calling normalize_newlines")
     text = normalize_newlines(text)
     logger.debug(f"After normalize_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling fix_hyphenated_linebreaks")
+    text = fix_hyphenated_linebreaks(text)
+    logger.debug(f"After fix_hyphenated_linebreaks: {repr(text[:100])}")
+
+    logger.debug("Calling _fix_double_newlines")
+    text = _fix_double_newlines(text)
+    logger.debug(f"After _fix_double_newlines: {repr(text[:100])}")
 
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
@@ -332,6 +409,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling merge_spurious_paragraph_breaks")
     text = merge_spurious_paragraph_breaks(text)
     logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
+
+    logger.debug("Calling _fix_split_words")
+    text = _fix_split_words(text)
+    logger.debug(f"After _fix_split_words: {repr(text[:100])}")
 
     # Split on paragraph breaks, clean each
     paragraphs = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
