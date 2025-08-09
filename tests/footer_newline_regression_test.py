@@ -15,3 +15,5 @@ def test_footer_newlines_joined():
     assert "tails exhibit is" in text
     assert "practically speaking" in text
     assert "pampas of the Spanish" in text
+    assert "and then they will stay" in text
+    assert "andthen" not in text

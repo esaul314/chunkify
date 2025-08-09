@@ -80,42 +80,40 @@ STOPWORDS = {
 }
 
 
+def _maybe_join_words(head: str, tail: str) -> str:
+    """Return head+tail when the combined form is more plausible than separate words."""
+
+    if head.lower() in STOPWORDS or tail.lower() in STOPWORDS:
+        return f"{head} {tail}"
+
+    head_freq, tail_freq = map(lambda w: zipf_frequency(w, "en"), (head, tail))
+    word = head + tail
+
+    if zipf_frequency(word, "en") > 0 and (
+        len(head) <= 3 or len(tail) <= 3 or head_freq < 2 or tail_freq < 2
+    ):
+        return word
+
+    if head[-1].lower() == tail[0].lower():
+        dedup = head + tail[1:]
+        if zipf_frequency(dedup, "en") > 0:
+            return dedup
+
+    return f"{head} {tail}"
+
+
 def _fix_double_newlines(text: str) -> str:
-    """Resolve words or phrases separated by double newlines.
+    """Resolve words or phrases separated by double newlines using word heuristics."""
 
-    If the concatenation forms a valid word, remove the break entirely,
-    otherwise replace it with a single space.
-    """
-
-    def repl(match: re.Match) -> str:
-        head, tail = match.group(1), match.group(2)
-        word = head + tail
-        return word if zipf_frequency(word, "en") > 0 else f"{head} {tail}"
-
-    return DOUBLE_NEWLINE_RE.sub(repl, text)
+    return DOUBLE_NEWLINE_RE.sub(
+        lambda m: _maybe_join_words(m.group(1), m.group(2)), text
+    )
 
 
 def _fix_split_words(text: str) -> str:
-    """Join words erroneously split by whitespace."""
+    """Join words erroneously split by whitespace using word heuristics."""
 
-    def repl(match: re.Match) -> str:
-        head, tail = match.group(1), match.group(2)
-        if head.lower() in STOPWORDS or tail.lower() in STOPWORDS:
-            return f"{head} {tail}"
-        word = head + tail
-        head_freq = zipf_frequency(head, "en")
-        tail_freq = zipf_frequency(tail, "en")
-        if zipf_frequency(word, "en") > 0 and (
-            len(head) <= 3 or len(tail) <= 3 or head_freq < 2 or tail_freq < 2
-        ):
-            return word
-        if head[-1].lower() == tail[0].lower():
-            dedup = head + tail[1:]
-            if zipf_frequency(dedup, "en") > 0:
-                return dedup
-        return f"{head} {tail}"
-
-    return SPLIT_WORD_RE.sub(repl, text)
+    return SPLIT_WORD_RE.sub(lambda m: _maybe_join_words(m.group(1), m.group(2)), text)
 
 
 def _remove_soft_hyphens(text: str) -> str:
