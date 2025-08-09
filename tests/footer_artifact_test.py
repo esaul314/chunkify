@@ -11,6 +11,8 @@ def test_footer_and_subfooter_removed():
     assert len(texts) == 2
     assert all("spam.com" not in t.lower() for t in texts)
     assert all("Bearings of Cattle Like Leaves Know" not in t for t in texts)
+    assert "I look up from my book" in " ".join(texts)
+    assert not texts[0].rstrip().endswith(",")
 
 
 def test_footer_pdf_includes_second_page_text():

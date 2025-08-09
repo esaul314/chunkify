@@ -50,11 +50,13 @@ def split_bullet_fragment(text: str) -> Tuple[str, str]:
 
 def is_bullet_list_pair(curr: str, nxt: str) -> bool:
     """Return True when ``curr`` and ``nxt`` belong to the same bullet list."""
-    colon_bullet = re.search(rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", curr)
+    colon_bullet = curr.rstrip().endswith(":") or re.search(
+        rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", curr
+    )
     has_bullet = starts_with_bullet(curr) or any(
         starts_with_bullet(line) for line in curr.splitlines()
     )
-    return starts_with_bullet(nxt) and (has_bullet or colon_bullet is not None)
+    return starts_with_bullet(nxt) and (has_bullet or colon_bullet)
 
 
 def starts_with_number(text: str) -> bool:

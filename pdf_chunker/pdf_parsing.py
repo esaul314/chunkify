@@ -158,6 +158,31 @@ def _is_cross_page_paragraph_continuation(
     return True
 
 
+def _is_same_page_continuation(
+    curr_text: str,
+    next_text: str,
+    curr_page: Optional[int],
+    next_page: Optional[int],
+) -> bool:
+    """Detect sentence continuations on the same page.
+
+    A continuation is likely when both blocks share the same page, the current
+    block lacks terminal punctuation, and the next block begins with either a
+    lowercase word or a common sentence starter like "I" or "The".
+    """
+
+    if not all(page is not None for page in (curr_page, next_page)):
+        return False
+    if curr_page != next_page or not next_text:
+        return False
+    if any(b in curr_text for b in BULLET_CHARS):
+        return False
+    if curr_text.endswith((".", "!", "?", ":", ";")):
+        return False
+    first_word = next_text.split()[0]
+    return next_text[0].islower() or _is_common_sentence_starter(first_word)
+
+
 def _should_merge_blocks(
     curr_block: Dict[str, Any], next_block: Dict[str, Any]
 ) -> Tuple[bool, str]:
@@ -234,13 +259,7 @@ def _should_merge_blocks(
         logger.debug("Merge decision: HYPHENATED_CONTINUATION")
         return True, "hyphenated_continuation"
 
-    elif (
-        all(page is not None for page in (curr_page, next_page))
-        and curr_page == next_page
-        and not curr_text.endswith((".", "!", "?", ":", ";"))
-        and next_text
-        and next_text[0].islower()
-    ):
+    elif _is_same_page_continuation(curr_text, next_text, curr_page, next_page):
         logger.debug("Merge decision: SAME_PAGE_CONTINUATION")
         return True, "sentence_continuation"
 
