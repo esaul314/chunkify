@@ -16,3 +16,9 @@ def test_hyphen_bullet_lists_preserved():
     ]
     assert bullet_lines[: len(expected)] == expected
     assert "Vermont\n\n• Some trader" not in text
+    bullet_chunks = [
+        i
+        for i, c in enumerate(chunks)
+        if any(line.startswith("• ") for line in c["text"].splitlines())
+    ]
+    assert len(set(bullet_chunks)) == 1

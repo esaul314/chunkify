@@ -228,6 +228,7 @@ All CLI scripts follow these conventions:
 * **Header/footer cleanup**: headers and footers stripped when they appear at page breaks or within paragraphs, including trailing "|" fragments
 * **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- fixed.
 * **Bullet hyphen fix**: words split at line breaks within bullet lists now rejoin correctly without duplicating the bullet marker.
+* **Bullet list splitting fixed**: bullet lists spanning chunk boundaries are rebalanced so items stay within a single chunk.
 * **Underscore emphasis removed**: PyMuPDF4LLM cleanup strips single and double underscore wrappers.
 * **PyMuPDF4LLM page loss**: enhancement step now reverts to traditional extraction if pages disappear, guarded by `footer_artifact_test.py`.
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.

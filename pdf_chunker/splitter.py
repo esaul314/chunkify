@@ -9,6 +9,7 @@ from haystack.components.preprocessors import DocumentSplitter
 from haystack import Document
 
 from .text_cleaning import _is_probable_heading
+from .list_detection import starts_with_bullet
 
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,54 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
         merged.append(current)
         i += 1
     return merged
+
+
+def _extract_bullet_tail(lines: List[str]) -> Tuple[List[str], List[str]]:
+    """Split lines into non-bullet head and trailing bullet block."""
+    idx = len(lines)
+    while idx > 0 and starts_with_bullet(lines[idx - 1]):
+        idx -= 1
+    if idx > 0 and lines[idx - 1].rstrip().endswith(":"):
+        idx -= 1
+    return lines[:idx], lines[idx:]
+
+
+def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
+    """Move trailing bullet lists to following chunks to keep lists intact."""
+    if not chunks:
+        return chunks
+    result: List[str] = []
+    current = chunks[0]
+    for nxt in chunks[1:]:
+        curr_lines = current.rstrip().splitlines()
+        next_lines = nxt.lstrip().splitlines()
+        head, tail = _extract_bullet_tail(curr_lines)
+        if tail and next_lines and starts_with_bullet(next_lines[0]):
+            combined = tail + next_lines
+            tlen = len(tail)
+            i = tlen
+            while i <= len(combined) - tlen:
+                if combined[i : i + tlen] == tail:
+                    combined = combined[:i] + combined[i + tlen :]
+                    break
+                i += 1
+            cleaned: List[str] = []
+            seen = set()
+            for line in combined:
+                if starts_with_bullet(line):
+                    if line in seen:
+                        continue
+                    seen.add(line)
+                else:
+                    seen.clear()
+                cleaned.append(line)
+            combined = cleaned
+            current = "\n".join(head)
+            nxt = "\n".join(combined)
+        result.append(current.rstrip())
+        current = nxt
+    result.append(current.rstrip())
+    return result
 
 
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
@@ -821,16 +870,19 @@ def semantic_chunker(
     # Merge numbered list items that were split across chunks
     numbered_chunks = _merge_numbered_list_chunks(validated_chunks)
 
+    # Rebalance bullet lists so they remain in a single chunk
+    bullet_chunks = _rebalance_bullet_chunks(numbered_chunks)
+
     # Final statistics
     final_short_count = sum(
-        1 for chunk in numbered_chunks if len(chunk.split()) <= short_threshold
+        1 for chunk in bullet_chunks if len(chunk.split()) <= short_threshold
     )
     final_very_short_count = sum(
-        1 for chunk in numbered_chunks if len(chunk.split()) <= very_short_threshold
+        1 for chunk in bullet_chunks if len(chunk.split()) <= very_short_threshold
     )
 
     logger.info("Final chunking results:")
-    logger.info(f"  Total chunks: {len(numbered_chunks)}")
+    logger.info(f"  Total chunks: {len(bullet_chunks)}")
     logger.info(
         f"  Short chunks (≤{short_threshold} words): {final_short_count} (reduced from {initial_short_count})"
     )
@@ -838,8 +890,8 @@ def semantic_chunker(
         f"  Very short chunks (≤{very_short_threshold} words): {final_very_short_count} (reduced from {initial_very_short_count})"
     )
 
-    if numbered_chunks:
-        word_counts = [len(chunk.split()) for chunk in numbered_chunks]
+    if bullet_chunks:
+        word_counts = [len(chunk.split()) for chunk in bullet_chunks]
         avg_words = sum(word_counts) / len(word_counts)
         min_words = min(word_counts)
         max_words = max(word_counts)
@@ -847,7 +899,7 @@ def semantic_chunker(
             f"  Chunk size stats: avg={avg_words:.1f} words, min={min_words} words, max={max_words} words"
         )
 
-    return numbered_chunks
+    return bullet_chunks
 
 
 def _check_quote_balance(text: str) -> int:
