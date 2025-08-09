@@ -437,7 +437,7 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     )
                 elif merge_reason == "bullet_list":
                     current_text = re.sub(
-                        rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", current_text
+                        rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", current_text
                     )
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "numbered_list":

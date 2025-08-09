@@ -3,12 +3,16 @@ from typing import Tuple
 
 BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
+HYPHEN_BULLET_PREFIX = "- "
 NUMBERED_RE = re.compile(r"\s*\d+[.)]")
 
 
 def starts_with_bullet(text: str) -> bool:
-    """Return True if ``text`` begins with a bullet character."""
-    return text.lstrip().startswith(tuple(BULLET_CHARS))
+    """Return True if ``text`` begins with a bullet marker or hyphen bullet."""
+    stripped = text.lstrip()
+    return stripped.startswith(tuple(BULLET_CHARS)) or stripped.startswith(
+        HYPHEN_BULLET_PREFIX
+    )
 
 
 def _last_non_empty_line(text: str) -> str:
@@ -46,7 +50,7 @@ def split_bullet_fragment(text: str) -> Tuple[str, str]:
 
 def is_bullet_list_pair(curr: str, nxt: str) -> bool:
     """Return True when ``curr`` and ``nxt`` belong to the same bullet list."""
-    colon_bullet = re.search(rf":\s*[{BULLET_CHARS_ESC}]", curr)
+    colon_bullet = re.search(rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", curr)
     has_bullet = starts_with_bullet(curr) or any(
         starts_with_bullet(line) for line in curr.splitlines()
     )

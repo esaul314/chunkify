@@ -134,7 +134,7 @@ def collapse_artifact_breaks(text: str) -> str:
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
     placeholder = "[[LIST_BREAK]]"
-    pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
+    pattern = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
     return (
         re.sub(pattern, placeholder, text).replace("\n", " ").replace(placeholder, "\n")
     )
@@ -146,10 +146,10 @@ def collapse_single_newlines(text: str) -> str:
 
     list_break = "[[LIST_BREAK]]"
     para_break = "[[PARAGRAPH_BREAK]]"
-    list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)]))"
+    list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
 
     # Normalize colon bullet starts and protect paragraph and list breaks
-    text = re.sub(rf":\s*(?=[{BULLET_CHARS_ESC}])", ":\n", text)
+    text = re.sub(rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", text)
     text = re.sub(list_re, list_break, text)
     text = re.sub(r"\n{2,}", para_break, text)
     text = text.replace("\n", " ")
