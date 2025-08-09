@@ -16,6 +16,7 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `list_detection_edge_case_test.py`: Bullet list parsing edge cases
 - `page_artifact_detection_test.py`: Header/footer removal accuracy
 - `page_artifacts_edge_case_test.py`: Page artifact suffix handling
+- `footer_artifact_test.py`: Regression for footer and sub-footer removal
 - `scripts_cli_test.py`: CLI invocation sanity checks
 - `run_all_tests.sh`: Orchestrates full suite
 - Duplicate detection thresholds (via `detect_duplicates.py`).

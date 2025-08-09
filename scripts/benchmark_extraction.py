@@ -17,6 +17,7 @@ import tracemalloc
 import statistics
 import sys
 import os
+import traceback
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from pathlib import Path
