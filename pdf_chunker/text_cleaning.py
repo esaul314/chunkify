@@ -39,12 +39,34 @@ SOFT_HYPHEN_RE = re.compile("\u00ad")
 BULLET_CHARS_ESC = re.escape("*•")
 
 
-def _join_broken_words(text: str) -> str:
+def _merge_double_newlines(text: str) -> str:
+    """Join hyphenated words separated by multiple newlines."""
+
     bullet_opt = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
-    pattern_break = rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}(\w)"
-    pattern_space = rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([a-z])"
-    text = re.sub(pattern_break, r"\1\2", text)
-    return re.sub(pattern_space, r"\1\2", text)
+    pattern = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s*(?:\n\s*){{2,}}{bullet_opt}(\w)")
+    return pattern.sub(r"\1\2", text)
+
+
+def _merge_single_newlines(text: str) -> str:
+    """Join hyphenated words split by a single newline."""
+
+    bullet_opt = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
+    pattern = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}(\w)")
+    return pattern.sub(r"\1\2", text)
+
+
+def _merge_split_words(text: str) -> str:
+    """Join hyphenated words split by spaces without newlines."""
+
+    bullet_opt = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
+    pattern = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([a-z])")
+    return pattern.sub(r"\1\2", text)
+
+
+def _join_broken_words(text: str) -> str:
+    return pipe(
+        text, _merge_double_newlines, _merge_single_newlines, _merge_split_words
+    )
 
 
 def _remove_soft_hyphens(text: str) -> str:
