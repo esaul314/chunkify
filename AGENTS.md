@@ -212,6 +212,7 @@ All CLI scripts follow these conventions:
 ## Programming Philosophy
 
 * **Pure functions** and **declarative transforms** preferred
+* Use **functional programming** techniques and libraries where applicable
 * **Single-responsibility modules**, minimal interdependencies
 * **Explicit logging** and **testability**
 * Adhere to **Unix philosophy**: communicate via clear interfaces, CLI tools
