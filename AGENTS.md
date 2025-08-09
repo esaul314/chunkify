@@ -229,6 +229,7 @@ All CLI scripts follow these conventions:
 * **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- fixed.
 * **Bullet hyphen fix**: words split at line breaks within bullet lists now rejoin correctly without duplicating the bullet marker.
 * **Underscore emphasis removed**: PyMuPDF4LLM cleanup strips single and double underscore wrappers.
+* **PyMuPDF4LLM page loss**: enhancement step now reverts to traditional extraction if pages disappear, guarded by `footer_artifact_test.py`.
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts

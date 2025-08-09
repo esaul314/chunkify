@@ -644,6 +644,26 @@ def extract_text_blocks_from_pdf(
                         f"Filtered out {pre_filter_count - len(enhanced_blocks)} enhanced blocks from excluded pages"
                     )
 
+            if enhanced_blocks:
+                original_pages = {
+                    p
+                    for b in pre_merge_blocks
+                    if (p := b.get("source", {}).get("page")) is not None
+                    and p not in excluded
+                }
+                enhanced_pages = {
+                    b.get("source", {}).get("page")
+                    for b in enhanced_blocks
+                    if b.get("source", {}).get("page") is not None
+                }
+                missing = original_pages - enhanced_pages
+                if missing:
+                    logger.warning(
+                        "PyMuPDF4LLM enhancement dropped pages: %s", sorted(missing)
+                    )
+                    enhancement_stats["degraded"] = len(enhanced_blocks)
+                    enhanced_blocks = None
+
             # If enhancement was successful and high quality, use enhanced blocks
             if enhanced_blocks and enhancement_stats.get("enhanced", 0) > 0:
                 if pre_merge_blocks and len(pre_merge_blocks) == len(enhanced_blocks):
