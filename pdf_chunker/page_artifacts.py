@@ -8,6 +8,7 @@ from .text_cleaning import clean_text
 
 ROMAN_RE = r"[ivxlcdm]+"
 _ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+DOMAIN_RE = re.compile(r"\b[\w.-]+\.[a-z]{2,}\b", re.IGNORECASE)
 
 
 def _roman_to_int(value: str) -> int:
@@ -32,6 +33,19 @@ def _looks_like_footnote(text: str) -> bool:
         return True
 
     return bool(re.match(r"^(?:\d{1,3}|[\*\u2020])\s+[A-Z]", stripped))
+
+
+def _starts_with_multiple_numbers(text: str) -> bool:
+    """Return ``True`` if ``text`` begins with two or more numbers."""
+
+    parts = text.strip().split()
+    return sum(1 for p in takewhile(str.isdigit, parts)) >= 2
+
+
+def _contains_domain(text: str) -> bool:
+    """Return ``True`` if ``text`` contains a domain-like pattern."""
+
+    return bool(DOMAIN_RE.search(text))
 
 
 logger = logging.getLogger(__name__)
@@ -141,6 +155,20 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
             "is_page_artifact_text() page number suffix: %s (page %s)",
             text[:30],
             page_num,
+        )
+        return True
+
+    if _starts_with_multiple_numbers(text_lower):
+        logger.info(
+            "is_page_artifact_text() multiple leading numbers: %s",
+            text[:30],
+        )
+        return True
+
+    if _contains_domain(text) and len(text.split()) <= 8:
+        logger.info(
+            "is_page_artifact_text() domain footer detected: %s",
+            text[:30],
         )
         return True
 

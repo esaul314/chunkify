@@ -76,6 +76,7 @@ pdf_chunker/
     ├── numbered_list_test.py
     ├── page_artifact_detection_test.py
     ├── page_artifacts_edge_case_test.py
+    ├── footer_artifact_test.py
     ├── page_exclusion_test.py
     ├── page_utils_test.py
     ├── pdf_extraction_test.py

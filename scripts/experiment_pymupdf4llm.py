@@ -156,7 +156,7 @@ def extract_with_pymupdf4llm(
                     submodules.append(attr)
                     sub_attrs = [a for a in dir(obj) if not a.startswith("_")]
                     print(f"DEBUG: Submodule {attr} attributes: {sub_attrs}")
-            except:
+            except Exception:
                 pass
 
         print(f"DEBUG: Found submodules: {submodules}")
