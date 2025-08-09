@@ -14,3 +14,4 @@ def test_footer_newlines_joined():
     assert "angle of elevation" in text
     assert "tails exhibit is" in text
     assert "practically speaking" in text
+    assert "pampas of the Spanish" in text

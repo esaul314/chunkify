@@ -44,10 +44,17 @@ def _join_hyphenated_words(text: str) -> str:
     """Merge words broken with hyphenation across line breaks."""
 
     bullet_opt = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
-    pattern_break = rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}(\w)"
-    pattern_space = rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([a-z])"
-    text = re.sub(pattern_break, r"\1\2", text)
-    return re.sub(pattern_space, r"\1\2", text)
+    pattern_break = re.compile(
+        rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{bullet_opt}([A-Za-z]+)"
+    )
+    pattern_space = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{bullet_opt}([A-Za-z]+)")
+
+    def repl(match: re.Match) -> str:
+        head, tail = match.group(1), match.group(2)
+        tail = tail[1:] if tail and tail[0].lower() == head.lower() else tail
+        return f"{head}{tail}"
+
+    return pattern_space.sub(repl, pattern_break.sub(repl, text))
 
 
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
@@ -102,6 +109,10 @@ def _fix_split_words(text: str) -> str:
             len(head) <= 3 or len(tail) <= 3 or head_freq < 2 or tail_freq < 2
         ):
             return word
+        if head[-1].lower() == tail[0].lower():
+            dedup = head + tail[1:]
+            if zipf_frequency(dedup, "en") > 0:
+                return dedup
         return f"{head} {tail}"
 
     return SPLIT_WORD_RE.sub(repl, text)
