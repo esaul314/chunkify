@@ -129,6 +129,60 @@ def _is_cross_page_continuation(
     return True
 
 
+def _is_cross_page_paragraph_continuation(
+    curr_block: Dict[str, Any], next_block: Dict[str, Any]
+) -> bool:
+    """Detect when a paragraph is split across pages despite ending with punctuation."""
+
+    curr_page = curr_block.get("source", {}).get("page")
+    next_page = next_block.get("source", {}).get("page")
+    if curr_page is None or next_page is None or curr_page == next_page:
+        return False
+
+    curr_bbox = curr_block.get("bbox")
+    next_bbox = next_block.get("bbox")
+    if not curr_bbox or not next_bbox:
+        return False
+
+    curr_x0, _, _, _ = curr_bbox
+    next_x0, _, _, _ = next_bbox
+    indent_diff = next_x0 - curr_x0
+
+    if indent_diff > 10:
+        return False
+
+    next_text = next_block.get("text", "").strip()
+    if _detect_heading_fallback(next_text):
+        return False
+
+    return True
+
+
+def _is_same_page_continuation(
+    curr_text: str,
+    next_text: str,
+    curr_page: Optional[int],
+    next_page: Optional[int],
+) -> bool:
+    """Detect sentence continuations on the same page.
+
+    A continuation is likely when both blocks share the same page, the current
+    block lacks terminal punctuation, and the next block begins with either a
+    lowercase word or a common sentence starter like "I" or "The".
+    """
+
+    if not all(page is not None for page in (curr_page, next_page)):
+        return False
+    if curr_page != next_page or not next_text:
+        return False
+    if any(b in curr_text for b in BULLET_CHARS):
+        return False
+    if curr_text.endswith((".", "!", "?", ":", ";")):
+        return False
+    first_word = next_text.split()[0]
+    return next_text[0].islower() or _is_common_sentence_starter(first_word)
+
+
 def _should_merge_blocks(
     curr_block: Dict[str, Any], next_block: Dict[str, Any]
 ) -> Tuple[bool, str]:
@@ -205,13 +259,7 @@ def _should_merge_blocks(
         logger.debug("Merge decision: HYPHENATED_CONTINUATION")
         return True, "hyphenated_continuation"
 
-    elif (
-        all(page is not None for page in (curr_page, next_page))
-        and curr_page == next_page
-        and not curr_text.endswith((".", "!", "?", ":", ";"))
-        and next_text
-        and next_text[0].islower()
-    ):
+    elif _is_same_page_continuation(curr_text, next_text, curr_page, next_page):
         logger.debug("Merge decision: SAME_PAGE_CONTINUATION")
         return True, "sentence_continuation"
 
@@ -219,6 +267,11 @@ def _should_merge_blocks(
     # Enhanced to be more careful with quoted text
     elif _is_cross_page_continuation(curr_text, next_text, curr_page, next_page):
         logger.debug("Merge decision: CROSS_PAGE_CONTINUATION")
+        return True, "sentence_continuation"
+
+    # Case 4: Cross-page paragraph continuation after punctuation
+    elif _is_cross_page_paragraph_continuation(curr_block, next_block):
+        logger.debug("Merge decision: CROSS_PAGE_PARAGRAPH")
         return True, "sentence_continuation"
 
     logger.debug("Merge decision: NO_MERGE")
@@ -643,6 +696,26 @@ def extract_text_blocks_from_pdf(
                     logger.info(
                         f"Filtered out {pre_filter_count - len(enhanced_blocks)} enhanced blocks from excluded pages"
                     )
+
+            if enhanced_blocks:
+                original_pages = {
+                    p
+                    for b in pre_merge_blocks
+                    if (p := b.get("source", {}).get("page")) is not None
+                    and p not in excluded
+                }
+                enhanced_pages = {
+                    b.get("source", {}).get("page")
+                    for b in enhanced_blocks
+                    if b.get("source", {}).get("page") is not None
+                }
+                missing = original_pages - enhanced_pages
+                if missing:
+                    logger.warning(
+                        "PyMuPDF4LLM enhancement dropped pages: %s", sorted(missing)
+                    )
+                    enhancement_stats["degraded"] = len(enhanced_blocks)
+                    enhanced_blocks = None
 
             # If enhancement was successful and high quality, use enhanced blocks
             if enhanced_blocks and enhancement_stats.get("enhanced", 0) > 0:

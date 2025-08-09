@@ -14,6 +14,10 @@ def test_footer_newlines_joined():
     assert "angle of elevation" in text
     assert "tails exhibit is" in text
     assert "practically speaking" in text
-    assert "pampas of the Spanish" in text
+    assert "Spanish main" in text
     assert "and then they will stay" in text
     assert "andthen" not in text
+
+    second_chunk = chunks[1]["text"]
+    assert "lambs. A car-load of drovers" in second_chunk
+    assert "lambs.\n\nA car-load" not in second_chunk
