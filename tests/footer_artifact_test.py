@@ -11,7 +11,10 @@ def test_footer_and_subfooter_removed():
     assert len(texts) == 2
     assert all("spam.com" not in t.lower() for t in texts)
     assert all("Bearings of Cattle Like Leaves Know" not in t for t in texts)
-    assert "I look up from my book" in " ".join(texts)
+    joined = " ".join(texts)
+    assert "I look up from my book" in joined
+    assert "no longer" in joined and "nolonger" not in joined
+    assert "I am more" in joined and "I amore" not in joined
     assert not texts[0].rstrip().endswith(",")
 
 

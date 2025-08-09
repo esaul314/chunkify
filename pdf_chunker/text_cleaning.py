@@ -59,7 +59,7 @@ def _join_hyphenated_words(text: str) -> str:
 
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
 
-SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})[\s\u00A0]+([a-z]{2,})")
+SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 STOPWORDS = {
     "the",
     "of",
@@ -88,15 +88,14 @@ def _maybe_join_words(head: str, tail: str) -> str:
 
     head_freq, tail_freq = map(lambda w: zipf_frequency(w, "en"), (head, tail))
     word = head + tail
+    combined_freq = zipf_frequency(word, "en")
 
-    if zipf_frequency(word, "en") > 0 and (
-        len(head) <= 3 or len(tail) <= 3 or head_freq < 2 or tail_freq < 2
-    ):
+    if combined_freq > max(head_freq, tail_freq):
         return word
 
     if head[-1].lower() == tail[0].lower():
         dedup = head + tail[1:]
-        if zipf_frequency(dedup, "en") > 0:
+        if zipf_frequency(dedup, "en") > max(head_freq, tail_freq):
             return dedup
 
     return f"{head} {tail}"

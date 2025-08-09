@@ -233,6 +233,7 @@ All CLI scripts follow these conventions:
 * **PyMuPDF4LLM page loss**: enhancement step now reverts to traditional extraction if pages disappear, guarded by `footer_artifact_test.py`.
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.
 * **Comma continuation fix**: same-page blocks ending with commas merge with following blocks even if the next starts with an uppercase word.
+* **Split-word merging guarded**: only joins across newlines or double spaces when the combined form is more common than its parts, avoiding merges like "no longer"→"nolonger".
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts

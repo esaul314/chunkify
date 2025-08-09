@@ -37,6 +37,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - Metadata fields sometimes missing when fallback triggers.
 - Hyphenated continuation lines starting with bullet markers were not rejoined; this is now fixed in `text_cleaning._join_broken_words`.
 - Underscore emphasis is stripped during PyMuPDF4LLM cleanup.
+- Split-word merging is restricted to newline or double-space boundaries with frequency checks to avoid collapsing valid phrases.
 ```
 
 ---
