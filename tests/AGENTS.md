@@ -18,7 +18,6 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `page_artifacts_edge_case_test.py`: Page artifact suffix handling
 - `footer_artifact_test.py`: Regression for footer and sub-footer removal and multi-page preservation
 - `scripts_cli_test.py`: CLI invocation sanity checks
-- `run_all_tests.sh`: Orchestrates full suite
 - Duplicate detection thresholds (via `detect_duplicates.py`).
 
 ## AI Agent Guidance
@@ -31,6 +30,7 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Utilities & Fixtures
 - `tests/utils/common.sh`: Shell helpers for CLI-oriented tests
+- `tests/conftest.py`: Colored output fixtures for test logging
 - `pytest.monkeypatch`: Controls environment variables in `env_utils_test.py`
 
 ## Formatting

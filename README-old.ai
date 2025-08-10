@@ -25,7 +25,7 @@ The project has undergone significant evolution to produce RAG-supportive, conte
 *   **Strict Semantic Chunking**: Implements comprehensive chunk size validation with force-splitting logic to prevent oversized chunks (8k character limit per chunk, emergency truncation at 25k characters).
 *   **External Tag Configuration**: Uses **YAML-based tag vocabularies** for domain-specific AI enrichment, supporting generic tags plus specialized domains (philosophy, psychology, technical, project management).
 *   **Modular Code Organization**: Refactored into focused modules (`text_cleaning.py`, `heading_detection.py`, `extraction_fallbacks.py`, `page_utils.py`, `epub_parsing.py`) following Unix philosophy principles.
-*   **Modular Test Architecture**: Comprehensive test suite refactored from monolithic script into focused, reusable test modules with shared utilities (`tests/utils/common.sh`) and lightweight orchestration (`tests/run_all_tests.sh`).
+*   **Modular Test Architecture**: Comprehensive test suite refactored into focused, reusable modules executed via `pytest` with shared utilities (`tests/utils/common.sh`) and colored fixtures (`tests/conftest.py`).
 *   **Enhanced Metadata Generation Pipeline**: Implements granular diagnostic logging throughout the chunk processing pipeline with detailed process tracing to prevent silent chunk loss and ensure all valid chunks are properly processed or logged with drop reasons.
 *   **Robust Error Handling**: Added comprehensive error handling and validation in the metadata generation pipeline to prevent chunks from being silently dropped during AI enrichment or final formatting phases.
 
@@ -156,7 +156,7 @@ pdf_chunker/
 │   ├── semantic_chunking_test.py  # Chunk size validation and module integration testing
 │   ├── page_exclusion_test.py     # PDF page exclusion functionality testing
 │   ├── epub_spine_test.py         # EPUB spine exclusion functionality testing
-│   └── run_all_tests.sh           # Test orchestrator that coordinates all test modules
+│   └── conftest.py                # Pytest fixtures and colored output helpers
 └── _apply.sh                      # Lightweight dependency installer and test launcher
 ```
 
@@ -189,7 +189,7 @@ The project provides a streamlined validation workflow accessible via a single c
 
 This executes the following lightweight sequence:
 1. **Dependency Installation**: Installs Python dependencies and system tools (poppler-utils)
-2. **Test Orchestration**: Delegates to `tests/run_all_tests.sh` for comprehensive validation
+2. **Test Orchestration**: Executes `pytest` for comprehensive validation
 3. **Modular Test Execution**: Runs focused test modules for each feature area
 
 The test suite follows the same modular architecture principles as the main codebase, with focused modules that can be run independently or as part of the comprehensive test orchestration.
@@ -199,7 +199,7 @@ The test suite follows the same modular architecture principles as the main code
 The test suite has been refactored into focused, reusable modules following the same Unix philosophy principles as the main codebase:
 
 The test suite has been refactored into focused, reusable modules:
-**Test Orchestrator (`tests/run_all_tests.sh`):**
+**Pytest Execution:**
 - Coordinates execution of all test modules
 - Aggregates results and provides overall success/failure status
 - Uses shared utilities for consistent reporting
@@ -433,8 +433,8 @@ The project includes comprehensive validation tooling with a modular test archit
 - **Reusable Utilities**: Shared functions in `tests/utils/common.sh` eliminate code duplication
 - **Comprehensive Coverage**: Each module tests both unit-level functionality and end-to-end pipeline behavior
 
-**Test Orchestration**: The `tests/run_all_tests.sh` script provides:
-- **Sequential Execution**: Runs all test modules in logical order
+**Test Orchestration**: `pytest` provides:
+- **Parallel-ready Execution**: Runs all test modules with built-in ordering
 - **Aggregated Results**: Combines individual test results into overall success/failure status
 - **Early Termination**: Stops on critical failures while allowing non-critical warnings
 - **Lightweight Coordination**: Minimal orchestration logic that delegates to focused test modules
