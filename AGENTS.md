@@ -61,6 +61,7 @@ pdf_chunker/
 │   └── validate_readme_functionality.py # Check README code snippets
 └── tests/                        # Modular test architecture
     ├── AGENTS.md
+    ├── conftest.py                 # Pytest fixtures and colored output
     ├── ai_enrichment_test.py
     ├── bullet_list_test.py
     ├── chunk_pdf_integration_test.py
@@ -82,7 +83,6 @@ pdf_chunker/
     ├── pdf_extraction_test.py
     ├── process_document_override_test.py
     ├── property_based_text_test.py
-    ├── run_all_tests.sh           # Orchestrates all test modules
     ├── scripts_cli_test.py
     ├── semantic_chunking_test.py
     ├── source_matchers_test.py
@@ -242,12 +242,11 @@ All CLI scripts follow these conventions:
 
 ## Testing Requirements for OpenAI Codex
 
-Use `pytest` and shell scripts:
+Use `pytest`:
 
 ```bash
 pytest tests/
-bash tests/run_all_tests.sh
-`````
+```
 
 Tests must:
 

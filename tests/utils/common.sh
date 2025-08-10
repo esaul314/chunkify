@@ -10,24 +10,6 @@ find_files_by_extension() {
     find . -name "*.${extension}" -type f | head -n "$max_files"
 }
 
-# Print test section header
-print_test_header() {
-    local test_name="$1"
-    echo "Testing ${test_name}..."
-}
-
-# Print test result
-print_test_result() {
-    local test_name="$1"
-    local status="$2"
-    
-    if [ "$status" = "success" ]; then
-        echo "${test_name} testing completed successfully!"
-    else
-        echo "${test_name} testing completed with issues."
-    fi
-}
-
 # Check if Python module can be imported
 check_python_import() {
     local module="$1"

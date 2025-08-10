@@ -20,6 +20,12 @@ import traceback
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import importlib.util
+import shutil
+
+
+def _command_exists(command: str) -> bool:
+    return shutil.which(command) is not None
+
 
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent
@@ -545,12 +551,12 @@ class READMEValidator:
         """Validate test infrastructure"""
         print("\n=== Test Infrastructure Validation ===")
 
-        # Check for test runner script
-        test_runner = self.project_root / "tests" / "run_all_tests.sh"
-        if test_runner.exists():
-            self.log_result("Test runner script", "PASS", f"Found at {test_runner}")
-        else:
-            self.log_result("Test runner script", "MISSING", "Script not found")
+        pytest_found = _command_exists("pytest")
+        self.log_result(
+            "pytest availability",
+            "PASS" if pytest_found else "MISSING",
+            "pytest command found" if pytest_found else "pytest not installed",
+        )
 
         # Check for e2e test script
         e2e_script = self.project_root / "_e2e_check.sh"
