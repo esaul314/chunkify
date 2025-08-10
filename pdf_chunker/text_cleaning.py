@@ -5,6 +5,7 @@ import json
 import ftfy
 from typing import Callable, List, Tuple, TypeVar
 from wordfreq import zipf_frequency
+from .list_detection import BULLET_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,24 @@ HYPHEN_CHARS_ESC = re.escape("\u2010\u2011\u002d\u00ad\u1400\ufe63‐-")
 SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 
-BULLET_CHARS_ESC = re.escape("*•")
+BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
+EMPTY_BULLET_RE = re.compile(
+    rf"^\s*(?:[{BULLET_CHARS_ESC}]|-)\s*$",
+    re.MULTILINE,
+)
+BULLET_CONTINUATION_RE = re.compile(
+    rf"^\s*([{BULLET_CHARS_ESC}]|-)\n(?![{BULLET_CHARS_ESC}]|-)",
+    re.MULTILINE,
+)
+
+
+def remove_empty_bullet_lines(text: str) -> str:
+    """Normalize bullet lines and drop empty markers."""
+    if "\n" not in text:
+        return text
+    text = BULLET_CONTINUATION_RE.sub(r"\1 ", text)
+    cleaned = EMPTY_BULLET_RE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", cleaned)
 
 
 def _join_hyphenated_words(text: str) -> str:
@@ -406,6 +424,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)
     logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling remove_empty_bullet_lines")
+    text = remove_empty_bullet_lines(text)
+    logger.debug(f"After remove_empty_bullet_lines: {repr(text[:100])}")
 
     logger.debug("Calling merge_spurious_paragraph_breaks")
     text = merge_spurious_paragraph_breaks(text)
