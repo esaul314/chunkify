@@ -3,6 +3,7 @@ import os
 import logging
 import json
 import ftfy
+from functools import reduce
 from typing import Callable, List, Tuple, TypeVar
 from wordfreq import zipf_frequency
 
@@ -21,10 +22,20 @@ def pipe(value: T, *funcs: Callable[[T], T]) -> T:
 PARAGRAPH_BREAK = re.compile(r"\n{2,}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\u202d\u202c]")
 
-# Quote normalization patterns
-QUOTE_PATTERNS: List[Tuple[re.Pattern, str]] = [
-    (re.compile(r'(\w)"([A-Z])'), r'\1 "\2'),
-    (re.compile(r'"(\w)'), r'" \1'),
+# Quote normalization helpers
+SMART_QUOTES = {
+    "“": '"',
+    "”": '"',
+    "„": '"',
+    "‚": '"',
+    "‘": "'",
+    "’": "'",
+    "`": "'",
+}
+
+QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r'(?<!\s)"(?=[A-Z])'), r' "'),
+    (re.compile(r'(?<=\w)"(?=\w)'), r'" '),
     (re.compile(r'"{2,}'), '"'),
     (re.compile(r"'{2,}"), "'"),
     (re.compile(r'\s+"([^\"]*?)"\s+'), r' "\1" '),
@@ -180,15 +191,20 @@ def normalize_ligatures(text: str) -> str:
     return ftfy.fix_text(text)
 
 
+def _map_smart_quotes(text: str) -> str:
+    """Map smart quotes to their ASCII equivalents."""
+
+    return "".join(SMART_QUOTES.get(ch, ch) for ch in text)
+
+
+def _fix_quote_spacing(text: str) -> str:
+    """Apply spacing and duplication fixes around quotes."""
+
+    return reduce(lambda s, p: p[0].sub(p[1], s), QUOTE_SPACING_PATTERNS, text)
+
+
 def normalize_quotes(text: str) -> str:
-    if not text:
-        return text
-    mapping = {"“": '"', "”": '"', "„": '"', "‚": '"', "‘": "'", "’": "'", "`": "'"}
-    for smart, ascii_q in mapping.items():
-        text = text.replace(smart, ascii_q)
-    for pattern, repl in QUOTE_PATTERNS:
-        text = pattern.sub(repl, text)
-    return text
+    return text if not text else pipe(text, _map_smart_quotes, _fix_quote_spacing)
 
 
 def remove_underscore_emphasis(text: str) -> str:

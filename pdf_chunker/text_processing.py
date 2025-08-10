@@ -2,63 +2,9 @@ import re
 import logging
 from typing import Any, List, Tuple
 
+from .text_cleaning import normalize_quotes
+
 logger = logging.getLogger(__name__)
-
-
-def normalize_quotes(text: str) -> str:
-    """
-    Normalize smart quotes to standard ASCII quotes and fix spacing around quotes.
-    - Convert all smart quotes to ASCII.
-    - Add a space before an opening quote if missing (e.g. said"Hello" -> said "Hello").
-    - Never add a space after the opening quote.
-    - Never add a space before a closing quote.
-    - Remove any extra spaces after opening or before closing quotes.
-    """
-    if not text:
-        return text
-
-    # 1. Map smart quotes to ASCII
-    replacements = {
-        "“": '"',
-        "”": '"',
-        "„": '"',
-        "«": '"',
-        "»": '"',
-        "‘": "'",
-        "’": "'",
-        "‚": "'",
-        "`": "'",
-    }
-    text = text.translate({ord(k): v for k, v in replacements.items()})
-
-    # # 2. Add space before opening quote if missing (opening quote = quote followed by word char)
-    # # Use positive lookbehind for any non-space (so both word and punctuation)
-    # text = re.sub(r'(?<!\s)(["\'])(?=\w)', r' \1', text)
-
-    # # 3. Remove any space after opening quote (e.g. " Hello" -> "Hello")
-    # text = re.sub(r'(["\'])\s+(\w)', r'\1\2', text)
-
-    # # 4. Remove any space before closing quote (e.g. Hello " -> Hello)
-    # text = re.sub(r'(\w)\s+(["\'])', r'\1\2', text)
-
-    # # 5. Add space after closing quote if missing (e.g. "Hello"and -> "Hello" and)
-    # text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
-
-    # # Remove multiple spaces
-    # text = re.sub(r'\s{2,}', ' ', text)
-    # return text.strip()
-
-    # 2. Fix spacing *only* around double-quotes:
-    #    a) space before missing opening "
-    text = re.sub(r'(?<!\s)"(?=[A-Z])', r' "', text)
-    # text = re.sub(r'(?<!\s)"(?=\w)', r' "', text)
-    #    b) space after missing closing "
-    text = re.sub(r'(?<=\w)"(?=\w)', r'" ', text)
-    # text = re.sub(r'(?<=\w)"(?=\w)', r'" ', text)
-
-    # collapse any runs of multiple spaces
-    text = re.sub(r"\s{2,}", " ", text)
-    return text.strip()
 
 
 def _fix_case_transition_gluing(text: str) -> str:
@@ -129,56 +75,9 @@ def _fix_page_boundary_gluing(text: str) -> str:
 
 
 def _fix_quote_boundary_gluing(text: str) -> str:
-    """
-    Fix word gluing around quotes (e.g. said"Hello"and -> said "Hello" and).
-    - Add space before opening quote if missing, but never after the opening quote.
-    - Never add a space before a closing quote.
-    - Remove any extra spaces after opening or before closing quotes.
-    """
-    if not text:
-        return text
+    """Fix word gluing around quotes."""
 
-    # 1. Map smart quotes to ASCII
-    replacements = {
-        "“": '"',
-        "”": '"',
-        "„": '"',
-        "«": '"',
-        "»": '"',
-        "‘": "'",
-        "’": "'",
-        "‚": "'",
-        "`": "'",
-    }
-    text = text.translate({ord(k): v for k, v in replacements.items()})
-
-    # # 2. Add space before opening quote if missing (opening quote = quote followed by word char)
-    # text = re.sub(r'(?<!\s)(["\'])(?=\w)', r' \1', text)
-
-    # # 3. Remove any space after opening quote
-    # text = re.sub(r'(["\'])\s+(\w)', r'\1\2', text)
-
-    # # 4. Remove any space before closing quote
-    # text = re.sub(r'(\w)\s+(["\'])', r'\1\2', text)
-
-    # # 5. Add space after closing quote if missing
-    # text = re.sub(r'(["\'])([A-Za-z])', r'\1 \2', text)
-
-    # # Remove multiple spaces
-    # text = re.sub(r'\s{2,}', ' ', text)
-    # return text.strip()
-
-    # 2. Fix spacing *only* around double-quotes:
-    #    a) space before missing opening "
-    text = re.sub(r'(?<!\s)"(?=[A-Z])', r' "', text)
-    # text = re.sub(r'(?<!\s)"(?=\w)', r' "', text)
-    #    b) space after missing closing "
-    text = re.sub(r'(?<=\w)"(?=\w)', r'" ', text)
-    # text = re.sub(r'(?<=\w)"(?=\w)', r'" ', text)
-
-    # collapse any runs of multiple spaces
-    text = re.sub(r"\s{2,}", " ", text)
-    return text.strip()
+    return text if not text else normalize_quotes(text).strip()
 
 
 def detect_and_fix_word_gluing(text: str) -> str:
