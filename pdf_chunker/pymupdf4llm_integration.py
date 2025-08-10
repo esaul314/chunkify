@@ -486,6 +486,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
             fix_hyphenated_linebreaks,
             _fix_double_newlines,
             _fix_split_words,
+            insert_numbered_list_newlines,
             normalize_ligatures,
             consolidate_whitespace,
         )
@@ -503,6 +504,10 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         text = _fix_double_newlines(text)
         logger.debug(f"After _fix_double_newlines: {repr(text[:100])}")
 
+        logger.debug("Applying insert_numbered_list_newlines in PyMuPDF4LLM path")
+        text = insert_numbered_list_newlines(text)
+        logger.debug(f"After insert_numbered_list_newlines: {repr(text[:100])}")
+
         logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
         text = collapse_single_newlines(text)
         logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
@@ -519,6 +524,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         paragraphs = []
         for p in text.split("\n\n"):
             if p.strip():
+                p = consolidate_whitespace(p)
                 p = normalize_ligatures(p)
                 p = consolidate_whitespace(p)
                 paragraphs.append(p)

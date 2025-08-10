@@ -132,6 +132,16 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
+NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
+
+
+def insert_numbered_list_newlines(text: str) -> str:
+    """Insert newlines before numbered list items lacking explicit breaks."""
+    text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
+    return NUMBERED_INLINE_RE.sub(r"\1\n", text)
+
+
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
     placeholder = "[[LIST_BREAK]]"
@@ -338,9 +348,10 @@ def clean_paragraph(paragraph: str) -> str:
         fix_hyphenated_linebreaks,
         collapse_artifact_breaks,
         _preserve_list_newlines,
-        normalize_ligatures,
         normalize_quotes,
         remove_control_characters,
+        consolidate_whitespace,
+        normalize_ligatures,
         consolidate_whitespace,
     )
 
@@ -401,6 +412,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling _fix_double_newlines")
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling insert_numbered_list_newlines")
+    text = insert_numbered_list_newlines(text)
+    logger.debug(f"After insert_numbered_list_newlines: {repr(text[:100])}")
 
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
