@@ -9,7 +9,7 @@ from haystack.components.preprocessors import DocumentSplitter
 from haystack import Document
 
 from .text_cleaning import _is_probable_heading
-from .list_detection import starts_with_bullet
+from .list_detection import starts_with_bullet, strip_bullet_prefix
 
 
 logger = logging.getLogger(__name__)
@@ -293,24 +293,43 @@ def _dedupe_bullet_block(lines: List[str]) -> List[str]:
     return cleaned
 
 
+def _unwrap_bullet_lines(lines: List[str]) -> List[str]:
+    """Merge wrapped bullet lines by removing redundant prefixes."""
+    from functools import reduce
+
+    def _reducer(acc: List[str], line: str) -> List[str]:
+        if (
+            acc
+            and starts_with_bullet(acc[-1])
+            and not acc[-1].rstrip().endswith((".", "!", "?"))
+            and starts_with_bullet(line)
+            and strip_bullet_prefix(line)[:1].islower()
+        ):
+            acc[-1] = f"{acc[-1]} {strip_bullet_prefix(line)}"
+            return acc
+        return acc + [line]
+
+    return reduce(_reducer, lines, [])
+
+
 def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
     """Move trailing bullet lists to following chunks to keep lists intact."""
     if not chunks:
         return []
 
-    result: List[str] = []
     chunks = chunks[:]  # work on a copy
     for i, current in enumerate(chunks):
-        curr_lines = current.rstrip().splitlines()
-        head, tail = _extract_bullet_tail(curr_lines)
+        lines = current.rstrip().splitlines()
+        head, tail = _extract_bullet_tail(lines)
         if tail and i + 1 < len(chunks):
             next_lines = chunks[i + 1].lstrip().splitlines()
             if next_lines and starts_with_bullet(next_lines[0]):
                 combined = _dedupe_bullet_block(tail + next_lines)
-                chunks[i + 1] = "\n".join(combined).rstrip()
-                current = "\n".join(head)
-        result.append(current.rstrip())
-    return [chunk for chunk in result if chunk.strip()]
+                chunks[i + 1] = "\n".join(_unwrap_bullet_lines(combined)).rstrip()
+                lines = head
+        cleaned = _unwrap_bullet_lines(_dedupe_bullet_block(lines))
+        chunks[i] = "\n".join(cleaned).rstrip()
+    return [chunk for chunk in chunks if chunk.strip()]
 
 
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:

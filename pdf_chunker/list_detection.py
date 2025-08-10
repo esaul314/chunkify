@@ -7,7 +7,7 @@ HYPHEN_BULLET_PREFIX = "- "
 NUMBERED_RE = re.compile(r"\s*\d+[.)]")
 
 
-def _strip_bullet_prefix(text: str) -> str:
+def strip_bullet_prefix(text: str) -> str:
     """Remove leading bullet markers and surrounding whitespace."""
     return re.sub(rf"^[\s\-]*[{BULLET_CHARS_ESC}]\s*", "", text.lstrip())
 
@@ -41,13 +41,13 @@ def is_bullet_fragment(curr: str, nxt: str) -> bool:
         and not last_line.rstrip().endswith((".", "!", "?"))
     ):
         return False
-    stripped = _strip_bullet_prefix(nxt)
+    stripped = strip_bullet_prefix(nxt)
     return bool(stripped) and stripped[:1].islower()
 
 
 def split_bullet_fragment(text: str) -> Tuple[str, str]:
     """Split a bullet-prefixed continuation from any following list items."""
-    stripped = _strip_bullet_prefix(text)
+    stripped = strip_bullet_prefix(text)
     bullet_match = re.search(rf"[{BULLET_CHARS_ESC}]", stripped)
     if bullet_match:
         idx = bullet_match.start()
