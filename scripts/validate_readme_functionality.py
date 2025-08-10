@@ -320,8 +320,8 @@ class READMEValidator:
 
         # Test text processing
         try:
+            from pdf_chunker.text_cleaning import normalize_quotes
             from pdf_chunker.text_processing import (
-                normalize_quotes,
                 detect_and_fix_word_gluing,
                 _fix_case_transition_gluing,
             )

@@ -1,6 +1,6 @@
 import unittest
+from pdf_chunker.text_cleaning import normalize_quotes
 from pdf_chunker.text_processing import (
-    normalize_quotes,
     detect_and_fix_word_gluing,
     _fix_quote_boundary_gluing,
     _fix_quote_splitting_issues,
