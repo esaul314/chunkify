@@ -9,7 +9,12 @@ from haystack.components.preprocessors import DocumentSplitter
 from haystack import Document
 
 from .text_cleaning import _is_probable_heading
-from .list_detection import starts_with_bullet, strip_bullet_prefix
+from .list_detection import (
+    BULLET_CHARS_ESC,
+    HYPHEN_BULLET_PREFIX,
+    starts_with_bullet,
+    strip_bullet_prefix,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -257,16 +262,6 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
     return merged
 
 
-def _extract_bullet_tail(lines: List[str]) -> Tuple[List[str], List[str]]:
-    """Split lines into non-bullet head and trailing bullet block."""
-    idx = len(lines)
-    while idx > 0 and starts_with_bullet(lines[idx - 1]):
-        idx -= 1
-    if idx > 0 and lines[idx - 1].rstrip().endswith(":"):
-        idx -= 1
-    return lines[:idx], lines[idx:]
-
-
 def _is_empty_bullet(line: str) -> bool:
     """Return True for bullet markers without following text."""
     stripped = line.strip()
@@ -312,24 +307,55 @@ def _unwrap_bullet_lines(lines: List[str]) -> List[str]:
     return reduce(_reducer, lines, [])
 
 
+def _split_inline_bullets(text: str) -> str:
+    """Insert newlines before inline bullet markers or hyphen bullets."""
+    text = re.sub(
+        rf"(?<!\n)\s*{re.escape(HYPHEN_BULLET_PREFIX)}",
+        f"\n{HYPHEN_BULLET_PREFIX}",
+        text,
+    )
+    text = re.sub(rf"(?<!\n)\s*([{BULLET_CHARS_ESC}])", r"\n\1", text)
+    return text.lstrip("\n")
+
+
+def _find_bullet_block(
+    lines: List[str],
+) -> Tuple[List[str], List[str], List[str]]:
+    """Return head, bullet block, and trailing lines for ``lines``."""
+    start = next((i for i, ln in enumerate(lines) if starts_with_bullet(ln)), None)
+    if start is None:
+        return lines, [], []
+    end = start
+    while end < len(lines) and starts_with_bullet(lines[end]):
+        end += 1
+    head = [ln.rstrip() for ln in lines[:start]]
+    rest = lines[end:]
+    while rest and not rest[0].strip():
+        rest = rest[1:]
+    rest = [ln.rstrip() for ln in rest]
+    return head, lines[start:end], rest
+
+
 def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
-    """Move trailing bullet lists to following chunks to keep lists intact."""
+    """Keep list items contiguous by pushing bullet blocks forward."""
     if not chunks:
         return []
 
-    chunks = chunks[:]  # work on a copy
+    chunks = chunks[:]
     for i, current in enumerate(chunks):
-        lines = current.rstrip().splitlines()
-        head, tail = _extract_bullet_tail(lines)
-        if tail and i + 1 < len(chunks):
-            next_lines = chunks[i + 1].lstrip().splitlines()
+        normalized = _split_inline_bullets(current).rstrip()
+        lines = normalized.splitlines()
+        head, bullets, rest = _find_bullet_block(lines)
+        if bullets and i + 1 < len(chunks):
+            next_norm = _split_inline_bullets(chunks[i + 1].lstrip())
+            next_lines = next_norm.splitlines()
             if next_lines and starts_with_bullet(next_lines[0]):
-                combined = _dedupe_bullet_block(tail + next_lines)
+                combined = _dedupe_bullet_block(bullets + next_lines)
                 chunks[i + 1] = "\n".join(_unwrap_bullet_lines(combined)).rstrip()
-                lines = head
+                lines = head + rest
         cleaned = _unwrap_bullet_lines(_dedupe_bullet_block(lines))
         chunks[i] = "\n".join(cleaned).rstrip()
-    return [chunk for chunk in chunks if chunk.strip()]
+    return [c for c in chunks if c.strip()]
 
 
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
