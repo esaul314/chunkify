@@ -29,8 +29,6 @@ from .pymupdf4llm_integration import (
 
 from .list_detection import (
     BULLET_CHARS,
-    BULLET_CHARS_ESC,
-    insert_list_break,
     is_bullet_continuation,
     is_bullet_fragment,
     is_bullet_list_pair,
@@ -491,7 +489,6 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                         current_text.rstrip(" " + BULLET_CHARS) + " " + next_text
                     )
                 elif merge_reason in {"bullet_list", "numbered_list"}:
-                    current_text = insert_list_break(current_text)
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "numbered_continuation":
                     merged_text = current_text + " " + next_text

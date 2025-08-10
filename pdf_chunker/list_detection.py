@@ -5,14 +5,6 @@ BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 HYPHEN_BULLET_PREFIX = "- "
 NUMBERED_RE = re.compile(r"\s*\d+[.)]")
-COLON_LIST_RE = re.compile(rf":\s*(?=(?:-|\d+[.)]|[{BULLET_CHARS_ESC}]))")
-NUMBERED_ITEM_BREAK_RE = re.compile(r"(\d+[.)][^\n]*?)\s+(?=\d+[.)])")
-
-
-def insert_list_break(text: str) -> str:
-    """Normalize spacing around list markers."""
-    text = COLON_LIST_RE.sub(":\n", text)
-    return NUMBERED_ITEM_BREAK_RE.sub(r"\1\n", text)
 
 
 def starts_with_bullet(text: str) -> bool:

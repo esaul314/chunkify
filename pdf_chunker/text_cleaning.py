@@ -50,6 +50,9 @@ BULLET_CONTINUATION_RE = re.compile(
     re.MULTILINE,
 )
 
+LIST_COLON_RE = re.compile(rf":\s*(?=(?:-|\d+[.)]|[{BULLET_CHARS_ESC}]))")
+NUMBERED_ITEM_BREAK_RE = re.compile(r"(\d+[.)][^\n]*?)\s+(?=\d+[.)])")
+
 
 def remove_empty_bullet_lines(text: str) -> str:
     """Normalize bullet lines and drop empty markers."""
@@ -58,6 +61,14 @@ def remove_empty_bullet_lines(text: str) -> str:
     text = BULLET_CONTINUATION_RE.sub(r"\1 ", text)
     cleaned = EMPTY_BULLET_RE.sub("", text)
     return re.sub(r"\n{3,}", "\n\n", cleaned)
+
+
+def normalize_list_breaks(text: str) -> str:
+    """Ensure list items and numbered sequences have explicit line breaks."""
+    if "\n" not in text and ":" not in text:
+        return text
+    text = LIST_COLON_RE.sub(":\n", text)
+    return NUMBERED_ITEM_BREAK_RE.sub(r"\1\n", text)
 
 
 def _join_hyphenated_words(text: str) -> str:
@@ -424,6 +435,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)
     logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling normalize_list_breaks")
+    text = normalize_list_breaks(text)
+    logger.debug(f"After normalize_list_breaks: {repr(text[:100])}")
 
     logger.debug("Calling remove_empty_bullet_lines")
     text = remove_empty_bullet_lines(text)

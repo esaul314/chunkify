@@ -84,21 +84,9 @@ def _is_heading(text: str) -> bool:
 
 
 def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
-    """Convert raw fallback text into structured blocks.
+    """Convert raw fallback text into structured blocks."""
 
-    Applies :func:`clean_text` to each paragraph but preserves the original
-    paragraph whenever cleaning yields an empty result. This defensive approach
-    ensures that upstream extraction errors do not result in a completely empty
-    document, as observed when ``clean_text`` returned ``""`` for every
-    paragraph.  The paragraph iterator and mapping keep the implementation
-    functional and side-effect free.
-    """
-
-    paragraphs = [p for p in text.split("\n\n") if p.strip()]
-
-    def _safe_clean(p: str) -> str:
-        cleaned = clean_text(p)
-        return cleaned.strip() or p.strip()
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
     blocks = [
         {
@@ -107,16 +95,17 @@ def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
             "language": _detect_language(t),
             "source": {"filename": os.path.basename(filepath), "method": method},
         }
-        for t in map(_safe_clean, paragraphs)
-        if t.strip()
+        for t in (clean_text(p).strip() or p for p in paragraphs)
+        if t
     ]
 
     if not blocks and text.strip():
+        t = text.strip()
         blocks = [
             {
                 "type": "paragraph",
-                "text": text.strip(),
-                "language": _detect_language(text),
+                "text": t,
+                "language": _detect_language(t),
                 "source": {"filename": os.path.basename(filepath), "method": method},
             }
         ]
