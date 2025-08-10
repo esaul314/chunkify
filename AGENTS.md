@@ -83,6 +83,7 @@ pdf_chunker/
     ├── pdf_extraction_test.py
     ├── process_document_override_test.py
     ├── property_based_text_test.py
+    ├── sample_local_pdf_list_test.py
     ├── scripts_cli_test.py
     ├── semantic_chunking_test.py
     ├── source_matchers_test.py

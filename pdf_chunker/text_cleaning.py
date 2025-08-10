@@ -132,6 +132,20 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
+NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
+NUMBERED_END_RE = re.compile(
+    rf"(\d{{1,3}}[.)][^\n]+?)(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z]|$))"
+)
+
+
+def insert_numbered_list_newlines(text: str) -> str:
+    """Insert newlines around numbered list items and terminate the list with a paragraph break."""
+    text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
+    text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
+    return NUMBERED_END_RE.sub(r"\1\n\n", text)
+
+
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
     placeholder = "[[LIST_BREAK]]"
@@ -272,6 +286,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
             if author_line.startswith("—"):
                 merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
+            last_line = prev.strip().splitlines()[-1]
+            if re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", last_line):
+                merged.append(part)
+                continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
                     prev + part
@@ -338,9 +356,10 @@ def clean_paragraph(paragraph: str) -> str:
         fix_hyphenated_linebreaks,
         collapse_artifact_breaks,
         _preserve_list_newlines,
-        normalize_ligatures,
         normalize_quotes,
         remove_control_characters,
+        consolidate_whitespace,
+        normalize_ligatures,
         consolidate_whitespace,
     )
 
@@ -401,6 +420,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling _fix_double_newlines")
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling insert_numbered_list_newlines")
+    text = insert_numbered_list_newlines(text)
+    logger.debug(f"After insert_numbered_list_newlines: {repr(text[:100])}")
 
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")
