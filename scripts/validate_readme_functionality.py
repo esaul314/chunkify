@@ -778,7 +778,7 @@ class READMEValidator:
         return self.generate_report()
 
 
-def main():
+def main() -> None:
     """Main entry point"""
     validator = READMEValidator()
 

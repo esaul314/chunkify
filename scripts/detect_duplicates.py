@@ -245,7 +245,7 @@ def generate_report(
     print(f"\n{'='*80}")
 
 
-def main():
+def main() -> None:
     if len(sys.argv) != 2:
         print("Usage: python scripts/detect_duplicates.py <jsonl_file>")
         print("Example: python scripts/detect_duplicates.py output_chunks_pdf.jsonl")

@@ -5,19 +5,21 @@ import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
-from funcy import compose, cat, mapcat
+from dataclasses import dataclass
+from typing import Iterable, Dict, List, Optional, Set, Tuple, Iterator, Any
+from funcy import compose, mapcat
 from llm_correction import correct_word
 import wordninja
 
 # ─── Helpers ───────────────────────────────────────────────
 
 
-def load_jsonl(path):
+def load_jsonl(path: str) -> List[Dict[str, Any]]:
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f]
 
 
-def extract_candidates(text):
+def extract_candidates(text: str) -> List[str]:
     return [
         m.group()
         for m in re.finditer(r"\b[a-z][^\W\d_]*\b", text)
@@ -25,7 +27,7 @@ def extract_candidates(text):
     ]
 
 
-def aspell_bad(words, lang="en_US"):
+def aspell_bad(words: Iterable[str], lang: str = "en_US") -> Set[str]:
     p = subprocess.Popen(
         ["aspell", "-l", lang, "list"],
         stdin=subprocess.PIPE,
@@ -39,7 +41,7 @@ def aspell_bad(words, lang="en_US"):
 # ─── Improved Snippet Extraction ────────────────────────────
 
 
-def snippet_for(word, text, window=20):
+def snippet_for(word: str, text: str, window: int = 20) -> Optional[str]:
     pattern = re.compile(r"\b{}\b".format(re.escape(word)))
     match = pattern.search(text)
     if match:
@@ -53,7 +55,7 @@ def snippet_for(word, text, window=20):
 # ─── Semantic LLM Validation ────────────────────────────────
 
 
-def semantic_llm_validate(original, split, snippet):
+def semantic_llm_validate(original: str, split: str, snippet: str) -> str:
     prompt = (
         f"In the context '{snippet}', is '{split}' the correct form of '{original}'? "
         f"Reply only with the correct form: either '{split}' or '{original}'."
@@ -64,7 +66,16 @@ def semantic_llm_validate(original, split, snippet):
 # ─── Enhanced Correction Step ───────────────────────────────
 
 
-def enhanced_correction_step(words, texts, workers=5):
+@dataclass
+class Correction:
+    index: int
+    word: str
+    corrected: str
+
+
+def enhanced_correction_step(
+    words: Iterable[str], texts: List[str], workers: int = 5
+) -> Dict[Tuple[int, str], str]:
     pairs = [
         (i, word, text)
         for i, text in enumerate(texts)
@@ -72,7 +83,7 @@ def enhanced_correction_step(words, texts, workers=5):
         if word in text
     ]
 
-    def correct(args):
+    def correct(args: Tuple[int, str, str]) -> Optional[Correction]:
         i, word, text = args
         snippet = snippet_for(word, text)
         if snippet:
@@ -81,20 +92,22 @@ def enhanced_correction_step(words, texts, workers=5):
                 validated = semantic_llm_validate(word, split_words, snippet)
                 if validated != word:
                     print(f"[CORRECTED] Record {i}: '{word}' → '{validated}'")
-                    return (i, word, validated)
+                    return Correction(i, word, validated)
         return None
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        results = filter(None, executor.map(correct, pairs))
+        results: Iterator[Correction] = filter(
+            None, executor.map(correct, pairs)
+        )  # type: ignore[arg-type]
 
-    corrections = {(i, word): corrected for i, word, corrected in results}
+    corrections = {(c.index, c.word): c.corrected for c in results}
     return corrections
 
 
 # ─── Replacement Step ────────────────────────────────────────
 
 
-def apply_corrections_to_text(text, word_map):
+def apply_corrections_to_text(text: str, word_map: Dict[str, str]) -> str:
     if not word_map:
         return text
     pattern = re.compile(r"\b(" + "|".join(map(re.escape, word_map.keys())) + r")\b")
@@ -104,7 +117,7 @@ def apply_corrections_to_text(text, word_map):
 # ─── Main pipeline ──────────────────────────────────────────
 
 
-def main(path, output_path, summary=True):
+def main(path: str, output_path: str, summary: bool = True) -> None:
     records = load_jsonl(path)
     texts = [record["text"] for record in records]
 

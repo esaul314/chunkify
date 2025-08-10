@@ -521,7 +521,7 @@ def run_comparison(
     return comparison
 
 
-def print_comparison_report(comparison: ComparisonReport):
+def print_comparison_report(comparison: ComparisonReport) -> None:
     """Print a formatted comparison report"""
 
     print(f"\n{'='*80}")
@@ -588,7 +588,7 @@ def print_comparison_report(comparison: ComparisonReport):
     print(f"\n{'='*80}")
 
 
-def save_detailed_report(comparison: ComparisonReport, output_file: str):
+def save_detailed_report(comparison: ComparisonReport, output_file: str) -> None:
     """Save detailed comparison report to JSON file"""
 
     # Convert dataclasses to dictionaries for JSON serialization
@@ -607,7 +607,7 @@ def save_detailed_report(comparison: ComparisonReport, output_file: str):
     print(f"\nDetailed report saved to: {output_file}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Compare PDF extraction methods")
     parser.add_argument("pdf_file", help="Path to PDF file to analyze")
     parser.add_argument(

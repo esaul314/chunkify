@@ -18,6 +18,7 @@ will be left alone.
 import re
 import subprocess
 import sys
+from typing import TextIO
 
 # Spell‐checker command: we’ll use aspell in “list” mode.
 # Make sure you have `aspell` installed (`dnf install aspell`).
@@ -51,9 +52,8 @@ def repl(match: re.Match) -> str:
         return head + " " + tail
 
 
-def fix_stream(in_stream, out_stream):
+def fix_stream(in_stream: TextIO, out_stream: TextIO) -> None:
     text = in_stream.read()
-    # Perform a global substitution
     cleaned = PAT.sub(repl, text)
     out_stream.write(cleaned)
 

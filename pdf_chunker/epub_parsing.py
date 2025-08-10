@@ -5,9 +5,19 @@ import sys
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
+from typing import Dict, List, TypedDict
 from .text_cleaning import clean_paragraph
 from .heading_detection import _detect_heading_fallback
 from .extraction_fallbacks import _detect_language
+
+
+class TextBlock(TypedDict):
+    """Structured representation of extracted text blocks."""
+
+    type: str
+    text: str
+    language: str
+    source: Dict[str, str]
 
 
 def get_element_text_content(element) -> str:
@@ -22,13 +32,14 @@ def get_element_text_content(element) -> str:
     )
 
 
-def process_epub_item(item, filename):
+def process_epub_item(item: epub.EpubHtml, filename: str) -> List[TextBlock]:
+    """Convert a spine item into structured text blocks."""
     soup = BeautifulSoup(item.get_content(), "html.parser")
     body = soup.find("body")
     if not body:
         return []
 
-    blocks = []
+    blocks: List[TextBlock] = []
     for element in body.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"]):
         raw_text = get_element_text_content(element)
         block_text = clean_paragraph(raw_text)
@@ -54,8 +65,8 @@ def process_epub_item(item, filename):
 
 
 def extract_text_blocks_from_epub(
-    filepath: str, exclude_spines: str = None
-) -> list[dict]:
+    filepath: str, exclude_spines: str | None = None
+) -> List[TextBlock]:
     """
     Extracts structured text blocks from an EPUB file.
 

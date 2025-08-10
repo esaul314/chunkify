@@ -3,13 +3,15 @@ import os
 import logging
 import json
 import ftfy
-from typing import List, Callable, Tuple
+from typing import Callable, List, Tuple, TypeVar
 from wordfreq import zipf_frequency
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
 
-def pipe(value, *funcs):
+
+def pipe(value: T, *funcs: Callable[[T], T]) -> T:
     for fn in funcs:
         value = fn(value)
     return value

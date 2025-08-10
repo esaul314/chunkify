@@ -470,7 +470,7 @@ def generate_comparison_report(
     return "\n".join(report)
 
 
-def main():
+def main() -> None:
     if len(sys.argv) != 2:
         print("Usage: python scripts/test_page_boundaries.py <pdf_file>")
         sys.exit(1)

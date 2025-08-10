@@ -190,10 +190,8 @@ def _process_jsonl_file(
             outfile.write(json.dumps(result_chunk) + "\n")
 
 
-def main():
-    """
-    Main function to run the AI enrichment script from the command line.
-    """
+def main() -> None:
+    """Run the AI enrichment script from the command line."""
     if len(sys.argv) != 3:
         print(
             "Usage: python -m pdf_chunker.ai_enrichment <input_file.jsonl> <output_file.jsonl>",

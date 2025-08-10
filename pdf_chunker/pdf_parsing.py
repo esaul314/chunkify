@@ -37,7 +37,7 @@ from .list_detection import (
     is_numbered_list_pair,
     split_bullet_fragment,
 )
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Sequence
 
 
 MIN_WORDS_FOR_CONTINUATION = 6
@@ -336,12 +336,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def is_artifact_block(block, page_height, frac=0.15, max_words=6):
-    """
-    Detect small numeric artifact blocks near page margins:
-    - Block positioned within top or bottom 'frac' of page height,
-    - Contains a digit and at most 'max_words' words.
-    """
+def is_artifact_block(
+    block: Sequence[Any],
+    page_height: float,
+    frac: float = 0.15,
+    max_words: int = 6,
+) -> bool:
+    """Detect small numeric artifact blocks near page margins."""
     # Unpack first five elements: x0, y0, x1, y1, raw_text
     x0, y0, x1, y1, raw_text = block[:5]
     # Check if block sits in the margin zones

@@ -548,7 +548,7 @@ def run_benchmark(
     )
 
 
-def print_benchmark_summary(results: BenchmarkResults):
+def print_benchmark_summary(results: BenchmarkResults) -> None:
     """Print a human-readable summary of benchmark results"""
     summary = results.comparison_summary
     config = summary["benchmark_config"]
@@ -633,7 +633,7 @@ def print_benchmark_summary(results: BenchmarkResults):
     print("\n" + "=" * 80)
 
 
-def main():
+def main() -> None:
     """Main function to run the benchmark"""
     parser = argparse.ArgumentParser(
         description="Benchmark PDF extraction performance: hybrid vs traditional methods"

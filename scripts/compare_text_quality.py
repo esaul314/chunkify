@@ -801,7 +801,7 @@ def run_text_quality_comparison(pdf_files: List[str]) -> List[QualityComparison]
     return results
 
 
-def print_quality_summary(results: List[QualityComparison]):
+def print_quality_summary(results: List[QualityComparison]) -> None:
     """Print a human-readable summary of text quality comparison results"""
     if not results:
         print("No results to display")
@@ -896,7 +896,7 @@ def print_quality_summary(results: List[QualityComparison]):
     print("\n" + "=" * 80)
 
 
-def main():
+def main() -> None:
     """Main function to run the text quality comparison"""
     parser = argparse.ArgumentParser(
         description="Compare text quality between hybrid PyMuPDF4LLM and traditional PDF extraction methods"

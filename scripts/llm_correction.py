@@ -8,7 +8,7 @@ MODEL = "gpt-3.5-turbo"
 litellm.api_key = os.getenv("OPENAI_API_KEY")
 
 
-def correct_word(word, snippet):
+def correct_word(word: str, snippet: str) -> str:
     prompt = (
         f"The following snippet contains the possibly erroneous word '{word}':\n\n"
         f'"{snippet}"\n\n'
