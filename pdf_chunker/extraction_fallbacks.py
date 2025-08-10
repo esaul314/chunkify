@@ -94,13 +94,13 @@ def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
     functional and side-effect free.
     """
 
-    paragraphs = (p for p in text.split("\n\n") if p.strip())
+    paragraphs = [p for p in text.split("\n\n") if p.strip()]
 
     def _safe_clean(p: str) -> str:
         cleaned = clean_text(p)
         return cleaned.strip() or p.strip()
 
-    return [
+    blocks = [
         {
             "type": "heading" if _is_heading(t) else "paragraph",
             "text": t,
@@ -110,6 +110,18 @@ def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
         for t in map(_safe_clean, paragraphs)
         if t.strip()
     ]
+
+    if not blocks and text.strip():
+        blocks = [
+            {
+                "type": "paragraph",
+                "text": text.strip(),
+                "language": _detect_language(text),
+                "source": {"filename": os.path.basename(filepath), "method": method},
+            }
+        ]
+
+    return blocks
 
 
 def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[dict]:
