@@ -134,12 +134,16 @@ def collapse_artifact_breaks(text: str) -> str:
 
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
 NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
+NUMBERED_END_RE = re.compile(
+    rf"(\d{{1,3}}[.)][^\n]+?)(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z]|$))"
+)
 
 
 def insert_numbered_list_newlines(text: str) -> str:
-    """Insert newlines before numbered list items lacking explicit breaks."""
+    """Insert newlines around numbered list items and terminate the list with a paragraph break."""
     text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
-    return NUMBERED_INLINE_RE.sub(r"\1\n", text)
+    text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
+    return NUMBERED_END_RE.sub(r"\1\n\n", text)
 
 
 def _preserve_list_newlines(text: str) -> str:
@@ -281,6 +285,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
             author_line = part.lstrip()
             if author_line.startswith("—"):
                 merged[-1] = f"{prev.rstrip()} {author_line}"
+                continue
+            last_line = prev.strip().splitlines()[-1]
+            if re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", last_line):
+                merged.append(part)
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
