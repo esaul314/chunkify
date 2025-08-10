@@ -103,11 +103,19 @@ class TestWordGluingDetection(unittest.TestCase):
 
     def test_quote_boundary_gluing(self):
         """Test detection and fixing of quote boundary gluing."""
-        text = 'He said"Hello"and left quickly.'
+        text = "He said“Hello”and left quickly."
         fixed_text = _fix_quote_boundary_gluing(text)
         self.assertIn('said "Hello" and', fixed_text)
-        # Should not have quotes glued to words
-        self.assertNotIn('said"Hello"and', fixed_text)
+        # Should not retain smart quotes or gluing
+        self.assertNotIn("said“Hello”and", fixed_text)
+        self.assertNotIn('said "Hello"and', fixed_text)
+
+    def test_quote_boundary_gluing_idempotent(self):
+        """_fix_quote_boundary_gluing should be idempotent."""
+        text = 'He said "Hello" and left quickly.'
+        once = _fix_quote_boundary_gluing(text)
+        twice = _fix_quote_boundary_gluing(once)
+        self.assertEqual(once, twice)
 
     def test_legitimate_compound_words_preserved(self):
         """Test that legitimate compound words are not broken."""

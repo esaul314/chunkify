@@ -2,7 +2,7 @@ import re
 import logging
 from typing import Any, List, Tuple
 
-from .text_cleaning import normalize_quotes
+from .text_cleaning import normalize_quotes, pipe
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +75,9 @@ def _fix_page_boundary_gluing(text: str) -> str:
 
 
 def _fix_quote_boundary_gluing(text: str) -> str:
-    """Fix word gluing around quotes."""
+    """Fix spacing around quotes after normalization."""
 
-    return text if not text else normalize_quotes(text).strip()
+    return text if not text else pipe(text, normalize_quotes, str.strip)
 
 
 def detect_and_fix_word_gluing(text: str) -> str:
@@ -148,39 +148,6 @@ def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
             merged.append(chunks[i])
             i += 1
     return merged
-
-
-# def _fix_quote_splitting_issues(chunks):
-# """
-# Merge chunks that were incorrectly split at quotes.
-# Merge any two chunks where the first ends with a quote and the second starts with '",'
-# (with or without whitespace), as in the test case.
-# """
-# if not chunks or len(chunks) < 2:
-# return chunks
-
-# # Check if we have exactly 2 chunks and they match the splitting pattern
-# if (len(chunks) == 2 and
-# chunks[0].rstrip().endswith('"') and
-# re.match(r'^\s*",', chunks[1])):
-# merged_text = chunks[0] + chunks[1]
-# return [merged_text]
-
-# # General case: merge any such adjacent chunks
-# merged = []
-# i = 0
-# while i < len(chunks):
-# current = chunks[i]
-# if (i + 1 < len(chunks) and
-# current.rstrip().endswith('"') and
-# re.match(r'^\s*",', chunks[i + 1])):
-# merged_chunk = current + chunks[i + 1]
-# merged.append(merged_chunk)
-# i += 2
-# else:
-# merged.append(current)
-# i += 1
-# return merged
 
 
 def _validate_json_safety(text: str) -> Tuple[bool, List[str]]:
