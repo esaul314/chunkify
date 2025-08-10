@@ -59,7 +59,7 @@ pdf_chunker/
 │   ├── validate_chunk_quality.py # Evaluate chunk content quality
 │   ├── validate_chunks.sh       # Quality and boundary validation
 │   └── validate_readme_functionality.py # Check README code snippets
-└── tests/                        # Modular test architecture
+├── tests/                        # Modular test architecture
     ├── AGENTS.md
     ├── conftest.py                 # Pytest fixtures and colored output
     ├── ai_enrichment_test.py
@@ -87,12 +87,22 @@ pdf_chunker/
     ├── scripts_cli_test.py
     ├── semantic_chunking_test.py
     ├── source_matchers_test.py
+    ├── splitter_transform_test.py
     ├── test_text_processing.py
+    ├── text_cleaning_transform_test.py
     ├── utils/
     │   ├── AGENTS.md
     │   └── common.sh              # Shared test utilities and formatting
     └── utils_test.py
+└── test_data/
+    ├── README.md
+    ├── hyphenation.b64
+    ├── ligature.b64
+    ├── sample_test.pdf
+    └── underscore.b64
 `````
+
+*PDF fixtures for ligatures, underscores, and hyphenation are stored as Base64 to avoid binary artifacts and decoded during tests.*
 
 ---
 

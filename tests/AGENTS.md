@@ -18,6 +18,8 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `page_artifacts_edge_case_test.py`: Page artifact suffix handling
 - `footer_artifact_test.py`: Regression for footer and sub-footer removal and multi-page preservation
 - `scripts_cli_test.py`: CLI invocation sanity checks
+- `splitter_transform_test.py`: Chunk splitting of cleaned text artifacts
+- `text_cleaning_transform_test.py`: Ligature, underscore, and hyphenation normalization
 - Duplicate detection thresholds (via `detect_duplicates.py`).
 
 ## AI Agent Guidance
