@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 
 
-def create_test_epub():
+def create_test_epub() -> str:
     """Create a test EPUB file manually"""
     # Create test_data directory if it doesn't exist
     test_data_dir = Path(__file__).parent.parent / "test_data"

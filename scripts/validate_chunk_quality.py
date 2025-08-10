@@ -752,7 +752,7 @@ def validate_text_processing_quality(chunks: List[Dict[str, Any]]) -> Dict[str, 
     return validation_results
 
 
-def print_text_processing_validation_report(validation_results: Dict[str, Any]):
+def print_text_processing_validation_report(validation_results: Dict[str, Any]) -> None:
     """Print a detailed text processing validation report."""
     print(
         "================================================================================"
@@ -1057,7 +1057,7 @@ def print_quality_report(
             print()
 
 
-def print_comparison_report(comparison: Dict[str, Any]):
+def print_comparison_report(comparison: Dict[str, Any]) -> None:
     """Print a formatted comparison report."""
     print("=" * 80)
     print("CHUNK QUALITY COMPARISON REPORT")
@@ -1162,7 +1162,7 @@ def generate_chunks_from_pdf(
             del os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"]
 
 
-def save_chunks_to_jsonl(chunks: List[Dict[str, Any]], output_path: str):
+def save_chunks_to_jsonl(chunks: List[Dict[str, Any]], output_path: str) -> None:
     """Save chunks to a JSONL file."""
     # Ensure proper .jsonl extension
     if not output_path.endswith(".jsonl"):
@@ -1178,7 +1178,7 @@ def save_chunks_to_jsonl(chunks: List[Dict[str, Any]], output_path: str):
         print(f"Error saving chunks to '{output_path}': {e}", file=sys.stderr)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Validate chunk quality from JSONL output"
     )

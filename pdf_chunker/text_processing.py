@@ -1,5 +1,6 @@
 import re
 import logging
+from typing import Any, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -194,24 +195,20 @@ def detect_and_fix_word_gluing(text: str) -> str:
     return text
 
 
-def _detect_text_reordering(*args, **kwargs):
-    """
-    Stub for test compatibility. Returns False (no reordering detected).
-    """
+def _detect_text_reordering(*args: Any, **kwargs: Any) -> bool:
+    """Stub for test compatibility. Returns False (no reordering detected)."""
     return False
 
 
-def _validate_chunk_integrity(chunks, original_text=None):
-    """
-    Stub for test compatibility. Returns chunks unchanged.
-    """
+def _validate_chunk_integrity(
+    chunks: List[str], original_text: str | None = None
+) -> List[str]:
+    """Stub for test compatibility. Returns chunks unchanged."""
     return chunks
 
 
-def _repair_json_escaping_issues(text):
-    """
-    Stub for test compatibility. Removes leading '",' and control characters.
-    """
+def _repair_json_escaping_issues(text: str) -> str:
+    """Stub for test compatibility. Remove leading '",' and control characters."""
     if not text:
         return text
     import re
@@ -227,13 +224,13 @@ def _repair_json_escaping_issues(text):
     return text.strip()
 
 
-def _remove_control_characters(text):
+def _remove_control_characters(text: str) -> str:
     import re
 
     return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", text)
 
 
-def _fix_quote_splitting_issues(chunks):
+def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
     if not chunks or len(chunks) < 2:
         return chunks
 
@@ -287,10 +284,8 @@ def _fix_quote_splitting_issues(chunks):
 # return merged
 
 
-def _validate_json_safety(text):
-    """
-    Stub for test compatibility. Returns (True, []) if text can be JSON serialized, else (False, [issue]).
-    """
+def _validate_json_safety(text: str) -> Tuple[bool, List[str]]:
+    """Stub for test compatibility. Validate JSON serialization safety."""
     import json
 
     try:

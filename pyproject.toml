@@ -1,3 +1,27 @@
 [tool.black]
 line-length = 88
 
+[tool.mypy]
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+module = ["fitz", "pymupdf4llm"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["yaml", "ebooklib", "langdetect"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pdf_chunker.list_detection",
+    "pdf_chunker.extraction_fallbacks",
+    "pdf_chunker.pdf_parsing",
+    "pdf_chunker.parsing",
+    "pdf_chunker.splitter",
+    "pdf_chunker.ai_enrichment",
+    "pdf_chunker.core",
+    "pdf_chunker.epub_parsing",
+]
+ignore_errors = true
+

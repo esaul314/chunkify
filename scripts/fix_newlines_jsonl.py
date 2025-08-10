@@ -16,7 +16,8 @@ Algorithm:
 """
 
 import re, sys, json, subprocess
-from functools import partial, reduce
+from functools import reduce
+from typing import TextIO
 
 SPELLER_CMD = ["aspell", "list"]
 
@@ -56,7 +57,7 @@ def fix_text(text: str) -> str:
     return reduce(lambda acc, fn: fn(acc), (merge_splits, collapse_clause_breaks), text)
 
 
-def process_stream(inp, outp):
+def process_stream(inp: TextIO, outp: TextIO) -> None:
     for line in inp:
         line = line.rstrip("\n")
         if not line:

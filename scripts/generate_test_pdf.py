@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 
-def create_test_pdf():
+def create_test_pdf() -> str:
     """Create a test PDF file using reportlab"""
     try:
         # Debug import path and environment
@@ -163,7 +163,7 @@ def create_test_pdf():
     return str(pdf_path)
 
 
-def create_pdf_placeholder():
+def create_pdf_placeholder() -> str:
     """Create a placeholder info file when reportlab is not available"""
     test_data_dir = Path(__file__).parent.parent / "test_data"
     test_data_dir.mkdir(exist_ok=True)

@@ -11,7 +11,7 @@ import sys
 from collections import Counter
 
 
-def diagnose(path):
+def diagnose(path: str) -> None:
     counts = Counter()
     with open(path, encoding="utf-8") as f:
         for line in f:

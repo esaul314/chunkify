@@ -1,4 +1,5 @@
 import argparse
+import argparse
 import json
 import logging
 
@@ -7,7 +8,7 @@ from pdf_chunker.core import process_document
 logger = logging.getLogger(__name__)
 
 
-def main():
+def main() -> None:
     logger.debug("Starting chunk_pdf script execution")
     parser = argparse.ArgumentParser("Chunk a document into structured JSONL.")
     parser.add_argument("document_file", help="Path to the document file (PDF or EPUB)")
