@@ -1,7 +1,7 @@
 import logging
 from collections import Counter
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from haystack.components.preprocessors import DocumentSplitter
 
@@ -199,39 +199,47 @@ def _last_number(text: str) -> Optional[int]:
     return int(matches[-1].group(1)) if matches else None
 
 
+def _collect_numbered_sequence(
+    chunks: List[str], start: int, expected: int
+) -> Tuple[str, int]:
+    """Collect consecutive numbered items starting at ``start``."""
+    collected: List[str] = []
+    i = start
+    while i < len(chunks):
+        candidate = chunks[i].strip()
+        num = _starting_number(candidate)
+        if num != expected:
+            break
+        collected.append(candidate)
+        expected += 1
+        i += 1
+    return " ".join(collected).strip(), i
+
+
 def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
     """Merge chunks that split numbered lists across boundaries."""
     merged: List[str] = []
     i = 0
     while i < len(chunks):
         current = chunks[i].strip()
-        end_num = _ending_number(current)
-        if end_num is not None and i + 1 < len(chunks):
-            next_chunk = chunks[i + 1].strip()
-            combined = f"{current} {next_chunk}".strip()
-            i += 2
-            last = _last_number(combined) or end_num
-            expected = last + 1
-            while i < len(chunks):
-                candidate = chunks[i].strip()
-                start = _starting_number(candidate)
-                if start == expected:
-                    combined = f"{combined} {candidate}".strip()
-                    expected += 1
-                    i += 1
-                else:
-                    break
+        start = _starting_number(current)
+        if start is not None:
+            combined, i = _collect_numbered_sequence(chunks, i, start)
             merged.append(combined)
             continue
 
-        last_num = _last_number(current)
-        if last_num is not None and i + 1 < len(chunks):
-            next_chunk = chunks[i + 1].strip()
-            start = _starting_number(next_chunk)
-            if start == last_num + 1:
-                combined = f"{current} {next_chunk}".strip()
+        last = _last_number(current)
+        if last is not None and i + 1 < len(chunks):
+            nxt = chunks[i + 1].strip()
+            next_start = _starting_number(nxt)
+            if next_start == last + 1:
+                seq, i = _collect_numbered_sequence(chunks, i + 1, next_start)
+                merged.append(f"{current} {seq}".strip())
+                continue
+            if next_start is None:
+                combined = f"{current} {nxt}".strip()
                 i += 2
-                expected = start + 1
+                expected = last + 1
                 while i < len(chunks):
                     candidate = chunks[i].strip()
                     start = _starting_number(candidate)
@@ -243,23 +251,6 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
                         break
                 merged.append(combined)
                 continue
-
-        start_num = _starting_number(current)
-        if start_num is not None:
-            combined = current
-            i += 1
-            expected = start_num + 1
-            while i < len(chunks):
-                candidate = chunks[i].strip()
-                start = _starting_number(candidate)
-                if start == expected:
-                    combined = f"{combined} {candidate}".strip()
-                    expected += 1
-                    i += 1
-                else:
-                    break
-            merged.append(combined)
-            continue
 
         merged.append(current)
         i += 1
@@ -276,42 +267,50 @@ def _extract_bullet_tail(lines: List[str]) -> Tuple[List[str], List[str]]:
     return lines[:idx], lines[idx:]
 
 
+def _is_empty_bullet(line: str) -> bool:
+    """Return True for bullet markers without following text."""
+    stripped = line.strip()
+    return starts_with_bullet(stripped) and len(stripped.split(maxsplit=1)) == 1
+
+
+def _dedupe_bullet_block(lines: List[str]) -> List[str]:
+    """Remove empty and duplicate bullet lines while preserving order."""
+    from functools import reduce
+
+    def _reducer(
+        state: Tuple[List[str], Set[str]], line: str
+    ) -> Tuple[List[str], Set[str]]:
+        cleaned, seen = state
+        if starts_with_bullet(line):
+            if _is_empty_bullet(line) or line in seen:
+                return cleaned, seen
+            seen = seen | {line}
+        else:
+            seen = set()
+        return cleaned + [line], seen
+
+    cleaned, _ = reduce(_reducer, lines, ([], set()))
+    return cleaned
+
+
 def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
     """Move trailing bullet lists to following chunks to keep lists intact."""
     if not chunks:
-        return chunks
+        return []
+
     result: List[str] = []
-    current = chunks[0]
-    for nxt in chunks[1:]:
+    chunks = chunks[:]  # work on a copy
+    for i, current in enumerate(chunks):
         curr_lines = current.rstrip().splitlines()
-        next_lines = nxt.lstrip().splitlines()
         head, tail = _extract_bullet_tail(curr_lines)
-        if tail and next_lines and starts_with_bullet(next_lines[0]):
-            combined = tail + next_lines
-            tlen = len(tail)
-            i = tlen
-            while i <= len(combined) - tlen:
-                if combined[i : i + tlen] == tail:
-                    combined = combined[:i] + combined[i + tlen :]
-                    break
-                i += 1
-            cleaned: List[str] = []
-            seen = set()
-            for line in combined:
-                if starts_with_bullet(line):
-                    if line in seen:
-                        continue
-                    seen.add(line)
-                else:
-                    seen.clear()
-                cleaned.append(line)
-            combined = cleaned
-            current = "\n".join(head)
-            nxt = "\n".join(combined)
+        if tail and i + 1 < len(chunks):
+            next_lines = chunks[i + 1].lstrip().splitlines()
+            if next_lines and starts_with_bullet(next_lines[0]):
+                combined = _dedupe_bullet_block(tail + next_lines)
+                chunks[i + 1] = "\n".join(combined).rstrip()
+                current = "\n".join(head)
         result.append(current.rstrip())
-        current = nxt
-    result.append(current.rstrip())
-    return result
+    return [chunk for chunk in result if chunk.strip()]
 
 
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
