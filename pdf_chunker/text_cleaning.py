@@ -143,6 +143,15 @@ def collapse_artifact_breaks(text: str) -> str:
     return re.sub(r"([._])\n(\w)", r"\1 \2", text)
 
 
+STRAY_BULLET_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
+
+
+def remove_stray_bullet_lines(text: str) -> str:
+    """Collapse bullet markers that appear alone or mid-item."""
+    text = STRAY_BULLET_RE.sub(" ", text)
+    return re.sub(rf"(?<=\S)[ \t][{BULLET_CHARS_ESC}]\s+", " ", text)
+
+
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
 NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
 NUMBERED_END_RE = re.compile(
@@ -371,6 +380,7 @@ def clean_paragraph(paragraph: str) -> str:
         paragraph,
         fix_hyphenated_linebreaks,
         collapse_artifact_breaks,
+        remove_stray_bullet_lines,
         _preserve_list_newlines,
         normalize_quotes,
         remove_control_characters,

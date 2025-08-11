@@ -4,7 +4,7 @@ import os
 import sys
 import re
 import fitz  # PyMuPDF
-from .text_cleaning import clean_text, HYPHEN_CHARS_ESC
+from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
 from .heading_detection import _detect_heading_fallback
 from .page_utils import parse_page_ranges, validate_page_exclusions
 from .page_artifacts import (
@@ -36,6 +36,8 @@ from .list_detection import (
     is_numbered_continuation,
     is_numbered_list_pair,
     split_bullet_fragment,
+    starts_with_bullet,
+    _last_non_empty_line,
 )
 from typing import List, Dict, Any, Tuple, Optional, Sequence
 
@@ -229,6 +231,15 @@ def _should_merge_blocks(
     if is_bullet_fragment(curr_text, next_text):
         logger.debug("Merge decision: BULLET_FRAGMENT")
         return True, "bullet_fragment"
+
+    last_line = _last_non_empty_line(curr_text)
+    if (
+        starts_with_bullet(last_line)
+        and not starts_with_bullet(next_text)
+        and len(next_text.split()) <= 3
+    ):
+        logger.debug("Merge decision: BULLET_SHORT_FRAGMENT")
+        return True, "bullet_short_fragment"
 
     if is_bullet_list_pair(curr_text, next_text):
         logger.debug("Merge decision: BULLET_LIST")
@@ -473,7 +484,9 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     merged_text = current_text + " " + next_text
                 elif merge_reason == "bullet_fragment":
                     fragment, remainder = split_bullet_fragment(next_text)
-                    merged_text = f"{current_text} {fragment}"
+                    merged_text = remove_stray_bullet_lines(
+                        f"{current_text} {fragment}"
+                    )
                     after_merge = merged_text[:50].replace(chr(10), "\n")
                     logger.debug("  After merge: %s", after_merge)
                     current_block["text"] = merged_text
@@ -486,14 +499,20 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     j += 1
                     continue
                 elif merge_reason == "bullet_continuation":
-                    merged_text = (
+                    merged_text = remove_stray_bullet_lines(
                         current_text.rstrip(" " + BULLET_CHARS) + " " + next_text
+                    )
+                elif merge_reason == "bullet_short_fragment":
+                    merged_text = remove_stray_bullet_lines(
+                        current_text + " " + next_text
                     )
                 elif merge_reason == "bullet_list":
                     current_text = re.sub(
                         rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", current_text
                     )
-                    merged_text = current_text + "\n" + next_text
+                    merged_text = remove_stray_bullet_lines(
+                        current_text + "\n" + next_text
+                    )
                 elif merge_reason == "numbered_list":
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "numbered_continuation":
