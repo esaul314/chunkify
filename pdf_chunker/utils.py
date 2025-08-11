@@ -126,7 +126,7 @@ def _build_metadata(
     chunk_index: int,
     utterance_type: dict,
 ) -> dict:
-    """Construct metadata object for a chunk."""
+    """Construct metadata object for a chunk, propagating list metadata."""
     filename = source_block.get("source", {}).get("filename", "Unknown")
     page = source_block.get("source", {}).get("page", 0)
     location = source_block.get("source", {}).get("location")
@@ -136,7 +136,7 @@ def _build_metadata(
     )
     page_value = page if isinstance(page, int) and page > 0 else None
 
-    metadata = {
+    base_metadata = {
         "source": filename,
         "chunk_id": _generate_chunk_id(
             filename, page_value if page_value is not None else 0, chunk_index
@@ -149,6 +149,14 @@ def _build_metadata(
         "utterance_type": utterance_type,
         "importance": "medium",
     }
+
+    list_metadata = (
+        {"list_kind": source_block["list_kind"]}
+        if source_block.get("type") == "list_item" and source_block.get("list_kind")
+        else {}
+    )
+
+    metadata = {**base_metadata, **list_metadata}
     return {k: v for k, v in metadata.items() if k != "location" or v is None or v}
 
 
