@@ -7,6 +7,11 @@ HYPHEN_BULLET_PREFIX = "- "
 NUMBERED_RE = re.compile(r"\s*\d+[.)]")
 
 
+def strip_bullet_prefix(text: str) -> str:
+    """Remove leading bullet markers and surrounding whitespace."""
+    return re.sub(rf"^[\s\-]*[{BULLET_CHARS_ESC}]\s*", "", text.lstrip())
+
+
 def starts_with_bullet(text: str) -> bool:
     """Return True if ``text`` begins with a bullet marker or hyphen bullet."""
     stripped = text.lstrip()
@@ -29,22 +34,29 @@ def is_bullet_continuation(curr: str, nxt: str) -> bool:
 
 
 def is_bullet_fragment(curr: str, nxt: str) -> bool:
-    """Return True when ``nxt`` starts with text that continues the last bullet in ``curr``."""
+    """Return True when ``nxt`` continues the last bullet item from ``curr``."""
     last_line = _last_non_empty_line(curr)
-    return (
+    if not (
         starts_with_bullet(last_line)
         and not last_line.rstrip().endswith((".", "!", "?"))
-        and nxt[:1].islower()
-    )
+    ):
+        return False
+    stripped = strip_bullet_prefix(nxt)
+    return bool(stripped) and stripped[:1].islower()
 
 
 def split_bullet_fragment(text: str) -> Tuple[str, str]:
-    """Split leading lowercase fragment from the rest of ``text``."""
-    match = re.match(r"([a-z0-9,;:'\"()\-\s]+)([A-Z].*)", text, re.DOTALL)
+    """Split a bullet-prefixed continuation from any following list items."""
+    stripped = strip_bullet_prefix(text)
+    bullet_match = re.search(rf"[{BULLET_CHARS_ESC}]", stripped)
+    if bullet_match:
+        idx = bullet_match.start()
+        return stripped[:idx].strip(), stripped[idx:].lstrip()
+    match = re.match(r"([a-z0-9,;:'\"()\-\s]+)([A-Z].*)", stripped, re.DOTALL)
     return (
         (match.group(1).strip(), match.group(2).lstrip())
         if match
-        else (text.strip(), "")
+        else (stripped.strip(), "")
     )
 
 
