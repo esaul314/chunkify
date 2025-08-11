@@ -3,6 +3,10 @@ import sys
 sys.path.insert(0, ".")
 
 from pdf_chunker.core import process_document
+from pdf_chunker.list_detection import (
+    is_bullet_continuation,
+    is_bullet_fragment,
+)
 
 
 def test_multiline_bullet_items():
@@ -27,3 +31,8 @@ def test_multiline_bullet_items():
     assert "by accident one\n\u2022 a bar behind another" not in text
     assert "mourning women\n\u2022 their" not in text
     assert "(Souls\n\u2022 that" not in text
+    texts = [c["text"] for c in chunks]
+    assert all(
+        not (is_bullet_fragment(a, b) or is_bullet_continuation(a, b))
+        for a, b in zip(texts, texts[1:])
+    )
