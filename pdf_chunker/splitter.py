@@ -314,6 +314,24 @@ def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
     return result
 
 
+def _merge_standalone_lists(chunks: List[str]) -> List[str]:
+    """Attach standalone bullet or numbered list chunks to preceding text.
+
+    This ensures list items are kept with their introductory context instead of
+    forming separate chunks that begin with a list marker.
+    """
+    merged: List[str] = []
+    for chunk in chunks:
+        stripped = chunk.lstrip()
+        if merged and (
+            starts_with_bullet(stripped) or _starting_number(stripped) is not None
+        ):
+            merged[-1] = f"{merged[-1].rstrip()}\n{stripped}"
+        else:
+            merged.append(chunk.rstrip())
+    return merged
+
+
 def detect_dialogue_patterns(text: str) -> List[Dict[str, Any]]:
     """
     Detect dialogue patterns in text including quotes, responses, and commentary.
@@ -870,19 +888,20 @@ def semantic_chunker(
     # Merge numbered list items that were split across chunks
     numbered_chunks = _merge_numbered_list_chunks(validated_chunks)
 
-    # Rebalance bullet lists so they remain in a single chunk
+    # Rebalance bullet lists and attach standalone list chunks
     bullet_chunks = _rebalance_bullet_chunks(numbered_chunks)
+    list_chunks = _merge_standalone_lists(bullet_chunks)
 
     # Final statistics
     final_short_count = sum(
-        1 for chunk in bullet_chunks if len(chunk.split()) <= short_threshold
+        1 for chunk in list_chunks if len(chunk.split()) <= short_threshold
     )
     final_very_short_count = sum(
-        1 for chunk in bullet_chunks if len(chunk.split()) <= very_short_threshold
+        1 for chunk in list_chunks if len(chunk.split()) <= very_short_threshold
     )
 
     logger.info("Final chunking results:")
-    logger.info(f"  Total chunks: {len(bullet_chunks)}")
+    logger.info(f"  Total chunks: {len(list_chunks)}")
     logger.info(
         f"  Short chunks (≤{short_threshold} words): {final_short_count} (reduced from {initial_short_count})"
     )
@@ -890,8 +909,8 @@ def semantic_chunker(
         f"  Very short chunks (≤{very_short_threshold} words): {final_very_short_count} (reduced from {initial_very_short_count})"
     )
 
-    if bullet_chunks:
-        word_counts = [len(chunk.split()) for chunk in bullet_chunks]
+    if list_chunks:
+        word_counts = [len(chunk.split()) for chunk in list_chunks]
         avg_words = sum(word_counts) / len(word_counts)
         min_words = min(word_counts)
         max_words = max(word_counts)
@@ -899,7 +918,7 @@ def semantic_chunker(
             f"  Chunk size stats: avg={avg_words:.1f} words, min={min_words} words, max={max_words} words"
         )
 
-    return bullet_chunks
+    return list_chunks
 
 
 def _check_quote_balance(text: str) -> int:
