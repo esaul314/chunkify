@@ -5,7 +5,10 @@ import pytest
 sys.path.insert(0, ".")
 
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
-from pdf_chunker.text_cleaning import collapse_single_newlines
+from pdf_chunker.text_cleaning import (
+    collapse_single_newlines,
+    insert_numbered_list_newlines,
+)
 
 
 def test_numbered_list_preservation():
@@ -33,3 +36,15 @@ def test_numbered_list_preservation():
 )
 def test_number_suffix_not_list(raw: str, expected: str) -> None:
     assert collapse_single_newlines(raw) == expected
+
+
+def test_abbreviation_inside_numbered_item() -> None:
+    text = (
+        "1. First item.\n"
+        "2. Second item references the SaaS paradigm for clarity.\n"
+        "Following paragraph."
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "the\n\nSaaS" not in cleaned
+    assert "paradigm for clarity.\n\nFollowing" in cleaned
