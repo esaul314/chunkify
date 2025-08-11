@@ -3,6 +3,7 @@
 import os
 import sys
 import re
+from functools import reduce
 import fitz  # PyMuPDF
 from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
 from .heading_detection import _detect_heading_fallback
@@ -399,6 +400,37 @@ def is_artifact_block(
     return False
 
 
+def _is_footer_text_block(
+    block: Sequence[Any],
+    page_height: float,
+    frac: float = 0.15,
+    max_words: int = 8,
+) -> bool:
+    """Heuristically detect footer text near the bottom margin."""
+
+    x0, y0, x1, y1, raw_text = block[:5]
+    if y0 <= page_height * (1 - frac):
+        return False
+    stripped = strip_page_artifact_suffix(clean_text(raw_text), None)
+    words = stripped.split()
+    return 0 < len(words) <= max_words
+
+
+def _filter_margin_artifacts(blocks: Sequence[Any], page_height: float) -> list[Any]:
+    """Remove margin artifacts and preceding footer text blocks."""
+
+    def step(acc: list[Any], block: Any) -> list[Any]:
+        if is_artifact_block(block, page_height):
+            return (
+                acc[:-1] if acc and _is_footer_text_block(acc[-1], page_height) else acc
+            )
+        if _is_footer_text_block(block, page_height):
+            return acc
+        return acc + [block]
+
+    return reduce(step, blocks, [])
+
+
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     Extract and classify text blocks from a PDF page,
@@ -406,7 +438,7 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")
-    filtered = [b for b in raw_blocks if not is_artifact_block(b, page_height)]
+    filtered = _filter_margin_artifacts(raw_blocks, page_height)
 
     structured = []
     for b in filtered:
