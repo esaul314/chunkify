@@ -16,12 +16,14 @@ def test_multiline_bullet_items():
     assert "our eyes?\n\u2022\n\u2022 There" not in text
     assert "our eyes?\n\u2022 There" in text
     assert "gone by. \u2022 They would" not in text
-    assert "gone by.\n\n\u2022 They would" in text
+    assert "gone by.\n\u2022 They would" in text
     assert (
         "\u2022 They would begin to sing almost with as much precision as a clock,"
         " within five minutes of a particular time, referred to the setting of the sun,"
         " every evening." in text
     )
+    assert "singing, when\n\nI state" not in text
+    assert "singing, when I state" in text
     assert "by accident one\n\u2022 a bar behind another" not in text
     assert "mourning women\n\u2022 their" not in text
     assert "(Souls\n\u2022 that" not in text
