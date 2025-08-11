@@ -3,6 +3,8 @@
 import os
 import sys
 import re
+import logging
+from functools import reduce
 import fitz  # PyMuPDF
 from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
 from .heading_detection import _detect_heading_fallback
@@ -372,9 +374,9 @@ def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     return False
 
 
-import logging
-
 logger = logging.getLogger(__name__)
+
+NUMERIC_PATTERN = re.compile(r"^[0-9ivxlcdm]+$", re.IGNORECASE)
 
 
 def is_artifact_block(
@@ -383,20 +385,47 @@ def is_artifact_block(
     frac: float = 0.15,
     max_words: int = 6,
 ) -> bool:
-    """Detect small numeric artifact blocks near page margins."""
-    # Unpack first five elements: x0, y0, x1, y1, raw_text
+    """Detect numeric-only blocks near page margins (likely page numbers)."""
     x0, y0, x1, y1, raw_text = block[:5]
-    # Check if block sits in the margin zones
     if y0 < page_height * frac or y0 > page_height * (1 - frac):
-        cleaned = clean_text(raw_text)
+        cleaned = clean_text(raw_text).strip()
         words = cleaned.split()
-        if (
-            words
-            and len(words) <= max_words
-            and any(any(c.isdigit() for c in w) for w in words)
+        if 0 < len(words) <= max_words and all(
+            NUMERIC_PATTERN.fullmatch(w) for w in words
         ):
             return True
     return False
+
+
+def _is_footer_text_block(
+    block: Sequence[Any],
+    page_height: float,
+    frac: float = 0.15,
+    max_words: int = 8,
+) -> bool:
+    """Heuristically detect footer text near the bottom margin."""
+
+    x0, y0, x1, y1, raw_text = block[:5]
+    if y0 <= page_height * (1 - frac):
+        return False
+    stripped = strip_page_artifact_suffix(clean_text(raw_text), None)
+    words = stripped.split()
+    return 0 < len(words) <= max_words
+
+
+def _filter_margin_artifacts(blocks: Sequence[Any], page_height: float) -> list[Any]:
+    """Remove margin artifacts and preceding footer text blocks."""
+
+    def step(acc: list[Any], block: Any) -> list[Any]:
+        if is_artifact_block(block, page_height):
+            return (
+                acc[:-1] if acc and _is_footer_text_block(acc[-1], page_height) else acc
+            )
+        if _is_footer_text_block(block, page_height):
+            return acc
+        return acc + [block]
+
+    return reduce(step, blocks, [])
 
 
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
@@ -406,7 +435,13 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")
-    filtered = [b for b in raw_blocks if not is_artifact_block(b, page_height)]
+    filtered = _filter_margin_artifacts(raw_blocks, page_height)
+    logger.debug(
+        "Page %s: %d raw blocks, %d after artifact filtering",
+        page_num,
+        len(raw_blocks),
+        len(filtered),
+    )
 
     structured = []
     for b in filtered:
@@ -586,9 +621,6 @@ def extract_text_blocks_from_pdf(
     Preserves all existing functionality including page exclusion, heading detection,
     and error handling while optionally enhancing text quality with PyMuPDF4LLM.
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
 
     logger.info(f"Starting PDF text extraction from: {filepath}")
     logger.info(

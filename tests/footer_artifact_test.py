@@ -35,3 +35,11 @@ def test_footer_pdf_includes_second_page_text():
     assert report.empty_text == 0
     text = " ".join(c["text"] for c in chunks)
     assert "cattle-train bearing the cattle of a thousand hills" in text
+
+
+def test_bullet_footer_removed():
+    pdf = Path(__file__).resolve().parent.parent / "sample_book-bullets.pdf"
+    chunks = list(process_document(str(pdf), 400, 50))
+    texts = [c["text"] for c in chunks]
+    assert all("Faintly from Far in the Lincoln Woods" not in t for t in texts)
+    assert len(chunks) == 1
