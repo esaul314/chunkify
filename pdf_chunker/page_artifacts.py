@@ -10,6 +10,10 @@ ROMAN_RE = r"[ivxlcdm]+"
 _ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
 DOMAIN_RE = re.compile(r"\b[\w.-]+\.[a-z]{2,}\b", re.IGNORECASE)
 
+SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+_SUPERSCRIPT_MAP = str.maketrans(SUPERSCRIPT_DIGITS, "0123456789")
+_SUP_DIGITS_ESC = re.escape(SUPERSCRIPT_DIGITS)
+
 
 def _roman_to_int(value: str) -> int:
     """Convert a Roman numeral to an integer."""
@@ -32,7 +36,8 @@ def _looks_like_footnote(text: str) -> bool:
     if stripped.lower().startswith("footnote"):
         return True
 
-    return bool(re.match(r"^(?:\d{1,3}|[\*\u2020])\s+[A-Z]", stripped))
+    pattern = rf"^(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z]"
+    return bool(re.match(pattern, stripped))
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
@@ -247,16 +252,20 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
     return text
 
 
+FOOTNOTE_LINE_RE = re.compile(
+    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.(?:\s*|$)\n?"
+)
+
+
 def _remove_embedded_footnote(text: str) -> str:
     """Remove footnote lines merged into surrounding text."""
 
-    pattern = re.compile(
-        r"(?m)^\s*(?:\d{1,3}|[\*\u2020])\s+[A-Z][^.]{0,120}\.(?:\s*|$)\n?"
-    )
-    return pattern.sub("", text)
+    return FOOTNOTE_LINE_RE.sub("", text)
 
 
-FOOTNOTE_MARKER_RE = re.compile(r"(?<=[a-zA-Z]\.)((?:\d+))\n+")
+FOOTNOTE_MARKER_RE = re.compile(
+    rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)\n+"
+)
 
 
 def _normalize_footnote_markers(text: str) -> str:
@@ -268,7 +277,11 @@ def _normalize_footnote_markers(text: str) -> str:
     paragraph flow.
     """
 
-    return FOOTNOTE_MARKER_RE.sub(lambda m: f"[{m.group(1)}] ", text)
+    def repl(match: re.Match[str]) -> str:
+        digits = match.group(1).translate(_SUPERSCRIPT_MAP)
+        return f"[{digits}] "
+
+    return FOOTNOTE_MARKER_RE.sub(repl, text)
 
 
 def _flatten_markdown_table(text: str) -> str:
