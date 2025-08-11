@@ -72,6 +72,7 @@ pdf_chunker/
     ├── hyphenation_test.py
     ├── indented_block_test.py
     ├── list_detection_edge_case_test.py
+    ├── multiline_bullet_test.py
     ├── newline_cleanup_test.py
     ├── numbered_list_chunk_test.py
     ├── numbered_list_test.py
@@ -240,6 +241,7 @@ All CLI scripts follow these conventions:
 * **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- fixed.
 * **Bullet hyphen fix**: words split at line breaks within bullet lists now rejoin correctly without duplicating the bullet marker.
 * **Bullet list splitting fixed**: bullet lists spanning chunk boundaries are rebalanced so items stay within a single chunk.
+* **Bullet fragment cleanup**: multi-line bullet items no longer insert spurious paragraph breaks; regression test guards cases like "singing, when I state".
 * **Underscore emphasis removed**: PyMuPDF4LLM cleanup strips single and double underscore wrappers.
 * **PyMuPDF4LLM page loss**: enhancement step now reverts to traditional extraction if pages disappear, guarded by `footer_artifact_test.py`.
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.

@@ -39,13 +39,12 @@ def is_bullet_fragment(curr: str, nxt: str) -> bool:
 
 
 def split_bullet_fragment(text: str) -> Tuple[str, str]:
-    """Split leading lowercase fragment from the rest of ``text``."""
-    match = re.match(r"([a-z0-9,;:'\"()\-\s]+)([A-Z].*)", text, re.DOTALL)
-    return (
-        (match.group(1).strip(), match.group(2).lstrip())
-        if match
-        else (text.strip(), "")
-    )
+    """Split the first line from the remainder, if any."""
+
+    if "\n" not in text:
+        return text.strip(), ""
+    first, rest = text.split("\n", 1)
+    return first.strip(), rest.lstrip()
 
 
 def is_bullet_list_pair(curr: str, nxt: str) -> bool:
