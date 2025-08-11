@@ -146,6 +146,27 @@ def collapse_artifact_breaks(text: str) -> str:
 STRAY_BULLET_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
 
 
+NUMBER_SUFFIX_LINE_RE = re.compile(r"\n(\d+\.)(\s*)")
+
+
+def merge_number_suffix_lines(text: str) -> str:
+    """Join lines where a terminal number is split onto its own line."""
+
+    def repl(match: re.Match[str]) -> str:
+        start = match.start()
+        prev = text[text.rfind("\n", 0, start) + 1 : start].strip()
+        if (
+            not prev
+            or prev.endswith(":")
+            or re.match(r"\d+[.)]", prev)
+            or re.search(r"[.!?]$", prev)
+        ):
+            return match.group(0)
+        return f" {match.group(1)}{match.group(2)}"
+
+    return NUMBER_SUFFIX_LINE_RE.sub(repl, text)
+
+
 def remove_stray_bullet_lines(text: str) -> str:
     """Collapse bullet markers that appear alone or mid-item while preserving line breaks."""
     text = STRAY_BULLET_RE.sub("\n", text)
@@ -186,6 +207,7 @@ def collapse_single_newlines(text: str) -> str:
     list_re = rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
 
     # Normalize colon bullet starts and protect paragraph and list breaks
+    text = merge_number_suffix_lines(text)
     text = re.sub(rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", text)
     text = re.sub(list_re, list_break, text)
     text = re.sub(r"\n{2,}", para_break, text)
