@@ -84,16 +84,33 @@ def _is_heading(text: str) -> bool:
 
 
 def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
-    return [
+    """Convert raw fallback text into structured blocks."""
+
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    blocks = [
         {
             "type": "heading" if _is_heading(t) else "paragraph",
             "text": t,
             "language": _detect_language(t),
             "source": {"filename": os.path.basename(filepath), "method": method},
         }
-        for t in (clean_text(p) for p in text.split("\n\n"))
+        for t in (clean_text(p).strip() or p for p in paragraphs)
         if t
     ]
+
+    if not blocks and text.strip():
+        t = text.strip()
+        blocks = [
+            {
+                "type": "paragraph",
+                "text": t,
+                "language": _detect_language(t),
+                "source": {"filename": os.path.basename(filepath), "method": method},
+            }
+        ]
+
+    return blocks
 
 
 def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[dict]:

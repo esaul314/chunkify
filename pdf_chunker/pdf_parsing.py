@@ -29,7 +29,6 @@ from .pymupdf4llm_integration import (
 
 from .list_detection import (
     BULLET_CHARS,
-    BULLET_CHARS_ESC,
     is_bullet_continuation,
     is_bullet_fragment,
     is_bullet_list_pair,
@@ -489,12 +488,7 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     merged_text = (
                         current_text.rstrip(" " + BULLET_CHARS) + " " + next_text
                     )
-                elif merge_reason == "bullet_list":
-                    current_text = re.sub(
-                        rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", current_text
-                    )
-                    merged_text = current_text + "\n" + next_text
-                elif merge_reason == "numbered_list":
+                elif merge_reason in {"bullet_list", "numbered_list"}:
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "numbered_continuation":
                     merged_text = current_text + " " + next_text

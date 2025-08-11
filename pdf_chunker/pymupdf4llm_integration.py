@@ -489,6 +489,8 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
             insert_numbered_list_newlines,
             normalize_ligatures,
             consolidate_whitespace,
+            remove_empty_bullet_lines,
+            normalize_list_breaks,
         )
 
         # Apply the cleaning steps in the correct order
@@ -511,6 +513,14 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
         text = collapse_single_newlines(text)
         logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
+
+        logger.debug("Applying normalize_list_breaks in PyMuPDF4LLM path")
+        text = normalize_list_breaks(text)
+        logger.debug(f"After normalize_list_breaks: {repr(text[:100])}")
+
+        logger.debug("Applying remove_empty_bullet_lines in PyMuPDF4LLM path")
+        text = remove_empty_bullet_lines(text)
+        logger.debug(f"After remove_empty_bullet_lines: {repr(text[:100])}")
 
         logger.debug("Applying merge_spurious_paragraph_breaks in PyMuPDF4LLM path")
         text = merge_spurious_paragraph_breaks(text)
