@@ -245,6 +245,7 @@ All CLI scripts follow these conventions:
 * **Bullet list splitting fixed**: bullet lists spanning chunk boundaries are rebalanced so items stay within a single chunk.
 * **Bullet fragment cleanup**: multi-line bullet items no longer insert spurious paragraph breaks; regression test guards cases like "singing, when I state".
 * **Underscore emphasis removed**: PyMuPDF4LLM cleanup strips single and double underscore wrappers.
+* **PyMuPDF4LLM list metadata propagated**: `list_kind` from PyMuPDF4LLM blocks is retained in final chunk metadata.
 * **PyMuPDF4LLM page loss**: enhancement step now reverts to traditional extraction if pages disappear, guarded by `footer_artifact_test.py`.
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.
 * **Comma continuation fix**: same-page blocks ending with commas merge with following blocks even if the next starts with an uppercase word.
