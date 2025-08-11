@@ -243,6 +243,23 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
                         break
                 merged.append(combined)
                 continue
+            if start is None:
+                combined = f"{current} {next_chunk}".strip()
+                i += 2
+                last = _last_number(combined) or last_num
+                expected = last + 1
+                while i < len(chunks):
+                    candidate = chunks[i].strip()
+                    start = _starting_number(candidate)
+                    if start == expected or start is None:
+                        combined = f"{combined} {candidate}".strip()
+                        i += 1
+                        if start == expected:
+                            expected += 1
+                    else:
+                        break
+                merged.append(combined)
+                continue
 
         start_num = _starting_number(current)
         if start_num is not None:
