@@ -226,6 +226,13 @@ def _validate_enhancement_quality(blocks: List[Dict[str, Any]]) -> float:
     return min(average_score, 1.0)
 
 
+def _strip_list_marker(text: str, block: Dict[str, Any]) -> str:
+    if block.get("type") != "list_item":
+        return text
+    pattern = r"^[-*]\s+" if block.get("list_kind") == "bullet" else r"^\d+\.\s+"
+    return re.sub(pattern, "", text)
+
+
 def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Clean and validate a block from PyMuPDF4LLM output.
 
@@ -250,6 +257,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         consolidate_whitespace,
     )
 
+    text = _strip_list_marker(text, block)
     text = remove_page_artifact_lines(text, block.get("source", {}).get("page"))
 
     text = pipe(
@@ -310,89 +318,66 @@ def _convert_markdown_to_blocks(
     if not markdown_text or not markdown_text.strip():
         return []
 
-    # Import text cleaning function to collapse newlines
     from .text_cleaning import collapse_single_newlines
 
-    blocks = []
-    lines = markdown_text.split("\n")
-    current_block_lines = []
-    current_block_type = "paragraph"
+    def _build_block(
+        lines: List[str], block_type: str, **extra: Any
+    ) -> Optional[Dict[str, Any]]:
+        text = collapse_single_newlines("\n".join(lines).strip())
+        if not text:
+            return None
+        base = {
+            "type": block_type,
+            "text": text,
+            "language": "en",
+            "source": {"filename": pdf_path, "page": None, "location": None},
+        }
+        return {**base, **extra}
 
-    for line in lines:
-        line = line.strip()
+    def _flush(blocks: List[Dict[str, Any]], lines: List[str], block_type: str) -> None:
+        block = _build_block(lines, block_type)
+        if block:
+            blocks.append(block)
 
-        # Skip empty lines but use them as block separators
-        if not line:
-            if current_block_lines:
-                # Finish current block
-                block_text = "\n".join(current_block_lines).strip()
-                if block_text:
-                    # Apply newline collapsing to clean the text
-                    cleaned_text = collapse_single_newlines(block_text)
-                    blocks.append(
-                        {
-                            "type": current_block_type,
-                            "text": cleaned_text,
-                            "language": "en",  # Default language
-                            "source": {
-                                "filename": pdf_path,
-                                "page": None,  # Page info not available from markdown
-                                "location": None,
-                            },
-                        }
-                    )
-                current_block_lines = []
-                current_block_type = "paragraph"
+    def _list_kind(line: str) -> Optional[str]:
+        if re.match(r"^[-*]\s+", line):
+            return "bullet"
+        if re.match(r"^\d+\.\s+", line):
+            return "numbered"
+        return None
+
+    blocks: List[Dict[str, Any]] = []
+    current: List[str] = []
+    current_type = "paragraph"
+
+    for raw_line in (ln.strip() for ln in markdown_text.split("\n")):
+        if not raw_line:
+            _flush(blocks, current, current_type)
+            current, current_type = [], "paragraph"
             continue
 
-        # Check if this line is a heading
-        if line.startswith("#"):
-            # Finish previous block if it exists
-            if current_block_lines:
-                block_text = "\n".join(current_block_lines).strip()
-                if block_text:
-                    # Apply newline collapsing to clean the text
-                    cleaned_text = collapse_single_newlines(block_text)
-                    blocks.append(
-                        {
-                            "type": current_block_type,
-                            "text": cleaned_text,
-                            "language": "en",
-                            "source": {
-                                "filename": pdf_path,
-                                "page": None,
-                                "location": None,
-                            },
-                        }
-                    )
-                current_block_lines = []
+        if raw_line.startswith("#"):
+            _flush(blocks, current, current_type)
+            heading = raw_line.lstrip("#").strip()
+            block = _build_block([heading], "heading")
+            if block:
+                blocks.append(block)
+            current, current_type = [], "paragraph"
+            continue
 
-            # Start new heading block
-            heading_text = line.lstrip("#").strip()
-            if heading_text:
-                current_block_lines = [heading_text]
-                current_block_type = "heading"
-        else:
-            # Regular text line
-            current_block_lines.append(line)
-            if current_block_type != "heading":
-                current_block_type = "paragraph"
+        kind = _list_kind(raw_line)
+        if kind:
+            _flush(blocks, current, current_type)
+            block = _build_block([raw_line], "list_item", list_kind=kind)
+            if block:
+                blocks.append(block)
+            current, current_type = [], "paragraph"
+            continue
 
-    # Handle final block
-    if current_block_lines:
-        block_text = "\n".join(current_block_lines).strip()
-        if block_text:
-            # Apply newline collapsing to clean the text
-            cleaned_text = collapse_single_newlines(block_text)
-            blocks.append(
-                {
-                    "type": current_block_type,
-                    "text": cleaned_text,
-                    "language": "en",
-                    "source": {"filename": pdf_path, "page": None, "location": None},
-                }
-            )
+        current.append(raw_line)
+        current_type = "paragraph"
 
+    _flush(blocks, current, current_type)
     return blocks
 
 
