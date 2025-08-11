@@ -48,3 +48,14 @@ def test_abbreviation_inside_numbered_item() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "the\n\nSaaS" not in cleaned
     assert "paradigm for clarity.\n\nFollowing" in cleaned
+
+
+def test_embedded_sentence_with_quotes() -> None:
+    text = (
+        '1. whosoever that can answer the question "Why did this need to happen at all?" '
+        "Then come towards"
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "\n\nThen" not in cleaned
+    assert '"Why did this need to happen at all?" Then' in cleaned
