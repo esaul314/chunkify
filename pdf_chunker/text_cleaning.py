@@ -178,7 +178,7 @@ def remove_stray_bullet_lines(text: str) -> str:
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
 NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
 NUMBERED_END_RE = re.compile(
-    rf"(\d{{1,3}}[.)][^\n]+?)(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z]|$))"
+    rf"(\d{{1,3}}[.)][^\n]+?)(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b|$))"
 )
 
 
