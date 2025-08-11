@@ -256,6 +256,21 @@ def _remove_embedded_footnote(text: str) -> str:
     return pattern.sub("", text)
 
 
+FOOTNOTE_MARKER_RE = re.compile(r"(?<=[a-zA-Z]\.)((?:\d+))\n+")
+
+
+def _normalize_footnote_markers(text: str) -> str:
+    """Replace trailing footnote numbers with bracketed form.
+
+    Patterns like ``sentence.3`` followed by one or more newlines are
+    transformed into ``sentence.[3]`` with a single trailing space. This keeps
+    the footnote reference while preventing double newlines from breaking the
+    paragraph flow.
+    """
+
+    return FOOTNOTE_MARKER_RE.sub(lambda m: f"[{m.group(1)}] ", text)
+
+
 def _flatten_markdown_table(text: str) -> str:
     """Flatten leading markdown table rows into plain lines.
 
@@ -302,9 +317,13 @@ def _flatten_markdown_table(text: str) -> str:
 def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     """Remove header or footer artifact lines from a block."""
 
-    text = _flatten_markdown_table(text)
-    text = _remove_inline_footer(text, page_num)
-    text = _remove_embedded_footnote(text)
+    pipeline = (
+        _flatten_markdown_table,
+        lambda t: _remove_inline_footer(t, page_num),
+        _remove_embedded_footnote,
+        _normalize_footnote_markers,
+    )
+    text = reduce(lambda acc, fn: fn(acc), pipeline, text)
 
     lines = text.splitlines()
 
