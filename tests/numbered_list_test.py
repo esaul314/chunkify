@@ -1,9 +1,11 @@
 import sys
 import re
+import pytest
 
 sys.path.insert(0, ".")
 
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
+from pdf_chunker.text_cleaning import collapse_single_newlines
 
 
 def test_numbered_list_preservation():
@@ -16,3 +18,14 @@ def test_numbered_list_preservation():
     assert "\n\n2." not in blob
     assert "\n\n3." not in blob
     assert "\n\n4." not in blob
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("scope of Tier\n1.", "scope of Tier 1."),
+        ("scope of Tier\n1.\nNext", "scope of Tier 1. Next"),
+    ],
+)
+def test_number_suffix_not_list(raw: str, expected: str) -> None:
+    assert collapse_single_newlines(raw) == expected
