@@ -146,18 +146,23 @@ def collapse_artifact_breaks(text: str) -> str:
 STRAY_BULLET_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
 
 
-NUMBER_SUFFIX_LINE_RE = re.compile(r"\n(\d+\.)\s*(?=\n|$)")
+NUMBER_SUFFIX_LINE_RE = re.compile(r"\n(\d+\.)(\s*)")
 
 
 def merge_number_suffix_lines(text: str) -> str:
-    """Join lines where a terminal number is isolated on its own line."""
+    """Join lines where a terminal number is split onto its own line."""
 
     def repl(match: re.Match[str]) -> str:
         start = match.start()
         prev = text[text.rfind("\n", 0, start) + 1 : start].strip()
-        if prev.endswith(":") or re.match(r"\d+[.)]", prev):
+        if (
+            not prev
+            or prev.endswith(":")
+            or re.match(r"\d+[.)]", prev)
+            or re.search(r"[.!?]$", prev)
+        ):
             return match.group(0)
-        return f" {match.group(1)}"
+        return f" {match.group(1)}{match.group(2)}"
 
     return NUMBER_SUFFIX_LINE_RE.sub(repl, text)
 

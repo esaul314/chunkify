@@ -25,6 +25,10 @@ def test_numbered_list_preservation():
     [
         ("scope of Tier\n1.", "scope of Tier 1."),
         ("scope of Tier\n1.\nNext", "scope of Tier 1. Next"),
+        (
+            "scope of Tier\n1. T2 support engineers",
+            "scope of Tier 1. T2 support engineers",
+        ),
     ],
 )
 def test_number_suffix_not_list(raw: str, expected: str) -> None:
