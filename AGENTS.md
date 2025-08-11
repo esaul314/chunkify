@@ -63,6 +63,7 @@ pdf_chunker/
     ├── AGENTS.md
     ├── conftest.py                 # Pytest fixtures and colored output
     ├── ai_enrichment_test.py
+    ├── artifact_block_test.py
     ├── bullet_list_test.py
     ├── chunk_pdf_integration_test.py
     ├── cross_page_sentence_test.py

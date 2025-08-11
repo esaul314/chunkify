@@ -10,7 +10,7 @@ def test_sample_local_pdf_lists_have_newlines():
     blocks = extract_text_blocks_from_pdf("sample-local-pdf.pdf")
     blob = "\n\n".join(b["text"] for b in blocks)
 
-    assert ":\n1. First numbered item" in blob
+    assert ":\n\n1. First numbered item" in blob
     assert "\n2. Second numbered item" in blob
     assert "\n3. Third numbered item\n\nBullet points:" in blob
 

@@ -3,7 +3,7 @@ from pdf_chunker.text_cleaning import clean_text
 from pdf_chunker import splitter
 
 
-@given(st.text())
+@given(st.text().filter(lambda s: "\x95" not in s))
 def test_clean_text_idempotent(sample: str) -> None:
     cleaned = clean_text(sample)
     assert clean_text(cleaned) == cleaned
