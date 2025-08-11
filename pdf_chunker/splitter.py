@@ -67,6 +67,7 @@ DIALOGUE_VERBS = {
 # Patterns for detecting numbered list boundaries
 NUMBERED_ITEM_START = re.compile(r"^\s*(\d+)[.)]\s+")
 NUMBER_AT_END = re.compile(r"(\d+)[.)]?\s*$")
+NUMBERED_ITEM_ANYWHERE = re.compile(r"\b(\d+)[.)]\s+")
 
 
 def _is_dialogue_attribution(words: List[str]) -> bool:
@@ -200,86 +201,39 @@ def _last_number(text: str) -> Optional[int]:
 
 
 def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
-    """Merge chunks that split numbered lists across boundaries."""
+    """Merge chunks whose numbered list items spill into the following chunk.
+
+    This implementation is intentionally conservative: it merges a numbered
+    chunk only with the immediate next chunk when that next chunk does not start
+    with a new list number. This avoids accidentally swallowing large portions of
+    text that are not part of the list, a regression observed in earlier
+    versions. The approach favors correctness over aggressive merging and keeps
+    the logic side‑effect free.
+    """
+
+    def _combine(first: str, second: str) -> str:
+        return f"{first.rstrip()} {second.lstrip()}".strip()
+
     merged: List[str] = []
-    i = 0
-    while i < len(chunks):
-        current = chunks[i].strip()
-        end_num = _ending_number(current)
-        if end_num is not None and i + 1 < len(chunks):
-            next_chunk = chunks[i + 1].strip()
-            combined = f"{current} {next_chunk}".strip()
-            i += 2
-            last = _last_number(combined) or end_num
-            expected = last + 1
-            while i < len(chunks):
-                candidate = chunks[i].strip()
-                start = _starting_number(candidate)
-                if start == expected:
-                    combined = f"{combined} {candidate}".strip()
-                    expected += 1
-                    i += 1
-                else:
-                    break
-            merged.append(combined)
-            continue
-
-        last_num = _last_number(current)
-        if last_num is not None and i + 1 < len(chunks):
-            next_chunk = chunks[i + 1].strip()
-            start = _starting_number(next_chunk)
-            if start == last_num + 1:
-                combined = f"{current} {next_chunk}".strip()
-                i += 2
-                expected = start + 1
-                while i < len(chunks):
-                    candidate = chunks[i].strip()
-                    start = _starting_number(candidate)
-                    if start == expected:
-                        combined = f"{combined} {candidate}".strip()
-                        expected += 1
-                        i += 1
-                    else:
-                        break
-                merged.append(combined)
+    idx = 0
+    while idx < len(chunks):
+        current = chunks[idx].strip()
+        if idx + 1 < len(chunks):
+            nxt = chunks[idx + 1].strip()
+            if _starting_number(current) is not None and _starting_number(nxt) is None:
+                merged.append(_combine(current, nxt))
+                idx += 2
                 continue
-            if start is None:
-                combined = f"{current} {next_chunk}".strip()
-                i += 2
-                last = _last_number(combined) or last_num
-                expected = last + 1
-                while i < len(chunks):
-                    candidate = chunks[i].strip()
-                    start = _starting_number(candidate)
-                    if start == expected or start is None:
-                        combined = f"{combined} {candidate}".strip()
-                        i += 1
-                        if start == expected:
-                            expected += 1
-                    else:
-                        break
-                merged.append(combined)
+            last_line = current.rsplit("\n", 1)[-1]
+            if (
+                NUMBERED_ITEM_ANYWHERE.search(last_line)
+                and _starting_number(nxt) is None
+            ):
+                merged.append(_combine(current, nxt))
+                idx += 2
                 continue
-
-        start_num = _starting_number(current)
-        if start_num is not None:
-            combined = current
-            i += 1
-            expected = start_num + 1
-            while i < len(chunks):
-                candidate = chunks[i].strip()
-                start = _starting_number(candidate)
-                if start == expected:
-                    combined = f"{combined} {candidate}".strip()
-                    expected += 1
-                    i += 1
-                else:
-                    break
-            merged.append(combined)
-            continue
-
         merged.append(current)
-        i += 1
+        idx += 1
     return merged
 
 
