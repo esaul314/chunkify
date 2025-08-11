@@ -147,10 +147,11 @@ STRAY_BULLET_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
 
 
 def remove_stray_bullet_lines(text: str) -> str:
-    """Collapse bullet markers that appear alone or mid-item."""
-    text = STRAY_BULLET_RE.sub(" ", text)
+    """Collapse bullet markers that appear alone or mid-item while preserving line breaks."""
+    text = STRAY_BULLET_RE.sub("\n", text)
     text = re.sub(rf"\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])", " ", text)
-    return re.sub(rf"(?<=\S)[ \t][{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])", " ", text)
+    text = re.sub(rf"(?<=\S)[ \t][{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])", " ", text)
+    return re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", text)
 
 
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")

@@ -39,7 +39,7 @@ from .list_detection import (
     starts_with_bullet,
     _last_non_empty_line,
 )
-from typing import List, Dict, Any, Tuple, Optional, Sequence
+from typing import List, Dict, Any, Tuple, Optional, Sequence, Callable
 
 
 MIN_WORDS_FOR_CONTINUATION = 6
@@ -210,20 +210,6 @@ def _should_merge_blocks(
         logger.debug("Merge decision: AUTHOR_ATTRIBUTION")
         return True, "author_attribution"
 
-    # Check for quote-related splitting issues
-    curr_has_quote = '"' in curr_text or "'" in curr_text
-    next_has_quote = '"' in next_text or "'" in next_text
-
-    if curr_has_quote or next_has_quote:
-        logger.debug(
-            f"Merge check: Quote detection - curr: {curr_has_quote}, next: {next_has_quote}"
-        )
-
-        # Special handling for quoted text that may have been incorrectly split
-        if _is_quote_continuation(curr_text, next_text):
-            logger.debug("Merge decision: QUOTE_CONTINUATION")
-            return True, "quote_continuation"
-
     if is_bullet_continuation(curr_text, next_text):
         logger.debug("Merge decision: BULLET_CONTINUATION")
         return True, "bullet_continuation"
@@ -252,6 +238,20 @@ def _should_merge_blocks(
     if is_numbered_continuation(curr_text, next_text):
         logger.debug("Merge decision: NUMBERED_CONTINUATION")
         return True, "numbered_continuation"
+
+    # Check for quote-related splitting issues
+    curr_has_quote = '"' in curr_text or "'" in curr_text
+    next_has_quote = '"' in next_text or "'" in next_text
+
+    if curr_has_quote or next_has_quote:
+        logger.debug(
+            f"Merge check: Quote detection - curr: {curr_has_quote}, next: {next_has_quote}"
+        )
+
+        # Special handling for quoted text that may have been incorrectly split
+        if _is_quote_continuation(curr_text, next_text):
+            logger.debug("Merge decision: QUOTE_CONTINUATION")
+            return True, "quote_continuation"
 
     if _is_indented_continuation(
         curr_block, next_block
@@ -287,6 +287,36 @@ def _should_merge_blocks(
 
     logger.debug("Merge decision: NO_MERGE")
     return False, "no_merge"
+
+
+def _merge_bullet_text(
+    reason: str, current: str, nxt: str
+) -> Tuple[str, Optional[str]]:
+    """Handle merging for various bullet-related cases."""
+
+    def merge_fragment() -> Tuple[str, Optional[str]]:
+        fragment, remainder = split_bullet_fragment(nxt)
+        return f"{current} {fragment}", remainder
+
+    def merge_continuation() -> Tuple[str, Optional[str]]:
+        return current.rstrip(" " + BULLET_CHARS) + " " + nxt, None
+
+    def merge_short_fragment() -> Tuple[str, Optional[str]]:
+        return f"{current} {nxt}", None
+
+    def merge_list() -> Tuple[str, Optional[str]]:
+        adjusted = re.sub(rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", current)
+        return adjusted + "\n" + nxt, None
+
+    handlers: Dict[str, Callable[[], Tuple[str, Optional[str]]]] = {
+        "bullet_fragment": merge_fragment,
+        "bullet_continuation": merge_continuation,
+        "bullet_short_fragment": merge_short_fragment,
+        "bullet_list": merge_list,
+    }
+
+    merged, remainder = handlers[reason]()
+    return remove_stray_bullet_lines(merged), remainder
 
 
 def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
@@ -482,10 +512,9 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     )
                 elif merge_reason == "sentence_continuation":
                     merged_text = current_text + " " + next_text
-                elif merge_reason == "bullet_fragment":
-                    fragment, remainder = split_bullet_fragment(next_text)
-                    merged_text = remove_stray_bullet_lines(
-                        f"{current_text} {fragment}"
+                elif merge_reason.startswith("bullet_"):
+                    merged_text, remainder = _merge_bullet_text(
+                        merge_reason, current_text, next_text
                     )
                     after_merge = merged_text[:50].replace(chr(10), "\n")
                     logger.debug("  After merge: %s", after_merge)
@@ -498,21 +527,6 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                         break
                     j += 1
                     continue
-                elif merge_reason == "bullet_continuation":
-                    merged_text = remove_stray_bullet_lines(
-                        current_text.rstrip(" " + BULLET_CHARS) + " " + next_text
-                    )
-                elif merge_reason == "bullet_short_fragment":
-                    merged_text = remove_stray_bullet_lines(
-                        current_text + " " + next_text
-                    )
-                elif merge_reason == "bullet_list":
-                    current_text = re.sub(
-                        rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", current_text
-                    )
-                    merged_text = remove_stray_bullet_lines(
-                        current_text + "\n" + next_text
-                    )
                 elif merge_reason == "numbered_list":
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "numbered_continuation":

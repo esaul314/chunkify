@@ -14,6 +14,9 @@ def test_multiline_bullet_items():
     )
     assert "\u2022\n\nAtmosphere?" not in text
     assert "our eyes?\n\u2022\n\u2022 There" not in text
+    assert "our eyes?\n\u2022 There" in text
+    assert "gone by. \u2022 They would" not in text
+    assert "gone by.\n\n\u2022 They would" in text
     assert (
         "\u2022 They would begin to sing almost with as much precision as a clock,"
         " within five minutes of a particular time, referred to the setting of the sun,"
