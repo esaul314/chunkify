@@ -48,3 +48,14 @@ def test_abbreviation_inside_numbered_item() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "the\n\nSaaS" not in cleaned
     assert "paradigm for clarity.\n\nFollowing" in cleaned
+
+
+def test_quoted_question_inside_numbered_item() -> None:
+    text = (
+        '1. Item with a quote "Why did this need to happen at all?" '
+        "Then proceed with more details."
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "\n\nThen" not in cleaned
+    assert '"Why did this need to happen at all?" Then' in cleaned
