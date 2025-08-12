@@ -36,8 +36,19 @@ def _looks_like_footnote(text: str) -> bool:
     if stripped.lower().startswith("footnote"):
         return True
 
-    pattern = rf"^(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z]"
-    return bool(re.match(pattern, stripped))
+    # Avoid misclassifying ordinary numbered list items like "1. Item" or
+    # "2) Item" as footnotes.
+    if re.match(r"^\d+[.)]\s", stripped):
+        return False
+
+    pattern = rf"""
+        ^(
+            \d{{1,3}}\s{{2,}}|      # digit marker with at least two spaces
+            [{_SUP_DIGITS_ESC}]\s+|  # superscript digit marker
+            [\*\u2020]\s+           # symbol footnote markers
+        )[A-Z]
+    """
+    return bool(re.match(pattern, stripped, re.VERBOSE))
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
