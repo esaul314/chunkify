@@ -264,7 +264,7 @@ def _remove_embedded_footnote(text: str) -> str:
 
 
 FOOTNOTE_MARKER_RE = re.compile(
-    rf"([^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[ \t]*[\r\n]+"
+    rf"([^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[^\S\r\n]*[\r\n]+"
 )
 
 END_PUNCT_BEFORE_FOOTNOTE = ".!?"
@@ -273,10 +273,11 @@ END_PUNCT_BEFORE_FOOTNOTE = ".!?"
 def _normalize_footnote_markers(text: str) -> str:
     """Replace trailing footnote numbers with bracketed form.
 
-    Patterns like ``sentence.3`` or ``sentence³`` followed by one or more line
-    breaks are transformed into ``sentence[3].`` with a single trailing space.
-    This keeps the footnote reference while preventing double newlines from
-    breaking the paragraph flow.
+    Patterns like ``sentence.3`` or ``sentence³`` followed by whitespace and one
+    or more line breaks are transformed into ``sentence[3].`` with a single
+    trailing space. This keeps the footnote reference while preventing double
+    newlines from breaking the paragraph flow, even when non-breaking spaces
+    precede the line break (common in list items).
     """
 
     def repl(match: re.Match[str]) -> str:
