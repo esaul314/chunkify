@@ -17,6 +17,11 @@ if [[ ! -f "$JSONL_FILE" ]]; then
     exit $EXIT_FILE_NOT_FOUND
 fi
 
+if [[ ! -s "$JSONL_FILE" ]]; then
+    echo "Error: File '$JSONL_FILE' is empty" >&2
+    exit $EXIT_VALIDATION_FAILED
+fi
+
 echo "Validating chunks in: $JSONL_FILE"
 
 # Initialize counters
