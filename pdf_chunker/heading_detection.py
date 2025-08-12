@@ -1,5 +1,21 @@
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+
+TRAILING_PUNCTUATION = (".", "!", "?", ";", ":")
+HEADING_STARTERS = {
+    "chapter",
+    "section",
+    "part",
+    "appendix",
+    "introduction",
+    "conclusion",
+}
+
+
+def _has_heading_starter(words: List[str]) -> bool:
+    """Return True if the first word suggests a structural heading."""
+    return bool(words) and words[0].lower() in HEADING_STARTERS
 
 
 def _detect_heading_fallback(text: str) -> bool:
@@ -16,7 +32,7 @@ def _detect_heading_fallback(text: str) -> bool:
     # Very short text (1-3 words) without a terminal period is likely a heading.
     # Short sentences such as "It ended." should remain part of the body text
     # rather than being treated as headings.
-    if len(words) <= 3 and not text.endswith("."):
+    if len(words) <= 3 and not text.endswith(TRAILING_PUNCTUATION):
         return True
 
     # Text that's all uppercase might be a heading
@@ -24,31 +40,25 @@ def _detect_heading_fallback(text: str) -> bool:
         return True
 
     # Title case text without ending punctuation might be a heading
-    if (
-        text.istitle()
-        and len(words) <= 10
-        and not text.endswith((".", "!", "?", ";", ":"))
-    ):
+    if text.istitle() and len(words) <= 10 and not text.endswith(TRAILING_PUNCTUATION):
         return True
 
     # Text that starts with common heading patterns
-    heading_starters = [
-        "chapter",
-        "section",
-        "part",
-        "appendix",
-        "introduction",
-        "conclusion",
-    ]
-    first_word = words[0].lower() if words else ""
-    if first_word in heading_starters and len(words) <= 8:
+    if (
+        _has_heading_starter(words)
+        and len(words) <= 8
+        and not text.endswith(TRAILING_PUNCTUATION)
+    ):
         return True
 
     # Text that's mostly numbers (like "1.2.3 Some Topic")
-    if len(words) >= 2:
-        first_part = words[0]
-        if re.match(r"^[\d\.\-]+$", first_part) and len(words) <= 8:
-            return True
+    if (
+        len(words) >= 2
+        and re.match(r"^[\d\.\-]+$", words[0])
+        and len(words) <= 8
+        and not text.endswith(TRAILING_PUNCTUATION)
+    ):
+        return True
 
     return False
 
