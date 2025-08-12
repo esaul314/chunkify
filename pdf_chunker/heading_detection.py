@@ -102,53 +102,42 @@ def detect_headings_from_pymupdf4llm_blocks(
 def detect_headings_from_font_analysis(
     blocks: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """
-    Extract heading information using traditional font-based analysis.
+    """Extract heading information using traditional font-based analysis."""
 
-    Args:
-        blocks: List of text blocks from traditional PDF extraction
+    def _is_heading(text: str, block_type: str) -> bool:
+        declared_heading = block_type == "heading" and not text.endswith(
+            TRAILING_PUNCTUATION
+        )
+        return declared_heading or _detect_heading_fallback(text)
 
-    Returns:
-        List of heading dictionaries with metadata
-    """
-    headings = []
-
-    for i, block in enumerate(blocks):
-        block_type = block.get("type", "")
+    def _make_heading(i: int, block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         text = block.get("text", "").strip()
+        if not text or not _is_heading(text, block.get("type", "")):
+            return None
 
-        if not text:
-            continue
+        base = {
+            "text": text,
+            "level": _estimate_heading_level(text),
+            "source": "font_analysis",
+            "block_id": i,
+            "extraction_method": block.get("source", {}).get("method", "traditional"),
+        }
 
-        # Check if block is already marked as heading by extraction
-        is_heading = block_type == "heading"
-
-        # If not marked as heading, use fallback detection
-        if not is_heading:
-            is_heading = _detect_heading_fallback(text)
-
-        if is_heading:
-            # Estimate heading level based on text characteristics
-            level = _estimate_heading_level(text)
-
-            heading_info = {
-                "text": text,
-                "level": level,
-                "source": "font_analysis",
-                "block_id": i,
-                "extraction_method": block.get("source", {}).get(
-                    "method", "traditional"
-                ),
+        return (
+            base
+            if "source" not in block
+            else {
+                **base,
+                "page": block["source"].get("page"),
+                "filename": block["source"].get("filename"),
             }
+        )
 
-            # Add source information
-            if "source" in block:
-                heading_info["page"] = block["source"].get("page")
-                heading_info["filename"] = block["source"].get("filename")
-
-            headings.append(heading_info)
-
-    return headings
+    return [
+        heading
+        for heading in (_make_heading(i, block) for i, block in enumerate(blocks))
+        if heading is not None
+    ]
 
 
 def _estimate_heading_level(text: str) -> int:
