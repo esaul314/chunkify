@@ -6,6 +6,7 @@ sys.path.insert(0, ".")
 
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 from pdf_chunker.text_cleaning import (
+    clean_text,
     collapse_single_newlines,
     insert_numbered_list_newlines,
 )
@@ -48,3 +49,13 @@ def test_abbreviation_inside_numbered_item() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "the\n\nSaaS" not in cleaned
     assert "paradigm for clarity.\n\nFollowing" in cleaned
+
+
+def test_embedded_sentence_with_quotes() -> None:
+    text = (
+        '1. whosoever that can answer the question "Why did this need to happen at all?"\n'
+        "Then come towards"
+    )
+    cleaned = clean_text(text)
+    assert "\n\nThen" not in cleaned
+    assert '"Why did this need to happen at all?" Then' in cleaned

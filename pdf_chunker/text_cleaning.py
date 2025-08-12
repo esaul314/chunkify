@@ -178,15 +178,20 @@ def remove_stray_bullet_lines(text: str) -> str:
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
 NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
 NUMBERED_END_RE = re.compile(
-    rf"(\d{{1,3}}[.)][^\n]+?)(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b|$))"
+    rf"(\d{{1,3}}[.)][^\n]+?)(?=(?:\n\s*[A-Z][a-z]+\b|\s+[A-Z][^:]*:|\s*(?:[{BULLET_CHARS_ESC}]|$)))"
 )
+
+LIST_ITEM_START_RE = re.compile(rf"^\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)])\s")
 
 
 def insert_numbered_list_newlines(text: str) -> str:
     """Insert newlines around numbered list items and terminate the list with a paragraph break."""
-    text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
-    text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
-    return NUMBERED_END_RE.sub(r"\1\n\n", text)
+    return pipe(
+        text,
+        lambda t: NUMBERED_AFTER_COLON_RE.sub(r":\n\1", t),
+        lambda t: NUMBERED_INLINE_RE.sub(r"\1\n", t),
+        lambda t: NUMBERED_END_RE.sub(r"\1\n\n", t),
+    )
 
 
 def _preserve_list_newlines(text: str) -> str:
@@ -336,7 +341,13 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
             last_line = prev.strip().splitlines()[-1]
-            if re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", last_line):
+            if LIST_ITEM_START_RE.match(last_line):
+                head = part.lstrip().splitlines()[0].rstrip()
+                if not LIST_ITEM_START_RE.match(part.lstrip()) and not head.endswith(
+                    ":"
+                ):
+                    merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                    continue
                 merged.append(part)
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):

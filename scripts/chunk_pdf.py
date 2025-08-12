@@ -1,14 +1,14 @@
 import argparse
-import argparse
 import json
 import logging
+import sys
 
 from pdf_chunker.core import process_document
 
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+def main() -> int:
     logger.debug("Starting chunk_pdf script execution")
     parser = argparse.ArgumentParser("Chunk a document into structured JSONL.")
     parser.add_argument("document_file", help="Path to the document file (PDF or EPUB)")
@@ -76,17 +76,17 @@ def main() -> None:
     valid_chunks = [chunk for chunk in chunks if chunk]
 
     logger.debug(f"After filtering, have {len(valid_chunks)} valid chunks")
-    # Use a more robust approach for JSONL output
+    if not valid_chunks:
+        logger.error("No chunks generated; aborting without output")
+        return 1
+
     for chunk in valid_chunks:
         try:
-            # Ensure we have a clean, complete JSON object per line
             json_str = json.dumps(chunk, ensure_ascii=False)
-            print(json_str)
-        except Exception as e:
-            # Skip problematic chunks to maintain JSONL integrity
-            import sys
-
+            print(json_str, flush=True)
+        except Exception as e:  # pragma: no cover - defensive
             print(f"Error serializing chunk: {e}", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":
@@ -94,4 +94,4 @@ if __name__ == "__main__":
         level=logging.DEBUG,
         format="%(name)s - %(levelname)s - %(message)s",
     )
-    main()
+    raise SystemExit(main())
