@@ -59,3 +59,15 @@ def test_quoted_question_inside_numbered_item() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "\n\nThen" not in cleaned
     assert '"Why did this need to happen at all?" Then' in cleaned
+
+
+@pytest.mark.parametrize("punct", list(".…"))
+def test_quoted_sentence_endings_inside_numbered_item(punct: str) -> None:
+    text = (
+        f'1. Item with a quote "quoted sentence{punct}" '
+        "Then proceed with more details."
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "\n\nThen" not in cleaned
+    assert f'"quoted sentence{punct}" Then' in cleaned
