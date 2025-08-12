@@ -187,7 +187,8 @@ def insert_numbered_list_newlines(text: str) -> str:
     text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
     text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
     text = NUMBERED_END_RE.sub(r"\1\n\n", text)
-    return re.sub(r'(["\'])\n{2,}(?=\S)', r"\1\n", text)
+    text = re.sub(r'(["\'])\n{2,}(?=[A-Z])', r"\1 ", text)
+    return text
 
 
 def _preserve_list_newlines(text: str) -> str:
