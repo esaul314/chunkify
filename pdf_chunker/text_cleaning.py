@@ -186,7 +186,8 @@ def insert_numbered_list_newlines(text: str) -> str:
     """Insert newlines around numbered list items and terminate the list with a paragraph break."""
     text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
     text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
-    return NUMBERED_END_RE.sub(r"\1\n\n", text)
+    text = NUMBERED_END_RE.sub(r"\1\n\n", text)
+    return re.sub(r'(["\'])\n{2,}(?=\S)', r"\1\n", text)
 
 
 def _preserve_list_newlines(text: str) -> str:
