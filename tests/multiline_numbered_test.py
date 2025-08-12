@@ -2,6 +2,7 @@ import sys
 
 sys.path.insert(0, ".")
 
+from pdf_chunker.page_artifacts import remove_page_artifact_lines
 from pdf_chunker.splitter import semantic_chunker
 
 
@@ -24,3 +25,10 @@ def test_multiline_numbered_items() -> None:
         and "Continuation of second item to ensure merging." in chunk
         for chunk in chunks
     )
+
+
+def test_numbered_item_with_footnote() -> None:
+    text = "1. Item that can exist.3\n\nThis is still same item."
+    cleaned = remove_page_artifact_lines(text, 1)
+    chunks = semantic_chunker(cleaned, chunk_size=200, overlap=0)
+    assert chunks == ["1. Item that can exist[3]. This is still same item."]
