@@ -85,6 +85,11 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(text, 2)
         self.assertEqual(cleaned, "Can exist[3]. This is next")
 
+    def test_spaced_footnote_marker(self):
+        text = "Can exist.3  \n\nThis is next"
+        cleaned = remove_page_artifact_lines(text, 2)
+        self.assertEqual(cleaned, "Can exist[3]. This is next")
+
     def test_remove_header_and_footnote(self):
         text = (
             "First part of sentence\n\n"
