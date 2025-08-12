@@ -48,3 +48,17 @@ def test_abbreviation_inside_numbered_item() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "the\n\nSaaS" not in cleaned
     assert "paradigm for clarity.\n\nFollowing" in cleaned
+
+
+def test_quote_continuation_inside_numbered_item() -> None:
+    text = (
+        '1. whosoever that can answer the question "Why did this need to happen at all?"\n'
+        "Then come towards"
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    expected = (
+        '1. whosoever that can answer the question "Why did this need to happen at all?" '
+        "Then come towards"
+    )
+    assert cleaned.strip() == expected

@@ -186,7 +186,9 @@ def insert_numbered_list_newlines(text: str) -> str:
     """Insert newlines around numbered list items and terminate the list with a paragraph break."""
     text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
     text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
-    return NUMBERED_END_RE.sub(r"\1\n\n", text)
+    text = NUMBERED_END_RE.sub(r"\1\n\n", text)
+    text = re.sub(r'(["\'])\n{2,}(?=[A-Z])', r"\1 ", text)
+    return text
 
 
 def _preserve_list_newlines(text: str) -> str:
@@ -213,11 +215,11 @@ def collapse_single_newlines(text: str) -> str:
     text = re.sub(r"\n{2,}", para_break, text)
     text = text.replace("\n", " ")
 
-    # Restore preserved breaks
-    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
-
-    logger.debug(f"Output text preview: {repr(text[:100])}")
-    return text
+    # Restore preserved breaks and collapse stray list-newline splits
+    restored = text.replace(para_break, "\n\n").replace(list_break, "\n")
+    cleaned = re.sub(r'(["\'])\n{2,}(?=[A-Z])', r"\1 ", restored)
+    logger.debug(f"Output text preview: {repr(cleaned[:100])}")
+    return cleaned
 
 
 def normalize_ligatures(text: str) -> str:
