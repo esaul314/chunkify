@@ -1,8 +1,12 @@
 import sys
 
+import pytest
+
 sys.path.insert(0, ".")
 
+from pdf_chunker.page_artifacts import remove_page_artifact_lines
 from pdf_chunker.splitter import semantic_chunker
+from pdf_chunker.text_cleaning import clean_text
 
 
 def test_multiline_numbered_items() -> None:
@@ -24,3 +28,16 @@ def test_multiline_numbered_items() -> None:
         and "Continuation of second item to ensure merging." in chunk
         for chunk in chunks
     )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "1. Item that can exist.3\n\nThis is still same item.",
+        "1. Item that can exist. 3\n\nThis is still same item.",
+    ],
+)
+def test_numbered_item_with_footnote(raw: str) -> None:
+    cleaned = clean_text(remove_page_artifact_lines(raw, 1))
+    chunks = semantic_chunker(cleaned, chunk_size=200, overlap=0)
+    assert chunks == ["1. Item that can exist[3]. This is still same item."]

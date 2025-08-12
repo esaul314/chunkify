@@ -4,7 +4,7 @@ from functools import reduce
 from itertools import takewhile
 from typing import Optional
 
-from .text_cleaning import clean_text
+from .text_cleaning import clean_text, pipe
 
 ROMAN_RE = r"[ivxlcdm]+"
 _ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -36,8 +36,19 @@ def _looks_like_footnote(text: str) -> bool:
     if stripped.lower().startswith("footnote"):
         return True
 
-    pattern = rf"^(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z]"
-    return bool(re.match(pattern, stripped))
+    # Avoid misclassifying ordinary numbered list items like "1. Item" or
+    # "2) Item" as footnotes.
+    if re.match(r"^\d+[.)]\s", stripped):
+        return False
+
+    pattern = rf"""
+        ^(
+            \d{{1,3}}\s{{2,}}|      # digit marker with at least two spaces
+            [{_SUP_DIGITS_ESC}]\s+|  # superscript digit marker
+            [\*\u2020]\s+           # symbol footnote markers
+        )[A-Z]
+    """
+    return bool(re.match(pattern, stripped, re.VERBOSE))
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
@@ -264,24 +275,38 @@ def _remove_embedded_footnote(text: str) -> str:
 
 
 FOOTNOTE_MARKER_RE = re.compile(
-    rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+"
+    rf"([^\s0-9{_SUP_DIGITS_ESC}])\s*([0-9{_SUP_DIGITS_ESC}]+)\s*[\r\n]+"
+)
+
+FOOTNOTE_LONE_LINE_RE = re.compile(
+    rf"([^\s0-9{_SUP_DIGITS_ESC}])\s*\r?\n\s*([0-9{_SUP_DIGITS_ESC}]+)\s*[\r\n]+"
 )
 
 
 def _normalize_footnote_markers(text: str) -> str:
     """Replace trailing footnote numbers with bracketed form.
 
-    Patterns like ``sentence.3`` followed by one or more line breaks are
-    transformed into ``sentence.[3]`` with a single trailing space. This keeps
-    the footnote reference while preventing double newlines from breaking the
-    paragraph flow.
+    Patterns like ``sentence.3`` or ``sentence.\n3`` followed by one or more
+    line breaks are transformed into ``sentence.[3]`` with a single trailing
+    space. This keeps the footnote reference while preventing double newlines
+    from breaking the paragraph flow.
     """
 
-    def repl(match: re.Match[str]) -> str:
-        digits = match.group(1).translate(_SUPERSCRIPT_MAP)
-        return f"[{digits}] "
+    def _inline(match: re.Match[str]) -> str:
+        char, digits = match.groups()
+        normalized = digits.translate(_SUPERSCRIPT_MAP)
+        return f"[{normalized}]{char} " if char in ".!?" else f"{char}[{normalized}] "
 
-    return FOOTNOTE_MARKER_RE.sub(repl, text)
+    def _lone(match: re.Match[str]) -> str:
+        char, digits = match.groups()
+        normalized = digits.translate(_SUPERSCRIPT_MAP)
+        return f"[{normalized}]{char} " if char in ".!?" else f"{char}[{normalized}] "
+
+    return pipe(
+        text,
+        lambda t: FOOTNOTE_LONE_LINE_RE.sub(_lone, t),
+        lambda t: FOOTNOTE_MARKER_RE.sub(_inline, t),
+    )
 
 
 def _flatten_markdown_table(text: str) -> str:

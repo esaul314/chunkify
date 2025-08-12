@@ -58,38 +58,49 @@ class TestPageArtifactDetection(unittest.TestCase):
         self.assertEqual(cleaned, "")
 
     def test_footnote_detection(self):
-        line = "4 This is a sample footnote text."
+        line = "4  This is a sample footnote text."
         self.assertTrue(is_page_artifact_text(line, 2))
 
     def test_no_false_footnote(self):
         line = "2 a.m. In our experience, this failed"
         self.assertFalse(is_page_artifact_text(line, 0))
 
+    def test_numbered_list_item_not_artifact(self):
+        line = "3 This item should remain"
+        self.assertFalse(is_page_artifact_text(line, 0))
+
     def test_remove_footnote_line(self):
-        text = "Paragraph text\n4 This is a sample footnote text.\nNext paragraph"
+        text = "Paragraph text\n4  This is a sample footnote text.\nNext paragraph"
         cleaned = remove_page_artifact_lines(text, 2)
         self.assertEqual(cleaned, "Paragraph text\nNext paragraph")
 
     def test_inline_footnote_marker(self):
-        text = "Can exist.3\n3 Footnote text.\n\nThis is next"
-        cleaned = remove_page_artifact_lines(text, 2)
-        self.assertEqual(cleaned, "Can exist.[3] This is next")
+        cases = [
+            "Can exist.3\n3  Footnote text.\n\nThis is next",
+            "Can exist. 3\n3  Footnote text.\n\nThis is next",
+        ]
+        self.assertTrue(
+            all(
+                remove_page_artifact_lines(text, 2) == "Can exist[3]. This is next"
+                for text in cases
+            )
+        )
 
     def test_superscript_footnote_marker(self):
         text = "Can exist.\u00b3\n\u00b3 Footnote text.\n\nThis is next"
         cleaned = remove_page_artifact_lines(text, 2)
-        self.assertEqual(cleaned, "Can exist.[3] This is next")
+        self.assertEqual(cleaned, "Can exist[3]. This is next")
 
     def test_crlf_footnote_marker(self):
-        text = "Can exist.3\r\n3 Footnote text.\r\n\r\nThis is next"
+        text = "Can exist.3\r\n3  Footnote text.\r\n\r\nThis is next"
         cleaned = remove_page_artifact_lines(text, 2)
-        self.assertEqual(cleaned, "Can exist.[3] This is next")
+        self.assertEqual(cleaned, "Can exist[3]. This is next")
 
     def test_remove_header_and_footnote(self):
         text = (
             "First part of sentence\n\n"
             "115 | Chapter 3: Welcome to the Jungle\n"
-            "4 Footnote text. The sentence continues here."
+            "4  Footnote text. The sentence continues here."
         )
         cleaned = remove_page_artifact_lines(text, 115)
         self.assertEqual(
@@ -100,7 +111,7 @@ class TestPageArtifactDetection(unittest.TestCase):
         text = (
             "A sentence on the last line of the page and it continues on the next page\n"
             "| Chapter 3: Welcome to the Jungle\n"
-            "4 And then there is a footnote at the bottom of the second page.\n"
+            "4  And then there is a footnote at the bottom of the second page.\n"
             "the sentence continues here, on the next page."
         )
         cleaned = remove_page_artifact_lines(text, 115)
