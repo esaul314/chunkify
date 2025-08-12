@@ -17,6 +17,12 @@ if [[ ! -f "$JSONL_FILE" ]]; then
     exit $EXIT_FILE_NOT_FOUND
 fi
 
+# Fail fast if the file contains no chunks
+if ! grep -q '[^[:space:]]' "$JSONL_FILE"; then
+    echo "Error: No chunks found in '$JSONL_FILE'" >&2
+    exit $EXIT_VALIDATION_FAILED
+fi
+
 echo "Validating chunks in: $JSONL_FILE"
 
 # Initialize counters
