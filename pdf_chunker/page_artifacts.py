@@ -10,10 +10,6 @@ ROMAN_RE = r"[ivxlcdm]+"
 _ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
 DOMAIN_RE = re.compile(r"\b[\w.-]+\.[a-z]{2,}\b", re.IGNORECASE)
 
-SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
-_SUPERSCRIPT_MAP = str.maketrans(SUPERSCRIPT_DIGITS, "0123456789")
-_SUP_DIGITS_ESC = re.escape(SUPERSCRIPT_DIGITS)
-
 
 def _roman_to_int(value: str) -> int:
     """Convert a Roman numeral to an integer."""
@@ -36,7 +32,7 @@ def _looks_like_footnote(text: str) -> bool:
     if stripped.lower().startswith("footnote"):
         return True
 
-    pattern = rf"^(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z]"
+    pattern = r"^(?:[0-9]{1,3}|[\*\u2020])\s+[A-Z]"
     return bool(re.match(pattern, stripped))
 
 
@@ -253,7 +249,7 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
 
 
 FOOTNOTE_LINE_RE = re.compile(
-    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.(?:\s*|$)\n?"
+    r"(?m)^\s*(?:[0-9]{1,3}|[\*\u2020])\s+[A-Z][^.]{0,120}\.(?:\s*|$)(?:\r?\n)?"
 )
 
 
@@ -263,23 +259,28 @@ def _remove_embedded_footnote(text: str) -> str:
     return FOOTNOTE_LINE_RE.sub("", text)
 
 
-FOOTNOTE_MARKER_RE = re.compile(
-    rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+"
-)
+FOOTNOTE_MARKER_RE = re.compile(r"([^\s\d])[^\S\r\n]*(\d+)[^\S\r\n]*[\r\n]+")
+
+END_PUNCT_BEFORE_FOOTNOTE = ".!?"
 
 
 def _normalize_footnote_markers(text: str) -> str:
     """Replace trailing footnote numbers with bracketed form.
 
-    Patterns like ``sentence.3`` followed by one or more line breaks are
-    transformed into ``sentence.[3]`` with a single trailing space. This keeps
+    Patterns like ``sentence.3`` followed by whitespace and a line break are
+    transformed into ``sentence[3].`` with a single trailing space. This keeps
     the footnote reference while preventing double newlines from breaking the
-    paragraph flow.
+    paragraph flow, including when non-breaking spaces precede the line break
+    (common in list items).
     """
 
     def repl(match: re.Match[str]) -> str:
-        digits = match.group(1).translate(_SUPERSCRIPT_MAP)
-        return f"[{digits}] "
+        before, digits = match.group(1), match.group(2)
+        return (
+            f"[{digits}]{before} "
+            if before in END_PUNCT_BEFORE_FOOTNOTE
+            else f"{before}[{digits}] "
+        )
 
     return FOOTNOTE_MARKER_RE.sub(repl, text)
 

@@ -21,9 +21,9 @@ class ValidationReport:
     boundary_overlaps: List[Dict[str, Any]]
 
     def has_issues(self) -> bool:
-        """Return ``True`` if any anomalies or duplicates were found."""
+        """Return ``True`` if anomalies or an empty result were found."""
 
-        return any(
+        return self.total_chunks == 0 or any(
             (
                 self.empty_text,
                 self.mid_sentence_starts,
