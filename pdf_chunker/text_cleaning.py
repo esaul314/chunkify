@@ -338,11 +338,34 @@ def _starts_new_list_item(text: str) -> bool:
     return _starts_list_item(text.lstrip())
 
 
-FOOTNOTE_END_RE = re.compile(r"\[\d+\]$")
+FOOTNOTE_BRACKETED_RE = re.compile(r"\[\d+\]$")
+FOOTNOTE_DOTTED_RE = re.compile(r"\.(\d+)$")
+FOOTNOTE_PLAIN_RE = re.compile(r"(?<=[^\s\d])(\d+)$")
 
 
 def _ends_with_footnote(text: str) -> bool:
-    return bool(FOOTNOTE_END_RE.search(text.strip()))
+    stripped = text.strip()
+    return bool(
+        FOOTNOTE_BRACKETED_RE.search(stripped)
+        or FOOTNOTE_DOTTED_RE.search(stripped)
+        or FOOTNOTE_PLAIN_RE.search(stripped)
+    )
+
+
+def _normalize_trailing_footnote(text: str) -> str:
+    stripped = text.rstrip()
+    match = FOOTNOTE_BRACKETED_RE.search(stripped)
+    if match:
+        return stripped
+    match = FOOTNOTE_DOTTED_RE.search(stripped)
+    if match:
+        num = match.group(1)
+        return FOOTNOTE_DOTTED_RE.sub(f"[{num}].", stripped)
+    match = FOOTNOTE_PLAIN_RE.search(stripped)
+    if match:
+        num = match.group(1)
+        return FOOTNOTE_PLAIN_RE.sub(f"[{num}]", stripped)
+    return stripped
 
 
 def merge_spurious_paragraph_breaks(text: str) -> str:
@@ -358,7 +381,8 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
             last_line = prev.strip().splitlines()[-1]
             if _starts_list_item(last_line):
                 if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                    merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                    normalized = _normalize_trailing_footnote(prev)
+                    merged[-1] = f"{normalized} {part.lstrip()}"
                 else:
                     merged.append(part)
                 continue
