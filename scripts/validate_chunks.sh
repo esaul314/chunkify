@@ -67,13 +67,19 @@ except:
         echo "Warning: Overlong chunk (${#text} chars) on line $total_chunks" >&2
         validation_failed=1
     fi
-    
+
 done < "$JSONL_FILE"
+
+# Abort if no chunks were found
+if [[ $total_chunks -eq 0 ]]; then
+    echo "Error: No chunks found in $JSONL_FILE" >&2
+    exit $EXIT_VALIDATION_FAILED
+fi
 
 echo "Structural validation complete:"
 echo "  Total chunks: $total_chunks"
 echo "  Empty text: $empty_text_count"
-echo "  Mid-sentence starts: $mid_sentence_count" 
+echo "  Mid-sentence starts: $mid_sentence_count"
 echo "  Overlong chunks: $overlong_count"
 
 # Run duplicate detection
