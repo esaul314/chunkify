@@ -215,11 +215,11 @@ def collapse_single_newlines(text: str) -> str:
     text = re.sub(r"\n{2,}", para_break, text)
     text = text.replace("\n", " ")
 
-    # Restore preserved breaks
-    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
-
-    logger.debug(f"Output text preview: {repr(text[:100])}")
-    return text
+    # Restore preserved breaks and collapse stray list-newline splits
+    restored = text.replace(para_break, "\n\n").replace(list_break, "\n")
+    cleaned = re.sub(r'(["\'])\n{2,}(?=[A-Z])', r"\1 ", restored)
+    logger.debug(f"Output text preview: {repr(cleaned[:100])}")
+    return cleaned
 
 
 def normalize_ligatures(text: str) -> str:
