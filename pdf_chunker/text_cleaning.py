@@ -183,7 +183,7 @@ NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
 # Avoid inserting paragraph breaks when a numbered item ends with a quoted
 # sentence ('.', '!', '?', or '…') that continues the same sentence.
 NUMBERED_END_RE = re.compile(
-    rf"(\d{{1,3}}[.)][^\n]+?)(?<![{re.escape(END_PUNCT)}]\")(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b|$))"
+    rf"(\d{{1,3}}[.)][^\n]+?)(?<![{re.escape(END_PUNCT)}]\")(?<!\][{re.escape(END_PUNCT)}])(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b|$))"
 )
 
 
