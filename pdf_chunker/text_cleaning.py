@@ -194,6 +194,19 @@ def insert_numbered_list_newlines(text: str) -> str:
     return NUMBERED_END_RE.sub(r"\1\n\n", text)
 
 
+LIST_MARKER_RE = rf"(?:\d+[.)]|[{BULLET_CHARS_ESC}]|-\s)"
+LIST_ITEM_BLOCK_RE = re.compile(
+    rf"(^\s*{LIST_MARKER_RE}[^\n]*?(?:\n(?!\s*(?:{LIST_MARKER_RE})).*)*)(?=\n\s*(?:{LIST_MARKER_RE})|\Z)",
+    re.MULTILINE,
+)
+
+
+def collapse_list_item_paragraphs(text: str) -> str:
+    """Replace double newlines inside list items with a single space."""
+
+    return LIST_ITEM_BLOCK_RE.sub(lambda m: m.group(0).replace("\n\n", " "), text)
+
+
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
     placeholder = "[[LIST_BREAK]]"
@@ -479,6 +492,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling insert_numbered_list_newlines")
     text = insert_numbered_list_newlines(text)
     logger.debug(f"After insert_numbered_list_newlines: {repr(text[:100])}")
+
+    logger.debug("Calling collapse_list_item_paragraphs")
+    text = collapse_list_item_paragraphs(text)
+    logger.debug(f"After collapse_list_item_paragraphs: {repr(text[:100])}")
 
     # Collapse single line breaks except paragraph breaks
     logger.debug("Calling collapse_single_newlines")

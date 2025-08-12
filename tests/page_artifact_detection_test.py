@@ -71,9 +71,16 @@ class TestPageArtifactDetection(unittest.TestCase):
         self.assertEqual(cleaned, "Paragraph text\nNext paragraph")
 
     def test_inline_footnote_marker(self):
-        text = "Can exist.3\n3 Footnote text.\n\nThis is next"
-        cleaned = remove_page_artifact_lines(text, 2)
-        self.assertEqual(cleaned, "Can exist[3]. This is next")
+        cases = [
+            "Can exist.3\n3 Footnote text.\n\nThis is next",
+            "Can exist. 3\n3 Footnote text.\n\nThis is next",
+        ]
+        self.assertTrue(
+            all(
+                remove_page_artifact_lines(text, 2) == "Can exist[3]. This is next"
+                for text in cases
+            )
+        )
 
     def test_superscript_footnote_marker(self):
         text = "Can exist.\u00b3\n\u00b3 Footnote text.\n\nThis is next"
