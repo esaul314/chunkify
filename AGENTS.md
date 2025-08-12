@@ -70,6 +70,7 @@ pdf_chunker/
     ├── env_utils_test.py
     ├── epub_spine_test.py
     ├── heading_boundary_test.py
+    ├── heading_detection_test.py
     ├── hyphenation_test.py
     ├── indented_block_test.py
     ├── list_detection_edge_case_test.py

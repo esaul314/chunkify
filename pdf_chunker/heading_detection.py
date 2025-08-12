@@ -13,8 +13,10 @@ def _detect_heading_fallback(text: str) -> bool:
     text = text.strip()
     words = text.split()
 
-    # Very short text (1-3 words) is likely a heading
-    if len(words) <= 3:
+    # Very short text (1-3 words) without a terminal period is likely a heading.
+    # Short sentences such as "It ended." should remain part of the body text
+    # rather than being treated as headings.
+    if len(words) <= 3 and not text.endswith("."):
         return True
 
     # Text that's all uppercase might be a heading
