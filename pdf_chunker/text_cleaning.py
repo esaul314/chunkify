@@ -330,6 +330,21 @@ def _has_unbalanced_quotes(text: str) -> bool:
     return text.count('"') % 2 == 1 or text.count("'") % 2 == 1
 
 
+def _starts_list_item(line: str) -> bool:
+    return bool(re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", line))
+
+
+def _starts_new_list_item(text: str) -> bool:
+    return _starts_list_item(text.lstrip())
+
+
+FOOTNOTE_END_RE = re.compile(r"\[\d+\]$")
+
+
+def _ends_with_footnote(text: str) -> bool:
+    return bool(FOOTNOTE_END_RE.search(text.strip()))
+
+
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     merged: List[str] = []
@@ -341,8 +356,11 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
             last_line = prev.strip().splitlines()[-1]
-            if re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", last_line):
-                merged.append(part)
+            if _starts_list_item(last_line):
+                if _ends_with_footnote(prev) and not _starts_new_list_item(part):
+                    merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                else:
+                    merged.append(part)
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(

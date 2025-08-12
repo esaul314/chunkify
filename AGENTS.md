@@ -77,6 +77,7 @@ pdf_chunker/
     ├── multiline_numbered_test.py
     ├── newline_cleanup_test.py
     ├── numbered_list_chunk_test.py
+    ├── numbered_list_footnote_test.py
     ├── numbered_list_test.py
     ├── page_artifact_detection_test.py
     ├── page_artifacts_edge_case_test.py
