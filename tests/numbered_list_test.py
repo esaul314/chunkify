@@ -71,3 +71,14 @@ def test_quoted_sentence_endings_inside_numbered_item(punct: str) -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "\n\nThen" not in cleaned
     assert f'"quoted sentence{punct}" Then' in cleaned
+
+
+def test_long_inline_numbered_items() -> None:
+    text = (
+        "1. This item is fairly long and continues without a newline before the next number "
+        "2. Second item should begin on its own line."
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "next number 2." not in cleaned
+    assert "next number\n2." in cleaned

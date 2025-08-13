@@ -4,7 +4,7 @@ import logging
 import json
 import ftfy
 from functools import reduce
-from typing import Callable, List, Tuple, TypeVar
+from typing import Callable, List, Tuple, TypeVar, Match
 from wordfreq import zipf_frequency
 
 logger = logging.getLogger(__name__)
@@ -179,9 +179,9 @@ def remove_stray_bullet_lines(text: str) -> str:
 
 
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
-# Limit inline numbered list detection to short gaps so references like
-# "Chapter 10" within a list item aren't mistaken for a new item.
-NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]{0,30}?)\s+(?=\d{1,3}[.)])")
+# Split inline numbered items while avoiding false splits on title-cased
+# references like "Chapter 10".
+NUMBERED_INLINE_CANDIDATE_RE = re.compile(r"(\d{1,3}[.)][^\n]*?)(\s+)(\d{1,3}[.)])")
 # Avoid inserting paragraph breaks when a numbered item ends with a quoted
 # sentence ('.', '!', '?', or '…') that continues the same sentence.
 NUMBERED_END_RE = re.compile(
@@ -191,10 +191,17 @@ NUMBERED_END_RE = re.compile(
 )
 
 
+def _split_inline_numbered(match: Match[str]) -> str:
+    """Insert a newline before the next item unless the preceding token is title-cased."""
+    head, _, tail = match.groups()
+    last = head.rstrip().split()[-1]
+    return match.group(0) if last.istitle() else f"{head}\n{tail}"
+
+
 def insert_numbered_list_newlines(text: str) -> str:
     """Insert newlines around numbered list items and terminate the list with a paragraph break."""
     text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
-    text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
+    text = NUMBERED_INLINE_CANDIDATE_RE.sub(_split_inline_numbered, text)
     return NUMBERED_END_RE.sub(r"\1\n\n", text)
 
 
