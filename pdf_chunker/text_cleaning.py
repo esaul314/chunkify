@@ -179,11 +179,15 @@ def remove_stray_bullet_lines(text: str) -> str:
 
 
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
-NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
+# Limit inline numbered list detection to short gaps so references like
+# "Chapter 10" within a list item aren't mistaken for a new item.
+NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]{0,30}?)\s+(?=\d{1,3}[.)])")
 # Avoid inserting paragraph breaks when a numbered item ends with a quoted
 # sentence ('.', '!', '?', or '…') that continues the same sentence.
 NUMBERED_END_RE = re.compile(
-    rf"(\d{{1,3}}[.)][^\n]+?)(?<![{re.escape(END_PUNCT)}]\")(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b|$))"
+    rf"(\d{{1,3}}[.)][^\n]+?)"
+    rf"(?<![{re.escape(END_PUNCT)}]\")"
+    rf"(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b(?!\s+\d)|$))"
 )
 
 
