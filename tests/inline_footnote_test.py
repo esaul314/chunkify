@@ -15,3 +15,9 @@ def test_inline_footnote_at_end() -> None:
     raw = "They deserve.3"
     cleaned = clean_text(raw)
     assert cleaned == "They deserve[3]."
+
+
+def test_bracketed_footnote_no_extra_newline() -> None:
+    raw = "They deserve[3].\n\nThat follows"
+    cleaned = clean_text(raw)
+    assert cleaned == "They deserve[3]. That follows"
