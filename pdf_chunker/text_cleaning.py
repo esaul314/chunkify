@@ -353,6 +353,11 @@ FOOTNOTE_BRACKETED_RE = re.compile(r"\[\d+\]$")
 FOOTNOTE_DOTTED_RE = re.compile(r"\.(\d+)$")
 FOOTNOTE_PLAIN_RE = re.compile(r"(?<=[^\s\d])(\d+)$")
 
+SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+_SUPERSCRIPT_MAP = str.maketrans(SUPERSCRIPT_DIGITS, "0123456789")
+_SUP_DIGITS_ESC = re.escape(SUPERSCRIPT_DIGITS)
+INLINE_FOOTNOTE_RE = re.compile(rf"(?<!\d)\.([0-9{_SUP_DIGITS_ESC}]+)(\s|$)")
+
 
 def _ends_with_footnote(text: str) -> bool:
     stripped = text.strip()
@@ -377,6 +382,14 @@ def _normalize_trailing_footnote(text: str) -> str:
         num = match.group(1)
         return FOOTNOTE_PLAIN_RE.sub(f"[{num}]", stripped)
     return stripped
+
+
+def _normalize_inline_footnotes(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        digits = match.group(1).translate(_SUPERSCRIPT_MAP)
+        return f"[{digits}].{match.group(2)}"
+
+    return INLINE_FOOTNOTE_RE.sub(repl, text)
 
 
 def merge_spurious_paragraph_breaks(text: str) -> str:
@@ -541,6 +554,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling merge_spurious_paragraph_breaks")
     text = merge_spurious_paragraph_breaks(text)
     logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
+
+    logger.debug("Calling _normalize_inline_footnotes")
+    text = _normalize_inline_footnotes(text)
+    logger.debug(f"After _normalize_inline_footnotes: {repr(text[:100])}")
 
     logger.debug("Calling _fix_split_words")
     text = _fix_split_words(text)
