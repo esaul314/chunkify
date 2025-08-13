@@ -4,6 +4,7 @@ from pdf_chunker.heading_detection import (
     _detect_heading_fallback,
     detect_headings_from_font_analysis,
 )
+from pdf_chunker.pdf_parsing import _spans_indicate_heading
 
 
 class TestHeadingDetectionFallback(unittest.TestCase):
@@ -19,6 +20,15 @@ class TestHeadingDetectionFallback(unittest.TestCase):
         """Blocks tagged as headings but ending with punctuation stay paragraphs."""
         blocks = [{"text": "Chapter 10.", "type": "heading"}]
         self.assertEqual(detect_headings_from_font_analysis(blocks), [])
+
+    def test_font_flag_heading_with_period_not_heading(self) -> None:
+        """Font-emphasized lines ending with punctuation should remain body text."""
+        spans = [{"flags": 2}]
+        self.assertFalse(
+            _spans_indicate_heading(
+                spans, "Considering this issue, no decision was made."
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import logging
 from functools import reduce
 import fitz  # PyMuPDF
 from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
-from .heading_detection import _detect_heading_fallback
+from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .page_utils import parse_page_ranges, validate_page_exclusions
 from .page_artifacts import (
     is_page_artifact_text,
@@ -428,6 +428,13 @@ def _filter_margin_artifacts(blocks: Sequence[Any], page_height: float) -> list[
     return reduce(step, blocks, [])
 
 
+def _spans_indicate_heading(spans: Sequence[dict], text: str) -> bool:
+    """Return True when font flags suggest a heading and text lacks trailing punctuation."""
+    return any(
+        span.get("flags", 0) & 2 for span in spans
+    ) and not text.rstrip().endswith(TRAILING_PUNCTUATION)
+
+
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     Extract and classify text blocks from a PDF page,
@@ -470,7 +477,7 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
             try:
                 block_dict = page.get_text("dict", clip=b[:4])["blocks"][0]
                 spans = block_dict["lines"][0]["spans"]
-                is_heading = any(span.get("flags", 0) & 2 for span in spans)
+                is_heading = _spans_indicate_heading(spans, block_text)
             except (KeyError, IndexError, TypeError):
                 is_heading = _detect_heading_fallback(block_text)
 
