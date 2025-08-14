@@ -31,6 +31,19 @@ class TestNewlineCleanup(unittest.TestCase):
         )
         self.assertEqual(clean_text(text), expected)
 
+    def test_multiline_numbered_item_with_chapter_reference(self):
+        text = (
+            "2. Another item to mention\n"
+            "in Chapter 10. Considering this issue, no decision was made. "
+            "The paragraph continues."
+        )
+        expected = (
+            "2. Another item to mention in Chapter\n"
+            "10.\n"
+            "Considering this issue, no decision was made. The paragraph continues."
+        )
+        self.assertEqual(clean_text(text), expected)
+
     def test_merge_break_in_quoted_title(self):
         text = (
             '" Vulnerability sounds like truth": Brené Brown, '

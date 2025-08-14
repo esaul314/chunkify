@@ -161,6 +161,7 @@ INLINE_FOOTNOTE_RE = re.compile(rf"(?<!\d)\.([0-9{_SUP_DIGITS_ESC}]+)(\s|$)")
 
 # Chapter reference detection
 CHAPTER_REF_RE = re.compile(r"Chapter\s+\d+\.$", re.IGNORECASE)
+CHAPTER_INLINE_RE = re.compile(r"(Chapter\s+\d+\.)(?=\s+[A-Z])", re.IGNORECASE)
 
 # Hyphenated word joiners (compiled with constants above)
 _HYPHEN_BULLET_OPT = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
@@ -362,8 +363,16 @@ def _starts_new_list_item(text: str) -> bool:
 
 def _ends_with_chapter_reference(text: str) -> bool:
     """Return True if the text ends with a 'Chapter N.' style reference."""
-    line = text.strip().splitlines()[-1]
-    return bool(CHAPTER_REF_RE.search(line))
+    lines = text.strip().splitlines()
+    if not lines:
+        return False
+    last = lines[-1]
+    if CHAPTER_REF_RE.search(last):
+        return True
+    if len(lines) >= 2:
+        combined = f"{lines[-2]} {last}"
+        return bool(CHAPTER_REF_RE.search(combined))
+    return False
 
 
 def _is_probable_heading(text: str) -> bool:
@@ -501,17 +510,26 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
             if author_line.startswith("—"):
                 merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
-            last_line = prev.strip().splitlines()[-1]
-            if _starts_list_item(last_line):
-                if _ends_with_chapter_reference(prev) and not _starts_new_list_item(
-                    part
-                ):
-                    merged[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
-                elif _ends_with_footnote(prev) and not _starts_new_list_item(part):
+            first_line = prev.lstrip().splitlines()[0]
+            if _starts_list_item(first_line):
+                if not _starts_new_list_item(part):
+                    match = CHAPTER_INLINE_RE.search(prev)
+                    if match:
+                        head = prev[: match.end()].rstrip()
+                        tail = prev[match.end() :].strip()
+                        combined = (
+                            f"{tail} {part.lstrip()}".strip() if tail else part.lstrip()
+                        )
+                        merged[-1] = f"{head}\n{combined}"
+                        continue
+                    if _ends_with_chapter_reference(prev):
+                        merged[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
+                        continue
+                if _ends_with_footnote(prev) and not _starts_new_list_item(part):
                     normalized = _normalize_trailing_footnote(prev)
                     merged[-1] = f"{normalized} {part.lstrip()}"
-                else:
-                    merged.append(part)
+                    continue
+                merged.append(part)
                 continue
             if _ends_with_footnote(prev) and not _starts_new_list_item(part):
                 normalized = _normalize_trailing_footnote(prev)
@@ -659,7 +677,6 @@ def clean_text(text: str) -> str:
     logger.debug("Calling _fix_double_newlines")
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {_preview(text)}")
-
     logger.debug("Calling insert_numbered_list_newlines")
     text = insert_numbered_list_newlines(text)
     logger.debug(f"After insert_numbered_list_newlines: {_preview(text)}")
