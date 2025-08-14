@@ -364,6 +364,13 @@ def _starts_new_list_item(text: str) -> bool:
     return _starts_list_item(text.lstrip())
 
 
+INLINE_CHAPTER_RE = re.compile(r"(?<!\n)Chapter \d+\.")
+
+
+def _contains_inline_chapter_reference(text: str) -> bool:
+    return bool(INLINE_CHAPTER_RE.search(text))
+
+
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
 FOOTNOTE_DOTTED_RE = re.compile(r"\.(\d+)$")
 FOOTNOTE_PLAIN_RE = re.compile(r"(?<=[^\s\d])(\d+)$")
@@ -422,6 +429,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 if _ends_with_footnote(prev) and not _starts_new_list_item(part):
                     normalized = _normalize_trailing_footnote(prev)
                     merged[-1] = f"{normalized} {part.lstrip()}"
+                elif _contains_inline_chapter_reference(
+                    prev
+                ) and not _starts_new_list_item(part):
+                    merged[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
                 else:
                     merged.append(part)
                 continue
