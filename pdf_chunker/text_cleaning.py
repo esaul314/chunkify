@@ -182,9 +182,10 @@ def remove_stray_bullet_lines(text: str) -> str:
 
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
 # Split inline numbered items while avoiding false splits on title-cased
-# references like "Chapter 10".
+# references like "Chapter 10". Uses lookahead so sequential items are handled
+# without missing overlaps.
 NUMBERED_INLINE_CANDIDATE_RE = re.compile(
-    r"(\d{1,3}[.)](?:[^\n]|\n(?!\n))*?)(\s+)(\d{1,3}[.)])"
+    r"(\d{1,3}[.)](?:[^\n]|\n(?!\n|\d))*?)\s+(?=(\d{1,3}[.)]))"
 )
 # Avoid inserting paragraph breaks when a numbered item ends with a quoted
 # sentence ('.', '!', '?', or '…') that continues the same sentence.
@@ -197,20 +198,25 @@ NUMBERED_END_RE = re.compile(
 
 def _split_inline_numbered(match: Match[str]) -> str:
     """Insert a newline before the next item unless the preceding token is title-cased and inline."""
-    head, _, tail = match.groups()
+    head, tail = match.groups()
     tokens = head.rstrip().split()
     last = tokens[-1] if tokens else ""
     return (
         match.group(0)
         if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head
-        else f"{head}\n{tail}"
+        else f"{head}\n"
     )
+
+
+def _apply_inline_numbered(text: str) -> str:
+    """Split inline numbered items, handling sequential overlaps in one pass."""
+    return NUMBERED_INLINE_CANDIDATE_RE.sub(_split_inline_numbered, text)
 
 
 def insert_numbered_list_newlines(text: str) -> str:
     """Insert newlines around numbered list items and terminate the list with a paragraph break."""
     text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
-    text = NUMBERED_INLINE_CANDIDATE_RE.sub(_split_inline_numbered, text)
+    text = _apply_inline_numbered(text)
     return NUMBERED_END_RE.sub(r"\1\n\n", text)
 
 

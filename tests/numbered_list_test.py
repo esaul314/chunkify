@@ -93,3 +93,11 @@ def test_item_ending_with_chapter_preserves_newline() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "Chapter 2." not in cleaned
     assert "Chapter\n2." in cleaned
+
+
+def test_lowercase_chapter_followed_by_next_number() -> None:
+    text = "1. First item.\n" "2. Earlier in the chapter. 3. A direction"
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "chapter. 3." not in cleaned
+    assert "chapter.\n3." in cleaned
