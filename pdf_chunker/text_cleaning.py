@@ -440,6 +440,13 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 normalized = _normalize_trailing_footnote(prev)
                 merged[-1] = f"{normalized} {part.lstrip()}"
                 continue
+            if (
+                _contains_inline_chapter_reference(prev)
+                and not _starts_new_list_item(part)
+                and not _is_probable_heading(part)
+            ):
+                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
                     prev + part
