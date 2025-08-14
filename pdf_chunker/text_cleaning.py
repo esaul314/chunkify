@@ -34,7 +34,7 @@ import logging
 import os
 import re
 from functools import reduce
-from typing import Callable, Iterable, List, Match, Tuple, TypeVar
+from typing import Callable, Iterable, List, Match, Tuple, TypeVar, cast
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -375,6 +375,22 @@ def _ends_with_chapter_reference(text: str) -> bool:
     return False
 
 
+def _merge_chapter_reference(prev: str, part: str) -> str | None:
+    """Merge numbered list items ending in a chapter reference with following text."""
+    first = prev.lstrip().splitlines()[0]
+    if not _starts_list_item(first) or _starts_new_list_item(part):
+        return None
+    match = CHAPTER_INLINE_RE.search(prev)
+    if match:
+        head = prev[: match.end()].rstrip()
+        tail = prev[match.end() :].strip()
+        combined = f"{tail} {part.lstrip()}".strip() if tail else part.lstrip()
+        return f"{head}\n{combined}"
+    if _ends_with_chapter_reference(prev):
+        return f"{prev.rstrip()}\n{part.lstrip()}"
+    return None
+
+
 def _is_probable_heading(text: str) -> bool:
     """Heuristically determine whether a line looks like a heading."""
     stripped = text.strip()
@@ -502,49 +518,40 @@ def remove_underscore_emphasis(text: str) -> str:
 
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
-    merged: List[str] = []
-    for part in parts:
+
+    def reducer(acc: List[str], part: str) -> List[str]:
+        if not acc:
+            return [part]
+        prev = acc[-1]
+        author_line = part.lstrip()
+        if author_line.startswith("—"):
+            acc[-1] = f"{prev.rstrip()} {author_line}"
+            return acc
+        merged = _merge_chapter_reference(prev, part)
         if merged:
-            prev = merged[-1]
-            author_line = part.lstrip()
-            if author_line.startswith("—"):
-                merged[-1] = f"{prev.rstrip()} {author_line}"
-                continue
-            first_line = prev.lstrip().splitlines()[0]
-            if _starts_list_item(first_line):
-                if not _starts_new_list_item(part):
-                    match = CHAPTER_INLINE_RE.search(prev)
-                    if match:
-                        head = prev[: match.end()].rstrip()
-                        tail = prev[match.end() :].strip()
-                        combined = (
-                            f"{tail} {part.lstrip()}".strip() if tail else part.lstrip()
-                        )
-                        merged[-1] = f"{head}\n{combined}"
-                        continue
-                    if _ends_with_chapter_reference(prev):
-                        merged[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
-                        continue
-                if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                    normalized = _normalize_trailing_footnote(prev)
-                    merged[-1] = f"{normalized} {part.lstrip()}"
-                    continue
-                merged.append(part)
-                continue
+            acc[-1] = merged
+            return acc
+        first_line = prev.lstrip().splitlines()[0]
+        if _starts_list_item(first_line):
             if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                normalized = _normalize_trailing_footnote(prev)
-                merged[-1] = f"{normalized} {part.lstrip()}"
-                continue
-            if not any(_is_probable_heading(seg) for seg in (prev, part)):
-                if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
-                    prev + part
-                ):
-                    merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
-                    continue
-                if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
-                    merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
-                    continue
-        merged.append(part)
+                acc[-1] = f"{_normalize_trailing_footnote(prev)} {part.lstrip()}"
+                return acc
+            acc.append(part)
+            return acc
+        if _ends_with_footnote(prev) and not _starts_new_list_item(part):
+            acc[-1] = f"{_normalize_trailing_footnote(prev)} {part.lstrip()}"
+            return acc
+        if not any(_is_probable_heading(seg) for seg in (prev, part)):
+            if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
+                acc[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                return acc
+            if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                acc[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                return acc
+        acc.append(part)
+        return acc
+
+    merged: List[str] = reduce(reducer, parts, cast(List[str], []))
     return "\n\n".join(merged)
 
 
