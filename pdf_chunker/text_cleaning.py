@@ -364,11 +364,20 @@ def _starts_new_list_item(text: str) -> bool:
     return _starts_list_item(text.lstrip())
 
 
-INLINE_CHAPTER_RE = re.compile(r"(?<!\n)Chapter \d+\.")
+INLINE_CHAPTER_RE = re.compile(r"Chapter\s+\d+\.")
 
 
 def _contains_inline_chapter_reference(text: str) -> bool:
-    return bool(INLINE_CHAPTER_RE.search(text))
+    lines = text.splitlines()
+    return any(
+        INLINE_CHAPTER_RE.search(line) and not INLINE_CHAPTER_RE.fullmatch(line.strip())
+        for line in lines
+    )
+
+
+def _is_short_sentence(text: str, char_limit: int = 60, word_limit: int = 10) -> bool:
+    stripped = text.strip()
+    return len(stripped) < char_limit or len(stripped.split()) <= word_limit
 
 
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
@@ -453,7 +462,9 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 ):
                     merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
                     continue
-                if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                if _is_short_sentence(prev) or not prev.rstrip().endswith(
+                    (".", "?", "!")
+                ):
                     merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
                     continue
         merged.append(part)
