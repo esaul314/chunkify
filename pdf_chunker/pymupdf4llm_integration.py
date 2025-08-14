@@ -491,10 +491,20 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         text = _fix_double_newlines(text)
         logger.debug(f"After _fix_double_newlines: {repr(text[:100])}")
 
+        # First pass: collapse incidental single newlines before list processing
+        logger.debug(
+            "Applying collapse_single_newlines in PyMuPDF4LLM path (pre-numbered)"
+        )
+        text = collapse_single_newlines(text)
+        logger.debug(
+            f"After collapse_single_newlines (pre-numbered): {repr(text[:100])}"
+        )
+
         logger.debug("Applying insert_numbered_list_newlines in PyMuPDF4LLM path")
         text = insert_numbered_list_newlines(text)
         logger.debug(f"After insert_numbered_list_newlines: {repr(text[:100])}")
 
+        # Second pass: collapse newlines introduced during numbered list handling
         logger.debug("Applying collapse_single_newlines in PyMuPDF4LLM path")
         text = collapse_single_newlines(text)
         logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")

@@ -364,6 +364,22 @@ def _starts_new_list_item(text: str) -> bool:
     return _starts_list_item(text.lstrip())
 
 
+INLINE_CHAPTER_RE = re.compile(r"Chapter\s+\d+\.")
+
+
+def _contains_inline_chapter_reference(text: str) -> bool:
+    lines = text.splitlines()
+    return any(
+        INLINE_CHAPTER_RE.search(line) and not INLINE_CHAPTER_RE.fullmatch(line.strip())
+        for line in lines
+    )
+
+
+def _is_short_sentence(text: str, char_limit: int = 60, word_limit: int = 10) -> bool:
+    stripped = text.strip()
+    return len(stripped) < char_limit or len(stripped.split()) <= word_limit
+
+
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
 FOOTNOTE_DOTTED_RE = re.compile(r"\.(\d+)$")
 FOOTNOTE_PLAIN_RE = re.compile(r"(?<=[^\s\d])(\d+)$")
@@ -422,6 +438,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 if _ends_with_footnote(prev) and not _starts_new_list_item(part):
                     normalized = _normalize_trailing_footnote(prev)
                     merged[-1] = f"{normalized} {part.lstrip()}"
+                elif _contains_inline_chapter_reference(
+                    prev
+                ) and not _starts_new_list_item(part):
+                    merged[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
                 else:
                     merged.append(part)
                 continue
@@ -429,13 +449,22 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 normalized = _normalize_trailing_footnote(prev)
                 merged[-1] = f"{normalized} {part.lstrip()}"
                 continue
+            if (
+                _contains_inline_chapter_reference(prev)
+                and not _starts_new_list_item(part)
+                and not _is_probable_heading(part)
+            ):
+                merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
+                continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
                     prev + part
                 ):
                     merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
                     continue
-                if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                if _is_short_sentence(prev) or not prev.rstrip().endswith(
+                    (".", "?", "!")
+                ):
                     merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
                     continue
         merged.append(part)
@@ -561,11 +590,16 @@ def clean_text(text: str) -> str:
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {repr(text[:100])}")
 
+    # First pass: collapse incidental single newlines before list processing
+    logger.debug("Calling collapse_single_newlines (pre-numbered)")
+    text = collapse_single_newlines(text)
+    logger.debug(f"After collapse_single_newlines (pre-numbered): {repr(text[:100])}")
+
     logger.debug("Calling insert_numbered_list_newlines")
     text = insert_numbered_list_newlines(text)
     logger.debug(f"After insert_numbered_list_newlines: {repr(text[:100])}")
 
-    # Collapse single line breaks except paragraph breaks
+    # Second pass: collapse newlines introduced during numbered list handling
     logger.debug("Calling collapse_single_newlines")
     text = collapse_single_newlines(text)
     logger.debug(f"After collapse_single_newlines: {repr(text[:100])}")
