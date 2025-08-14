@@ -9,7 +9,11 @@ from haystack.components.preprocessors import DocumentSplitter
 from haystack import Document
 
 from .text_cleaning import _is_probable_heading
-from .list_detection import starts_with_bullet
+from .list_detection import (
+    starts_with_bullet,
+    is_bullet_fragment,
+    is_bullet_continuation,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -247,6 +251,14 @@ def _extract_bullet_tail(lines: List[str]) -> Tuple[List[str], List[str]]:
     return lines[:idx], lines[idx:]
 
 
+def _merge_bullet_fragment(curr: str, nxt: str) -> Tuple[str, str]:
+    """Attach trailing bullet line from ``curr`` to the start of ``nxt``."""
+    lines = curr.rstrip().splitlines()
+    head, tail = lines[:-1], lines[-1]
+    merged_next = f"{tail} {nxt.lstrip()}".strip()
+    return "\n".join(head), merged_next
+
+
 def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
     """Move trailing bullet lists to following chunks to keep lists intact."""
     if not chunks:
@@ -254,6 +266,8 @@ def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
     result: List[str] = []
     current = chunks[0]
     for nxt in chunks[1:]:
+        if is_bullet_fragment(current, nxt) or is_bullet_continuation(current, nxt):
+            current, nxt = _merge_bullet_fragment(current, nxt)
         curr_lines = current.rstrip().splitlines()
         next_lines = nxt.lstrip().splitlines()
         head, tail = _extract_bullet_tail(curr_lines)
@@ -279,9 +293,11 @@ def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
             combined = cleaned
             current = "\n".join(head)
             nxt = "\n".join(combined)
-        result.append(current.rstrip())
+        if current.strip():
+            result.append(current.rstrip())
         current = nxt
-    result.append(current.rstrip())
+    if current.strip():
+        result.append(current.rstrip())
     return result
 
 
