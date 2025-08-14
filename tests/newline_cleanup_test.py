@@ -22,12 +22,47 @@ class TestNewlineCleanup(unittest.TestCase):
 
     def test_numbered_item_with_numeric_reference(self):
         text = (
-            "2. Another item to mention in Chapter 10.\n\n"
+            "2. Another item to mention in Chapter 10. "
             "Considering this issue, no decision was made. The paragraph continues."
         )
         expected = (
-            "2. Another item to mention in Chapter 10.\n\n"
+            "2. Another item to mention in Chapter 10.\n"
             "Considering this issue, no decision was made. The paragraph continues."
+        )
+        self.assertEqual(clean_text(text), expected)
+
+    def test_multiline_numbered_item_chapter_reference(self):
+        text = (
+            "2. Another item to mention in\n"
+            "Chapter 10. Considering this issue, no decision was made. The paragraph continues."
+        )
+        expected = (
+            "2. Another item to mention in Chapter 10.\n"
+            "Considering this issue, no decision was made. The paragraph continues."
+        )
+        self.assertEqual(clean_text(text), expected)
+
+    def test_numbered_item_removes_spurious_break_after_chapter(self):
+        text = (
+            "2. Another item to mention in Chapter 10. "
+            "Considering this issue, no decision was made.\n\n"
+            "The paragraph continues."
+        )
+        expected = (
+            "2. Another item to mention in Chapter 10.\n"
+            "Considering this issue, no decision was made. The paragraph continues."
+        )
+        self.assertEqual(clean_text(text), expected)
+
+    def test_numbered_item_with_long_short_sentence(self):
+        text = (
+            "2. Another item to mention in Chapter 10. "
+            "Supererogatory antipodean circumlocutions necessitated uncomprehending deliberations.\n\n"
+            "The paragraph continues."
+        )
+        expected = (
+            "2. Another item to mention in Chapter 10.\n"
+            "Supererogatory antipodean circumlocutions necessitated uncomprehending deliberations. The paragraph continues."
         )
         self.assertEqual(clean_text(text), expected)
 
