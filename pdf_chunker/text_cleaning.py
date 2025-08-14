@@ -158,11 +158,13 @@ def merge_number_suffix_lines(text: str) -> str:
     def repl(match: re.Match[str]) -> str:
         start = match.start()
         prev = text[text.rfind("\n", 0, start) + 1 : start].strip()
+        last = prev.split()[-1].lower() if prev else ""
         if (
             not prev
             or prev.endswith(":")
             or re.match(r"\d+[.)]", prev)
             or re.search(r"[.!?]$", prev)
+            or last == "chapter"
         ):
             return match.group(0)
         return f" {match.group(1)}{match.group(2)}"
@@ -181,7 +183,9 @@ def remove_stray_bullet_lines(text: str) -> str:
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
 # Split inline numbered items while avoiding false splits on title-cased
 # references like "Chapter 10".
-NUMBERED_INLINE_CANDIDATE_RE = re.compile(r"(\d{1,3}[.)][^\n]*?)(\s+)(\d{1,3}[.)])")
+NUMBERED_INLINE_CANDIDATE_RE = re.compile(
+    r"(\d{1,3}[.)](?:[^\n]|\n(?!\n))*?)(\s+)(\d{1,3}[.)])"
+)
 # Avoid inserting paragraph breaks when a numbered item ends with a quoted
 # sentence ('.', '!', '?', or '…') that continues the same sentence.
 NUMBERED_END_RE = re.compile(
@@ -192,10 +196,15 @@ NUMBERED_END_RE = re.compile(
 
 
 def _split_inline_numbered(match: Match[str]) -> str:
-    """Insert a newline before the next item unless the preceding token is title-cased."""
+    """Insert a newline before the next item unless the preceding token is title-cased and inline."""
     head, _, tail = match.groups()
-    last = head.rstrip().split()[-1]
-    return match.group(0) if last.istitle() else f"{head}\n{tail}"
+    tokens = head.rstrip().split()
+    last = tokens[-1] if tokens else ""
+    return (
+        match.group(0)
+        if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head
+        else f"{head}\n{tail}"
+    )
 
 
 def insert_numbered_list_newlines(text: str) -> str:

@@ -82,3 +82,14 @@ def test_long_inline_numbered_items() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "next number 2." not in cleaned
     assert "next number\n2." in cleaned
+
+
+def test_item_ending_with_chapter_preserves_newline() -> None:
+    text = (
+        "1. Intro text spanning lines\n"
+        "continues and ends with Chapter 2. Second item"
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "Chapter 2." not in cleaned
+    assert "Chapter\n2." in cleaned
