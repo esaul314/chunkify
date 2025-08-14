@@ -55,6 +55,19 @@ class TestNewlineCleanup(unittest.TestCase):
         )
         self.assertEqual(clean_text(text), expected)
 
+    def test_chapter_reference_followed_by_heading(self):
+        text = (
+            "2. Another item to mention in Chapter 10.\n\n"
+            "Conclusion\n\n"
+            "The paragraph continues."
+        )
+        expected = (
+            "2. Another item to mention in Chapter 10.\n\n"
+            "Conclusion\n\n"
+            "The paragraph continues."
+        )
+        self.assertEqual(clean_text(text), expected)
+
     def test_merge_break_in_quoted_title(self):
         text = (
             '" Vulnerability sounds like truth": Brené Brown, '

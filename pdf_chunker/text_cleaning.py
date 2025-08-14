@@ -378,7 +378,12 @@ def _ends_with_chapter_reference(text: str) -> bool:
 def _merge_chapter_reference(prev: str, part: str) -> str | None:
     """Merge numbered list items ending in a chapter reference with following text."""
     first = prev.lstrip().splitlines()[0]
-    if not _starts_list_item(first) or _starts_new_list_item(part):
+    next_line = part.strip().splitlines()[0]
+    if (
+        not _starts_list_item(first)
+        or _starts_new_list_item(part)
+        or _is_probable_heading(next_line)
+    ):
         return None
     match = CHAPTER_INLINE_RE.search(prev)
     if match:
