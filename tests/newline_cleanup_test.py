@@ -1,4 +1,3 @@
-import os
 import unittest
 
 from pdf_chunker.text_cleaning import clean_text
@@ -20,6 +19,17 @@ class TestNewlineCleanup(unittest.TestCase):
         text = "Chapter 1\n\nIntroduction paragraph starts here."
         cleaned = clean_text(text)
         self.assertIn("\n\n", cleaned)
+
+    def test_numbered_item_with_numeric_reference(self):
+        text = (
+            "2. Another item to mention in Chapter 10.\n\n"
+            "Considering this issue, no decision was made. The paragraph continues."
+        )
+        expected = (
+            "2. Another item to mention in Chapter 10.\n\n"
+            "Considering this issue, no decision was made. The paragraph continues."
+        )
+        self.assertEqual(clean_text(text), expected)
 
     def test_merge_break_in_quoted_title(self):
         text = (

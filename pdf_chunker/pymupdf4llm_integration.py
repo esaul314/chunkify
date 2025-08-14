@@ -475,6 +475,7 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
             normalize_ligatures,
             consolidate_whitespace,
             remove_stray_bullet_lines,
+            _normalize_inline_footnotes,
         )
 
         # Apply the cleaning steps in the correct order
@@ -505,6 +506,10 @@ def clean_text_with_pymupdf4llm(text: str, pdf_path: Optional[str] = None) -> st
         logger.debug("Applying merge_spurious_paragraph_breaks in PyMuPDF4LLM path")
         text = merge_spurious_paragraph_breaks(text)
         logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
+
+        logger.debug("Applying _normalize_inline_footnotes in PyMuPDF4LLM path")
+        text = _normalize_inline_footnotes(text)
+        logger.debug(f"After _normalize_inline_footnotes: {repr(text[:100])}")
 
         logger.debug("Applying _fix_split_words in PyMuPDF4LLM path")
         text = _fix_split_words(text)

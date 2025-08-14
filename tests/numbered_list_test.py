@@ -71,3 +71,33 @@ def test_quoted_sentence_endings_inside_numbered_item(punct: str) -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "\n\nThen" not in cleaned
     assert f'"quoted sentence{punct}" Then' in cleaned
+
+
+def test_long_inline_numbered_items() -> None:
+    text = (
+        "1. This item is fairly long and continues without a newline before the next number "
+        "2. Second item should begin on its own line."
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "next number 2." not in cleaned
+    assert "next number\n2." in cleaned
+
+
+def test_item_ending_with_chapter_preserves_newline() -> None:
+    text = (
+        "1. Intro text spanning lines\n"
+        "continues and ends with Chapter 2. Second item"
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "Chapter 2." not in cleaned
+    assert "Chapter\n2." in cleaned
+
+
+def test_lowercase_chapter_followed_by_next_number() -> None:
+    text = "1. First item.\n" "2. Earlier in the chapter. 3. A direction"
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "chapter. 3." not in cleaned
+    assert "chapter.\n3." in cleaned

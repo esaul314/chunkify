@@ -1,5 +1,21 @@
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+
+TRAILING_PUNCTUATION = (".", "!", "?", ";", ":")
+HEADING_STARTERS = {
+    "chapter",
+    "section",
+    "part",
+    "appendix",
+    "introduction",
+    "conclusion",
+}
+
+
+def _has_heading_starter(words: List[str]) -> bool:
+    """Return True if the first word suggests a structural heading."""
+    return bool(words) and words[0].lower() in HEADING_STARTERS
 
 
 def _detect_heading_fallback(text: str) -> bool:
@@ -13,8 +29,10 @@ def _detect_heading_fallback(text: str) -> bool:
     text = text.strip()
     words = text.split()
 
-    # Very short text (1-3 words) is likely a heading
-    if len(words) <= 3:
+    # Very short text (1-3 words) without a terminal period is likely a heading.
+    # Short sentences such as "It ended." should remain part of the body text
+    # rather than being treated as headings.
+    if len(words) <= 3 and not text.endswith(TRAILING_PUNCTUATION):
         return True
 
     # Text that's all uppercase might be a heading
@@ -22,31 +40,25 @@ def _detect_heading_fallback(text: str) -> bool:
         return True
 
     # Title case text without ending punctuation might be a heading
-    if (
-        text.istitle()
-        and len(words) <= 10
-        and not text.endswith((".", "!", "?", ";", ":"))
-    ):
+    if text.istitle() and len(words) <= 10 and not text.endswith(TRAILING_PUNCTUATION):
         return True
 
     # Text that starts with common heading patterns
-    heading_starters = [
-        "chapter",
-        "section",
-        "part",
-        "appendix",
-        "introduction",
-        "conclusion",
-    ]
-    first_word = words[0].lower() if words else ""
-    if first_word in heading_starters and len(words) <= 8:
+    if (
+        _has_heading_starter(words)
+        and len(words) <= 8
+        and not text.endswith(TRAILING_PUNCTUATION)
+    ):
         return True
 
     # Text that's mostly numbers (like "1.2.3 Some Topic")
-    if len(words) >= 2:
-        first_part = words[0]
-        if re.match(r"^[\d\.\-]+$", first_part) and len(words) <= 8:
-            return True
+    if (
+        len(words) >= 2
+        and re.match(r"^[\d\.\-]+$", words[0])
+        and len(words) <= 8
+        and not text.endswith(TRAILING_PUNCTUATION)
+    ):
+        return True
 
     return False
 
@@ -90,53 +102,42 @@ def detect_headings_from_pymupdf4llm_blocks(
 def detect_headings_from_font_analysis(
     blocks: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """
-    Extract heading information using traditional font-based analysis.
+    """Extract heading information using traditional font-based analysis."""
 
-    Args:
-        blocks: List of text blocks from traditional PDF extraction
+    def _is_heading(text: str, block_type: str) -> bool:
+        declared_heading = block_type == "heading" and not text.endswith(
+            TRAILING_PUNCTUATION
+        )
+        return declared_heading or _detect_heading_fallback(text)
 
-    Returns:
-        List of heading dictionaries with metadata
-    """
-    headings = []
-
-    for i, block in enumerate(blocks):
-        block_type = block.get("type", "")
+    def _make_heading(i: int, block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         text = block.get("text", "").strip()
+        if not text or not _is_heading(text, block.get("type", "")):
+            return None
 
-        if not text:
-            continue
+        base = {
+            "text": text,
+            "level": _estimate_heading_level(text),
+            "source": "font_analysis",
+            "block_id": i,
+            "extraction_method": block.get("source", {}).get("method", "traditional"),
+        }
 
-        # Check if block is already marked as heading by extraction
-        is_heading = block_type == "heading"
-
-        # If not marked as heading, use fallback detection
-        if not is_heading:
-            is_heading = _detect_heading_fallback(text)
-
-        if is_heading:
-            # Estimate heading level based on text characteristics
-            level = _estimate_heading_level(text)
-
-            heading_info = {
-                "text": text,
-                "level": level,
-                "source": "font_analysis",
-                "block_id": i,
-                "extraction_method": block.get("source", {}).get(
-                    "method", "traditional"
-                ),
+        return (
+            base
+            if "source" not in block
+            else {
+                **base,
+                "page": block["source"].get("page"),
+                "filename": block["source"].get("filename"),
             }
+        )
 
-            # Add source information
-            if "source" in block:
-                heading_info["page"] = block["source"].get("page")
-                heading_info["filename"] = block["source"].get("filename")
-
-            headings.append(heading_info)
-
-    return headings
+    return [
+        heading
+        for heading in (_make_heading(i, block) for i, block in enumerate(blocks))
+        if heading is not None
+    ]
 
 
 def _estimate_heading_level(text: str) -> int:

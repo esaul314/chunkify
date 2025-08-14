@@ -4,7 +4,7 @@ import logging
 import json
 import ftfy
 from functools import reduce
-from typing import Callable, List, Tuple, TypeVar
+from typing import Callable, List, Tuple, TypeVar, Match
 from wordfreq import zipf_frequency
 
 logger = logging.getLogger(__name__)
@@ -158,11 +158,13 @@ def merge_number_suffix_lines(text: str) -> str:
     def repl(match: re.Match[str]) -> str:
         start = match.start()
         prev = text[text.rfind("\n", 0, start) + 1 : start].strip()
+        last = prev.split()[-1].lower() if prev else ""
         if (
             not prev
             or prev.endswith(":")
             or re.match(r"\d+[.)]", prev)
             or re.search(r"[.!?]$", prev)
+            or last == "chapter"
         ):
             return match.group(0)
         return f" {match.group(1)}{match.group(2)}"
@@ -179,18 +181,42 @@ def remove_stray_bullet_lines(text: str) -> str:
 
 
 NUMBERED_AFTER_COLON_RE = re.compile(r":\s*(?!\n)(\d{1,3}[.)])")
-NUMBERED_INLINE_RE = re.compile(r"(\d{1,3}[.)][^\n]+?)\s+(?=\d{1,3}[.)])")
+# Split inline numbered items while avoiding false splits on title-cased
+# references like "Chapter 10". Uses lookahead so sequential items are handled
+# without missing overlaps.
+NUMBERED_INLINE_CANDIDATE_RE = re.compile(
+    r"(\d{1,3}[.)](?:[^\n]|\n(?!\n|\d))*?)\s+(?=(\d{1,3}[.)]))"
+)
 # Avoid inserting paragraph breaks when a numbered item ends with a quoted
 # sentence ('.', '!', '?', or '…') that continues the same sentence.
 NUMBERED_END_RE = re.compile(
-    rf"(\d{{1,3}}[.)][^\n]+?)(?<![{re.escape(END_PUNCT)}]\")(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b|$))"
+    rf"(\d{{1,3}}[.)][^\n]+?)"
+    rf"(?<![{re.escape(END_PUNCT)}]\")"
+    rf"(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b(?!\s+\d)|$))"
 )
+
+
+def _split_inline_numbered(match: Match[str]) -> str:
+    """Insert a newline before the next item unless the preceding token is title-cased and inline."""
+    head, tail = match.groups()
+    tokens = head.rstrip().split()
+    last = tokens[-1] if tokens else ""
+    return (
+        match.group(0)
+        if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head
+        else f"{head}\n"
+    )
+
+
+def _apply_inline_numbered(text: str) -> str:
+    """Split inline numbered items, handling sequential overlaps in one pass."""
+    return NUMBERED_INLINE_CANDIDATE_RE.sub(_split_inline_numbered, text)
 
 
 def insert_numbered_list_newlines(text: str) -> str:
     """Insert newlines around numbered list items and terminate the list with a paragraph break."""
     text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
-    text = NUMBERED_INLINE_RE.sub(r"\1\n", text)
+    text = _apply_inline_numbered(text)
     return NUMBERED_END_RE.sub(r"\1\n\n", text)
 
 
@@ -338,9 +364,14 @@ def _starts_new_list_item(text: str) -> bool:
     return _starts_list_item(text.lstrip())
 
 
-FOOTNOTE_BRACKETED_RE = re.compile(r"\[\d+\]$")
+FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
 FOOTNOTE_DOTTED_RE = re.compile(r"\.(\d+)$")
 FOOTNOTE_PLAIN_RE = re.compile(r"(?<=[^\s\d])(\d+)$")
+
+SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+_SUPERSCRIPT_MAP = str.maketrans(SUPERSCRIPT_DIGITS, "0123456789")
+_SUP_DIGITS_ESC = re.escape(SUPERSCRIPT_DIGITS)
+INLINE_FOOTNOTE_RE = re.compile(rf"(?<!\d)\.([0-9{_SUP_DIGITS_ESC}]+)(\s|$)")
 
 
 def _ends_with_footnote(text: str) -> bool:
@@ -368,6 +399,14 @@ def _normalize_trailing_footnote(text: str) -> str:
     return stripped
 
 
+def _normalize_inline_footnotes(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        digits = match.group(1).translate(_SUPERSCRIPT_MAP)
+        return f"[{digits}].{match.group(2)}"
+
+    return INLINE_FOOTNOTE_RE.sub(repl, text)
+
+
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     merged: List[str] = []
@@ -385,6 +424,10 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                     merged[-1] = f"{normalized} {part.lstrip()}"
                 else:
                     merged.append(part)
+                continue
+            if _ends_with_footnote(prev) and not _starts_new_list_item(part):
+                normalized = _normalize_trailing_footnote(prev)
+                merged[-1] = f"{normalized} {part.lstrip()}"
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
@@ -530,6 +573,10 @@ def clean_text(text: str) -> str:
     logger.debug("Calling merge_spurious_paragraph_breaks")
     text = merge_spurious_paragraph_breaks(text)
     logger.debug(f"After merge_spurious_paragraph_breaks: {repr(text[:100])}")
+
+    logger.debug("Calling _normalize_inline_footnotes")
+    text = _normalize_inline_footnotes(text)
+    logger.debug(f"After _normalize_inline_footnotes: {repr(text[:100])}")
 
     logger.debug("Calling _fix_split_words")
     text = _fix_split_words(text)
