@@ -22,11 +22,11 @@ class TestNewlineCleanup(unittest.TestCase):
 
     def test_numbered_item_with_numeric_reference(self):
         text = (
-            "2. Another item to mention in Chapter 10.\n\n"
+            "2. Another item to mention in Chapter 10. "
             "Considering this issue, no decision was made. The paragraph continues."
         )
         expected = (
-            "2. Another item to mention in Chapter 10.\n\n"
+            "2. Another item to mention in Chapter 10.\n"
             "Considering this issue, no decision was made. The paragraph continues."
         )
         self.assertEqual(clean_text(text), expected)

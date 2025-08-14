@@ -129,24 +129,26 @@ COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
 SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 
-STOPWORDS: frozenset[str] = frozenset({
-    "the",
-    "of",
-    "for",
-    "and",
-    "with",
-    "from",
-    "this",
-    "that",
-    "is",
-    "to",
-    "in",
-    "on",
-    "as",
-    "by",
-    "then",
-    "up",
-})
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "of",
+        "for",
+        "and",
+        "with",
+        "from",
+        "this",
+        "that",
+        "is",
+        "to",
+        "in",
+        "on",
+        "as",
+        "by",
+        "then",
+        "up",
+    }
+)
 
 # Footnote handling
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
@@ -157,15 +159,23 @@ _SUPERSCRIPT_MAP = str.maketrans(SUPERSCRIPT_DIGITS, "0123456789")
 _SUP_DIGITS_ESC = re.escape(SUPERSCRIPT_DIGITS)
 INLINE_FOOTNOTE_RE = re.compile(rf"(?<!\d)\.([0-9{_SUP_DIGITS_ESC}]+)(\s|$)")
 
+# Chapter reference detection
+CHAPTER_REF_RE = re.compile(r"Chapter\s+\d+\.$", re.IGNORECASE)
+
 # Hyphenated word joiners (compiled with constants above)
 _HYPHEN_BULLET_OPT = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
-HYPHEN_BREAK_RE = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{_HYPHEN_BULLET_OPT}([A-Za-z]+)")
-HYPHEN_SPACE_RE = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}([A-Za-z]+)")
+HYPHEN_BREAK_RE = re.compile(
+    rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{_HYPHEN_BULLET_OPT}([A-Za-z]+)"
+)
+HYPHEN_SPACE_RE = re.compile(
+    rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}([A-Za-z]+)"
+)
 
 
 # ---------------------------------------------------------------------------
 # Hyphenation and word glue fixes
 # ---------------------------------------------------------------------------
+
 
 def _join_hyphenated_words(text: str) -> str:
     """Merge words broken with hyphenation across line breaks."""
@@ -211,7 +221,9 @@ def _maybe_join_words(head: str, tail: str) -> str:
 
 def _fix_double_newlines(text: str) -> str:
     """Resolve words or phrases separated by double newlines using word heuristics."""
-    return DOUBLE_NEWLINE_RE.sub(lambda m: _maybe_join_words(m.group(1), m.group(2)), text)
+    return DOUBLE_NEWLINE_RE.sub(
+        lambda m: _maybe_join_words(m.group(1), m.group(2)), text
+    )
 
 
 def _fix_split_words(text: str) -> str:
@@ -222,6 +234,7 @@ def _fix_split_words(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Quote & ligature normalization
 # ---------------------------------------------------------------------------
+
 
 def _map_smart_quotes(text: str) -> str:
     """Map smart quotes to their ASCII equivalents."""
@@ -244,6 +257,7 @@ def normalize_ligatures(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Newline & list handling
 # ---------------------------------------------------------------------------
+
 
 def collapse_artifact_breaks(text: str) -> str:
     """Remove unwanted breaks after ., _, etc. (e.g., systems._\nThis → systems. This)"""
@@ -283,7 +297,11 @@ def _split_inline_numbered(match: Match[str]) -> str:
     head, tail = match.groups()
     tokens = head.rstrip().split()
     last = tokens[-1] if tokens else ""
-    return match.group(0) if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head else f"{head}\n"
+    return (
+        match.group(0)
+        if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head
+        else f"{head}\n"
+    )
 
 
 def _apply_inline_numbered(text: str) -> str:
@@ -333,12 +351,19 @@ def collapse_single_newlines(text: str) -> str:
 # Heading/list detection & footnotes
 # ---------------------------------------------------------------------------
 
+
 def _starts_list_item(line: str) -> bool:
     return bool(re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", line))
 
 
 def _starts_new_list_item(text: str) -> bool:
     return _starts_list_item(text.lstrip())
+
+
+def _ends_with_chapter_reference(text: str) -> bool:
+    """Return True if the text ends with a 'Chapter N.' style reference."""
+    line = text.strip().splitlines()[-1]
+    return bool(CHAPTER_REF_RE.search(line))
 
 
 def _is_probable_heading(text: str) -> bool:
@@ -436,6 +461,7 @@ def _normalize_inline_footnotes(text: str) -> str:
 # Safety & whitespace utilities
 # ---------------------------------------------------------------------------
 
+
 def normalize_newlines(text: str) -> str:
     """Convert CRLF/CR and unicode separators to LF."""
     return (
@@ -464,6 +490,7 @@ def remove_underscore_emphasis(text: str) -> str:
 # Paragraph merge logic
 # ---------------------------------------------------------------------------
 
+
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     merged: List[str] = []
@@ -476,7 +503,11 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 continue
             last_line = prev.strip().splitlines()[-1]
             if _starts_list_item(last_line):
-                if _ends_with_footnote(prev) and not _starts_new_list_item(part):
+                if _ends_with_chapter_reference(prev) and not _starts_new_list_item(
+                    part
+                ):
+                    merged[-1] = f"{prev.rstrip()}\n{part.lstrip()}"
+                elif _ends_with_footnote(prev) and not _starts_new_list_item(part):
                     normalized = _normalize_trailing_footnote(prev)
                     merged[-1] = f"{normalized} {part.lstrip()}"
                 else:
@@ -487,7 +518,9 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 merged[-1] = f"{normalized} {part.lstrip()}"
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
-                if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
+                if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(
+                    prev + part
+                ):
                     merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
                     continue
                 if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
@@ -500,6 +533,7 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
 # ---------------------------------------------------------------------------
 # JSON safety helpers
 # ---------------------------------------------------------------------------
+
 
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
     issues: List[str] = []
@@ -547,6 +581,7 @@ def apply_json_safety_fixes(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Pipelines
 # ---------------------------------------------------------------------------
+
 
 def clean_paragraph(paragraph: str) -> str:
     """
@@ -596,14 +631,18 @@ def clean_text(text: str) -> str:
             )
 
             if is_pymupdf4llm_available():
-                logger.debug("PyMuPDF4LLM is available, calling clean_text_with_pymupdf4llm")
+                logger.debug(
+                    "PyMuPDF4LLM is available, calling clean_text_with_pymupdf4llm"
+                )
                 result = clean_text_with_pymupdf4llm(text)
                 logger.debug(f"PyMuPDF4LLM result preview: {_preview(result)}")
                 return result
             else:
                 logger.debug("PyMuPDF4LLM not available, falling back to traditional")
         except Exception as e:  # noqa: BLE001 - keep behaviour identical
-            logger.debug(f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional")
+            logger.debug(
+                f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional"
+            )
             pass
 
     logger.debug("Using traditional text cleaning path")
