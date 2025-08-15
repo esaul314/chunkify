@@ -95,7 +95,7 @@ For Codex agent — results:
 - Tests: …
 ```
 For Codex agent — Invariants to Enforce
-    * ``text_clean`` must run before any split step.
+    * `text_clean` must run before any split step.
     * Do not mix PDF and EPUB passes in one pipeline.
     * Record fallback reasons & quality metrics.
     * Emit run_report.json with timings, metrics, and warnings for known issues.
