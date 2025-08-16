@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence, Callable
 from pathlib import Path
 
 from pdf_chunker.adapters import emit_jsonl, io_pdf
@@ -35,6 +35,39 @@ def _pass_steps(spec: PipelineSpec) -> list[str]:
     return [s for s in spec.pipeline if s in regs]
 
 
+def _indices(pred: Callable[[str], bool], steps: Sequence[str]) -> list[int]:
+    """Return indices of ``steps`` matching ``pred`` using comprehension."""
+    return [i for i, s in enumerate(steps) if pred(s)]
+
+
+def _ensure_clean_precedes_split(steps: Sequence[str]) -> None:
+    """Raise if any split step occurs before ``text_clean``."""
+    split_idx = _indices(lambda s: s.startswith("split"), steps)
+    if not split_idx:
+        return
+    clean_idx = _indices(lambda s: s == "text_clean", steps)
+    if not clean_idx or clean_idx[0] > min(split_idx):
+        raise ValueError("text_clean must precede split passes")
+
+
+def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> None:
+    """Ensure pipeline contains only PDF or only EPUB passes and matches ``ext``."""
+    prefixes = {s.split("_", 1)[0] for s in steps if s.startswith(("pdf_", "epub_"))}
+    if len(prefixes) > 1:
+        raise ValueError("pipeline mixes PDF and EPUB passes")
+    ext_map = {".pdf": "pdf", ".epub": "epub"}
+    expected = ext_map.get(ext)
+    if prefixes and expected and prefixes != {expected}:
+        raise ValueError(f"{ext} input incompatible with {next(iter(prefixes))} passes")
+
+
+def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> None:
+    """Validate pipeline order and media-type separation."""
+    steps = list(spec.pipeline)
+    _ensure_clean_precedes_split(steps)
+    _ensure_pdf_epub_separation(steps, Path(input_path).suffix.lower())
+
+
 def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, float]]:
     """Run pipeline steps sequentially while recording timings."""
     timings: dict[str, float] = {}
@@ -54,6 +87,7 @@ def _emit(a: Artifact, spec: PipelineSpec, timings: dict[str, float]) -> None:
 
 def run_convert(input_path: str, spec: PipelineSpec) -> Artifact:
     """Load ``input_path``, run declared passes, and maybe write JSONL."""
+    _enforce_invariants(spec, input_path=input_path)
     a = _initial_artifact(input_path)
     steps = _pass_steps(spec)
     a, timings = _run_passes(steps, a)
