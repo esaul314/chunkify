@@ -11,13 +11,10 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
 @app.command()
-def convert(spec: str = "pipeline.yaml"):
-    """
-    Run the configured pipeline. This command does not perform IO; it only
-    exercises registered passes over an empty Artifact until adapters exist.
-    """
+def convert(input_path: str, spec: str = "pipeline.yaml"):
+    """Run the configured pipeline on ``input_path``."""
     s = load_spec(spec)
-    _ = run_convert(s)  # result kept in memory for now
+    _ = run_convert(input_path, s)
     typer.echo("convert: OK")
 
 
