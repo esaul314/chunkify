@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator
+from typing import Any
 
 from pdf_chunker.framework import Artifact
 
 
-def _rows(payload: Any) -> Iterable[Dict[str, Any]]:
+def _rows(payload: Any) -> Iterable[dict[str, Any]]:
     """Yield rows when payload is a list of dictionaries."""
     return payload if isinstance(payload, list) else []
 
 
-def _serialize(rows: Iterable[Dict[str, Any]]) -> Iterator[str]:
+def _serialize(rows: Iterable[dict[str, Any]]) -> Iterator[str]:
     """Serialize dictionaries to JSON lines."""
     return (json.dumps(r, ensure_ascii=False) for r in rows)
 
@@ -25,7 +26,7 @@ def _write(path: str, lines: Iterable[str]) -> None:
 
 
 def maybe_write(
-    artifact: Artifact, options: Dict[str, Any], timings: Dict[str, float] | None = None
+    artifact: Artifact, options: dict[str, Any], timings: dict[str, float] | None = None
 ) -> None:
     """Write artifact payload to JSONL if ``output_path`` is specified."""
     out_path = options.get("output_path")
