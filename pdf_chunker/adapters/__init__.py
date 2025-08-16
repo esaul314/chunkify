@@ -1,3 +1,3 @@
-from . import io_epub, io_pdf
+from . import emit_jsonl, io_epub, io_pdf
 
-__all__ = ["io_pdf", "io_epub"]
+__all__ = ["emit_jsonl", "io_epub", "io_pdf"]
