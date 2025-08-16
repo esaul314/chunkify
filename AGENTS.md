@@ -24,6 +24,10 @@ pdf_chunker/
 │       └── project_management.yaml # PM domain tags
 ├── pdf_chunker/
 │   ├── __init__.py                # Package initializer
+│   ├── adapters/
+│   │   ├── __init__.py
+│   │   ├── io_pdf.py
+│   │   └── io_epub.py
 │   ├── ai_enrichment.py           # AI Pass: classification and YAML-based tagging
 │   ├── core.py                    # Orchestrates the three-pass pipeline
 │   ├── env_utils.py               # Environment flag helpers
