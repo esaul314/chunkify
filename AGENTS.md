@@ -40,6 +40,12 @@ pdf_chunker/
 │   ├── splitter.py                # Semantic Pass: chunk splitting and boundaries
 │   ├── text_cleaning.py           # Ligature, quote, control-character cleanup
 │   ├── text_processing.py         # Shared text manipulation utilities
+│   ├── passes/                    # Registered pipeline passes
+│   │   ├── __init__.py
+│   │   ├── extraction_fallback.py
+│   │   ├── heading_detect.py
+│   │   ├── pdf_parse.py
+│   │   └── text_clean.py
 │   └── utils.py                   # Metadata mapping and glue logic
 ├── scripts/
 │   ├── AGENTS.md                # Guidance for maintenance scripts
