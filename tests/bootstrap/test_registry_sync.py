@@ -14,5 +14,6 @@ def test_registry_expected_keys_subset():
         "heading_detect",
         "extraction_fallback",
         "split_semantic",
+        "ai_enrich",
     }
     assert expected.issubset(set(registry().keys()))

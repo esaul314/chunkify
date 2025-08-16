@@ -46,6 +46,7 @@ pdf_chunker/
 │   │   ├── heading_detect.py
 │   │   ├── pdf_parse.py
 │   │   ├── split_semantic.py
+│   │   ├── ai_enrich.py
 │   │   └── text_clean.py
 │   └── utils.py                   # Metadata mapping and glue logic
 ├── scripts/
@@ -69,6 +70,7 @@ pdf_chunker/
 ├── tests/                        # Modular test architecture
     ├── AGENTS.md
     ├── conftest.py                 # Pytest fixtures and colored output
+    ├── ai_enrich_pass_test.py
     ├── ai_enrichment_test.py
     ├── artifact_block_test.py
     ├── bullet_list_test.py
