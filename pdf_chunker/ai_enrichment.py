@@ -5,10 +5,21 @@ from pathlib import Path
 from functools import reduce
 from typing import Callable
 
-import litellm
-import yaml
-from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import yaml
+
+try:  # pragma: no cover - optional dependency
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+
+    def load_dotenv(*_args: object, **_kwargs: object) -> bool:  # type: ignore
+        return False
+
+
+try:  # pragma: no cover - optional dependency
+    import litellm  # type: ignore
+except Exception:  # pragma: no cover
+    litellm = None
 
 # --- Configuration ---
 # This is now configured via an explicit init function
@@ -63,9 +74,11 @@ def init_llm(api_key: str | None = None) -> Callable[[str], str]:
     key = api_key or os.environ.get("OPENAI_API_KEY")
     if not key:
         raise ValueError("OPENAI_API_KEY not found in .env file or environment.")
+    if litellm is None:
+        raise ImportError("litellm is required for init_llm")
 
     def completion(prompt: str) -> str:
-        response = litellm.completion(
+        response = litellm.completion(  # type: ignore[union-attr]
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
@@ -92,9 +105,7 @@ def classify_chunk_utterance(
         available_tags_text = "\n\nAvailable tags by category:\n"
         for category, tags in tag_configs.items():
             available_tags_text += f"- {category}: {', '.join(tags)}\n"
-        available_tags_text += (
-            "\nSelect 2-4 most relevant tags from the available categories."
-        )
+        available_tags_text += "\nSelect 2-4 most relevant tags from the available categories."
 
     prompt = f"""Given the following text, classify its primary utterance type and assign relevant tags.
 
@@ -166,9 +177,10 @@ def _process_jsonl_file(
 ):
     """Read ``input_path`` JSONL, classify chunks, and write to ``output_path``."""
     tag_configs = tag_configs or _load_tag_configs()
-    with open(input_path, "r", encoding="utf-8") as infile, open(
-        output_path, "w", encoding="utf-8"
-    ) as outfile:
+    with (
+        open(input_path, "r", encoding="utf-8") as infile,
+        open(output_path, "w", encoding="utf-8") as outfile,
+    ):
         lines = infile.readlines()
         chunks = [json.loads(line) for line in lines]
 
