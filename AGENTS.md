@@ -45,6 +45,7 @@ pdf_chunker/
 │   │   ├── extraction_fallback.py
 │   │   ├── heading_detect.py
 │   │   ├── pdf_parse.py
+│   │   ├── split_semantic.py
 │   │   └── text_clean.py
 │   └── utils.py                   # Metadata mapping and glue logic
 ├── scripts/

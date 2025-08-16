@@ -7,6 +7,12 @@ def test_registry_is_mapping():
 
 
 def test_registry_expected_keys_subset():
-    # Update this set as passes are registered (e.g., {"pdf_parse", "text_clean", ...})
-    expected = set()
+    # Update this set as passes are registered
+    expected = {
+        "pdf_parse",
+        "text_clean",
+        "heading_detect",
+        "extraction_fallback",
+        "split_semantic",
+    }
     assert expected.issubset(set(registry().keys()))
