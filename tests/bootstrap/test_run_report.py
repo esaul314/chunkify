@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 @pytest.mark.xfail(reason="run_report emission is implemented in later stories", strict=True)
