@@ -44,6 +44,7 @@ pdf_chunker/
 │   │   ├── __init__.py
 │   │   ├── extraction_fallback.py
 │   │   ├── heading_detect.py
+│   │   ├── list_detect.py
 │   │   ├── pdf_parse.py
 │   │   ├── split_semantic.py
 │   │   ├── ai_enrich.py
