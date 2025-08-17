@@ -567,7 +567,7 @@ def clean_paragraph(paragraph: str) -> str:
     )
 
 
-def clean_text(text: str) -> str:
+def _clean_text_impl(text: str) -> str:
     """
     Cleans multi-paragraph text, preserving paragraph breaks,
     using clean_paragraph() for each paragraph.
@@ -656,6 +656,14 @@ def clean_text(text: str) -> str:
 
     logger.debug(f"Final clean_text result preview: {_preview(result)}")
     return result
+
+
+def clean_text(text: str) -> str:
+    """Shim maintaining legacy API while delegating to the text_clean pass."""
+    from pdf_chunker.framework import Artifact
+    from pdf_chunker.passes import text_clean as _text_clean
+
+    return _text_clean(Artifact(payload=text)).payload
 
 
 __all__ = [
