@@ -131,6 +131,15 @@ For Codex agent — Safety Checks
     * When moving code, preserve public signatures; add shims if needed.
     * Never remove core.py without explicit instruction; prefer core_new.py and a gradual cut-over.
 
+For Codex agent — Non-destructive change policy (must follow)
+    * Do not remove or overwrite existing, working logic unless explicitly instructed.
+    * Additive first: when introducing stubs or new boundaries, add new functions or modules (e.g., `describe()` or `*_stub.py`) rather than replacing existing functions.
+    * Keep public signatures stable. If you need a different shape, add an adapter/wrapper and leave a thin shim.
+    * Propose before large edits: if you must modify >10 lines of an existing function, show the proposed diff first and wait for approval.
+    * If a task description is ambiguous, default to non-destructive changes and ask to confirm before removing code.
+
+
+
 For Codex agent — Start Now
 
 Begin with Story A from `ARCHITECTURE_REFACTOR_TASKS.md`
