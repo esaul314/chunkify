@@ -1,4 +1,5 @@
 from .ai_enrich import ai_enrich  # noqa: F401
+from .emit_jsonl import emit_jsonl  # noqa: F401
 from .extraction_fallback import extraction_fallback  # noqa: F401
 from .heading_detect import heading_detect  # noqa: F401
 from .list_detect import list_detect  # noqa: F401
