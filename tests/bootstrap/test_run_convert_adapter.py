@@ -12,10 +12,15 @@ def test_run_convert_writes_jsonl(tmp_path, monkeypatch):
     monkeypatch.setattr(io_pdf, "read", fake_read)
     spec = PipelineSpec(
         pipeline=["pdf_parse", "emit_jsonl"],
-        options={"emit_jsonl": {"output_path": str(tmp_path / "out.jsonl")}},
+        options={
+            "emit_jsonl": {"output_path": str(tmp_path / "out.jsonl")},
+            "run_report": {"output_path": str(tmp_path / "run_report.json")},
+        },
     )
     pdf_path = Path("test_data") / "sample_test.pdf"
     artifact = run_convert(str(pdf_path), spec)
     out_file = tmp_path / "out.jsonl"
+    report_file = tmp_path / "run_report.json"
     assert out_file.exists()
+    assert report_file.exists()
     assert artifact.meta.get("input") == str(pdf_path)
