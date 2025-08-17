@@ -228,63 +228,13 @@ def detect_headings_hybrid(
 def enhance_blocks_with_heading_metadata(
     blocks: List[Dict[str, Any]], extraction_method: str = "unknown"
 ) -> List[Dict[str, Any]]:
-    """
-    Enhance text blocks with heading metadata using hybrid detection approach.
+    """Delegate to the registered ``heading_detect`` pass."""
 
-    Args:
-        blocks: List of text blocks from PDF extraction
-        extraction_method: Method used for extraction
+    from pdf_chunker.framework import Artifact
+    from pdf_chunker.passes.heading_detect import heading_detect
 
-    Returns:
-        Enhanced blocks with heading metadata
-    """
-    # Detect headings using hybrid approach
-    headings = detect_headings_hybrid(blocks, extraction_method)
-
-    # Create a mapping of block text to heading info for quick lookup
-    heading_map = {}
-    for heading in headings:
-        text_key = heading["text"].strip().lower()
-        heading_map[text_key] = heading
-
-    # Enhance blocks with heading metadata
-    enhanced_blocks = []
-    current_section_heading = None
-
-    for i, block in enumerate(blocks):
-        enhanced_block = block.copy()
-        block_text = block.get("text", "").strip()
-        text_key = block_text.lower()
-
-        # Check if this block is a heading
-        if text_key in heading_map:
-            heading_info = heading_map[text_key]
-
-            # Add heading metadata to block
-            enhanced_block["is_heading"] = True
-            enhanced_block["heading_level"] = heading_info["level"]
-            enhanced_block["heading_source"] = heading_info["source"]
-
-            # Update current section context
-            current_section_heading = block_text
-
-            # Ensure block type is set to heading
-            enhanced_block["type"] = "heading"
-        else:
-            # This is a regular text block
-            enhanced_block["is_heading"] = False
-
-            # Add section context if available
-            if current_section_heading:
-                enhanced_block["section_heading"] = current_section_heading
-
-            # Ensure block type is set appropriately
-            if enhanced_block.get("type") != "heading":
-                enhanced_block["type"] = "paragraph"
-
-        enhanced_blocks.append(enhanced_block)
-
-    return enhanced_blocks
+    artifact = Artifact(payload=blocks, meta={"extraction_method": extraction_method})
+    return heading_detect(artifact).payload  # type: ignore[no-any-return]
 
 
 def get_heading_hierarchy(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
