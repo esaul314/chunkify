@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import time
-from collections.abc import Iterable, Sequence, Callable
+from collections.abc import Iterable, Sequence, Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from pdf_chunker.adapters import emit_jsonl, io_pdf
 from pdf_chunker.config import PipelineSpec
@@ -80,9 +82,27 @@ def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, 
     return Artifact(payload=a.payload, meta=meta), timings
 
 
-def _emit(a: Artifact, spec: PipelineSpec, timings: dict[str, float]) -> None:
-    """Emit the artifact using the JSONL adapter when configured."""
+def _assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
+    """Purely assemble run report data without performing IO."""
+    metrics = dict(meta.get("metrics") or {})
+    return {
+        "timings": dict(timings),
+        "metrics": metrics,
+        "warnings": list(meta.get("warnings") or []),
+    }
+
+
+def _write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
+    """Write ``report`` to ``run_report.json`` honoring options path."""
+    path = spec.options.get("run_report", {}).get("output_path", "run_report.json")
+    Path(path).write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+
+def _emit(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
+    """Emit artifacts and run report using configured adapters."""
     emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), timings)
+    report = _assemble_report(timings, a.meta or {})
+    _write_run_report(spec, report)
 
 
 def run_convert(input_path: str, spec: PipelineSpec) -> Artifact:
