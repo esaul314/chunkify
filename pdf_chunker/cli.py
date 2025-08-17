@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from pdf_chunker.adapters import emit_jsonl, io_pdf
+from pdf_chunker.adapters import io_pdf
 from pdf_chunker.config import load_spec
 from pdf_chunker.core_new import (
     assemble_report,
@@ -41,7 +41,6 @@ def convert(input_path: str, spec: str = "pipeline.yaml"):
     s = load_spec(spec)
     a = _initial_artifact(input_path)
     a, timings = run_convert(a, s)
-    emit_jsonl.maybe_write(a, s.options.get("emit_jsonl", {}), timings)
     report = assemble_report(timings, a.meta or {})
     write_run_report(s, report)
     typer.echo("convert: OK")

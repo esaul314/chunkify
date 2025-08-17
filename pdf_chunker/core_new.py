@@ -8,6 +8,7 @@ from functools import reduce
 from pathlib import Path
 from typing import Any
 
+from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, registry, run_pipeline
 
@@ -68,6 +69,14 @@ def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, 
     metrics = {**(a.meta or {}).get("metrics", {}), "_timings": timings}
     meta = {**(a.meta or {}), "metrics": metrics}
     return Artifact(payload=a.payload, meta=meta), timings
+
+
+def _maybe_emit_jsonl(
+    a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]
+) -> None:
+    """Write JSONL output when pipeline requests ``emit_jsonl``."""
+    if "emit_jsonl" in spec.pipeline:
+        emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), timings)
 
 
 def _has_footnote(texts: Iterable[str]) -> bool:
@@ -132,6 +141,7 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
     _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     steps = _pass_steps(spec)
     a, timings = _run_passes(steps, a)
+    _maybe_emit_jsonl(a, spec, timings)
     warnings = _collect_warnings(a, spec)
     a = Artifact(payload=a.payload, meta={**(a.meta or {}), "warnings": warnings})
     return a, timings

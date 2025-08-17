@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pdf_chunker.pdf_parsing as pdf_parsing
-from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import assemble_report, run_convert, write_run_report
 from pdf_chunker.framework import Artifact
@@ -23,7 +22,6 @@ def test_run_convert_writes_jsonl(tmp_path, monkeypatch):
     pdf_path = Path("test_data") / "sample_test.pdf"
     artifact = Artifact(payload=str(pdf_path), meta={"metrics": {}, "input": str(pdf_path)})
     artifact, timings = run_convert(artifact, spec)
-    emit_jsonl.maybe_write(artifact, spec.options["emit_jsonl"], timings)
     report = assemble_report(timings, artifact.meta or {})
     write_run_report(spec, report)
     out_file = tmp_path / "out.jsonl"
