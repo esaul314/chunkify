@@ -1,12 +1,22 @@
+from functools import reduce
+from typing import Callable, TypeVar
+
 from hypothesis import given, strategies as st
-from pdf_chunker.text_cleaning import clean_text
 from pdf_chunker import splitter
+from pdf_chunker.text_cleaning import clean_text
 
 
-@given(st.text().filter(lambda s: "\x95" not in s))
-def test_clean_text_idempotent(sample: str) -> None:
+T = TypeVar("T")
+
+
+def _apply_times(fn: Callable[[T], T], times: int, value: T) -> T:
+    return reduce(lambda acc, _: fn(acc), range(times), value)
+
+
+@given(st.text().filter(lambda s: "\x95" not in s), st.integers(min_value=1, max_value=5))
+def test_clean_text_idempotent(sample: str, repeats: int) -> None:
     cleaned = clean_text(sample)
-    assert clean_text(cleaned) == cleaned
+    assert _apply_times(clean_text, repeats, cleaned) == cleaned
     assert all(ord(ch) >= 32 or ch == "\n" for ch in cleaned)
 
 
