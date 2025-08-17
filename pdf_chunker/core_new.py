@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Iterable, Sequence, Callable, Mapping
 from pathlib import Path
@@ -82,6 +83,47 @@ def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, 
     return Artifact(payload=a.payload, meta=meta), timings
 
 
+def _has_footnote(texts: Iterable[str]) -> bool:
+    """Return True if any ``texts`` contain footnote markers."""
+    pattern = re.compile(r"\bfootnote\b|\[\d+\]", re.IGNORECASE)
+    return any(pattern.search(t) for t in texts)
+
+
+def _page_exclusion_noop(spec: PipelineSpec, meta: Mapping[str, Any]) -> bool:
+    """Warn when page exclusion was requested but no pages were excluded."""
+    excl = spec.options.get("pdf_parse", {}).get("exclude_pages")
+    if not excl:
+        return False
+    metrics = meta.get("metrics", {}).get("pdf_parse", {}) or {}
+    return not metrics.get("excluded_pages")
+
+
+def _has_metadata_gaps(chunks: Iterable[Mapping[str, Any]]) -> bool:
+    """Detect missing ``chunk_id`` or ``source`` metadata fields."""
+    required = {"chunk_id", "source"}
+    return any(required - set(c.get("metadata", {})) for c in chunks)
+
+
+def _underscore_loss(spec: PipelineSpec) -> bool:
+    """Flag potential underscore loss when PyMuPDF4LLM engine is used."""
+    engine = spec.options.get("pdf_parse", {}).get("engine")
+    return engine == "pymupdf4llm"
+
+
+def _collect_warnings(a: Artifact, spec: PipelineSpec) -> list[str]:
+    """Return list of known-issue warnings derived from ``a`` and ``spec``."""
+    payload = a.payload if isinstance(a.payload, Iterable) else []
+    chunks = [c for c in payload if isinstance(c, Mapping)]
+    texts = [c.get("text", "") for c in chunks]
+    checks = {
+        "footnote_anchors": _has_footnote(texts),
+        "page_exclusion_noop": _page_exclusion_noop(spec, a.meta or {}),
+        "metadata_gaps": _has_metadata_gaps(chunks),
+        "underscore_loss": _underscore_loss(spec),
+    }
+    return [name for name, flag in checks.items() if flag]
+
+
 def _assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
     """Purely assemble run report data without performing IO."""
     metrics = dict(meta.get("metrics") or {})
@@ -111,6 +153,8 @@ def run_convert(input_path: str, spec: PipelineSpec) -> Artifact:
     a = _initial_artifact(input_path)
     steps = _pass_steps(spec)
     a, timings = _run_passes(steps, a)
+    warnings = _collect_warnings(a, spec)
+    a = Artifact(payload=a.payload, meta={**(a.meta or {}), "warnings": warnings})
     _emit(a, spec, timings)
     return a
 
