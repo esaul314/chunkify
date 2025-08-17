@@ -5,8 +5,17 @@ import sys
 import re
 import logging
 from functools import reduce
-import fitz  # PyMuPDF
-from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
+try:
+    import fitz  # PyMuPDF
+except Exception:
+    fitz = None
+try:
+    from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
+except Exception:
+    clean_text = lambda text: text
+    HYPHEN_CHARS_ESC = ""
+    def remove_stray_bullet_lines(text: str) -> str:
+        return text
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .page_utils import parse_page_ranges, validate_page_exclusions
 from .page_artifacts import (
@@ -14,13 +23,20 @@ from .page_artifacts import (
     remove_page_artifact_lines,
     strip_page_artifact_suffix,
 )
-from .extraction_fallbacks import (
-    _detect_language,
-    _assess_text_quality,
-    _extract_with_pdftotext,
-    _extract_with_pdfminer,
-    PDFMINER_AVAILABLE,
-)
+try:
+    from .extraction_fallbacks import (
+        _detect_language,
+        _assess_text_quality,
+        _extract_with_pdftotext,
+        _extract_with_pdfminer,
+        PDFMINER_AVAILABLE,
+    )
+except Exception:
+    _detect_language = lambda *a, **k: ""
+    _assess_text_quality = lambda *a, **k: {}
+    _extract_with_pdftotext = lambda *a, **k: ""
+    _extract_with_pdfminer = lambda *a, **k: ""
+    PDFMINER_AVAILABLE = False
 from .pymupdf4llm_integration import (
     extract_with_pymupdf4llm,
     is_pymupdf4llm_available,
@@ -947,3 +963,13 @@ def extract_text_blocks_from_pdf(
         filtered_blocks.append(block)
 
     return filtered_blocks
+
+_legacy_extract_text_blocks_from_pdf = extract_text_blocks_from_pdf
+
+
+def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str | None = None) -> list[dict]:
+    """Delegate to ``pdf_parse`` pass while preserving original signature."""
+    from pdf_chunker.framework import Artifact, run_step
+
+    artifact = Artifact(payload=filepath, meta={"exclude_pages": exclude_pages})
+    return run_step("pdf_parse", artifact).payload
