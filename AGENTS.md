@@ -83,6 +83,7 @@ pdf_chunker/
     ├── cross_page_sentence_test.py
     ├── env_utils_test.py
     ├── epub_spine_test.py
+    ├── extraction_fallback_pass_test.py
     ├── heading_boundary_test.py
     ├── heading_detection_test.py
     ├── hyphenation_test.py

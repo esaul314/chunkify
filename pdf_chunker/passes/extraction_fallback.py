@@ -9,11 +9,11 @@ def _blocks_doc(blocks: List[Block], source: str) -> Dict[str, Any]:
     return {"type": "blocks", "blocks": blocks, "source_path": source}
 
 
-def _quality(blocks: List[Block]) -> Dict[str, float]:
+def _score(blocks: List[Block]) -> float:
     from pdf_chunker.extraction_fallbacks import _assess_text_quality
 
     text = "\n".join(b.get("text", "") for b in blocks)
-    return _assess_text_quality(text)
+    return _assess_text_quality(text).get("quality_score", 0.0)
 
 
 def _extract(path: str, reason: str | None) -> List[Block]:
@@ -22,17 +22,14 @@ def _extract(path: str, reason: str | None) -> List[Block]:
     return execute_fallback_extraction(path, fallback_reason=reason)
 
 
-def _meta(
-    meta: Dict[str, Any] | None,
-    reason: str | None,
-    quality: Dict[str, float],
-) -> Dict[str, Any]:
-    base = dict(meta or {})
-    metrics = base.setdefault("metrics", {}).setdefault("extraction_fallback", {})
-    if reason:
-        metrics["reason"] = reason
-    metrics["quality_score"] = quality.get("quality_score", 0.0)
-    return base
+def _meta(meta: Dict[str, Any] | None, reason: str | None, score: float) -> Dict[str, Any]:
+    metrics = (meta or {}).get("metrics", {})
+    fallback = metrics.get("extraction_fallback", {})
+    update = {"score": score, **({"reason": reason} if reason else {})}
+    return {
+        **(meta or {}),
+        "metrics": {"extraction_fallback": {**fallback, **update}, **metrics},
+    }
 
 
 class _ExtractionFallbackPass:
@@ -45,8 +42,8 @@ class _ExtractionFallbackPass:
         path = doc.get("source_path", "")
         reason = (a.meta or {}).get("fallback_reason")
         blocks = _extract(path, reason)
-        quality = _quality(blocks)
-        meta = _meta(a.meta, reason, quality)
+        score = _score(blocks)
+        meta = _meta(a.meta, reason, score)
         return Artifact(payload=_blocks_doc(blocks, path), meta=meta)
 
 
