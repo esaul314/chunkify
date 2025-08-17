@@ -4,7 +4,11 @@ from functools import reduce
 from itertools import takewhile
 from typing import Optional
 
-from .text_cleaning import clean_text
+try:
+    from .text_cleaning import clean_text
+except Exception:
+    def clean_text(text: str) -> str:
+        return text
 
 ROMAN_RE = r"[ivxlcdm]+"
 _ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}

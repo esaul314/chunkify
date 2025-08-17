@@ -3,24 +3,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pdf_chunker.adapters.io_pdf as io_pdf
+import pdf_chunker.pdf_parsing as pdf_parsing
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import assemble_report, run_convert, write_run_report
 from pdf_chunker.framework import Artifact
 
 
 def test_run_report_emitted(tmp_path, monkeypatch):
-    def fake_read(path, exclude_pages=None):
-        return {"type": "page_blocks", "source_path": path, "pages": []}
-
-    monkeypatch.setattr(io_pdf, "read", fake_read)
+    monkeypatch.setattr(
+        pdf_parsing,
+        "_legacy_extract_text_blocks_from_pdf",
+        lambda path, exclude_pages=None: [],
+    )
     spec = PipelineSpec(
         pipeline=["pdf_parse"],
         options={"run_report": {"output_path": str(tmp_path / "run_report.json")}},
     )
     pdf_path = Path("test_data") / "sample_test.pdf"
-    payload = io_pdf.read(str(pdf_path))
-    artifact = Artifact(payload=payload, meta={"metrics": {}, "input": str(pdf_path)})
+    artifact = Artifact(payload=str(pdf_path), meta={"metrics": {}, "input": str(pdf_path)})
     artifact, timings = run_convert(artifact, spec)
     report = assemble_report(timings, artifact.meta or {})
     write_run_report(spec, report)

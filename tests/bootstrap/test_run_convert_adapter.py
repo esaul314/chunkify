@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import pdf_chunker.adapters.io_pdf as io_pdf
+import pdf_chunker.pdf_parsing as pdf_parsing
 from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import assemble_report, run_convert, write_run_report
@@ -8,10 +8,11 @@ from pdf_chunker.framework import Artifact
 
 
 def test_run_convert_writes_jsonl(tmp_path, monkeypatch):
-    def fake_read(path, exclude_pages=None):
-        return {"type": "page_blocks", "source_path": path, "pages": []}
-
-    monkeypatch.setattr(io_pdf, "read", fake_read)
+    monkeypatch.setattr(
+        pdf_parsing,
+        "_legacy_extract_text_blocks_from_pdf",
+        lambda path, exclude_pages=None: [],
+    )
     spec = PipelineSpec(
         pipeline=["pdf_parse", "emit_jsonl"],
         options={
@@ -20,8 +21,7 @@ def test_run_convert_writes_jsonl(tmp_path, monkeypatch):
         },
     )
     pdf_path = Path("test_data") / "sample_test.pdf"
-    payload = io_pdf.read(str(pdf_path))
-    artifact = Artifact(payload=payload, meta={"metrics": {}, "input": str(pdf_path)})
+    artifact = Artifact(payload=str(pdf_path), meta={"metrics": {}, "input": str(pdf_path)})
     artifact, timings = run_convert(artifact, spec)
     emit_jsonl.maybe_write(artifact, spec.options["emit_jsonl"], timings)
     report = assemble_report(timings, artifact.meta or {})
