@@ -3,30 +3,13 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Iterable, Sequence, Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from functools import reduce
 from pathlib import Path
 from typing import Any
 
-from pdf_chunker.adapters import emit_jsonl, io_pdf
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, registry, run_pipeline
-
-
-def _adapter_for(path: str):
-    """Return the IO adapter based on file extension."""
-    ext = Path(path).suffix.lower()
-    if ext == ".epub":
-        from pdf_chunker.adapters import io_epub
-
-        return io_epub
-    return io_pdf
-
-
-def _initial_artifact(path: str) -> Artifact:
-    """Load document via chosen adapter into an Artifact."""
-    adapter = _adapter_for(path)
-    payload = adapter.read(path)
-    return Artifact(payload=payload, meta={"metrics": {}, "input": path})
 
 
 def _pass_steps(spec: PipelineSpec) -> list[str]:
@@ -71,15 +54,19 @@ def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> None:
     _ensure_pdf_epub_separation(steps, Path(input_path).suffix.lower())
 
 
+def _time_step(acc: tuple[Artifact, dict[str, float]], step: str) -> tuple[Artifact, dict[str, float]]:
+    """Run a single step and record its timing."""
+    a, timings = acc
+    t0 = time.time()
+    a = run_pipeline([step], a)
+    return a, {**timings, step: time.time() - t0}
+
+
 def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, float]]:
-    """Run pipeline steps sequentially while recording timings."""
-    timings: dict[str, float] = {}
-    for s in steps:
-        t0 = time.time()
-        a = run_pipeline([s], a)
-        timings[s] = time.time() - t0
-    meta = dict(a.meta or {})
-    meta.setdefault("metrics", {})["_timings"] = timings
+    """Run ``steps`` sequentially while capturing per-step timings."""
+    a, timings = reduce(_time_step, steps, (a, {}))
+    metrics = {**(a.meta or {}).get("metrics", {}), "_timings": timings}
+    meta = {**(a.meta or {}), "metrics": metrics}
     return Artifact(payload=a.payload, meta=meta), timings
 
 
@@ -124,7 +111,7 @@ def _collect_warnings(a: Artifact, spec: PipelineSpec) -> list[str]:
     return [name for name, flag in checks.items() if flag]
 
 
-def _assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
+def assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
     """Purely assemble run report data without performing IO."""
     metrics = dict(meta.get("metrics") or {})
     return {
@@ -134,29 +121,20 @@ def _assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> d
     }
 
 
-def _write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
+def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
     """Write ``report`` to ``run_report.json`` honoring options path."""
     path = spec.options.get("run_report", {}).get("output_path", "run_report.json")
     Path(path).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
-def _emit(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
-    """Emit artifacts and run report using configured adapters."""
-    emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), timings)
-    report = _assemble_report(timings, a.meta or {})
-    _write_run_report(spec, report)
-
-
-def run_convert(input_path: str, spec: PipelineSpec) -> Artifact:
-    """Load ``input_path``, run declared passes, and maybe write JSONL."""
-    _enforce_invariants(spec, input_path=input_path)
-    a = _initial_artifact(input_path)
+def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, float]]:
+    """Run declared passes on ``a`` and return new artifact plus timings."""
+    _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     steps = _pass_steps(spec)
     a, timings = _run_passes(steps, a)
     warnings = _collect_warnings(a, spec)
     a = Artifact(payload=a.payload, meta={**(a.meta or {}), "warnings": warnings})
-    _emit(a, spec, timings)
-    return a
+    return a, timings
 
 
 def run_inspect() -> dict[str, dict[str, str]]:
