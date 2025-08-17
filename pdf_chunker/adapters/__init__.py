@@ -5,4 +5,7 @@ try:  # pragma: no cover - optional dependency
 except ModuleNotFoundError:  # pragma: no cover
     io_epub = None  # type: ignore
 
+from .io_epub import describe_epub, read_epub  # noqa: F401
+
 __all__ = ["emit_jsonl", "io_epub", "io_pdf"]
+__all__ += ["describe_epub", "read_epub"]
