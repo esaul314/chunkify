@@ -8,7 +8,7 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
 from pdf_chunker.framework import Artifact, register
@@ -40,6 +40,17 @@ def _iter_blocks(doc: Doc) -> Iterable[tuple[int, Block]]:
     )
 
 
+def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]]:
+    """Yield ``(page, block, text)`` triples from a document."""
+
+    return (
+        (page, block, text)
+        for page, block in _iter_blocks(doc)
+        for text in split_fn(block.get("text", ""))
+        if text
+    )
+
+
 def _chunk_meta(page: int, block: Block, source: str | None) -> dict[str, Any]:
     base = {"page": page}
     if source is not None:
@@ -49,18 +60,14 @@ def _chunk_meta(page: int, block: Block, source: str | None) -> dict[str, Any]:
     return base
 
 
-def _chunk_items(doc: Doc, split_fn: SplitFn) -> list[Chunk]:
+def _chunk_items(doc: Doc, split_fn: SplitFn) -> Iterator[Chunk]:
+    """Yield chunk records from ``doc`` using ``split_fn``."""
+
     source = doc.get("source_path")
-    seq = (
-        (page, block, text)
-        for page, block in _iter_blocks(doc)
-        for text in split_fn(block.get("text", ""))
-    )
-    return [
+    return (
         {"id": str(i), "text": text, "meta": _chunk_meta(page, block, source)}
-        for i, (page, block, text) in enumerate(seq)
-        if text
-    ]
+        for i, (page, block, text) in enumerate(_block_texts(doc, split_fn))
+    )
 
 
 def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
@@ -80,10 +87,9 @@ class _SplitSemanticPass:
         if not isinstance(doc, dict) or doc.get("type") != "page_blocks":
             return a
         split_fn = _get_split_fn()
-        items = _chunk_items(doc, split_fn)
+        items = list(_chunk_items(doc, split_fn))
         meta = _update_meta(a.meta, len(items))
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
 
 split_semantic = register(_SplitSemanticPass())
-
