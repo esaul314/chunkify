@@ -407,7 +407,7 @@ We use `pytest-regressions` to compare structured results; prefer normalizing to
 ### `tests/golden/test_conversion.py`
 
 ```python
-import json, pathlib
+import base64, json, pathlib
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core import run_convert
 
@@ -419,14 +419,16 @@ def _read_jsonl(path: str):
         return [json.loads(line) for line in f]
 
 def test_sample_pdf(tmp_path):
-    sample = str(SAMPLES / "sample.pdf")   # you provide this
+    sample_path = SAMPLES / "sample.pdf.b64"
+    sample = tmp_path / "sample.pdf"
+    sample.write_bytes(base64.b64decode(sample_path.read_text()))
     out = tmp_path / "out.jsonl"
     spec = PipelineSpec(pipeline=[
         "pdf_parse","text_clean","heading_detect","split_semantic","ai_enrich","emit_jsonl"
     ], options={"emit_jsonl": {"output_path": str(out)}})
-    run_convert(sample, spec)
+    run_convert(str(sample), spec)
     got = _read_jsonl(out)
-    want = _read_jsonl(EXPECTED / "sample.pdf.jsonl")
+    want = _read_jsonl(EXPECTED / "pdf.jsonl")
     assert got == want
 ```
 
