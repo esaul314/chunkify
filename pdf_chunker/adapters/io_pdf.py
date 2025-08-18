@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from itertools import groupby
 from pathlib import Path
+from subprocess import CompletedProcess, run
 from typing import Any
 
 
@@ -33,3 +34,8 @@ def read(path: str, exclude_pages: str | None = None) -> dict[str, Any]:
         "source_path": abs_path,
         "pages": _group_blocks(blocks),
     }
+
+
+def run_pdftotext(cmd: Sequence[str], timeout: int = 60) -> CompletedProcess[str]:
+    """Execute ``pdftotext`` and capture its output."""
+    return run(cmd, capture_output=True, text=True, timeout=timeout)

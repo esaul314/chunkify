@@ -1,8 +1,9 @@
 import os
 import re
 import sys
-import subprocess
-from langdetect import detect, LangDetectException
+from subprocess import TimeoutExpired
+
+from langdetect import LangDetectException, detect
 
 try:
     from pdfminer.high_level import extract_text
@@ -12,9 +13,8 @@ try:
 except ImportError:
     PDFMINER_AVAILABLE = False
 
-from .text_cleaning import clean_text
 from .page_artifacts import remove_page_artifact_lines
-from .heading_detection import _detect_heading_fallback
+from .text_cleaning import clean_text
 
 
 def _detect_language(text: str) -> str:
@@ -64,9 +64,7 @@ def _assess_text_quality(text: str) -> dict:
 def _clean_fallback_text(text: str) -> str:
     """Remove page artifacts across pages in fallback extraction."""
     pages = text.split("\f")
-    cleaned_pages = [
-        remove_page_artifact_lines(page, i + 1) for i, page in enumerate(pages)
-    ]
+    cleaned_pages = [remove_page_artifact_lines(page, i + 1) for i, page in enumerate(pages)]
     return "\f".join(cleaned_pages)
 
 
@@ -74,9 +72,7 @@ def _filter_text_by_pages(text: str, excluded: set[int]) -> str:
     """Return text with pages in ``excluded`` removed."""
     if not excluded:
         return text
-    return "\f".join(
-        page for i, page in enumerate(text.split("\f"), start=1) if i not in excluded
-    )
+    return "\f".join(page for i, page in enumerate(text.split("\f"), start=1) if i not in excluded)
 
 
 def _is_heading(text: str) -> bool:
@@ -126,7 +122,9 @@ def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[di
         cmd.extend([filepath, "-"])
 
         # Try pdftotext with -layout flag
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        from .adapters.io_pdf import run_pdftotext
+
+        result = run_pdftotext(cmd)
 
         if result.returncode != 0:
             print(
@@ -149,7 +147,7 @@ def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[di
 
         return _text_to_blocks(raw_text, filepath, "pdftotext")
 
-    except subprocess.TimeoutExpired:
+    except TimeoutExpired:
         print("pdftotext timed out", file=sys.stderr)
         return []
     except FileNotFoundError:
@@ -253,12 +251,7 @@ def should_use_pymupdf4llm_cleaning(text: str) -> bool:
     has_hyphenation_issues = bool(re.search(r"-\s*\n\s*[a-z]", text))
 
     # Use PyMuPDF4LLM if any potential issues are detected
-    return (
-        has_ligatures
-        or has_joining_issues
-        or has_whitespace_issues
-        or has_hyphenation_issues
-    )
+    return has_ligatures or has_joining_issues or has_whitespace_issues or has_hyphenation_issues
 
 
 def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> dict:
@@ -357,9 +350,7 @@ def execute_fallback_extraction(
         logger.debug("Attempting pdfminer extraction")
         pdfminer_blocks = _extract_with_pdfminer(filepath, exclude_pages)
         if pdfminer_blocks:
-            logger.info(
-                f"pdfminer extraction successful: {len(pdfminer_blocks)} blocks"
-            )
+            logger.info(f"pdfminer extraction successful: {len(pdfminer_blocks)} blocks")
             return pdfminer_blocks
     else:
         logger.warning("pdfminer.six not available for fallback extraction")
