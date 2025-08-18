@@ -1,80 +1,38 @@
-import re
-from typing import Tuple
+"""Backward-compatible shims for list detection helpers.
 
-BULLET_CHARS = "*•◦▪‣·●◉○‧"
-BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
-HYPHEN_BULLET_PREFIX = "- "
-NUMBERED_RE = re.compile(r"\s*\d+[.)]")
+The implementations now live in :mod:`pdf_chunker.passes.list_detect`.
+This module re-exports those functions to preserve the public API.
+"""
 
+from pdf_chunker.passes.list_detect import (
+    BULLET_CHARS,
+    BULLET_CHARS_ESC,
+    HYPHEN_BULLET_PREFIX,
+    NUMBERED_RE,
+    is_bullet_continuation,
+    is_bullet_fragment,
+    is_bullet_list_pair,
+    _last_non_empty_line,
+    is_numbered_continuation,
+    is_numbered_list_pair,
+    split_bullet_fragment,
+    starts_with_bullet,
+    starts_with_number,
+)
 
-def starts_with_bullet(text: str) -> bool:
-    """Return True if ``text`` begins with a bullet marker or hyphen bullet."""
-    stripped = text.lstrip()
-    return stripped.startswith(tuple(BULLET_CHARS)) or stripped.startswith(
-        HYPHEN_BULLET_PREFIX
-    )
+__all__ = [
+    "BULLET_CHARS",
+    "BULLET_CHARS_ESC",
+    "HYPHEN_BULLET_PREFIX",
+    "NUMBERED_RE",
+    "starts_with_bullet",
+    "is_bullet_continuation",
+    "is_bullet_fragment",
+    "split_bullet_fragment",
+    "is_bullet_list_pair",
+    "starts_with_number",
+    "is_numbered_list_pair",
+    "is_numbered_continuation",
+    "_last_non_empty_line",
+]
 
-
-def _last_non_empty_line(text: str) -> str:
-    return next(
-        (line.strip() for line in reversed(text.splitlines()) if line.strip()),
-        "",
-    )
-
-
-def is_bullet_continuation(curr: str, nxt: str) -> bool:
-    """Return True when ``nxt`` continues a bullet item from ``curr``."""
-    last_line = _last_non_empty_line(curr)
-    return last_line.endswith(tuple(BULLET_CHARS)) and nxt[:1].islower()
-
-
-def is_bullet_fragment(curr: str, nxt: str) -> bool:
-    """Return True when ``nxt`` starts with text that continues the last bullet in ``curr``."""
-    last_line = _last_non_empty_line(curr)
-    return (
-        starts_with_bullet(last_line)
-        and not last_line.rstrip().endswith((".", "!", "?"))
-        and nxt[:1].islower()
-    )
-
-
-def split_bullet_fragment(text: str) -> Tuple[str, str]:
-    """Split the first line from the remainder, if any."""
-
-    if "\n" not in text:
-        return text.strip(), ""
-    first, rest = text.split("\n", 1)
-    return first.strip(), rest.lstrip()
-
-
-def is_bullet_list_pair(curr: str, nxt: str) -> bool:
-    """Return True when ``curr`` and ``nxt`` belong to the same bullet list."""
-    colon_bullet = curr.rstrip().endswith(":") or re.search(
-        rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", curr
-    )
-    has_bullet = starts_with_bullet(curr) or any(
-        starts_with_bullet(line) for line in curr.splitlines()
-    )
-    return starts_with_bullet(nxt) and (has_bullet or colon_bullet)
-
-
-def starts_with_number(text: str) -> bool:
-    """Return True if ``text`` begins with a numbered list marker."""
-    return bool(NUMBERED_RE.match(text))
-
-
-def is_numbered_list_pair(curr: str, nxt: str) -> bool:
-    """Return True when ``curr`` and ``nxt`` belong to the same numbered list."""
-    has_number = starts_with_number(curr) or any(
-        starts_with_number(line) for line in curr.splitlines()
-    )
-    return starts_with_number(nxt) and has_number
-
-
-def is_numbered_continuation(curr: str, nxt: str) -> bool:
-    """Return True when ``nxt`` continues a numbered item from ``curr``."""
-    return (
-        starts_with_number(curr)
-        and not starts_with_number(nxt)
-        and not curr.rstrip().endswith((".", "!", "?"))
-    )
