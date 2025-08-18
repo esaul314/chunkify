@@ -107,18 +107,33 @@ def _underscore_loss(spec: PipelineSpec) -> bool:
     return engine == "pymupdf4llm"
 
 
-def _collect_warnings(a: Artifact, spec: PipelineSpec) -> list[str]:
-    """Return list of known-issue warnings derived from ``a`` and ``spec``."""
+def _warning_checks(a: Artifact, spec: PipelineSpec) -> Iterable[tuple[str, bool]]:
+    """Yield pairs of warning names and their boolean status."""
     payload = a.payload if isinstance(a.payload, Iterable) else []
     chunks = [c for c in payload if isinstance(c, Mapping)]
-    texts = [c.get("text", "") for c in chunks]
-    checks = {
-        "footnote_anchors": _has_footnote(texts),
-        "page_exclusion_noop": _page_exclusion_noop(spec, a.meta or {}),
-        "metadata_gaps": _has_metadata_gaps(chunks),
-        "underscore_loss": _underscore_loss(spec),
-    }
-    return [name for name, flag in checks.items() if flag]
+    return (
+        (
+            "footnote_anchors",
+            _has_footnote(c.get("text", "") for c in chunks),
+        ),
+        (
+            "page_exclusion_noop",
+            _page_exclusion_noop(spec, a.meta or {}),
+        ),
+        (
+            "metadata_gaps",
+            _has_metadata_gaps(chunks),
+        ),
+        (
+            "underscore_loss",
+            _underscore_loss(spec),
+        ),
+    )
+
+
+def _collect_warnings(a: Artifact, spec: PipelineSpec) -> list[str]:
+    """Return list of known-issue warnings derived from ``a`` and ``spec``."""
+    return [name for name, flag in _warning_checks(a, spec) if flag]
 
 
 def assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
