@@ -20,6 +20,13 @@ text_strategy = st.text(
 )
 bullet_char_strategy = st.sampled_from(list(BULLET_CHARS) + ["-"])
 
+bullet_start_chars = BULLET_CHARS | {"-"}
+
+non_bullet_strategy = text_strategy.filter(
+    lambda s: s and not any(s.startswith(ch) for ch in bullet_start_chars)
+)
+non_number_strategy = text_strategy.filter(lambda s: not s[0].isdigit())
+
 
 @st.composite
 def bullet_pairs(draw):
@@ -41,6 +48,11 @@ def bullet_pairs(draw):
 def test_is_bullet_list_pair_property(pair):
     curr, nxt = pair
     assert is_bullet_list_pair(curr, nxt)
+
+
+@given(non_bullet_strategy, non_bullet_strategy)
+def test_is_bullet_list_pair_negative(curr: str, nxt: str) -> None:
+    assert not is_bullet_list_pair(curr, nxt)
 
 
 number_strategy = st.integers(min_value=1, max_value=999)
@@ -67,3 +79,8 @@ def numbered_pairs(draw):
 def test_is_numbered_list_pair_property(pair):
     curr, nxt = pair
     assert is_numbered_list_pair(curr, nxt)
+
+
+@given(non_number_strategy, non_number_strategy)
+def test_is_numbered_list_pair_negative(curr: str, nxt: str) -> None:
+    assert not is_numbered_list_pair(curr, nxt)

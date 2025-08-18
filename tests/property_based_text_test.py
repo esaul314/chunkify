@@ -9,6 +9,10 @@ from pdf_chunker.text_cleaning import clean_text
 T = TypeVar("T")
 
 
+def compose(*funcs: Callable[[T], T]) -> Callable[[T], T]:
+    return reduce(lambda f, g: lambda x: f(g(x)), funcs, lambda x: x)
+
+
 def _apply_times(fn: Callable[[T], T], times: int, value: T) -> T:
     return reduce(lambda acc, _: fn(acc), range(times), value)
 
@@ -25,4 +29,15 @@ def test_split_text_preserves_non_whitespace(sample: str) -> None:
     chunks = splitter._split_text_into_chunks(sample, chunk_size=50, overlap=0)
     joined = "".join(chunks)
     strip_ws = lambda s: "".join(ch for ch in s if not ch.isspace())
-    assert set(strip_ws(joined)) <= set(strip_ws(sample))
+    assert strip_ws(joined) == strip_ws(sample)
+
+
+@given(st.text(min_size=1))
+def test_split_roundtrip_cleaning(sample: str) -> None:
+    pipeline = compose(
+        clean_text,
+        "".join,
+        lambda s: splitter._split_text_into_chunks(s, 30, 0),
+        clean_text,
+    )
+    assert pipeline(sample) == clean_text(sample)
