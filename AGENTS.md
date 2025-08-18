@@ -11,6 +11,8 @@ The directory structure may have changed. If any new files or folders have been 
 If possible, check to make sure the tree below reflects the current state of the project, and update it if necessary.
 Document newly introduced modules (e.g., list detection utilities) here to keep this reference current.
 ```
+project_response.md
+project_response_with_snippets.md
 pdf_chunker/
 ├── _apply.sh                    # Batch apply scripts across multiple files
 ├── _e2e_check.sh                # End-to-end pipeline check
