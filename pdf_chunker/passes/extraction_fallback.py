@@ -25,13 +25,13 @@ def _extract(path: str, reason: str | None) -> list[Block]:
 
 
 def _meta(meta: dict[str, Any] | None, reason: str | None, score: float) -> dict[str, Any]:
+    """Return a new meta dict with fallback metrics merged immutably."""
+
     metrics = (meta or {}).get("metrics", {})
-    fallback = metrics.get("extraction_fallback", {})
-    update = {"score": score, **({"reason": reason} if reason else {})}
-    return {
-        **(meta or {}),
-        "metrics": {"extraction_fallback": {**fallback, **update}, **metrics},
-    }
+    fallback = {**metrics.get("extraction_fallback", {}), "score": score}
+    if reason:
+        fallback["reason"] = reason
+    return {**(meta or {}), "metrics": {**metrics, "extraction_fallback": fallback}}
 
 
 class _ExtractionFallbackPass:
