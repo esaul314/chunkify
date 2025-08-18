@@ -139,6 +139,57 @@ For Codex agent — Non-destructive change policy (must follow)
     * If a task description is ambiguous, default to non-destructive changes and ask to confirm before removing code.
 
 
+For Codex agent — Legacy-aware migration rules
+
+1. **Target the real functions (don’t re-invent):**
+   Wrap these legacy entrypoints in passes/adapters exactly as named in the repo:
+
+   * PDF parse: `pdf_parsing.extract_text_blocks_from_pdf`&#x20;
+   * EPUB parse: `epub_parsing.extract_text_blocks_from_epub`&#x20;
+   * Cleaning: `text_cleaning.clean_paragraph` / `clean_text`&#x20;
+   * Headings: `heading_detection._detect_heading_fallback`&#x20;
+   * Lists: `list_detection.*` helpers&#x20;
+   * Splitter: `splitter.semantic_chunker`&#x20;
+   * Fallbacks: `_extract_with_pdftotext` / `_extract_with_pdfminer`&#x20;
+   * Enrichment: `_load_tag_configs`, `init_llm`, `classify_chunk_utterance`&#x20;
+   * JSONL write (legacy): `scripts/chunk_pdf.py::main` (stdout)&#x20;
+
+2. **Canonical artifact contracts (framework side):**
+
+   * **After parse:** `PageBlocks` dict `{"type":"page_blocks","source_path":..., "pages":[{"page":int,"blocks":[{"text":..., ...}], ...}]}`. (Legacy blocks include `type`, `text`, `language`, `source{filename,page,location}`, optional `bbox`—preserve when lifting into blocks.)&#x20;
+   * **After split:** `Chunks` dict `{"type":"chunks","items":[{"id":str,"text":str,"meta":{...}}]}`. Legacy row metadata fields (page, location, block\_type, language, readability, utterance\_type, importance, list\_kind) must be carried into `meta`.&#x20;
+
+3. **IO boundaries (move side-effects into adapters):**
+
+   * PDF open via `fitz.open` → `adapters.io_pdf.read` (and fallbacks via `subprocess.run`).&#x20;
+   * EPUB open via `epub.read_epub` → `adapters.io_epub.read_epub`.&#x20;
+   * LLM calls (`litellm.completion`) → enrichment client behind `ai_enrich` pass, disabled in tests.&#x20;
+   * Legacy writer (stdout) → `adapters.emit_jsonl.write`.&#x20;
+
+4. **Config ingestion (preserve flags & env):**
+
+   * Env: `PDF_CHUNKER_USE_PYMUPDF4LLM`, `OPENAI_API_KEY`.&#x20;
+   * YAML: tag vocabularies under `config/tags`.&#x20;
+   * CLI flags to map into `pipeline.yaml` options: `--chunk_size` (400 default), `--overlap` (50), `--exclude-pages`, `--no-metadata`, `--list-spines`.&#x20;
+
+5. **Behavioral invariants / edge cases to keep:**
+
+   * Strip footnotes to avoid mid-sentence splits; remove header/footer artifacts (incl. trailing “|”); repair hyphenation and bullets; propagate list metadata (incl. PyMuPDF4LLM underscores); allow cross-page merges and comma-continuation fixes.&#x20;
+
+6. **Performance limits to respect:**
+
+   * Soft text limit 8 k chars (hard 25 k); `_truncate_chunk` trims beyond 8 k; default target 400 chars with 50 overlap; `min_chunk_size = max(8, chunk_size//10)`; `pdftotext` timeout 60 s; LLM completions ≤100 tokens.&#x20;
+
+7. **Test guardrails:**
+
+   * Keep listed tests green; add golden checks for `sample_*` PDFs and `test_data/sample_test.pdf`. &#x20;
+
+8. **AGENTS.md write-safety:**
+
+   * Only update content **between** `<!-- BEGIN AUTO-PASSES --> … <!-- END AUTO-PASSES -->`. Never edit outside the fenced block.
+
+(**Non-destructive change policy** remains in force.)
+
 
 For Codex agent — Start Now
 
