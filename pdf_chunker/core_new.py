@@ -64,9 +64,12 @@ def _time_step(acc: tuple[Artifact, dict[str, float]], step: str) -> tuple[Artif
 def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, float]]:
     """Run ``steps`` sequentially while capturing per-step timings."""
     a, timings = reduce(_time_step, steps, (a, {}))
-    metrics = {**(a.meta or {}).get("metrics", {}), "_timings": timings}
-    meta = {**(a.meta or {}), "metrics": metrics}
-    return Artifact(payload=a.payload, meta=meta), timings
+    # Timings previously nested under ``meta['metrics']['_timings']``.  The
+    # report helper now owns them, so we return the artifact unchanged and let
+    # ``assemble_report`` incorporate timings alongside metrics.  Behaviour is
+    # equivalent: callers still receive step timings, but artifact metadata stays
+    # focused on pass-emitted metrics.
+    return a, timings
 
 
 def _maybe_emit_jsonl(
