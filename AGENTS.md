@@ -112,6 +112,14 @@ pdf_chunker/
     ├── splitter_transform_test.py
     ├── test_text_processing.py
     ├── text_cleaning_transform_test.py
+    ├── golden/
+    │   ├── expected/
+    │   │   ├── epub.jsonl
+    │   │   └── pdf.jsonl
+    │   ├── samples/
+    │   │   ├── sample.epub.b64
+    │   │   └── sample.pdf.b64
+    │   └── test_conversion.py
     ├── utils/
     │   ├── AGENTS.md
     │   └── common.sh              # Shared test utilities and formatting
@@ -124,7 +132,7 @@ pdf_chunker/
     └── underscore.b64
 `````
 
-*PDF fixtures for ligatures, underscores, and hyphenation are stored as Base64 to avoid binary artifacts and decoded during tests.*
+*PDF fixtures for ligatures, underscores, hyphenation, and golden conversion samples are stored as Base64 to avoid binary artifacts and decoded during tests.*
 
 ---
 
