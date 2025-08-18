@@ -1,4 +1,7 @@
-2. Canonical data shapes actually used today  
+1. To run the entire pipeline:
+- Here is an example of how the legacy script could be run: `python -m scripts.chunk_pdf --no-metadata --exclude-pages "1-4,31-35" document.pdf > document.jsonl`
+
+2. Canonical data shapes actually used today
 - The TypedDict `TextBlock` models EPUB segments with `type`, `text`, `language`, and `source` fields
 ```python
 class TextBlock(TypedDict):
@@ -50,7 +53,7 @@ class ValidationReport:
 ```
 
 
-3. Exact module paths + functions for each stage  
+3. Exact module paths + functions for each stage
 - Parser (PDF): `pdf_chunker/pdf_parsing.py::extract_text_blocks_from_pdf`
 
 - Parser (EPUB): `pdf_chunker/epub_parsing.py::extract_text_blocks_from_epub`
@@ -70,7 +73,7 @@ class ValidationReport:
 - JSONL writer: `scripts/chunk_pdf.py::main` prints JSON lines to stdout
 
 
-4. Side effects / IO boundaries  
+4. Side effects / IO boundaries
 - `extract_text_blocks_from_pdf` opens files via `fitz.open`
 
 - `extract_text_blocks_from_epub` uses `epub.read_epub` to read archives
@@ -82,7 +85,7 @@ class ValidationReport:
 - `chunk_pdf.main` writes JSONL by printing serialized chunks
 
 
-5. Config sources  
+5. Config sources
 - Env vars: `PDF_CHUNKER_USE_PYMUPDF4LLM` for PyMuPDF4LLM features; `OPENAI_API_KEY` for enrichment
 
 - YAML: tag vocabularies under `config/tags` loaded by `_load_tag_configs`
@@ -92,7 +95,7 @@ class ValidationReport:
 - Defaults: `min_chunk_size` defaults to `max(8, chunk_size // 10)`; `_truncate_chunk` uses an 8 kB soft limit
 
 
-6. Known edge cases you care about  
+6. Known edge cases you care about
 - Footnotes stripped to avoid mid‑sentence splits
 
 - Header/footer artifacts removed, including trailing “|” fragments
@@ -104,7 +107,7 @@ class ValidationReport:
 - Cross‑page paragraph merges and comma continuation fixes prevent orphaned fragments
 
 
-7. Representative small PDFs/EPUBs  
+7. Representative small PDFs/EPUBs
 - Root samples: `sample_book-bullets.pdf`, `sample_book-quote.pdf`, `sample_book-footer.pdf`, `sample_local-pdf.pdf`
 
 - Unit-test fixture: `test_data/sample_test.pdf`
@@ -112,11 +115,11 @@ class ValidationReport:
 - `generate_test_pdf.py` / `generate_test_epub.py` scripts produce additional synthetic files
 
 
-8. Current tests that must stay green  
+8. Current tests that must stay green
 - `pdf_extraction_test.py`, `ai_enrichment_test.py`, `semantic_chunking_test.py`, `page_exclusion_test.py`, `epub_spine_test.py`, `process_document_override_test.py`, `env_utils_test.py`, `list_detection_edge_case_test.py`, `page_artifact_detection_test.py`, `page_artifacts_edge_case_test.py`, `footer_artifact_test.py`, `artifact_block_test.py`, `scripts_cli_test.py`, `splitter_transform_test.py`, `text_cleaning_transform_test.py`
 
 
-9. Performance constraints  
+9. Performance constraints
 - Semantic pass enforces an 8 k character soft limit with 25 k hard truncation
 
 - `_truncate_chunk` trims text beyond 8 k characters and validation flags overlong chunks at that threshold
