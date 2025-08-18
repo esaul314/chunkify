@@ -15,7 +15,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `page_utils.py`: Page range parsing/filtering.
 - `epub_parsing.py`: Spine discovery and exclusion.
 - `splitter.py`: Enforces chunk boundaries and semantic cohesion.
-- `ai_enrichment.py`: Applies YAML-based tags.
+- `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
 - `utils.py`: Metadata mapping and helper functions.
 - `env_utils.py`: Environment flag helpers.
 - `page_artifacts.py`: Header/footer detection utilities.
