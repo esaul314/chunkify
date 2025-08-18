@@ -26,9 +26,10 @@ pdf_chunker/
 │   ├── __init__.py                # Package initializer
 │   ├── adapters/
 │   │   ├── __init__.py
+│   │   ├── ai_enrich.py           # LLM completion & tag config loading
 │   │   ├── io_pdf.py
 │   │   └── io_epub.py
-│   ├── ai_enrichment.py           # AI Pass: classification and YAML-based tagging
+│   ├── ai_enrichment.py           # Shim delegating to ai_enrich pass and adapter
 │   ├── core.py                    # Orchestrates the three-pass pipeline
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support

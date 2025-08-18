@@ -3,11 +3,11 @@ import sys
 # Ensure local package path for pdf_chunker imports
 sys.path.insert(0, ".")
 
-from pdf_chunker.ai_enrichment import (
+from pdf_chunker.adapters.ai_enrich import (
     _load_tag_configs,
-    classify_chunk_utterance,
     _process_chunk_for_file,
 )
+from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
 
 
 def _dummy_completion(_: str) -> str:
