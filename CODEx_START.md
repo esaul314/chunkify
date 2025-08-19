@@ -199,6 +199,7 @@ Pass purity & IO rules
 > * A pass may only transform in-memory values (Artifacts).
 > * Adapters perform all IO (PDF/EPUB read, subprocess fallbacks, JSONL write, LLM calls).
 > * If a pass needs data, it must be **given** that data as its input Artifact.
+Passes MUST NOT call legacy extractors or perform IO. Adapters (io_pdf, io_epub, emit_jsonl) perform all IO. A pass only transforms in-memory Artifacts.
 >
 > **Allowed imports inside passes:** `typing`, `itertools`, `collections.abc`, our `framework`, pure helpers under `passes/*`.
 > **Disallowed inside passes:** `fitz`, `PyPDF*`, `subprocess`, `requests`, `litellm` (and any adapter or legacy extractor).
