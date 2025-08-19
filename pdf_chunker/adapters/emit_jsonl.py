@@ -19,10 +19,9 @@ def _serialize(rows: Iterable[dict[str, Any]]) -> Iterator[str]:
 
 
 def _write(path: str, lines: Iterable[str]) -> None:
-    """Write iterable of lines to ``path`` with trailing newlines."""
+    """Write ``lines`` to ``path`` with trailing newlines."""
     with Path(path).open("w", encoding="utf-8") as f:
-        for line in lines:
-            f.write(f"{line}\n")
+        f.writelines(f"{line}\n" for line in lines)
 
 
 def maybe_write(
