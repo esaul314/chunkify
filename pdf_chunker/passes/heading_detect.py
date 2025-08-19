@@ -8,27 +8,58 @@ leans on functional iteration to keep the transform stateless and
 composable within the pipeline.
 """
 
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.heading_detection import (
+    TRAILING_PUNCTUATION,
     _detect_heading_fallback,
     _estimate_heading_level,
+    _has_heading_starter,
     get_heading_hierarchy,
 )
+import re
 
 
 Block = Dict[str, Any]
 
 
+def _estimate_threshold(text: str) -> Optional[int]:
+    words = text.split()
+    checks = (
+        (len(words) <= 3 and not text.endswith(TRAILING_PUNCTUATION), 3),
+        (text.isupper() and len(words) <= 8, 8),
+        (
+            text.istitle() and len(words) <= 10 and not text.endswith(TRAILING_PUNCTUATION),
+            10,
+        ),
+        (
+            _has_heading_starter(words)
+            and len(words) <= 8
+            and not text.endswith(TRAILING_PUNCTUATION),
+            8,
+        ),
+        (
+            len(words) >= 2
+            and re.match(r"^[\d\.\-]+$", words[0])
+            and len(words) <= 8
+            and not text.endswith(TRAILING_PUNCTUATION),
+            8,
+        ),
+    )
+    return next((thr for cond, thr in checks if cond), None)
+
+
 def _annotate(block: Block) -> Block:
     text = block.get("text", "").strip()
     is_heading = _detect_heading_fallback(text)
+    threshold = _estimate_threshold(text) if is_heading else None
     enriched = {
         **block,
         "text": text,
         "is_heading": is_heading,
         "heading_level": _estimate_heading_level(text) if is_heading else None,
+        "heading_threshold": threshold,
         "heading_source": "fallback" if is_heading else None,
     }
     if is_heading:
