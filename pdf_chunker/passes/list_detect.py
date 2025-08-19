@@ -103,16 +103,17 @@ def is_numbered_continuation(curr: str, nxt: str) -> bool:
 Block = Dict[str, Any]
 
 
+def _list_kind(curr: str, prev: str | None) -> str | None:
+    if starts_with_bullet(curr) or (prev and is_bullet_continuation(prev, curr)):
+        return "bullet"
+    if starts_with_number(curr) or (prev and is_numbered_continuation(prev, curr)):
+        return "numbered"
+    return None
+
+
 def _annotate(prev: Block | None, block: Block) -> Block:
-    text = block.get("text", "")
-    prev_text = prev.get("text", "") if prev else ""
-    kind = (
-        "bullet"
-        if starts_with_bullet(text) or (prev and is_bullet_continuation(prev_text, text))
-        else "numbered"
-        if starts_with_number(text) or (prev and is_numbered_continuation(prev_text, text))
-        else None
-    )
+    prev_text = prev.get("text") if prev else None
+    kind = _list_kind(block.get("text", ""), prev_text)
     return {**block, "type": "list_item", "list_kind": kind} if kind else block
 
 
@@ -132,11 +133,11 @@ def _annotate_page(page: Dict[str, Any]) -> Dict[str, Any]:
 def _annotate_doc(doc: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, int]]:
     pages = [_annotate_page(p) for p in doc.get("pages", [])]
     blocks = [b for p in pages for b in p.get("blocks", [])]
-    metrics = {
-        "bullet_items": sum(1 for b in blocks if b.get("list_kind") == "bullet"),
-        "numbered_items": sum(1 for b in blocks if b.get("list_kind") == "numbered"),
+    counts = {
+        "bullet_items": sum(b.get("list_kind") == "bullet" for b in blocks),
+        "numbered_items": sum(b.get("list_kind") == "numbered" for b in blocks),
     }
-    return {**doc, "pages": pages}, metrics
+    return {**doc, "pages": pages}, counts
 
 
 class _ListDetectPass:

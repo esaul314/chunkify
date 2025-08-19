@@ -4,6 +4,8 @@ sys.path.insert(0, ".")
 
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 from pdf_chunker.chunk_validation import validate_chunks
+from pdf_chunker.framework import Artifact
+from pdf_chunker.passes.list_detect import list_detect
 
 
 def test_bullet_list_preservation():
@@ -25,3 +27,12 @@ def test_bullet_list_preservation():
     assert "•\n\n•" not in blob
     assert "\n\nswamp" not in blob
     assert "swamp\n\nFollow" in blob
+
+
+def test_bullet_items_annotated_with_list_kind():
+    doc = {
+        "type": "page_blocks",
+        "pages": [{"page": 1, "blocks": [{"text": "• item"}, {"text": "plain"}]}],
+    }
+    annotated = list_detect(Artifact(payload=doc)).payload["pages"][0]["blocks"]
+    assert [b.get("list_kind") for b in annotated] == ["bullet", None]

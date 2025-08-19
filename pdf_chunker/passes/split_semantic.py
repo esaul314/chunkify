@@ -51,13 +51,18 @@ def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]
     )
 
 
+def _list_meta(block: Block) -> dict[str, str]:
+    return (
+        {"list_kind": block["list_kind"]}
+        if block.get("type") == "list_item" and block.get("list_kind")
+        else {}
+    )
+
+
 def _chunk_meta(page: int, block: Block, source: str | None) -> dict[str, Any]:
-    base = {"page": page}
-    if source is not None:
-        base["source"] = source
-    if (block_meta := block.get("meta")) and isinstance(block_meta, dict):
-        base.update(block_meta)
-    return base
+    base = {k: v for k, v in {"page": page, "source": source}.items() if v is not None}
+    block_meta = block.get("meta") if isinstance(block.get("meta"), dict) else {}
+    return {**base, **block_meta, **_list_meta(block)}
 
 
 def _chunk_items(doc: Doc, split_fn: SplitFn) -> Iterator[Chunk]:
