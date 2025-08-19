@@ -49,8 +49,12 @@ def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> None:
 def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     """Return validated steps while enforcing order and media-type invariants."""
     steps = list(spec.pipeline)
-    _ensure_clean_precedes_split(steps)
-    _ensure_pdf_epub_separation(steps, Path(input_path).suffix.lower())
+    ext = Path(input_path).suffix.lower()
+    validators = (
+        _ensure_clean_precedes_split,
+        lambda s: _ensure_pdf_epub_separation(s, ext),
+    )
+    tuple(v(steps) for v in validators)
     return _pass_steps(spec)
 
 
