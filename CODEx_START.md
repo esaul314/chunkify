@@ -1,3 +1,4 @@
+_Last updated: 2025-08-18_
 # CODEx_START — Refactor Kickoff and Guardrails
 
 This document tells the Codex agent exactly how to proceed. It complements:
@@ -190,6 +191,37 @@ For Codex agent — Legacy-aware migration rules
 
 (**Non-destructive change policy** remains in force.)
 
+
+
+Totally fine that CODEx\_START.md references `ARCHITECTURE_REFACTOR_TASKS.md` and `PROJECT_BOOTSTRAP.md`. Think of CODEx\_START as the “ops manual.” It should point to those docs even after features are built—they’re reference material, not todo lists.
+
+To keep Codex from re-doing work or overwriting things, add two tiny rules and a pre-merge protocol. Then we’ll review the upcoming **M-parse(PDF)** patch before merge.
+
+
+For Codex agent — Reference files are read-only
+
+* Treat `ARCHITECTURE_REFACTOR_TASKS.md`, `PROJECT_BOOTSTRAP.md`, and `MIGRATION_MAP.md` as **reference**.
+* Do **not** modify or regenerate them unless explicitly instructed.
+
+For Codex agent — Idempotent task behavior
+
+* If the required file(s)/function(s) already exist and satisfy acceptance criteria, **make no changes** and mark the task **DONE (no-op)** with the evidence (nox output / CLI check).
+* If a task would replace or delete working code, default to **non-destructive** (add wrappers/adapters) and ask for approval.
+
+## Pre-merge review protocol (use this for M-parse(PDF) and similar)
+
+**Checklist for the patch you’re reviewing:**
+
+1. **No IO inside the pass.** No `fitz.open`, file reads, subprocess, or network calls.
+2. **Input handling:** pass accepts either canonical `PageBlocks` **or** legacy `list[block]` (wraps via small helper).
+3. **Output shape:** returns canonical `PageBlocks`
+   `{"type":"page_blocks","source_path":..., "pages":[{"page":int,"blocks":[{...}], ...}]}`
+   and preserves legacy block fields when present: `type`, `text`, `language`, `source {filename,page,location}`, optional `bbox`.
+4. **Meta/metrics preserved:** returns a new `Artifact` with prior `meta` merged and `metrics["pdf_parse"]["pages"]` set.
+5. **Registry key unchanged:** still registers as `"pdf_parse"`; `passes/__init__.py` only appends import (no deletions).
+6. **Non-destructive:** legacy functions remain; patch adds wrappers/adapters only.
+7. **Scope:** ≤ 2 files (3 only if unavoidable), ≤ 150 changed lines.
+8. **Green checks:** scoped `nox -s lint typecheck tests` pass; `python -m pdf_chunker.cli inspect` lists `pdf_parse` with dict→dict.
 
 For Codex agent — Start Now
 
