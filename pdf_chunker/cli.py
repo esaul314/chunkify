@@ -1,36 +1,16 @@
 from __future__ import annotations
 
 import json
-from importlib import import_module
 from pathlib import Path
 from typing import Any, Dict
 
 import typer
 
+from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import load_spec
-from pdf_chunker.core_new import (
-    assemble_report,
-    run_convert,
-    run_inspect,
-    write_run_report,
-)
-from pdf_chunker.framework import Artifact
+from pdf_chunker.core_new import convert as run_convert, run_inspect
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
-
-
-def _adapter_for(path: str):
-    """Return IO adapter for ``path`` based on its extension."""
-    ext = Path(path).suffix.lower()
-    module = {".epub": "pdf_chunker.adapters.io_epub"}.get(ext, "pdf_chunker.adapters.io_pdf")
-    return import_module(module)
-
-
-def _initial_artifact(path: str) -> Artifact:
-    """Load ``path`` via adapter and wrap in an ``Artifact``."""
-    adapter = _adapter_for(path)
-    payload = adapter.read(path)
-    return Artifact(payload=payload, meta={"metrics": {}, "input": path})
 
 
 def _cli_overrides(
@@ -53,10 +33,8 @@ def convert(
 ):
     """Run the configured pipeline on ``input_path``."""
     s = load_spec(spec, overrides=_cli_overrides(out, chunk_size, overlap))
-    a = _initial_artifact(input_path)
-    a, timings = run_convert(a, s)
-    report = assemble_report(timings, a.meta or {})
-    write_run_report(s, report)
+    rows = run_convert(input_path, s)
+    emit_jsonl.write(rows, s.options.get("emit_jsonl", {}))
     typer.echo("convert: OK")
 
 
