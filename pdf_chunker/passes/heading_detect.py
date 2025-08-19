@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-"""Heading detection pass.
+"""Heading detection pass using fallback heuristics.
 
-Pure transform that enriches blocks with heading metadata and derives a
-heading hierarchy.  The pass operates on ``list`` structures to remain
-composable within the functional pipeline.
+Each block is annotated with heading metadata based on
+``heading_detection._detect_heading_fallback``.  The implementation
+leans on functional iteration to keep the transform stateless and
+composable within the pipeline.
 """
 
-from functools import reduce
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.heading_detection import (
-    detect_headings_hybrid,
+    _detect_heading_fallback,
+    _estimate_heading_level,
     get_heading_hierarchy,
 )
 
@@ -20,46 +21,25 @@ from pdf_chunker.heading_detection import (
 Block = Dict[str, Any]
 
 
-def enhance_blocks_with_heading_metadata(
-    blocks: Iterable[Block], extraction_method: str = "unknown"
-) -> List[Block]:
-    """Return blocks annotated with heading metadata."""
-
-    blocks_list = list(blocks)
-    heading_map = {
-        h["text"].strip().lower(): h
-        for h in detect_headings_hybrid(blocks_list, extraction_method)
+def _annotate(block: Block) -> Block:
+    text = block.get("text", "").strip()
+    is_heading = _detect_heading_fallback(text)
+    enriched = {
+        **block,
+        "text": text,
+        "is_heading": is_heading,
+        "heading_level": _estimate_heading_level(text) if is_heading else None,
+        "heading_source": "fallback" if is_heading else None,
     }
+    if is_heading:
+        enriched["type"] = "heading"
+    elif enriched.get("type") == "heading":
+        enriched["type"] = "paragraph"
+    return enriched
 
-    def step(
-        state: Tuple[str | None, List[Block]], block: Block
-    ) -> Tuple[str | None, List[Block]]:
-        current, acc = state
-        text = block.get("text", "").strip()
-        key = text.lower()
-        info = heading_map.get(key)
-        if info:
-            enriched = {
-                **block,
-                "text": text,
-                "is_heading": True,
-                "heading_level": info["level"],
-                "heading_source": info["source"],
-                "type": "heading",
-            }
-            return text, [*acc, enriched]
 
-        enriched = {
-            **block,
-            "text": text,
-            "is_heading": False,
-            **({"section_heading": current} if current else {}),
-        }
-        if enriched.get("type") == "heading":
-            enriched["type"] = "paragraph"
-        return current, [*acc, enriched]
-
-    return reduce(step, blocks_list, (None, []))[1]
+def annotate_headings(blocks: Iterable[Block]) -> List[Block]:
+    return [_annotate(b) for b in blocks]
 
 
 class _HeadingDetectPass:
@@ -72,8 +52,7 @@ class _HeadingDetectPass:
         if not isinstance(blocks, list):
             return a
 
-        extraction_method = (a.meta or {}).get("extraction_method", "unknown")
-        enhanced = enhance_blocks_with_heading_metadata(blocks, extraction_method)
+        enhanced = annotate_headings(blocks)
         hierarchy = get_heading_hierarchy(enhanced)
 
         meta = dict(a.meta or {})
@@ -84,4 +63,3 @@ class _HeadingDetectPass:
 
 
 heading_detect = register(_HeadingDetectPass())
-

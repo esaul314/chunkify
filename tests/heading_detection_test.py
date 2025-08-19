@@ -4,6 +4,8 @@ from pdf_chunker.heading_detection import (
     _detect_heading_fallback,
     detect_headings_from_font_analysis,
 )
+from pdf_chunker.framework import Artifact
+from pdf_chunker.passes.heading_detect import heading_detect
 from pdf_chunker.pdf_parsing import _spans_indicate_heading
 
 
@@ -29,6 +31,16 @@ class TestHeadingDetectionFallback(unittest.TestCase):
                 spans, "Considering this issue, no decision was made."
             )
         )
+
+
+class TestHeadingDetectPass(unittest.TestCase):
+    def test_pass_adds_heading_metadata(self) -> None:
+        blocks = [{"text": "Introduction"}, {"text": "Body"}]
+        artifact = Artifact(payload=blocks, meta={})
+        result = heading_detect(artifact).payload
+        self.assertTrue(result[0]["is_heading"])
+        self.assertEqual(result[0]["heading_source"], "fallback")
+        self.assertFalse(result[1]["is_heading"])
 
 
 if __name__ == "__main__":
