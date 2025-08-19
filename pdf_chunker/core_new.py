@@ -5,6 +5,7 @@ import re
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from functools import reduce
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,31 @@ def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, 
     # equivalent: callers still receive step timings, but artifact metadata stays
     # focused on pass-emitted metrics.
     return a, timings
+
+
+def _adapter_for(path: str):
+    """Return IO adapter for ``path`` based on its extension."""
+    ext = Path(path).suffix.lower()
+    module = {".epub": "pdf_chunker.adapters.io_epub"}.get(
+        ext, "pdf_chunker.adapters.io_pdf"
+    )
+    return import_module(module)
+
+
+def _input_artifact(path: str) -> Artifact:
+    """Load ``path`` via selected adapter and wrap in an ``Artifact``."""
+    adapter = _adapter_for(path)
+    payload = adapter.read(path)
+    abs_path = str(Path(path).resolve())
+    return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
+
+
+def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
+    """Convert document at ``path`` using ``spec`` and return emitted rows."""
+    artifact = _input_artifact(path)
+    steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
+    artifact, _ = _run_passes(steps, artifact)
+    return artifact.payload if isinstance(artifact.payload, list) else []
 
 
 def _maybe_emit_jsonl(

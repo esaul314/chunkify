@@ -24,6 +24,14 @@ def _write(path: str, lines: Iterable[str]) -> None:
         f.writelines(f"{line}\n" for line in lines)
 
 
+def write(rows: Iterable[dict[str, Any]], options: dict[str, Any]) -> None:
+    """Write ``rows`` to JSONL when ``output_path`` is configured."""
+    out_path = options.get("output_path")
+    if not out_path:
+        return
+    _write(out_path, _serialize(rows))
+
+
 def maybe_write(
     artifact: Artifact, options: dict[str, Any], timings: dict[str, float] | None = None
 ) -> None:
