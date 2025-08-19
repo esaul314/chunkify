@@ -563,6 +563,7 @@ def clean_paragraph(paragraph: str) -> str:
         remove_control_characters,
         consolidate_whitespace,
         normalize_ligatures,
+        remove_underscore_emphasis,
         consolidate_whitespace,
     )
 
@@ -661,7 +662,7 @@ def _clean_text_impl(text: str) -> str:
 def clean_text(text: str) -> str:
     """Shim maintaining legacy API while delegating to the text_clean pass."""
     from pdf_chunker.framework import Artifact
-    from pdf_chunker.passes import text_clean as _text_clean
+    from pdf_chunker.passes.text_clean import text_clean as _text_clean
 
     return _text_clean(Artifact(payload=text)).payload
 
