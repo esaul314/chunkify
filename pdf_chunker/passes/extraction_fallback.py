@@ -15,23 +15,27 @@ def _score(blocks: list[Block]) -> float:
     from pdf_chunker.extraction_fallbacks import _assess_text_quality
 
     text = "\n".join(b.get("text", "") for b in blocks)
-    return _assess_text_quality(text).get("quality_score", 0.0)
+    return float(_assess_text_quality(text).get("quality_score", 0.0))
 
 
-def _extract(path: str, reason: str | None) -> list[Block]:
+def _metrics(reason: str | None, blocks: list[Block]) -> dict[str, Any]:
+    metrics: dict[str, Any] = {"score": _score(blocks)}
+    return metrics if reason is None else {**metrics, "reason": reason}
+
+
+def _extract(path: str, reason: str | None) -> tuple[list[Block], dict[str, Any]]:
     from pdf_chunker.extraction_fallbacks import execute_fallback_extraction
 
-    return execute_fallback_extraction(path, fallback_reason=reason)
+    blocks = execute_fallback_extraction(path, fallback_reason=reason)
+    return blocks, _metrics(reason, blocks)
 
 
-def _meta(meta: dict[str, Any] | None, reason: str | None, score: float) -> dict[str, Any]:
+def _meta(meta: dict[str, Any] | None, metrics: dict[str, Any]) -> dict[str, Any]:
     """Return a new meta dict with fallback metrics merged immutably."""
 
-    metrics = (meta or {}).get("metrics", {})
-    fallback = {**metrics.get("extraction_fallback", {}), "score": score}
-    if reason:
-        fallback["reason"] = reason
-    return {**(meta or {}), "metrics": {**metrics, "extraction_fallback": fallback}}
+    metrics_root = (meta or {}).get("metrics", {})
+    fallback = {**metrics_root.get("extraction_fallback", {}), **metrics}
+    return {**(meta or {}), "metrics": {**metrics_root, "extraction_fallback": fallback}}
 
 
 class _ExtractionFallbackPass:
@@ -43,9 +47,8 @@ class _ExtractionFallbackPass:
         doc = a.payload if isinstance(a.payload, dict) else {}
         path = doc.get("source_path", "")
         reason = (a.meta or {}).get("fallback_reason")
-        blocks = _extract(path, reason)
-        score = _score(blocks)
-        meta = _meta(a.meta, reason, score)
+        blocks, metrics = _extract(path, reason)
+        meta = _meta(a.meta, metrics)
         return Artifact(payload=_blocks_doc(blocks, path), meta=meta)
 
 
