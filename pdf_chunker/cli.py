@@ -34,7 +34,7 @@ def convert(
     """Run the configured pipeline on ``input_path``."""
     s = load_spec(spec, overrides=_cli_overrides(out, chunk_size, overlap))
     rows = run_convert(input_path, s)
-    emit_jsonl.write(rows, s.options.get("emit_jsonl", {}))
+    emit_jsonl.write(rows, s.options.get("emit_jsonl", {}).get("output_path"))
     typer.echo("convert: OK")
 
 
