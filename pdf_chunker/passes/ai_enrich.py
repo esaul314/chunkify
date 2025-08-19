@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Protocol
 
 from pdf_chunker.framework import Artifact, register
 
@@ -77,17 +77,18 @@ Response:"""
         return {"classification": "error", "tags": []}
 
 
+class ClassifyClient(Protocol):
+    def classify_chunk_utterance(
+        self, text_chunk: str, *, tag_configs: Dict[str, List[str]]
+    ) -> Dict[str, Any]:
+        ...
+
+
 def _classify_chunk(
-    chunk: Chunk,
-    *,
-    classify: Callable[..., Dict[str, Any]],
-    tag_configs: Dict[str, List[str]],
-    completion_fn: Callable[[str], str],
+    chunk: Chunk, *, client: ClassifyClient, tag_configs: Dict[str, List[str]]
 ) -> Chunk:
-    result = classify(
-        chunk.get("text", ""),
-        tag_configs=tag_configs,
-        completion_fn=completion_fn,
+    result = client.classify_chunk_utterance(
+        chunk.get("text", ""), tag_configs=tag_configs
     )
     meta = {
         **chunk.get("metadata", {}),
@@ -103,19 +104,10 @@ def _classify_chunk(
 
 
 def _classify_all(
-    chunks: Chunks,
-    *,
-    classify: Callable[..., Dict[str, Any]],
-    tag_configs: Dict[str, List[str]],
-    completion_fn: Callable[[str], str],
+    chunks: Chunks, *, client: ClassifyClient, tag_configs: Dict[str, List[str]]
 ) -> Chunks:
     return [
-        _classify_chunk(
-            c,
-            classify=classify,
-            tag_configs=tag_configs,
-            completion_fn=completion_fn,
-        )
+        _classify_chunk(c, client=client, tag_configs=tag_configs)
         for c in chunks
     ]
 
@@ -131,24 +123,20 @@ class _AiEnrichPass:
     input_type = list
     output_type = list
 
-    def __init__(
-        self,
-        classify: Callable[..., Dict[str, Any]] = classify_chunk_utterance,
-    ) -> None:
-        self._classify = classify
+    def __init__(self, client: ClassifyClient | None = None) -> None:
+        self._client = client
 
     def __call__(self, a: Artifact) -> Artifact:
         chunks = a.payload if isinstance(a.payload, list) else []
         options = (a.meta or {}).get("ai_enrich", {})
-        completion_fn = options.get("completion_fn")
-        tag_configs = options.get("tag_configs", {})
-        if not completion_fn:
+        if not options.get("enabled", False):
             return a
+        client = options.get("client") or self._client
+        if not client:
+            return a
+        tag_configs = options.get("tag_configs", {})
         enriched = _classify_all(
-            chunks,
-            classify=self._classify,
-            tag_configs=tag_configs,
-            completion_fn=completion_fn,
+            chunks, client=client, tag_configs=tag_configs
         )
         meta = _update_meta(a.meta, len(enriched))
         return Artifact(payload=enriched, meta=meta)

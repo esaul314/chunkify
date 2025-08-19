@@ -11,6 +11,28 @@ import yaml
 from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
 
 
+class Client:
+    """Simple adapter wrapping ``classify_chunk_utterance`` for the pass."""
+
+    def __init__(
+        self,
+        *,
+        completion_fn: Callable[[str], str],
+        tag_configs: dict | None = None,
+    ) -> None:
+        self._completion_fn = completion_fn
+        self._tag_configs = tag_configs or _load_tag_configs()
+
+    def classify_chunk_utterance(
+        self, text: str, *, tag_configs: dict | None = None
+    ) -> dict:
+        return classify_chunk_utterance(
+            text,
+            tag_configs=tag_configs or self._tag_configs,
+            completion_fn=self._completion_fn,
+        )
+
+
 def _load_tag_configs(config_dir: str = "config/tags") -> dict:
     """Merge YAML tag configurations into a single dictionary."""
     config_path = Path(config_dir)
