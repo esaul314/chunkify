@@ -4,7 +4,7 @@ from pdf_chunker.passes.extraction_fallback import extraction_fallback
 
 def test_extraction_fallback_records_metrics(monkeypatch):
     def fake_extract(path: str, reason: str | None):
-        return [{"text": "hello"}]
+        return ([{"text": "hello"}], {"reason": reason, "score": 0.5})
 
     monkeypatch.setattr("pdf_chunker.passes.extraction_fallback._extract", fake_extract)
 
@@ -13,5 +13,4 @@ def test_extraction_fallback_records_metrics(monkeypatch):
 
     assert artifact.meta == {"fallback_reason": "low_quality"}
     metrics = result.meta["metrics"]["extraction_fallback"]
-    assert metrics["reason"] == "low_quality"
-    assert metrics["score"] > 0
+    assert metrics == {"reason": "low_quality", "score": 0.5}
