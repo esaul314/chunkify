@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+from functools import reduce
 from typing import Any, Dict, List
 
 import yaml
@@ -50,17 +51,21 @@ def _merge_options(
     base: Dict[str, Dict[str, Any]], override: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
     """Shallow-merge per-step options with comprehension; override wins."""
-    return {
-        s: {**base.get(s, {}), **override.get(s, {})}
-        for s in set(base) | set(override)
-    }
+    return {s: {**base.get(s, {}), **override.get(s, {})} for s in set(base) | set(override)}
 
 
-def load_spec(path: str | os.PathLike | None = "pipeline.yaml") -> PipelineSpec:
-    """Load YAML + env overrides into a validated PipelineSpec."""
+def load_spec(
+    path: str | os.PathLike | None = "pipeline.yaml",
+    overrides: Dict[str, Dict[str, Any]] | None = None,
+) -> PipelineSpec:
+    """Load YAML + env/CLI overrides into a validated PipelineSpec."""
     data = _read_yaml(path)
     opts = data.get("options", {})
-    merged = _merge_options(opts, _env_overrides())
+    merged = reduce(
+        _merge_options,
+        filter(None, [opts, _env_overrides(), overrides]),
+        {},
+    )
     if merged:
         data = {**data, "options": merged}
     return PipelineSpec.model_validate(data)
