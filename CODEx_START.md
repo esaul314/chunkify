@@ -191,12 +191,19 @@ For Codex agent — Legacy-aware migration rules
 
 (**Non-destructive change policy** remains in force.)
 
+Pass purity & IO rules
 
-
-Totally fine that CODEx\_START.md references `ARCHITECTURE_REFACTOR_TASKS.md` and `PROJECT_BOOTSTRAP.md`. Think of CODEx\_START as the “ops manual.” It should point to those docs even after features are built—they’re reference material, not todo lists.
-
-To keep Codex from re-doing work or overwriting things, add two tiny rules and a pre-merge protocol. Then we’ll review the upcoming **M-parse(PDF)** patch before merge.
-
+> **Pass purity (must):**
+>
+> * Passes **MUST NOT** open files, shell out, access network, or import modules whose top-level imports do IO.
+> * A pass may only transform in-memory values (Artifacts).
+> * Adapters perform all IO (PDF/EPUB read, subprocess fallbacks, JSONL write, LLM calls).
+> * If a pass needs data, it must be **given** that data as its input Artifact.
+>
+> **Allowed imports inside passes:** `typing`, `itertools`, `collections.abc`, our `framework`, pure helpers under `passes/*`.
+> **Disallowed inside passes:** `fitz`, `PyPDF*`, `subprocess`, `requests`, `litellm` (and any adapter or legacy extractor).
+>
+> **Testable guarantee:** we can monkeypatch any legacy extractor to raise; running the pass with in-memory payload should not call it.
 
 For Codex agent — Reference files are read-only
 
