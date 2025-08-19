@@ -13,21 +13,55 @@ from typing import Any
 
 from pdf_chunker.framework import Artifact, register
 
+
+def _soft_truncate(text: str, max_size: int = 8_000) -> str:
+    """Truncate ``text`` to ``max_size`` characters using simple heuristics."""
+    if len(text) <= max_size:
+        return text
+    cut = text.rfind(" ", 0, max_size - 100)
+    return text[: cut if cut > 0 else max_size - 100].strip()
+
+
 Doc = dict[str, Any]
 Block = dict[str, Any]
 Chunk = dict[str, Any]
 SplitFn = Callable[[str], list[str]]
+MetricFn = Callable[[], dict[str, int | bool]]
 
 
-def _get_split_fn() -> SplitFn:
-    """Return the semantic splitter or a block-level fallback."""
+def _get_split_fn(chunk_size: int, overlap: int, min_chunk_size: int) -> tuple[SplitFn, MetricFn]:
+    """Return a semantic splitter enforcing size limits and collecting metrics."""
+
+    soft_hits = 0
+    hard_hit = False
 
     try:
         from pdf_chunker.splitter import semantic_chunker
 
-        return lambda text: semantic_chunker(text) or ([text] if text else [])
+        def split(text: str) -> list[str]:
+            nonlocal soft_hits, hard_hit
+            hard_hit |= len(text) > 25_000
+            truncated = text[:25_000]
+            raw = semantic_chunker(
+                truncated,
+                chunk_size,
+                overlap,
+                min_chunk_size=min_chunk_size,
+            )
+            soft_hits += sum(len(c) > 8_000 for c in raw)
+            return [_soft_truncate(c) for c in raw if c]
+
     except Exception:  # pragma: no cover - safety fallback
-        return lambda text: [text] if text else []
+
+        def split(text: str) -> list[str]:
+            nonlocal soft_hits, hard_hit
+            hard_hit |= len(text) > 25_000
+            truncated = text[:25_000]
+            soft_hits += int(len(truncated) > 8_000)
+            return [_soft_truncate(truncated)] if truncated else []
+
+    metrics = lambda: {"soft_limit_hits": soft_hits, "hard_limit_hit": hard_hit}
+    return split, metrics
 
 
 def _iter_blocks(doc: Doc) -> Iterable[tuple[int, Block]]:
@@ -75,10 +109,12 @@ def _chunk_items(doc: Doc, split_fn: SplitFn) -> Iterator[Chunk]:
     )
 
 
-def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
+def _update_meta(
+    meta: dict[str, Any] | None, count: int, extra: dict[str, int | bool]
+) -> dict[str, Any]:
     base = dict(meta or {})
     metrics = base.setdefault("metrics", {}).setdefault("split_semantic", {})
-    metrics["chunks"] = count
+    metrics.update({"chunks": count, **extra})
     return base
 
 
@@ -87,13 +123,20 @@ class _SplitSemanticPass:
     input_type = dict  # expects {"type": "page_blocks"}
     output_type = dict  # returns {"type": "chunks", "items": [...]}
 
+    def __init__(
+        self, chunk_size: int = 400, overlap: int = 50, min_chunk_size: int | None = None
+    ) -> None:
+        self.chunk_size = chunk_size
+        self.overlap = overlap
+        self.min_chunk_size = min_chunk_size or max(8, chunk_size // 10)
+
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload
         if not isinstance(doc, dict) or doc.get("type") != "page_blocks":
             return a
-        split_fn = _get_split_fn()
+        split_fn, metric_fn = _get_split_fn(self.chunk_size, self.overlap, self.min_chunk_size)
         items = list(_chunk_items(doc, split_fn))
-        meta = _update_meta(a.meta, len(items))
+        meta = _update_meta(a.meta, len(items), metric_fn())
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
 
