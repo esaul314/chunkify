@@ -10,7 +10,7 @@ This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other
 | Pass | Module | Responsibility |
 | --- | --- | --- |
 | `ai_enrich` | `pdf_chunker.passes.ai_enrich` | Utterance classification and tag assignment. |
-| `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` |  |
+| `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` | Prepare chunk rows for JSONL output. |
 | `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` |  |
 | `heading_detect` | `pdf_chunker.passes.heading_detect` |  |
 | `list_detect` | `pdf_chunker.passes.list_detect` | List detection pass. |
