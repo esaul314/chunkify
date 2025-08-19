@@ -16,5 +16,6 @@ def test_registry_expected_keys_subset():
         "split_semantic",
         "ai_enrich",
         "list_detect",
+        "emit_jsonl",
     }
     assert expected <= registry().keys()
