@@ -183,13 +183,15 @@ def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
 
 
 def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, float]]:
-    """Run declared passes on ``a`` and return new artifact plus timings."""
+    """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     a, timings = _run_passes(steps, a)
     _maybe_emit_jsonl(a, spec, timings)
     warnings = _collect_warnings(a, spec)
-    a = Artifact(payload=a.payload, meta={**(a.meta or {}), "warnings": warnings})
-    return a, timings
+    meta = {**(a.meta or {}), "warnings": warnings}
+    report = assemble_report(timings, meta)
+    write_run_report(spec, report)
+    return Artifact(payload=a.payload, meta=meta), timings
 
 
 def run_inspect() -> dict[str, dict[str, str]]:
