@@ -8,3 +8,11 @@ repos:
     rev: 24.3.0
     hooks:
       - id: black
+- repo: local
+  hooks:
+    - id: forbid-io-in-passes
+      name: Forbid IO imports in passes
+      language: system
+      entry: bash -c 'grep -R -nE "(fitz|subprocess|requests|litellm|PyPDF)" pdf_chunker/passes && echo "Disallowed import in passes" && exit 1 || true'
+      files: ^pdf_chunker/passes/.*\.py$
+
