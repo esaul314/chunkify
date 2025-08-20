@@ -24,13 +24,15 @@ def _write(path: str, lines: Iterable[str]) -> None:
         f.writelines(f"{line}\n" for line in lines)
 
 
+def write(rows: Iterable[dict[str, Any]], path: str | None) -> None:
+    """Write ``rows`` to JSONL at ``path`` when provided."""
+    if not path:
+        return
+    _write(path, _serialize(rows))
+
+
 def maybe_write(
     artifact: Artifact, options: dict[str, Any], timings: dict[str, float] | None = None
 ) -> None:
     """Write artifact payload to JSONL if ``output_path`` is specified."""
-    out_path = options.get("output_path")
-    if not out_path:
-        return
-
-    lines = _serialize(_rows(artifact.payload))
-    _write(out_path, lines)
+    write(_rows(artifact.payload), options.get("output_path"))

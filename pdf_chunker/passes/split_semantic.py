@@ -9,6 +9,7 @@ metadata so downstream passes can enrich and emit JSONL rows.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
+from functools import partial
 from typing import Any
 
 from pdf_chunker.framework import Artifact, register
@@ -38,16 +39,17 @@ def _get_split_fn(chunk_size: int, overlap: int, min_chunk_size: int) -> tuple[S
     try:
         from pdf_chunker.splitter import semantic_chunker
 
+        semantic = partial(
+            semantic_chunker,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            min_chunk_size=min_chunk_size,
+        )
+
         def split(text: str) -> list[str]:
             nonlocal soft_hits, hard_hit
             hard_hit |= len(text) > 25_000
-            truncated = text[:25_000]
-            raw = semantic_chunker(
-                truncated,
-                chunk_size,
-                overlap,
-                min_chunk_size=min_chunk_size,
-            )
+            raw = semantic(text[:25_000])
             soft_hits += sum(len(c) > 8_000 for c in raw)
             return [_soft_truncate(c) for c in raw if c]
 
@@ -112,10 +114,14 @@ def _chunk_items(doc: Doc, split_fn: SplitFn) -> Iterator[Chunk]:
 def _update_meta(
     meta: dict[str, Any] | None, count: int, extra: dict[str, int | bool]
 ) -> dict[str, Any]:
-    base = dict(meta or {})
-    metrics = base.setdefault("metrics", {}).setdefault("split_semantic", {})
-    metrics.update({"chunks": count, **extra})
-    return base
+    metrics = {**{"chunks": count}, **extra}
+    existing = ((meta or {}).get("metrics") or {}).get("split_semantic", {})
+    merged_metrics = {**existing, **metrics}
+    existing_metrics = (meta or {}).get("metrics") or {}
+    return {
+        **(meta or {}),
+        "metrics": {**existing_metrics, "split_semantic": merged_metrics},
+    }
 
 
 class _SplitSemanticPass:

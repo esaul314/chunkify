@@ -5,6 +5,7 @@ import re
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from functools import reduce
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -48,8 +49,12 @@ def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> None:
 def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     """Return validated steps while enforcing order and media-type invariants."""
     steps = list(spec.pipeline)
-    _ensure_clean_precedes_split(steps)
-    _ensure_pdf_epub_separation(steps, Path(input_path).suffix.lower())
+    ext = Path(input_path).suffix.lower()
+    validators = (
+        _ensure_clean_precedes_split,
+        lambda s: _ensure_pdf_epub_separation(s, ext),
+    )
+    tuple(v(steps) for v in validators)
     return _pass_steps(spec)
 
 
@@ -70,6 +75,31 @@ def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, 
     # equivalent: callers still receive step timings, but artifact metadata stays
     # focused on pass-emitted metrics.
     return a, timings
+
+
+def _adapter_for(path: str):
+    """Return IO adapter for ``path`` based on its extension."""
+    ext = Path(path).suffix.lower()
+    module = {".epub": "pdf_chunker.adapters.io_epub"}.get(
+        ext, "pdf_chunker.adapters.io_pdf"
+    )
+    return import_module(module)
+
+
+def _input_artifact(path: str) -> Artifact:
+    """Load ``path`` via selected adapter and wrap in an ``Artifact``."""
+    adapter = _adapter_for(path)
+    payload = adapter.read(path)
+    abs_path = str(Path(path).resolve())
+    return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
+
+
+def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
+    """Convert document at ``path`` using ``spec`` and return emitted rows."""
+    artifact = _input_artifact(path)
+    steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
+    artifact, _ = _run_passes(steps, artifact)
+    return artifact.payload if isinstance(artifact.payload, list) else []
 
 
 def _maybe_emit_jsonl(
@@ -153,13 +183,15 @@ def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
 
 
 def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, float]]:
-    """Run declared passes on ``a`` and return new artifact plus timings."""
+    """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     a, timings = _run_passes(steps, a)
     _maybe_emit_jsonl(a, spec, timings)
     warnings = _collect_warnings(a, spec)
-    a = Artifact(payload=a.payload, meta={**(a.meta or {}), "warnings": warnings})
-    return a, timings
+    meta = {**(a.meta or {}), "warnings": warnings}
+    report = assemble_report(timings, meta)
+    write_run_report(spec, report)
+    return Artifact(payload=a.payload, meta=meta), timings
 
 
 def run_inspect() -> dict[str, dict[str, str]]:
