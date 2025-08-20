@@ -1,52 +1,52 @@
 from __future__ import annotations
 
-import argparse
-import inspect
+from importlib import import_module
 from pathlib import Path
-from typing import Iterable, Tuple
-
 import sys
+from typing import Iterable, Tuple
+import argparse
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT))
+BEGIN = "<!-- BEGIN AUTO-PASSES -->"
+END = "<!-- END AUTO-PASSES -->"
 
-from pdf_chunker.framework import registry
-import pdf_chunker.passes  # ensure registration side effects
-
-START_MARK = "<!-- responsibilities-start -->"
-END_MARK = "<!-- responsibilities-end -->"
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 
-def _pass_rows() -> Iterable[Tuple[str, str, str]]:
-    reg = registry()
-    doc = lambda o: inspect.getdoc(o) or inspect.getdoc(inspect.getmodule(o)) or ""
-    first = lambda s: s.splitlines()[0] if s else ""
-    return sorted((name, obj.__class__.__module__, first(doc(obj))) for name, obj in reg.items())
+def _pass_rows() -> list[Tuple[str, str, str]]:
+    from pdf_chunker import passes
+
+    def _doc(name: str) -> str:
+        module = import_module(f"pdf_chunker.passes.{name}")
+        doc = module.__doc__ or ""
+        return doc.strip().splitlines()[0] if doc else ""
+
+    return [(name, f"pdf_chunker.passes.{name}", _doc(name)) for name in sorted(passes.__all__)]
 
 
-def _format_table(rows: Iterable[Tuple[str, str, str]]) -> str:
-    header = "| Pass | Module | Responsibility |\n| --- | --- | --- |\n"
-    body = "\n".join(f"| `{n}` | `{m}` | {d} |" for n, m, d in rows)
-    return f"{header}{body}\n"
+def _table(rows: Iterable[Tuple[str, str, str]]) -> str:
+    header = "| Pass | Module | Responsibility |\n| --- | --- | --- |"
+    fmt = lambda r: f"| `{r[0]}` | `{r[1]}` | {r[2]} |"
+    return "\n".join([header, *map(fmt, rows), ""])
 
 
-def _inject_table(text: str, table: str) -> str:
-    before, _, rest = text.partition(START_MARK)
-    _, _, after = rest.partition(END_MARK)
-    return f"{before}{START_MARK}\n{table}{END_MARK}{after}"
+def _replace(md_path: Path, table: str) -> None:
+    text = md_path.read_text(encoding="utf-8")
+    if BEGIN not in text or END not in text:
+        raise SystemExit("AGENTS.md missing auto-pass markers")
+    pre, rest = text.split(BEGIN, 1)
+    _, post = rest.split(END, 1)
+    md_path.write_text("".join([pre, BEGIN, "\n", table, END, post]), encoding="utf-8")
 
 
-def main(path: Path) -> None:
-    updated = _inject_table(path.read_text(), _format_table(_pass_rows()))
-    path.write_text(updated)
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Update pass table in AGENTS.md")
+    parser.add_argument(
+        "--md", type=Path, default=Path(__file__).resolve().parents[1] / "AGENTS.md"
+    )
+    md_path = parser.parse_args().md
+    table = _table(_pass_rows())
+    _replace(md_path, table)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Regenerate responsibilities table in AGENTS.md")
-    parser.add_argument(
-        "--agents-path",
-        type=Path,
-        default=Path(__file__).resolve().parent.parent / "AGENTS.md",
-        help="Path to AGENTS.md to update",
-    )
-    main(parser.parse_args().agents_path)
+    main()
