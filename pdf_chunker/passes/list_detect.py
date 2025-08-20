@@ -24,9 +24,7 @@ def starts_with_bullet(text: str) -> bool:
     """Return True if ``text`` begins with a bullet marker or hyphen bullet."""
 
     stripped = text.lstrip()
-    return stripped.startswith(tuple(BULLET_CHARS)) or stripped.startswith(
-        HYPHEN_BULLET_PREFIX
-    )
+    return stripped.startswith(tuple(BULLET_CHARS)) or stripped.startswith(HYPHEN_BULLET_PREFIX)
 
 
 def _last_non_empty_line(text: str) -> str:
@@ -130,14 +128,17 @@ def _annotate_page(page: Dict[str, Any]) -> Dict[str, Any]:
     return {**page, "blocks": _annotate_blocks(page.get("blocks", []))}
 
 
-def _annotate_doc(doc: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, int]]:
-    pages = [_annotate_page(p) for p in doc.get("pages", [])]
-    blocks = [b for p in pages for b in p.get("blocks", [])]
-    counts = {
+def _count_kinds(blocks: Iterable[Block]) -> Dict[str, int]:
+    return {
         "bullet_items": sum(b.get("list_kind") == "bullet" for b in blocks),
         "numbered_items": sum(b.get("list_kind") == "numbered" for b in blocks),
     }
-    return {**doc, "pages": pages}, counts
+
+
+def _annotate_doc(doc: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, int]]:
+    pages = [_annotate_page(p) for p in doc.get("pages", [])]
+    blocks = [b for p in pages for b in p.get("blocks", [])]
+    return {**doc, "pages": pages}, _count_kinds(blocks)
 
 
 class _ListDetectPass:
