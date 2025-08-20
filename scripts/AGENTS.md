@@ -11,6 +11,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `validate_chunks.sh`: Semantic and size checks.
 - `detect_duplicates.py`: Overlap/duplicate analysis.
 - `_apply.sh`: Batch orchestration.
+- `parity.py`: Run legacy and new pipelines for comparison.
 
 ## AI Agent Guidance
 - Delegate core logic to library modules.
