@@ -3,7 +3,6 @@ pipeline:
   - text_clean
   - heading_detect
   - split_semantic
-  - ai_enrich
   - emit_jsonl
 
 options:
@@ -16,6 +15,7 @@ options:
     target_tokens: 800
     hard_page_boundaries: false
   ai_enrich:
+    enabled: false
     tags_file: "tags.yaml"
   emit_jsonl:
     output_path: "out.jsonl"
