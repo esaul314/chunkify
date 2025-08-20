@@ -6,18 +6,18 @@ This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other
 
 ## Pass Responsibilities
 
-<!-- responsibilities-start -->
+<!-- BEGIN AUTO-PASSES -->
 | Pass | Module | Responsibility |
 | --- | --- | --- |
-| `ai_enrich` | `pdf_chunker.passes.ai_enrich` | Utterance classification and tag assignment. |
-| `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` | Prepare chunk rows for JSONL output. |
+| `ai_enrich` | `pdf_chunker.passes.ai_enrich` |  |
+| `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` |  |
 | `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` |  |
 | `heading_detect` | `pdf_chunker.passes.heading_detect` |  |
 | `list_detect` | `pdf_chunker.passes.list_detect` | List detection pass. |
-| `pdf_parse` | `pdf_chunker.passes.pdf_parse` | Extract PDF blocks while remaining side-effect free. |
+| `pdf_parse` | `pdf_chunker.passes.pdf_parse` |  |
 | `split_semantic` | `pdf_chunker.passes.split_semantic` | Split ``page_blocks`` into canonical ``chunks``. |
 | `text_clean` | `pdf_chunker.passes.text_clean` |  |
-<!-- responsibilities-end -->
+<!-- END AUTO-PASSES -->
 
 ## Project Structure for OpenAI Codex Navigation
 
