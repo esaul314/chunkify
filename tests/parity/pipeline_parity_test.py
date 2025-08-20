@@ -6,6 +6,8 @@ from scripts.parity import run_parity
 from tests.parity.normalize import canonical_rows
 
 SAMPLES = Path("tests/golden/samples")
+ARTIFACTS = Path("artifacts/parity")
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 
 def _pdfs() -> list[Path]:
@@ -20,7 +22,7 @@ def _rows(path: Path) -> list[dict]:
 
 
 def _equal(pdf: Path, tmp: Path) -> bool:
-    legacy, new = run_parity(pdf, tmp)
+    legacy, new = run_parity(pdf, tmp, diffdir=ARTIFACTS)
     return _rows(legacy) == _rows(new)
 
 
