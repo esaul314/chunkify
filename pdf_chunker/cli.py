@@ -6,9 +6,8 @@ from typing import Any, Dict
 
 import typer
 
-from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import load_spec
-from pdf_chunker.core_new import convert as run_convert, run_inspect
+from pdf_chunker.core_new import _input_artifact, run_convert, run_inspect
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -30,11 +29,10 @@ def convert(
     chunk_size: int | None = typer.Option(None, "--chunk-size"),
     overlap: int | None = typer.Option(None, "--overlap"),
     spec: str = "pipeline.yaml",
-):
+): 
     """Run the configured pipeline on ``input_path``."""
     s = load_spec(spec, overrides=_cli_overrides(out, chunk_size, overlap))
-    rows = run_convert(input_path, s)
-    emit_jsonl.write(rows, s.options.get("emit_jsonl", {}).get("output_path"))
+    run_convert(_input_artifact(input_path), s)
     typer.echo("convert: OK")
 
 
