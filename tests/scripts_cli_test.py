@@ -35,6 +35,7 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         env={**os.environ, "PYTHONPATH": "."},
+        cwd=tmp_path,
     )
     assert result.returncode == 0
     rows = [
@@ -43,3 +44,5 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
         if line.strip()
     ]
     assert rows
+    report = json.loads((tmp_path / "run_report.json").read_text())
+    assert {"timings", "metrics", "warnings"} <= report.keys()
