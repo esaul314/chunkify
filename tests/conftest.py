@@ -3,7 +3,6 @@ from pathlib import Path
 import sys
 import base64
 
-import fitz
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -68,9 +67,8 @@ _CASES = (
 
 @pytest.fixture(params=_CASES, ids=("ligature", "underscore", "hyphenation"))
 def pdf_case(request):
+    fitz = pytest.importorskip("fitz")
     filename, func, expected = request.param
     pdf_bytes = base64.b64decode((_TEST_DATA / filename).read_text())
-    raw = "".join(
-        page.get_text() for page in fitz.open(stream=pdf_bytes, filetype="pdf")
-    )
+    raw = "".join(page.get_text() for page in fitz.open(stream=pdf_bytes, filetype="pdf"))
     return raw, func, expected
