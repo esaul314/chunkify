@@ -2,17 +2,21 @@
 
 Public API (stable):
 - fix_hyphenated_linebreaks
+- rejoin_hyphenated_words
 - collapse_artifact_breaks
 - remove_stray_bullet_lines
+- cleanup_bullet_fragments
 - merge_number_suffix_lines
 - insert_numbered_list_newlines
 - collapse_single_newlines
 - normalize_ligatures
 - normalize_quotes
 - remove_underscore_emphasis
+- strip_underscore_wrapping
 - normalize_newlines
 - remove_control_characters
 - consolidate_whitespace
+- strip_headers_and_footers
 - merge_spurious_paragraph_breaks
 - validate_json_safety
 - apply_json_safety_fixes
@@ -187,6 +191,11 @@ def fix_hyphenated_linebreaks(text: str) -> str:
     return pipe(text, _join_hyphenated_words, _remove_soft_hyphens)
 
 
+def rejoin_hyphenated_words(text: str) -> str:
+    """Public helper that reuses ``fix_hyphenated_linebreaks``."""
+    return fix_hyphenated_linebreaks(text)
+
+
 def _maybe_join_words(head: str, tail: str) -> str:
     """Return head+tail when the combined form is more plausible than separate words."""
 
@@ -276,6 +285,18 @@ def remove_stray_bullet_lines(text: str) -> str:
     text = STRAY_BULLET_AFTER_NEWLINE_RE.sub(" ", text)
     text = STRAY_BULLET_INLINE_RE.sub(" ", text)
     return re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", text)
+
+
+def cleanup_bullet_fragments(text: str) -> str:
+    """Public helper that delegates to ``remove_stray_bullet_lines``."""
+    return remove_stray_bullet_lines(text)
+
+
+def strip_headers_and_footers(text: str) -> str:
+    """Remove simple header/footer lines containing ``|`` separators."""
+    lines = text.splitlines()
+    filtered = (ln for ln in lines if "|" not in ln)
+    return "\n".join(filtered)
 
 
 def _split_inline_numbered(match: Match[str]) -> str:
@@ -460,6 +481,11 @@ def remove_underscore_emphasis(text: str) -> str:
     return cleaned.strip("_")
 
 
+def strip_underscore_wrapping(text: str) -> str:
+    """Public helper that removes underscore emphasis wrappers."""
+    return remove_underscore_emphasis(text)
+
+
 # ---------------------------------------------------------------------------
 # Paragraph merge logic
 # ---------------------------------------------------------------------------
@@ -555,15 +581,16 @@ def clean_paragraph(paragraph: str) -> str:
     """
     return pipe(
         paragraph,
-        fix_hyphenated_linebreaks,
+        rejoin_hyphenated_words,
+        strip_headers_and_footers,
         collapse_artifact_breaks,
-        remove_stray_bullet_lines,
+        cleanup_bullet_fragments,
         _preserve_list_newlines,
         normalize_quotes,
         remove_control_characters,
         consolidate_whitespace,
         normalize_ligatures,
-        remove_underscore_emphasis,
+        strip_underscore_wrapping,
         consolidate_whitespace,
     )
 
@@ -670,20 +697,24 @@ def clean_text(text: str) -> str:
 __all__ = [
     # public API
     "fix_hyphenated_linebreaks",
+    "rejoin_hyphenated_words",
     "collapse_artifact_breaks",
     "remove_stray_bullet_lines",
+    "cleanup_bullet_fragments",
     "merge_number_suffix_lines",
     "insert_numbered_list_newlines",
     "collapse_single_newlines",
     "normalize_ligatures",
     "normalize_quotes",
     "remove_underscore_emphasis",
+    "strip_underscore_wrapping",
     "normalize_newlines",
     "remove_control_characters",
     "consolidate_whitespace",
     "merge_spurious_paragraph_breaks",
     "validate_json_safety",
     "apply_json_safety_fixes",
+    "strip_headers_and_footers",
     "clean_paragraph",
     "clean_text",
 ]
