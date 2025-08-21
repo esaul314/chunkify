@@ -31,4 +31,9 @@ def typecheck(session):
 @nox.session
 def tests(session):
     session.install("-e", ".[dev]")
-    session.run("pytest", "-q", "tests/bootstrap", "--confcutdir=tests/bootstrap")
+    paths = (
+        f"tests/{suite}"
+        for suite in ("bootstrap", "golden", "parity")
+        if os.path.exists(f"tests/{suite}")
+    )
+    session.run("pytest", "-q", *paths)
