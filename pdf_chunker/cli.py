@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import typer
 
-from pdf_chunker.config import load_spec
+from pdf_chunker.config import PipelineSpec, load_spec
 from pdf_chunker.core_new import _input_artifact, run_convert, run_inspect
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -17,7 +17,7 @@ def _cli_overrides(
     chunk_size: int | None,
     overlap: int | None,
     enrich: bool,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     split_opts = {
         k: v for k, v in {"chunk_size": chunk_size, "overlap": overlap}.items() if v is not None
     }
@@ -34,9 +34,22 @@ def _cli_overrides(
     }
 
 
+def _enrich_spec(spec: PipelineSpec) -> PipelineSpec:
+    """Insert ``ai_enrich`` before ``emit_jsonl`` without mutating ``spec``."""
+    return spec.model_copy(
+        update={
+            "pipeline": [
+                step
+                for p in spec.pipeline
+                for step in (["ai_enrich", "emit_jsonl"] if p == "emit_jsonl" else [p])
+            ]
+        }
+    )
+
+
 @app.command()
 def convert(
-    input_path: str,
+    input_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
     out: Path | None = typer.Option(None, "--out"),
     chunk_size: int | None = typer.Option(None, "--chunk-size"),
     overlap: int | None = typer.Option(None, "--overlap"),
@@ -45,13 +58,8 @@ def convert(
 ):
     """Run the configured pipeline on ``input_path``."""
     s = load_spec(spec, overrides=_cli_overrides(out, chunk_size, overlap, enrich))
-    if enrich:
-        s["pipeline"] = [
-            step
-            for p in s["pipeline"]
-            for step in (["ai_enrich", "emit_jsonl"] if p == "emit_jsonl" else [p])
-        ]
-    run_convert(_input_artifact(input_path), s)
+    s = _enrich_spec(s) if enrich else s
+    run_convert(_input_artifact(str(input_path)), s)
     typer.echo("convert: OK")
 
 
