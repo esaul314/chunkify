@@ -119,18 +119,15 @@ def _merge_headings(
         yield pending
 
 
-def _list_meta(block: Block) -> dict[str, str]:
-    return (
-        {"list_kind": block["list_kind"]}
-        if block.get("type") == "list_item" and block.get("list_kind")
-        else {}
-    )
-
-
 def _chunk_meta(page: int, block: Block, source: str | None) -> dict[str, Any]:
     base = {k: v for k, v in {"page": page, "source": source}.items() if v is not None}
+    attrs = {
+        k: block[k]
+        for k in ("is_heading", "heading_level", "list_kind")
+        if block.get(k) is not None and (k != "list_kind" or block.get("type") == "list_item")
+    }
     block_meta = block.get("meta") if isinstance(block.get("meta"), dict) else {}
-    return {**base, **block_meta, **_list_meta(block)}
+    return {**base, **attrs, **block_meta}
 
 
 def _chunk_items(doc: Doc, split_fn: SplitFn) -> Iterator[Chunk]:
