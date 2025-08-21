@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import subprocess
 from pathlib import Path
 from shutil import which
@@ -23,11 +24,15 @@ def _materialize_sample_pdf() -> Path:
     return pdf_path
 
 
+def _cleanup(*paths: Path) -> None:
+    tuple(p.unlink(missing_ok=True) for p in paths)
+
+
 def test_cli_smoke() -> None:
     pdf_path = _materialize_sample_pdf()
     out_path = Path("tmp.jsonl")
-    if out_path.exists():
-        out_path.unlink()
+    report_path = Path("run_report.json")
+    _cleanup(out_path, report_path)
     result = subprocess.run(
         [
             "pdf_chunker",
@@ -42,5 +47,12 @@ def test_cli_smoke() -> None:
     try:
         assert result.returncode == 0
         assert out_path.exists()
+        rows = [
+            json.loads(line)
+            for line in out_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert rows
+        assert report_path.exists()
     finally:
-        out_path.unlink(missing_ok=True)
+        _cleanup(out_path, report_path)
