@@ -87,6 +87,38 @@ def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]
     )
 
 
+def _merge_headings(
+    seq: Iterator[tuple[int, Block, str]]
+) -> Iterator[tuple[int, Block, str]]:
+    """Attach standalone heading blocks to the following block.
+
+    When a block is marked as a ``heading`` it should not form its own chunk
+    unless it is the last block. This generator buffers a pending heading and
+    prepends it to the text of the next block, mirroring the legacy
+    :func:`pdf_chunker.splitter._fix_heading_splitting_issues` behaviour.
+    """
+
+    pending: tuple[int, Block, str] | None = None
+
+    for page, block, text in seq:
+        if pending:
+            h_page, h_block, h_text = pending
+            merged_text = f"{h_text}\n{text}".strip()
+            merged_block = {**block}
+            yield h_page, merged_block, merged_text
+            pending = None
+            continue
+
+        if block.get("type") == "heading":
+            pending = (page, block, text)
+            continue
+
+        yield page, block, text
+
+    if pending:
+        yield pending
+
+
 def _list_meta(block: Block) -> dict[str, str]:
     return (
         {"list_kind": block["list_kind"]}
@@ -105,9 +137,10 @@ def _chunk_items(doc: Doc, split_fn: SplitFn) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     source = doc.get("source_path")
+    merged = _merge_headings(_block_texts(doc, split_fn))
     return (
         {"id": str(i), "text": text, "meta": _chunk_meta(page, block, source)}
-        for i, (page, block, text) in enumerate(_block_texts(doc, split_fn))
+        for i, (page, block, text) in enumerate(merged)
     )
 
 
