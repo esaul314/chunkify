@@ -14,6 +14,7 @@ from itertools import chain
 from typing import Any
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.utils import _build_metadata
 
 
 def _soft_truncate(text: str, max_size: int = 8_000) -> str:
@@ -117,24 +118,25 @@ def _merge_headings(seq: Iterator[tuple[int, Block, str]]) -> Iterator[tuple[int
             return
 
 
-def _chunk_meta(page: int, block: Block, source: str | None) -> dict[str, Any]:
-    base = {k: v for k, v in {"page": page, "source": source}.items() if v is not None}
-    attrs = {
-        k: block[k]
-        for k in ("is_heading", "heading_level", "list_kind")
-        if block.get(k) is not None
-    }
-    block_meta = block.get("meta") if isinstance(block.get("meta"), dict) else {}
-    return {**base, **attrs, **block_meta}
+def _with_source(block: Block, page: int, filename: str | None) -> Block:
+    """Attach ``filename`` and ``page`` as a ``source`` entry when absent."""
+
+    existing = block.get("source") or {}
+    source = {**{"filename": filename, "page": page}, **existing}
+    return {**block, "source": {k: v for k, v in source.items() if v is not None}}
 
 
 def _chunk_items(doc: Doc, split_fn: SplitFn) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
-    source = doc.get("source_path")
+    filename = doc.get("source_path")
     merged = _merge_headings(_block_texts(doc, split_fn))
     return (
-        {"id": str(i), "text": text, "meta": _chunk_meta(page, block, source)}
+        {
+            "id": str(i),
+            "text": text,
+            "meta": _build_metadata(text, _with_source(block, page, filename), i, {}),
+        }
         for i, (page, block, text) in enumerate(merged)
     )
 

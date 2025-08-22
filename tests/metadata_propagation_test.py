@@ -25,8 +25,14 @@ def test_metadata_propagation() -> None:
     assert bullet_meta["list_kind"] == "bullet"
     assert bullet_meta["page"] == 1
     assert bullet_meta["source"] == "src.pdf"
+    assert bullet_meta["block_type"] == "list_item"
+    assert bullet_meta["language"] == "un"
+    assert bullet_meta["location"] is None
 
     numbered_meta = chunks[1]["meta"]
     assert numbered_meta["list_kind"] == "numbered"
     assert numbered_meta["page"] == 2
     assert numbered_meta["source"] == "src.pdf"
+    assert numbered_meta["block_type"] == "list_item"
+    assert numbered_meta["language"] == "un"
+    assert numbered_meta["location"] is None
