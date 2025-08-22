@@ -122,7 +122,7 @@ def _chunk_meta(page: int, block: Block, source: str | None) -> dict[str, Any]:
     attrs = {
         k: block[k]
         for k in ("is_heading", "heading_level", "list_kind")
-        if block.get(k) is not None and (k != "list_kind" or block.get("type") == "list_item")
+        if block.get(k) is not None
     }
     block_meta = block.get("meta") if isinstance(block.get("meta"), dict) else {}
     return {**base, **attrs, **block_meta}

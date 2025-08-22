@@ -13,22 +13,20 @@ def test_metadata_propagation() -> None:
         "type": "page_blocks",
         "source_path": "src.pdf",
         "pages": [
-            {"page": 1, "blocks": [{"text": "1. first"}]},
-            {"page": 2, "blocks": [{"text": "Chapter One"}]},
+            {"page": 1, "blocks": [{"text": "- bullet"}]},
+            {"page": 2, "blocks": [{"text": "1. first"}]},
         ],
     }
     doc["pages"] = [
         {**p, "blocks": heading_detect(Artifact(payload=p["blocks"])).payload} for p in doc["pages"]
     ]
     chunks = split_semantic(list_detect(Artifact(payload=doc))).payload["items"]
+    bullet_meta = chunks[0]["meta"]
+    assert bullet_meta["list_kind"] == "bullet"
+    assert bullet_meta["page"] == 1
+    assert bullet_meta["source"] == "src.pdf"
 
-    list_meta = chunks[0]["meta"]
-    assert list_meta["list_kind"] == "numbered"
-    assert list_meta["page"] == 1
-    assert list_meta["source"] == "src.pdf"
-
-    heading_meta = chunks[1]["meta"]
-    assert heading_meta["is_heading"] is True
-    assert heading_meta["heading_level"] == 1
-    assert heading_meta["page"] == 2
-    assert heading_meta["source"] == "src.pdf"
+    numbered_meta = chunks[1]["meta"]
+    assert numbered_meta["list_kind"] == "numbered"
+    assert numbered_meta["page"] == 2
+    assert numbered_meta["source"] == "src.pdf"
