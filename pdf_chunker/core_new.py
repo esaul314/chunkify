@@ -166,12 +166,27 @@ def _collect_warnings(a: Artifact, spec: PipelineSpec) -> list[str]:
     return [name for name, flag in _warning_checks(a, spec) if flag]
 
 
+def _legacy_counts(metrics: Mapping[str, Any]) -> dict[str, int]:
+    """Return aggregate page and chunk counts from pass metrics."""
+    pages = (metrics.get("pdf_parse") or {}).get("pages")
+    chunks = (
+        (metrics.get("split_semantic") or {}).get("chunks")
+        or (metrics.get("emit_jsonl") or {}).get("rows")
+    )
+    return {
+        k: v
+        for k, v in (("page_count", pages), ("chunk_count", chunks))
+        if v is not None
+    }
+
+
 def assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
     """Purely assemble run report data without performing IO."""
     metrics = dict(meta.get("metrics") or {})
+    counts = _legacy_counts(metrics)
     return {
         "timings": dict(timings),
-        "metrics": metrics,
+        "metrics": {**counts, **metrics},
         "warnings": list(meta.get("warnings") or []),
     }
 

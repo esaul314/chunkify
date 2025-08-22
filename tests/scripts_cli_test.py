@@ -46,3 +46,6 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
     assert rows
     report = json.loads((tmp_path / "run_report.json").read_text())
     assert {"timings", "metrics", "warnings"} <= report.keys()
+    assert report["metrics"]["page_count"] == 3
+    assert report["metrics"]["chunk_count"] == len(rows)
+    assert report["warnings"] == ["metadata_gaps"]
