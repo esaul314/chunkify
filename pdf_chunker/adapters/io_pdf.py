@@ -20,11 +20,23 @@ def _page_key(block: dict[str, Any]) -> int:
     return block.get("source", {}).get("page", 0)
 
 
+def _sorted_blocks(blocks: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return blocks sorted by page and original order."""
+
+    return [
+        block
+        for _, block in sorted(
+            enumerate(blocks),
+            key=lambda t: (_page_key(t[1]), t[1].get("source", {}).get("index", t[0])),
+        )
+    ]
+
+
 def _group_blocks(blocks: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Group blocks by page in ascending order."""
 
     key = _page_key
-    sorted_blocks = sorted(blocks, key=key)
+    sorted_blocks = _sorted_blocks(blocks)
     return [{"page": page, "blocks": list(group)} for page, group in groupby(sorted_blocks, key)]
 
 
@@ -53,21 +65,28 @@ def _env(name: str, value: str):
             os.environ[name] = original
 
 
-def _primary_blocks(path: str, exclude: str | None, use_pymupdf4llm: bool) -> list[dict[str, Any]]:
+def _primary_blocks(
+    path: str,
+    exclude_pages: Sequence[int] | str | None,
+    use_pymupdf4llm: bool,
+) -> list[dict[str, Any]]:
     """Extract blocks using the legacy parser with optional enhancement."""
 
+    exclude = _format_exclusions(exclude_pages)
     with _env("PDF_CHUNKER_USE_PYMUPDF4LLM", "1" if use_pymupdf4llm else "0"):
         from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 
         return extract_text_blocks_from_pdf(path, exclude)
 
 
-def _fallback_blocks(path: str, exclude: str | None) -> list[dict[str, Any]]:
+def _fallback_blocks(
+    path: str, exclude_pages: Sequence[int] | str | None
+) -> list[dict[str, Any]]:
     """Invoke subprocess-based fallback extraction strategies."""
 
     from pdf_chunker.extraction_fallbacks import execute_fallback_extraction
 
-    return execute_fallback_extraction(path, exclude)
+    return execute_fallback_extraction(path, _format_exclusions(exclude_pages))
 
 
 def read(
@@ -81,10 +100,9 @@ def read(
     global _PDFTOTEXT_TIMEOUT
     _PDFTOTEXT_TIMEOUT = timeout
     abs_path = str(Path(path))
-    excl = _format_exclusions(exclude_pages)
-    blocks = _primary_blocks(abs_path, excl, use_pymupdf4llm)
+    blocks = _primary_blocks(abs_path, exclude_pages, use_pymupdf4llm)
     if not blocks:
-        blocks = _fallback_blocks(abs_path, excl)
+        blocks = _fallback_blocks(abs_path, exclude_pages)
     return {
         "type": "page_blocks",
         "source_path": abs_path,
