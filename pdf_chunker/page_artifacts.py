@@ -7,8 +7,10 @@ from typing import Optional
 try:
     from .text_cleaning import clean_text
 except Exception:
+
     def clean_text(text: str) -> str:
         return text
+
 
 ROMAN_RE = r"[ivxlcdm]+"
 _ROMAN_MAP = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
@@ -114,12 +116,8 @@ def _match_page_number_suffix(text: str, page_num: Optional[int]) -> bool:
     m = re.search(r"\|\s*(\d{1,3})(?!\d)", text)
     if m:
         trailing = int(m.group(1))
-        if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(
-            text
-        ) - m.end() <= 20:
-            logger.debug(
-                "_match_page_number_suffix pipe pattern detected: %s", text[:30]
-            )
+        if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(text) - m.end() <= 20:
+            logger.debug("_match_page_number_suffix pipe pattern detected: %s", text[:30])
             return True
 
     m = re.search(rf"(?:^|\s|\|)({ROMAN_RE})\s*$", text, re.IGNORECASE)
@@ -137,9 +135,7 @@ def _match_page_number_suffix(text: str, page_num: Optional[int]) -> bool:
     m = re.search(rf"\|\s*({ROMAN_RE})(?![0-9ivxlcdm])", text, re.IGNORECASE)
     if m:
         trailing = _roman_to_int(m.group(1))
-        if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(
-            text
-        ) - m.end() <= 20:
+        if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(text) - m.end() <= 20:
             logger.debug(
                 "_match_page_number_suffix roman pipe pattern detected: %s",
                 text[:30],
@@ -185,11 +181,7 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
         logger.info("is_page_artifact_text() footnote detected: %s", text[:30])
         return True
 
-    if (
-        len(text.split()) <= 3
-        and len(text) <= 30
-        and any(char.isdigit() for char in text)
-    ):
+    if len(text.split()) <= 3 and len(text) <= 30 and any(char.isdigit() for char in text):
         return True
 
     return False
@@ -206,9 +198,7 @@ def strip_page_artifact_suffix(text: str, page_num: Optional[int]) -> str:
     page_str = match.group(1)
     trailing = int(page_str) if page_str.isdigit() else _roman_to_int(page_str)
     page_num = _normalize_page_num(page_num)
-    if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(
-        text
-    ) - match.end() <= 20:
+    if (page_num <= 0 or abs(trailing - page_num) <= 1) and len(text) - match.end() <= 20:
         logger.info("strip_page_artifact_suffix removed footer fragment: %s", text[:30])
         return text[: match.start()].rstrip()
 
@@ -261,15 +251,13 @@ FOOTNOTE_LINE_RE = re.compile(
 )
 
 
-def _remove_embedded_footnote(text: str) -> str:
+def _strip_footnote_lines(text: str) -> str:
     """Remove footnote lines merged into surrounding text."""
 
     return FOOTNOTE_LINE_RE.sub("", text)
 
 
-FOOTNOTE_MARKER_RE = re.compile(
-    rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+"
-)
+FOOTNOTE_MARKER_RE = re.compile(rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+")
 
 
 def _normalize_footnote_markers(text: str) -> str:
@@ -288,6 +276,27 @@ def _normalize_footnote_markers(text: str) -> str:
     return FOOTNOTE_MARKER_RE.sub(repl, text)
 
 
+TRAILING_FOOTER_RE = re.compile(
+    rf"\s*\|\s*(\d{{1,3}}|{ROMAN_RE})(?![0-9ivxlcdm])\s*$", re.IGNORECASE
+)
+
+
+def _strip_trailing_footer(text: str, page_num: Optional[int]) -> str:
+    """Remove a terminal ``"| N"`` fragment if it matches the page."""
+
+    match = TRAILING_FOOTER_RE.search(text)
+    if not match:
+        return text
+
+    page_str = match.group(1)
+    trailing = int(page_str) if page_str.isdigit() else _roman_to_int(page_str)
+    page_num = _normalize_page_num(page_num)
+    if page_num <= 0 or abs(trailing - page_num) <= 1:
+        logger.info("_strip_trailing_footer removed: %s", text[:30])
+        return text[: match.start()].rstrip()
+    return text
+
+
 def _flatten_markdown_table(text: str) -> str:
     """Flatten leading markdown table rows into plain lines.
 
@@ -302,22 +311,16 @@ def _flatten_markdown_table(text: str) -> str:
     if not stripped.startswith("|"):
         return text
 
-    lines = list(
-        takewhile(lambda ln: ln.lstrip().startswith("|"), stripped.splitlines())
-    )
+    lines = list(takewhile(lambda ln: ln.lstrip().startswith("|"), stripped.splitlines()))
     if not any("---" in ln for ln in lines):
         return text
 
     col_re = re.compile(r"^col\d+$", re.IGNORECASE)
     rule_re = re.compile(r"^[-:]+$")
 
-    cells = (
-        cell.strip() for line in lines for cell in line.strip().strip("|").split("|")
-    )
+    cells = (cell.strip() for line in lines for cell in line.strip().strip("|").split("|"))
 
-    filtered = (
-        c for c in cells if c and not col_re.fullmatch(c) and not rule_re.fullmatch(c)
-    )
+    filtered = (c for c in cells if c and not col_re.fullmatch(c) and not rule_re.fullmatch(c))
 
     expanded = (part.strip() for cell in filtered for part in cell.split("<br>"))
 
@@ -337,8 +340,9 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     pipeline = (
         _flatten_markdown_table,
         lambda t: _remove_inline_footer(t, page_num),
-        _remove_embedded_footnote,
+        _strip_footnote_lines,
         _normalize_footnote_markers,
+        lambda t: _strip_trailing_footer(t, page_num),
     )
     text = reduce(lambda acc, fn: fn(acc), pipeline, text)
 

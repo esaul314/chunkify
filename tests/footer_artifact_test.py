@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pdf_chunker.core import process_document
 from pdf_chunker.chunk_validation import validate_chunks
+from pdf_chunker.page_artifacts import remove_page_artifact_lines
 
 
 def test_footer_and_subfooter_removed():
@@ -43,3 +44,21 @@ def test_bullet_footer_removed():
     texts = [c["text"] for c in chunks]
     assert all("Faintly from Far in the Lincoln Woods" not in t for t in texts)
     assert len(chunks) == 1
+
+
+def test_inline_footnote_removed():
+    sample = "Some text\n1 Footnote text.\nNext line"
+    cleaned = remove_page_artifact_lines(sample, 1)
+    assert cleaned == "Some text\nNext line"
+
+
+def test_trailing_footer_removed():
+    sample = (
+        "This line contains more than sixty characters so inline footer "
+        "patterns skip it and keep content | 12"
+    )
+    expected = (
+        "This line contains more than sixty characters so inline footer "
+        "patterns skip it and keep content"
+    )
+    assert remove_page_artifact_lines(sample, 12) == expected
