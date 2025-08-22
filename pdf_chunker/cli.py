@@ -2,14 +2,48 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+import importlib.util as ilu
+import sys
+import types
 import typer
 
 from pdf_chunker.config import PipelineSpec, load_spec
-from pdf_chunker.core_new import _input_artifact, run_convert, run_inspect
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
+
+
+def _core_helpers(
+    enrich: bool,
+) -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
+    """Load core functions while stubbing AI adapters when ``enrich`` is False."""
+    if enrich:
+        from pdf_chunker.core_new import (
+            _input_artifact,
+            run_convert,
+            run_inspect,
+        )  # pragma: no cover
+
+        return _input_artifact, run_convert, run_inspect
+
+    base = Path(__file__).resolve().parent / "adapters"
+    pkg = types.ModuleType("pdf_chunker.adapters")
+    pkg.__path__ = [str(base)]
+    sys.modules.setdefault("pdf_chunker.adapters", pkg)
+
+    def _load(name: str) -> None:
+        spec = ilu.spec_from_file_location(f"pdf_chunker.adapters.{name}", base / f"{name}.py")
+        mod = ilu.module_from_spec(spec)
+        assert spec.loader
+        spec.loader.exec_module(mod)
+        sys.modules[f"pdf_chunker.adapters.{name}"] = mod
+        setattr(pkg, name, mod)
+
+    tuple(_load(n) for n in ("emit_jsonl", "io_pdf", "io_epub"))
+    from pdf_chunker.core_new import _input_artifact, run_convert, run_inspect
+
+    return _input_artifact, run_convert, run_inspect
 
 
 def _cli_overrides(
@@ -61,6 +95,7 @@ def convert(
     spec: str = "pipeline.yaml",
 ):
     """Run the configured pipeline on ``input_path``."""
+    _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
         spec,
         overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages),
@@ -73,6 +108,7 @@ def convert(
 @app.command()
 def inspect():
     """Print registered passes with their declared input/output types."""
+    _, _, run_inspect = _core_helpers(False)
     typer.echo(json.dumps(run_inspect(), indent=2))
 
 
