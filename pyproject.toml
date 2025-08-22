@@ -16,6 +16,14 @@ dependencies = [
   "structlog>=24.1",
   "funcy>=2.0",
   "pluggy>=1.5",
+  "ftfy>=6.3.1",
+  "langchain-text-splitters>=0.3.8",
+  "wordfreq>=3.1.1",
+  "haystack-ai>=2.15.1",
+  "textstat>=0.7.7",
+  "langdetect>=1.0.9",
+  "PyMuPDF>=1.26.3",
+  "python-dotenv>=1.1.1",
 ]
 
 [project.optional-dependencies]

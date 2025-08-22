@@ -14,8 +14,15 @@ import difflib
 from scripts import chunk_pdf
 
 
+LEGACY_FLAG_MAP = {"--chunk-size": "--chunk_size"}
+
+
+def _legacy_flags(flags: Sequence[str]) -> Sequence[str]:
+    return [LEGACY_FLAG_MAP.get(flag, flag) for flag in flags]
+
+
 def _run_legacy(pdf: Path, out_path: Path, flags: Sequence[str] = ()) -> Path:
-    argv = ["chunk_pdf.py", str(pdf), *flags]
+    argv = ["chunk_pdf.py", str(pdf), *_legacy_flags(flags)]
     with (
         out_path.open("w", encoding="utf-8") as f,
         redirect_stdout(f),
