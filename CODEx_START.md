@@ -231,6 +231,10 @@ For Codex agent — Idempotent task behavior
 7. **Scope:** ≤ 2 files (3 only if unavoidable), ≤ 150 changed lines.
 8. **Green checks:** scoped `nox -s lint typecheck tests` pass; `python -m pdf_chunker.cli inspect` lists `pdf_parse` with dict→dict.
 
+Parity-first (fixtures):
+* For `tests/golden` and `tests/parity` fixtures, prefer exact legacy equivalence. If a deviation is intentional, add it to `tests/parity/EXCEPTIONS.md` with a reason; otherwise, adjust passes/adapters to match legacy.
+
+
 For Codex agent — Start Now
 
 Begin with Story A from `ARCHITECTURE_REFACTOR_TASKS.md`
