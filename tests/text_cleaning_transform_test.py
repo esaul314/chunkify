@@ -34,3 +34,13 @@ def test_clean_paragraph_cleans_bullet_fragments():
 def test_clean_paragraph_removes_underscore_wrapping():
     text = "This is __bold__ and _italics_"
     assert clean_paragraph(text) == "This is bold and italics"
+
+
+def test_quotes_and_control_chars():
+    text = "Here\u202d are “quotes”\u202c"
+    expected = 'Here are "quotes"'
+    assert clean_paragraph(text) == expected
+
+    doc = {"type": "page_blocks", "pages": [{"page": 1, "blocks": [{"text": text}]}]}
+    cleaned = text_clean(Artifact(payload=doc)).payload["pages"][0]["blocks"][0]["text"]
+    assert cleaned == expected
