@@ -31,3 +31,12 @@ def test_heading_followed_by_list_item():
     ]
     chunks = _run(blocks)
     assert [c["text"] for c in chunks] == ["Intro\nBullet"]
+
+
+def test_terminal_heading_discarded():
+    blocks = [
+        {"text": "Body", "type": "paragraph"},
+        {"text": "Lonely", "type": "heading"},
+    ]
+    chunks = _run(blocks)
+    assert [c["text"] for c in chunks] == ["Body"]

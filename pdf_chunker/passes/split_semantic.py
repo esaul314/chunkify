@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
 from functools import partial
+from itertools import chain
 from typing import Any
 
 from pdf_chunker.framework import Artifact, register
@@ -87,36 +88,33 @@ def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]
     )
 
 
-def _merge_headings(
-    seq: Iterator[tuple[int, Block, str]]
-) -> Iterator[tuple[int, Block, str]]:
-    """Attach standalone heading blocks to the following block.
+def _is_heading(block: Block) -> bool:
+    """Return ``True`` when ``block`` represents a heading."""
 
-    When a block is marked as a ``heading`` it should not form its own chunk
-    unless it is the last block. This generator buffers a pending heading and
-    prepends it to the text of the next block, mirroring the legacy
-    :func:`pdf_chunker.splitter._fix_heading_splitting_issues` behaviour.
-    """
+    return block.get("type") == "heading"
 
-    pending: tuple[int, Block, str] | None = None
 
-    for page, block, text in seq:
-        if pending:
-            h_page, h_block, h_text = pending
-            merged_text = f"{h_text}\n{text}".strip()
-            merged_block = {**block}
-            yield h_page, merged_block, merged_text
-            pending = None
+def _merge_headings(seq: Iterator[tuple[int, Block, str]]) -> Iterator[tuple[int, Block, str]]:
+    """Attach consecutive headings to the following block and drop trailing ones."""
+
+    it = iter(seq)
+    for page, block, text in it:
+        if not _is_heading(block):
+            yield page, block, text
             continue
 
-        if block.get("type") == "heading":
-            pending = (page, block, text)
-            continue
-
-        yield page, block, text
-
-    if pending:
-        yield pending
+        pages = [page]
+        texts = [text]
+        for page, block, text in it:
+            if _is_heading(block):
+                pages.append(page)
+                texts.append(text)
+                continue
+            merged_text = "\n".join(chain(texts, [text])).strip()
+            yield pages[0], {**block}, merged_text
+            break
+        else:
+            return
 
 
 def _chunk_meta(page: int, block: Block, source: str | None) -> dict[str, Any]:
