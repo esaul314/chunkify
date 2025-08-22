@@ -645,6 +645,14 @@ def _clean_text_impl(text: str) -> str:
     text = fix_hyphenated_linebreaks(text)
     logger.debug(f"After fix_hyphenated_linebreaks: {_preview(text)}")
 
+    logger.debug("Calling normalize_quotes")
+    text = normalize_quotes(text)
+    logger.debug(f"After normalize_quotes: {_preview(text)}")
+
+    logger.debug("Calling remove_control_characters")
+    text = remove_control_characters(text)
+    logger.debug(f"After remove_control_characters: {_preview(text)}")
+
     logger.debug("Calling _fix_double_newlines")
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {_preview(text)}")
