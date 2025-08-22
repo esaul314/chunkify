@@ -110,6 +110,11 @@ def _is_common_sentence_starter(word: str) -> bool:
     return word in COMMON_SENTENCE_STARTERS
 
 
+def _is_comma_uppercase_continuation(curr_text: str, next_text: str) -> bool:
+    """Detect comma-ended blocks followed by uppercase-starting text."""
+    return curr_text.endswith(",") and next_text[:1].isupper()
+
+
 def _is_indented_continuation(curr: dict, nxt: dict) -> bool:
     curr_bbox = curr.get("bbox")
     next_bbox = nxt.get("bbox")
@@ -201,6 +206,8 @@ def _is_same_page_continuation(
         return False
     if curr_text.endswith((".", "!", "?", ":", ";")):
         return False
+    if _is_comma_uppercase_continuation(curr_text, next_text):
+        return True
     first_word = next_text.split()[0]
     return next_text[0].islower() or _is_common_sentence_starter(first_word)
 
