@@ -52,11 +52,19 @@ def _cli_overrides(
     overlap: int | None,
     enrich: bool,
     exclude_pages: str | None,
+    drop_meta: bool,
 ) -> dict[str, dict[str, Any]]:
     split_opts = {
         k: v for k, v in {"chunk_size": chunk_size, "overlap": overlap}.items() if v is not None
     }
-    emit_opts = {"output_path": str(out)} if out else {}
+    emit_opts = {
+        k: v
+        for k, v in {
+            "output_path": str(out) if out else None,
+            "drop_meta": True if drop_meta else None,
+        }.items()
+        if v is not None
+    }
     enrich_opts = {"enabled": True} if enrich else {}
     parse_opts = {"exclude_pages": exclude_pages} if exclude_pages else {}
     return {
@@ -92,13 +100,14 @@ def convert(
     overlap: int | None = typer.Option(None, "--overlap"),
     enrich: bool = typer.Option(False, "--enrich/--no-enrich"),
     exclude_pages: str | None = typer.Option(None, "--exclude-pages"),
+    no_metadata: bool = typer.Option(False, "--no-metadata"),
     spec: str = "pipeline.yaml",
 ):
     """Run the configured pipeline on ``input_path``."""
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
         spec,
-        overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages),
+        overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages, no_metadata),
     )
     s = _enrich_spec(s) if enrich else s
     run_convert(_input_artifact(str(input_path)), s)
