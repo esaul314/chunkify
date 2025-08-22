@@ -8,10 +8,13 @@ from typing import Any, Dict, Iterable, List
 
 
 def _page_key(mapping: Dict[str, int], block: Dict[str, Any]) -> int:
-    """Resolve spine index for grouping."""
+    """Resolve spine index for grouping.
 
-    location = block.get("source", {}).get("location", "")
-    return mapping.get(location, 0)
+    Unknown locations are appended after known spine items instead of
+    collapsing into page ``0``.
+    """
+    location = block.get("source", {}).get("location")
+    return mapping.get(location, len(mapping) + 1)
 
 
 def _group_blocks(
@@ -20,9 +23,10 @@ def _group_blocks(
     """Group blocks by computed spine index."""
 
     key = lambda blk: _page_key(mapping, blk)
+    sorted_blocks = sorted(blocks, key=key)
     return [
         {"page": page, "blocks": list(group)}
-        for page, group in groupby(sorted(blocks, key=key), key)
+        for page, group in groupby(sorted_blocks, key)
     ]
 
 
