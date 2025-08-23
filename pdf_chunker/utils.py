@@ -169,12 +169,17 @@ def process_chunk(
     enrichment_fn: Callable[[str], dict] | None,
     char_map: dict,
     original_blocks: list[dict],
-) -> dict | None:
-    """Process a single chunk and return enriched metadata if requested."""
+    ) -> dict | None:
+    """Process a single chunk, optionally generating metadata.
+
+    When ``generate_metadata`` is ``False`` only the cleaned ``text`` field is
+    returned.
+    """
     logger.debug("process_chunk() ENTRY - chunk %s", chunk_index)
 
-    final_text = _truncate_chunk((chunk.content or "").strip())
-    final_text = _fix_split_words(_fix_double_newlines(final_text))
+    final_text = _fix_split_words(
+        _fix_double_newlines(_truncate_chunk((chunk.content or "").strip()))
+    )
     if not final_text:
         logger.debug("process_chunk() EXIT - chunk %s - EMPTY CONTENT", chunk_index)
         return None
@@ -244,7 +249,11 @@ def format_chunks_with_metadata(
     }
     logger.debug("Original blocks contain pages: %s", sorted(original_pages))
 
-    char_map = _build_char_map(original_blocks)
+    char_map = (
+        _build_char_map(original_blocks)
+        if generate_metadata
+        else {"char_positions": ()}
+    )
 
     processor = partial(
         process_chunk,
@@ -252,7 +261,7 @@ def format_chunks_with_metadata(
         perform_ai_enrichment=perform_ai_enrichment,
         enrichment_fn=enrichment_fn,
         char_map=char_map,
-        original_blocks=original_blocks,
+        original_blocks=original_blocks if generate_metadata else [],
     )
 
     if perform_ai_enrichment:
