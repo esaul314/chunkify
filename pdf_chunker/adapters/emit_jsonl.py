@@ -24,7 +24,7 @@ def _maybe_drop_meta(
             return {"text": text}
         meta = r.get("meta", {}).copy()
         if isinstance(meta.get("utterance_type"), dict) and not meta["utterance_type"]:
-            meta["utterance_type"] = {"classification": "disabled", "tags": []}
+            meta["utterance_type"] = {"classification": "error", "tags": []}
         return {"text": text, "meta": meta}
 
     return (_row(r) for r in rows)

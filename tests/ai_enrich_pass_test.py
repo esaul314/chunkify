@@ -1,5 +1,6 @@
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.ai_enrich import ai_enrich
+from pdf_chunker.utils import _enrich_chunk
 
 
 class _DummyClient:
@@ -38,3 +39,7 @@ def test_ai_enrich_pass_enabled_enriches():
     assert enriched["metadata"]["tags"] == ["technical"]
     assert result.meta["metrics"]["ai_enrich"]["chunks"] == 1
     assert client.calls == 1
+
+
+def test_enrich_chunk_fallback_returns_error() -> None:
+    assert _enrich_chunk("hi", False, None)["classification"] == "error"
