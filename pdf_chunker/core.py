@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import Callable, Iterable, List, Sequence, Set
 from functools import partial
 
-from haystack.dataclasses import Document
-
-from .ai_enrichment import init_llm, classify_chunk_utterance, _load_tag_configs
+from .ai_enrichment import classify_chunk_utterance
 from .splitter import semantic_chunker
 from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
 
@@ -253,6 +251,8 @@ def setup_enrichment(
     if not perform_ai_enrichment:
         return False, None
     try:
+        from .ai_enrichment import init_llm, _load_tag_configs
+
         completion_fn = init_llm()
         tag_configs = _load_tag_configs()
         return True, partial(
@@ -316,6 +316,8 @@ def process_document(
         min_chunk_size=min_chunk_size,
         enable_dialogue_detection=enable_dialogue_detection,
     )
+    from haystack.dataclasses import Document
+
     haystack_documents = [
         Document(content=text, id=f"chunk_{i}")
         for i, text in enumerate(haystack_chunks)
