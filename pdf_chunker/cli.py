@@ -52,16 +52,22 @@ def _cli_overrides(
     overlap: int | None,
     enrich: bool,
     exclude_pages: str | None,
-    drop_meta: bool,
+    no_metadata: bool,
 ) -> dict[str, dict[str, Any]]:
     split_opts = {
-        k: v for k, v in {"chunk_size": chunk_size, "overlap": overlap}.items() if v is not None
+        k: v
+        for k, v in {
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+            "generate_metadata": False if no_metadata else None,
+        }.items()
+        if v is not None
     }
     emit_opts = {
         k: v
         for k, v in {
             "output_path": str(out) if out else None,
-            "drop_meta": True if drop_meta else None,
+            "drop_meta": True if no_metadata else None,
         }.items()
         if v is not None
     }
