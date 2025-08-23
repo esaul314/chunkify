@@ -322,9 +322,8 @@ def process_document(
         Document(content=text, id=f"chunk_{i}")
         for i, text in enumerate(haystack_chunks)
     ]
-    final_chunks = enricher(
-        haystack_documents,
-        filtered_blocks,
+    enricher_fn = partial(
+        enricher,
         generate_metadata=generate_metadata,
         perform_ai_enrichment=perform_ai_enrichment,
         enrichment_fn=enrichment_fn,
@@ -332,4 +331,5 @@ def process_document(
         min_chunk_size=min_chunk_size,
         enable_dialogue_detection=enable_dialogue_detection,
     )
+    final_chunks = enricher_fn(haystack_documents, filtered_blocks)
     return validate_chunks(final_chunks, exclude_pages, generate_metadata)
