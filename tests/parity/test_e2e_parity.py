@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from itertools import combinations
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import pytest
 
@@ -13,15 +13,25 @@ SAMPLES = Path("tests/golden/samples")
 PDFS = sorted(SAMPLES.glob("*.pdf"))
 
 
+def _project(row: Mapping[str, object]) -> dict:
+    base = {"text": row.get("text", "")}
+    meta_key = "metadata" if "metadata" in row else "meta" if "meta" in row else None
+    return base if meta_key is None else {**base, "metadata": row[meta_key]}
+
+
 def _rows(path: Path) -> list[dict]:
-    return [
-        {"text": r.get("text", ""), "metadata": r.get("metadata") or r.get("meta")}
-        for r in canonical_rows(path)
-    ]
+    return [_project(r) for r in canonical_rows(path)]
+
+
+def _assert_text_only(path: Path) -> None:
+    assert all(row.keys() == {"text"} for row in canonical_rows(path))
 
 
 def _equal(pdf: Path, tmp: Path, flags: Sequence[str]) -> bool:
     legacy, new = run_parity(pdf, tmp, flags)
+    if "--no-metadata" in flags:
+        _assert_text_only(legacy)
+        _assert_text_only(new)
     return _rows(legacy) == _rows(new)
 
 
