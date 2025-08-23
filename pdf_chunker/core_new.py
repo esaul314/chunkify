@@ -6,6 +6,7 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from functools import reduce
 from importlib import import_module
+from itertools import chain
 from pathlib import Path
 from typing import Any
 
@@ -137,11 +138,18 @@ def _underscore_loss(spec: PipelineSpec) -> bool:
     return engine == "pymupdf4llm"
 
 
-def _warning_checks(a: Artifact, spec: PipelineSpec) -> Iterable[tuple[str, bool]]:
+def _generate_metadata_enabled(spec: PipelineSpec) -> bool:
+    """Return True when chunk metadata generation is enabled."""
+    return spec.options.get("split_semantic", {}).get("generate_metadata", True)
+
+
+def _warning_checks(
+    a: Artifact, spec: PipelineSpec, generate_metadata: bool
+) -> Iterable[tuple[str, bool]]:
     """Yield pairs of warning names and their boolean status."""
     payload = a.payload if isinstance(a.payload, Iterable) else []
     chunks = [c for c in payload if isinstance(c, Mapping)]
-    return (
+    core = (
         (
             "footnote_anchors",
             _has_footnote(c.get("text", "") for c in chunks),
@@ -151,19 +159,28 @@ def _warning_checks(a: Artifact, spec: PipelineSpec) -> Iterable[tuple[str, bool
             _page_exclusion_noop(spec, a.meta or {}),
         ),
         (
-            "metadata_gaps",
-            _has_metadata_gaps(chunks),
-        ),
-        (
             "underscore_loss",
             _underscore_loss(spec),
         ),
     )
+    meta = (
+        (
+            "metadata_gaps",
+            _has_metadata_gaps(chunks),
+        ),
+    )
+    return chain(core, meta) if generate_metadata else core
 
 
-def _collect_warnings(a: Artifact, spec: PipelineSpec) -> list[str]:
+def _collect_warnings(
+    a: Artifact, spec: PipelineSpec, *, generate_metadata: bool
+) -> list[str]:
     """Return list of known-issue warnings derived from ``a`` and ``spec``."""
-    return [name for name, flag in _warning_checks(a, spec) if flag]
+    return [
+        name
+        for name, flag in _warning_checks(a, spec, generate_metadata)
+        if flag
+    ]
 
 
 def _legacy_counts(metrics: Mapping[str, Any]) -> dict[str, int]:
@@ -202,7 +219,8 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     a, timings = _run_passes(steps, a)
     _maybe_emit_jsonl(a, spec, timings)
-    warnings = _collect_warnings(a, spec)
+    gen_meta = _generate_metadata_enabled(spec)
+    warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
     meta = {**(a.meta or {}), "warnings": warnings}
     report = assemble_report(timings, meta)
     write_run_report(spec, report)

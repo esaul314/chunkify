@@ -14,6 +14,7 @@ options:
   split_semantic:
     target_tokens: 800
     hard_page_boundaries: false
+    generate_metadata: true
   ai_enrich:
     enabled: false
     tags_file: "tags.yaml"
