@@ -6,32 +6,35 @@
 # - Maintains proven reliability while leveraging PyMuPDF4LLM's evolving capabilities
 # - Reduces complexity compared to complex hybrid approaches
 
-import os
-from .pdf_parsing import extract_text_blocks_from_pdf
+from collections.abc import Callable
+from pathlib import Path
+
 from .epub_parsing import extract_text_blocks_from_epub
+from .pdf_parsing import extract_text_blocks_from_pdf
+
+Extractor = Callable[[Path, str | None], list[dict]]
 
 
-def extract_structured_text(filepath: str, exclude_pages: str = None) -> list[dict]:
-    """
-    Facade function to extract structured text from PDF or EPUB files.
+def _pdf_extractor(path: Path, exclude: str | None) -> list[dict]:
+    return extract_text_blocks_from_pdf(str(path), exclude_pages=exclude)
 
-    Args:
-        filepath: Path to the input file
-        exclude_pages: Pages to exclude (PDF only) or spine indices to exclude (EPUB only)
 
-    Returns:
-        List of structured text blocks
+def _epub_extractor(path: Path, exclude: str | None) -> list[dict]:
+    return extract_text_blocks_from_epub(str(path), exclude_spines=exclude)
 
-    Raises:
-        ValueError: if the file type is unsupported
-    """
-    extension = os.path.splitext(filepath)[1].lower()
 
-    match extension:
-        case ".pdf":
-            return extract_text_blocks_from_pdf(filepath, exclude_pages)
-        case ".epub":
-            # Pass exclude_pages as exclude_spines for EPUBs
-            return extract_text_blocks_from_epub(filepath, exclude_spines=exclude_pages)
-        case _:
-            raise ValueError(f"Unsupported file type: '{extension}'")
+DISPATCH: dict[str, Extractor] = {
+    ".pdf": _pdf_extractor,
+    ".epub": _epub_extractor,
+}
+
+
+def extract_structured_text(path: Path | str, exclude_pages: str | None = None) -> list[dict]:
+    """Select the proper extractor based on file suffix."""
+
+    p = Path(path)
+    try:
+        extractor = DISPATCH[p.suffix.lower()]
+    except KeyError as exc:  # pragma: no cover - defensive
+        raise ValueError(f"Unsupported file type: '{p.suffix}'") from exc
+    return extractor(p, exclude_pages)
