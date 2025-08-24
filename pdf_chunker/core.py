@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Callable, Iterable, List, Sequence, Set
+import logging
+from collections.abc import Callable, Iterable, Sequence
 from functools import partial
+from pathlib import Path
 
+from . import parsing
 from .ai_enrichment import classify_chunk_utterance
 from .splitter import semantic_chunker
 from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
-from .parsing import extract_structured_text
-
-import logging
 
 logger = logging.getLogger(__name__)
 
 # Type aliases enable dependency injection for testability
-Extractor = Callable[[str, str | None], List[dict]]
-Chunker = Callable[..., List[str]]
-Enricher = Callable[..., List[dict]]
+Extractor = Callable[[Path, str | None], list[dict]]
+Chunker = Callable[..., list[str]]
+Enricher = Callable[..., list[dict]]
 
 
-def parse_exclusions(exclude_pages: str | None) -> Set[int]:
+def parse_exclusions(exclude_pages: str | None) -> set[int]:
     """Parse a comma-separated page range string into a set of integers."""
     if not exclude_pages:
         return set()
@@ -33,24 +33,6 @@ def parse_exclusions(exclude_pages: str | None) -> Set[int]:
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("Error parsing exclude_pages: %s", exc)
         return set()
-
-
-def extract_blocks(filepath: str, exclude_pages: str | None) -> List[dict]:
-    """Extract structured text blocks from the PDF."""
-    from .pdf_parsing import extract_text_blocks_from_pdf
-
-    logger.debug("Starting PDF extraction for %s", filepath)
-    blocks = extract_text_blocks_from_pdf(filepath, exclude_pages=exclude_pages)
-    logger.debug("PDF extraction complete: %d blocks", len(blocks))
-    [
-        logger.debug(
-            "Block %d text preview: %r",
-            i,
-            block.get("text", "")[:100].replace("\n", "\\n"),
-        )
-        for i, block in enumerate(blocks[:3])
-    ]
-    return blocks
 
 
 def log_chunk_stats(chunks: Sequence[str], *, label: str = "Chunk") -> None:
@@ -132,7 +114,7 @@ def log_chunk_stats(chunks: Sequence[str], *, label: str = "Chunk") -> None:
         )
 
 
-def filter_blocks(blocks: Iterable[dict], excluded_pages: Set[int]) -> List[dict]:
+def filter_blocks(blocks: Iterable[dict], excluded_pages: set[int]) -> list[dict]:
     """Remove blocks that originate from excluded pages."""
     filtered = [
         block for block in blocks if block.get("source", {}).get("page") not in excluded_pages
@@ -160,7 +142,7 @@ def chunk_text(
     *,
     min_chunk_size: int,
     enable_dialogue_detection: bool,
-) -> List[str]:
+) -> list[str]:
     """Chunk blocks of text into semantic units."""
     full_text = "\n\n".join(block.get("text", "") for block in blocks if block.get("text", ""))
     chunks = semantic_chunker(
@@ -180,10 +162,10 @@ def chunk_text(
 
 
 def validate_chunks(
-    final_chunks: List[dict],
+    final_chunks: list[dict],
     exclude_pages: str | None,
     generate_metadata: bool,
-) -> List[dict]:
+) -> list[dict]:
     """Validate final chunks for exclusions and size limits."""
     if exclude_pages and generate_metadata:
         logger.debug("Validating page exclusions in final chunks")
@@ -234,7 +216,7 @@ def setup_enrichment(generate_metadata: bool, ai_enrichment: bool) -> tuple[bool
     if not perform_ai_enrichment:
         return False, None
     try:
-        from .ai_enrichment import init_llm, _load_tag_configs
+        from .ai_enrichment import _load_tag_configs, init_llm
 
         completion_fn = init_llm()
         tag_configs = _load_tag_configs()
@@ -249,7 +231,7 @@ def setup_enrichment(generate_metadata: bool, ai_enrichment: bool) -> tuple[bool
 
 
 def process_document(
-    filepath: str,
+    filepath: str | Path,
     chunk_size: int,
     overlap: int,
     *,
@@ -258,10 +240,10 @@ def process_document(
     exclude_pages: str | None = None,
     min_chunk_size: int | None = None,
     enable_dialogue_detection: bool = True,
-    extractor: Extractor = extract_structured_text,
+    extractor: Extractor = parsing.extract_structured_text,
     chunker: Chunker = chunk_text,
     enricher: Enricher = utils_format_chunks_with_metadata,
-) -> List[dict]:
+) -> list[dict]:
     """Process a PDF or EPUB document through extraction, chunking and enrichment.
 
     Parameters allow injection of custom callables for each stage, enabling
@@ -288,8 +270,9 @@ def process_document(
     perform_ai_enrichment, enrichment_fn = setup_enrichment(generate_metadata, ai_enrichment)
 
     excluded_pages = parse_exclusions(exclude_pages)
+    path = Path(filepath)
     # EPUB extractor interprets exclude_pages as spine indices
-    blocks = extractor(filepath, exclude_pages)
+    blocks = extractor(path, exclude_pages)
     filtered_blocks = filter_blocks(blocks, excluded_pages)
     haystack_chunks = chunker(
         filtered_blocks,

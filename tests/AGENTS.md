@@ -21,7 +21,7 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `footer_artifact_test.py`: Regression for footer and sub-footer removal and multi-page preservation
 - `artifact_block_test.py`: Numeric margin block detection conservatism
 - `scripts_cli_test.py`: CLI invocation sanity checks
-- `cli_epub_conversion_test.py`: CLI EPUB conversion parity with golden output
+- `test_conversion_epub_cli.py`: CLI EPUB conversion parity with golden output
 - `splitter_transform_test.py`: Chunk splitting of cleaned text artifacts
 - `text_cleaning_transform_test.py`: Ligature, underscore, and hyphenation normalization
 - Duplicate detection thresholds (via `detect_duplicates.py`).

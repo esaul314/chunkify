@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -12,7 +14,7 @@ def _materialize(src: Path, dst: Path) -> Path:
     return target
 
 
-def test_cli_epub_conversion(tmp_path: Path) -> None:
+def test_conversion_epub_cli(tmp_path: Path) -> None:
     b64_path = Path("tests/golden/samples/sample.epub.b64")
     epub_path = _materialize(b64_path, tmp_path)
     out_file = tmp_path / "out.jsonl"
