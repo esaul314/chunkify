@@ -137,10 +137,10 @@ def build_chunk_with_meta(
     text: str, block: Block, page: int, filename: str | None, index: int
 ) -> Chunk:
     """Return chunk payload enriched with metadata."""
-
-    meta = _build_metadata(text, _with_source(block, page, filename), index, {})
-    meta["language"] = "en"
-    return {"text": text, "meta": meta}
+    return {
+        "text": text,
+        "meta": _build_metadata(text, _with_source(block, page, filename), index, {}),
+    }
 
 
 def _chunk_items(doc: Doc, split_fn: SplitFn, generate_metadata: bool = True) -> Iterator[Chunk]:
