@@ -28,3 +28,12 @@ def _equal(pdf: Path, tmp: Path) -> bool:
 
 def test_new_matches_legacy(tmp_path: Path) -> None:
     assert all(_equal(pdf, tmp_path / pdf.stem) for pdf in _pdfs())
+
+
+def test_no_metadata_rows_contain_only_text(tmp_path: Path) -> None:
+    for pdf in _pdfs():
+        legacy, new = sp.run_parity(
+            pdf, tmp_path / pdf.stem, flags=["--no-metadata"], diffdir=ARTIFACTS
+        )
+        for path in (legacy, new):
+            assert all(r.keys() == {"text"} for r in canonical_rows(path))

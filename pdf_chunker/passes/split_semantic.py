@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
 from functools import partial
 from itertools import chain
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.utils import _build_metadata
@@ -127,16 +127,20 @@ def _with_source(block: Block, page: int, filename: str | None) -> Block:
     return {**block, "source": {k: v for k, v in source.items() if v is not None}}
 
 
-def _chunk_text(text: str) -> Chunk:
+def build_chunk(text: str) -> Chunk:
     """Return chunk payload containing only ``text``."""
 
     return {"text": text}
 
 
-def _chunk_with_meta(text: str, meta: Mapping[str, Any]) -> Chunk:
-    """Return chunk payload enriched with ``meta``."""
+def build_chunk_with_meta(
+    text: str, block: Block, page: int, filename: str | None, index: int
+) -> Chunk:
+    """Return chunk payload enriched with metadata."""
 
-    return {"text": text, "meta": dict(meta)}
+    meta = _build_metadata(text, _with_source(block, page, filename), index, {})
+    meta["language"] = "en"
+    return {"text": text, "meta": meta}
 
 
 def _chunk_items(doc: Doc, split_fn: SplitFn, generate_metadata: bool = True) -> Iterator[Chunk]:
@@ -148,12 +152,9 @@ def _chunk_items(doc: Doc, split_fn: SplitFn, generate_metadata: bool = True) ->
         {
             "id": str(i),
             **(
-                _chunk_with_meta(
-                    text,
-                    _build_metadata(text, _with_source(block, page, filename), i, {}),
-                )
+                build_chunk_with_meta(text, block, page, filename, i)
                 if generate_metadata
-                else _chunk_text(text)
+                else build_chunk(text)
             ),
         }
         for i, (page, block, text) in enumerate(merged)
