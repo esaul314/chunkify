@@ -9,6 +9,7 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `pdf_extraction_test.py`: Extractor accuracy and fallback thresholds
 - `ai_enrichment_test.py`: Classification correctness and tag injection
 - `ai_enrich_pass_test.py`: Pass-level enrichment and metadata injection
+- `convert_returns_rows_test.py`: `convert` yields rows for chunk dict payloads
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
