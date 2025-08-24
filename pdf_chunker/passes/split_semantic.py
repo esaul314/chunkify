@@ -126,9 +126,7 @@ def _with_source(block: Block, page: int, filename: str | None) -> Block:
     return {**block, "source": {k: v for k, v in source.items() if v is not None}}
 
 
-def _chunk_items(
-    doc: Doc, split_fn: SplitFn, meta_fn: Callable[[str, Block, int], dict[str, Any]]
-) -> Iterator[Chunk]:
+def _chunk_items(doc: Doc, split_fn: SplitFn, generate_metadata: bool) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
@@ -136,7 +134,11 @@ def _chunk_items(
     return (
         {
             **{"id": str(i), "text": text},
-            **meta_fn(text, _with_source(block, page, filename), i),
+            **(
+                {"meta": _build_metadata(text, _with_source(block, page, filename), i, {})}
+                if generate_metadata
+                else {}
+            ),
         }
         for i, (page, block, text) in enumerate(merged)
     )
@@ -178,12 +180,7 @@ class _SplitSemanticPass:
         if not isinstance(doc, dict) or doc.get("type") != "page_blocks":
             return a
         split_fn, metric_fn = _get_split_fn(self.chunk_size, self.overlap, self.min_chunk_size)
-        meta_fn = (
-            (lambda text, block, i: {"meta": _build_metadata(text, block, i, {})})
-            if self.generate_metadata
-            else (lambda *_: {})
-        )
-        items = list(_chunk_items(doc, split_fn, meta_fn))
+        items = list(_chunk_items(doc, split_fn, self.generate_metadata))
         meta = _update_meta(a.meta, len(items), metric_fn())
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
