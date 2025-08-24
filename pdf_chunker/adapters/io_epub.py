@@ -24,10 +24,7 @@ def _group_blocks(
 
     key = lambda blk: _page_key(mapping, blk)
     sorted_blocks = sorted(blocks, key=key)
-    return [
-        {"page": page, "blocks": list(group)}
-        for page, group in groupby(sorted_blocks, key)
-    ]
+    return [{"page": page, "blocks": list(group)} for page, group in groupby(sorted_blocks, key)]
 
 
 def _excluded_spines(spec: str | None, total: int, filename: str) -> set[int]:
@@ -69,6 +66,12 @@ def read_epub(path: str, spine: str | None = None) -> Dict[str, Any]:
         "source_path": abs_path,
         "pages": _group_blocks(blocks, mapping),
     }
+
+
+def read(path: str, exclude_pages: str | None = None) -> Dict[str, Any]:
+    """Compatibility wrapper exposing a standard ``read`` entrypoint."""
+
+    return read_epub(path, spine=exclude_pages)
 
 
 def describe_epub(path: str) -> Dict[str, str]:
