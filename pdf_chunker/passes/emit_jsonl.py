@@ -9,7 +9,8 @@ Doc = dict[str, Any]
 
 
 def _row(item: dict[str, Any]) -> Row:
-    return {"text": item.get("text", ""), "meta": item.get("meta", {})}
+    base = {"text": item.get("text", "")}
+    return base | ({"meta": item["meta"]} if "meta" in item else {})
 
 
 def _rows(doc: Doc) -> list[Row]:

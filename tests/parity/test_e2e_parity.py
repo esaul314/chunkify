@@ -8,6 +8,8 @@ import pytest
 
 from scripts.parity import run_parity
 from tests.parity.normalize import canonical_rows
+from pdf_chunker.framework import Artifact
+from pdf_chunker.passes.emit_jsonl import emit_jsonl
 
 SAMPLES = Path("tests/golden/samples")
 PDFS = sorted(SAMPLES.glob("*.pdf"))
@@ -63,3 +65,10 @@ def test_exclude_pages_yields_no_rows(tmp_path: Path, pdf: Path) -> None:
     legacy, new = run_parity(pdf, tmp_path / pdf.stem, ("--exclude-pages", "1"))
     assert list(canonical_rows(legacy)) == []
     assert list(canonical_rows(new)) == []
+
+
+def test_emit_jsonl_omits_meta_when_absent() -> None:
+    doc = {"type": "chunks", "items": [{"text": "hello"}]}
+    result = emit_jsonl(Artifact(payload=doc, meta={})).payload
+    assert result == [{"text": "hello"}]
+    assert all(row.keys() == {"text"} for row in result)
