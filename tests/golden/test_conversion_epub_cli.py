@@ -1,22 +1,19 @@
 from __future__ import annotations
-
-import base64
 import json
 import os
 import subprocess
 from pathlib import Path
 
+from tests.utils.materialize import materialize_base64
 
-def _materialize(src: Path, dst: Path) -> Path:
-    data = base64.b64decode(src.read_text())
-    target = dst / "sample.epub"
-    target.write_bytes(data)
-    return target
+BASE = Path(__file__).parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_conversion_epub_cli(tmp_path: Path) -> None:
-    b64_path = Path("tests/golden/samples/sample.epub.b64")
-    epub_path = _materialize(b64_path, tmp_path)
+    epub_path = materialize_base64(
+        BASE / "samples" / "sample.epub.b64", tmp_path, "sample.epub"
+    )
     out_file = tmp_path / "out.jsonl"
     cmd = [
         "python",
@@ -35,7 +32,7 @@ def test_conversion_epub_cli(tmp_path: Path) -> None:
         cmd,
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONPATH": "."},
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
         cwd=tmp_path,
     )
     assert result.returncode == 0
@@ -46,9 +43,7 @@ def test_conversion_epub_cli(tmp_path: Path) -> None:
     ]
     expected = [
         json.loads(line)
-        for line in Path("tests/golden/expected/epub.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
+        for line in (BASE / "expected" / "epub.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     assert actual == expected

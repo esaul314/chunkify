@@ -240,7 +240,7 @@ def process_document(
     exclude_pages: str | None = None,
     min_chunk_size: int | None = None,
     enable_dialogue_detection: bool = True,
-    extractor: Extractor = parsing.extract_structured_text,
+    extractor: Extractor | None = None,
     chunker: Chunker = chunk_text,
     enricher: Enricher = utils_format_chunks_with_metadata,
 ) -> list[dict]:
@@ -271,8 +271,8 @@ def process_document(
 
     excluded_pages = parse_exclusions(exclude_pages)
     path = Path(filepath)
-    # EPUB extractor interprets exclude_pages as spine indices
-    blocks = extractor(path, exclude_pages)
+    extractor = extractor or parsing.extract_structured_text
+    blocks = extractor(path, exclude_pages=exclude_pages)
     filtered_blocks = filter_blocks(blocks, excluded_pages)
     haystack_chunks = chunker(
         filtered_blocks,
