@@ -8,11 +8,11 @@ from functools import reduce
 from importlib import import_module
 from itertools import chain
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
-from pdf_chunker.framework import Artifact, registry, run_pipeline
+from pdf_chunker.framework import Artifact, registry
 
 
 def _pass_steps(spec: PipelineSpec) -> list[str]:
@@ -59,17 +59,32 @@ def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     return _pass_steps(spec)
 
 
-def _time_step(acc: tuple[Artifact, dict[str, float]], step: str) -> tuple[Artifact, dict[str, float]]:
-    """Run a single step and record its timing."""
-    a, timings = acc
-    t0 = time.time()
-    a = run_pipeline([step], a)
-    return a, {**timings, step: time.time() - t0}
+def _time_step(
+    opts: Mapping[str, Mapping[str, Any]],
+) -> Callable[[tuple[Artifact, dict[str, float]], str], tuple[Artifact, dict[str, float]]]:
+    """Return reducer that runs ``step`` with optional ``opts`` and records timing."""
+
+    def runner(
+        acc: tuple[Artifact, dict[str, float]], step: str
+    ) -> tuple[Artifact, dict[str, float]]:
+        a, timings = acc
+        p = registry()[step]
+        step_opts = opts.get(step, {})
+        p = p.__class__(**step_opts) if step_opts else p
+        t0 = time.time()
+        a = p(a)
+        return a, {**timings, step: time.time() - t0}
+
+    return runner
 
 
-def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, float]]:
+def _run_passes(
+    steps: Iterable[str],
+    a: Artifact,
+    opts: Mapping[str, Mapping[str, Any]] | None = None,
+) -> tuple[Artifact, dict[str, float]]:
     """Run ``steps`` sequentially while capturing per-step timings."""
-    a, timings = reduce(_time_step, steps, (a, {}))
+    a, timings = reduce(_time_step(opts or {}), steps, (a, {}))
     # Timings previously nested under ``meta['metrics']['_timings']``.  The
     # report helper now owns them, so we return the artifact unchanged and let
     # ``assemble_report`` incorporate timings alongside metrics.  Behaviour is
@@ -81,9 +96,7 @@ def _run_passes(steps: Iterable[str], a: Artifact) -> tuple[Artifact, dict[str, 
 def _adapter_for(path: str):
     """Return IO adapter for ``path`` based on its extension."""
     ext = Path(path).suffix.lower()
-    module = {".epub": "pdf_chunker.adapters.io_epub"}.get(
-        ext, "pdf_chunker.adapters.io_pdf"
-    )
+    module = {".epub": "pdf_chunker.adapters.io_epub"}.get(ext, "pdf_chunker.adapters.io_pdf")
     return import_module(module)
 
 
@@ -116,13 +129,11 @@ def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
     artifact = _input_artifact(path, spec)
     steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
-    artifact, _ = _run_passes(steps, artifact)
+    artifact, _ = _run_passes(steps, artifact, spec.options)
     return artifact.payload if isinstance(artifact.payload, list) else []
 
 
-def _maybe_emit_jsonl(
-    a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]
-) -> None:
+def _maybe_emit_jsonl(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
     """Write JSONL output when pipeline requests ``emit_jsonl``."""
     if "emit_jsonl" in spec.pipeline:
         emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), timings)
@@ -189,29 +200,18 @@ def _warning_checks(
     return chain(core, meta) if generate_metadata else core
 
 
-def _collect_warnings(
-    a: Artifact, spec: PipelineSpec, *, generate_metadata: bool
-) -> list[str]:
+def _collect_warnings(a: Artifact, spec: PipelineSpec, *, generate_metadata: bool) -> list[str]:
     """Return list of known-issue warnings derived from ``a`` and ``spec``."""
-    return [
-        name
-        for name, flag in _warning_checks(a, spec, generate_metadata)
-        if flag
-    ]
+    return [name for name, flag in _warning_checks(a, spec, generate_metadata) if flag]
 
 
 def _legacy_counts(metrics: Mapping[str, Any]) -> dict[str, int]:
     """Return aggregate page and chunk counts from pass metrics."""
     pages = (metrics.get("pdf_parse") or {}).get("pages")
-    chunks = (
-        (metrics.get("split_semantic") or {}).get("chunks")
-        or (metrics.get("emit_jsonl") or {}).get("rows")
-    )
-    return {
-        k: v
-        for k, v in (("page_count", pages), ("chunk_count", chunks))
-        if v is not None
-    }
+    chunks = (metrics.get("split_semantic") or {}).get("chunks") or (
+        metrics.get("emit_jsonl") or {}
+    ).get("rows")
+    return {k: v for k, v in (("page_count", pages), ("chunk_count", chunks)) if v is not None}
 
 
 def assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
@@ -234,7 +234,7 @@ def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
 def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, float]]:
     """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
-    a, timings = _run_passes(steps, a)
+    a, timings = _run_passes(steps, a, spec.options)
     _maybe_emit_jsonl(a, spec, timings)
     gen_meta = _generate_metadata_enabled(spec)
     warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
