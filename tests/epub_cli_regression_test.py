@@ -10,9 +10,17 @@ from tests.utils.materialize import materialize_base64
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
-    pdf_path = materialize_base64(
-        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+def _read_jsonl(path: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def test_cli_epub_matches_golden(tmp_path: Path) -> None:
+    epub = materialize_base64(
+        Path("tests/golden/samples/sample.epub.b64"), tmp_path, "sample.epub"
     )
     out_file = tmp_path / "out.jsonl"
     cmd = [
@@ -20,7 +28,7 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
         "-m",
         "pdf_chunker.cli",
         "convert",
-        str(pdf_path),
+        str(epub),
         "--chunk-size",
         "1000",
         "--overlap",
@@ -36,14 +44,7 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert result.returncode == 0
-    rows = [
-        json.loads(line)
-        for line in out_file.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert rows
-    report = json.loads((tmp_path / "run_report.json").read_text())
-    assert {"timings", "metrics", "warnings"} <= report.keys()
-    assert report["metrics"]["page_count"] == 3
-    assert report["metrics"]["chunk_count"] == len(rows)
-    assert report["warnings"] == ["metadata_gaps"]
+    actual = _read_jsonl(out_file)
+    expected = _read_jsonl(Path("tests/golden/expected/epub.jsonl"))
+    assert actual == expected
+

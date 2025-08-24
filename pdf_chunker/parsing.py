@@ -30,7 +30,11 @@ DISPATCH: dict[str, Extractor] = {
 
 
 def extract_structured_text(path: Path | str, exclude_pages: str | None = None) -> list[dict]:
-    """Select the proper extractor based on file suffix."""
+    """Return text blocks from a PDF or EPUB file.
+
+    The extractor is chosen solely by the file's suffix, keeping the function
+    free of side effects and external state.
+    """
 
     p = Path(path)
     try:
