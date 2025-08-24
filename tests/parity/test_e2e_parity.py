@@ -56,3 +56,10 @@ def flag_sets() -> list[tuple[str, ...]]:
 @pytest.mark.parametrize("flags", flag_sets(), ids=lambda f: " ".join(f) or "base")
 def test_e2e_parity_flags(tmp_path: Path, flags: tuple[str, ...]) -> None:
     assert all(_equal(pdf, tmp_path / f"{i}", flags) for i, pdf in enumerate(PDFS))
+
+
+@pytest.mark.parametrize("pdf", PDFS)
+def test_exclude_pages_yields_no_rows(tmp_path: Path, pdf: Path) -> None:
+    legacy, new = run_parity(pdf, tmp_path / pdf.stem, ("--exclude-pages", "1"))
+    assert list(canonical_rows(legacy)) == []
+    assert list(canonical_rows(new)) == []

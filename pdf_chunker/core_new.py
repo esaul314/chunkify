@@ -87,17 +87,34 @@ def _adapter_for(path: str):
     return import_module(module)
 
 
-def _input_artifact(path: str) -> Artifact:
-    """Load ``path`` via selected adapter and wrap in an ``Artifact``."""
-    adapter = _adapter_for(path)
-    payload = adapter.read(path)
+def _excluded_all(path: str, exclude: str | None) -> bool:
+    """Return True when ``exclude`` removes every page of ``path``."""
+    if not exclude:
+        return False
+    from pdf_chunker.page_utils import parse_page_ranges
+    import fitz
+
+    excluded = parse_page_ranges(exclude)
+    with fitz.open(path) as doc:
+        return set(range(1, len(doc) + 1)) <= excluded
+
+
+def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
+    """Load ``path`` honoring PDF exclusions from ``spec``."""
+    opts = (spec or PipelineSpec()).options.get("pdf_parse", {})
+    exclude = opts.get("exclude_pages")
     abs_path = str(Path(path).resolve())
+    payload = (
+        {"type": "page_blocks", "source_path": abs_path, "pages": []}
+        if _excluded_all(abs_path, exclude)
+        else _adapter_for(path).read(path, exclude_pages=exclude)
+    )
     return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
 
 
 def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
-    artifact = _input_artifact(path)
+    artifact = _input_artifact(path, spec)
     steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
     artifact, _ = _run_passes(steps, artifact)
     return artifact.payload if isinstance(artifact.payload, list) else []
