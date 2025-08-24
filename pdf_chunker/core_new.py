@@ -129,12 +129,21 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
     return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
 
 
+def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+    """Return chunk rows when ``payload`` is either a list or ``{"items": [...]}``."""
+    return (
+        payload
+        if isinstance(payload, list)
+        else payload.get("items", []) if isinstance(payload, Mapping) else []
+    )
+
+
 def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
     artifact = _input_artifact(path, spec)
     steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
     artifact, _ = _run_passes(steps, artifact, spec.options)
-    return artifact.payload if isinstance(artifact.payload, list) else []
+    return _rows_from_payload(artifact.payload)
 
 
 def _maybe_emit_jsonl(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
