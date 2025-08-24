@@ -70,7 +70,11 @@ def _time_step(
         a, timings = acc
         p = registry()[step]
         step_opts = opts.get(step, {})
-        p = p.__class__(**step_opts) if step_opts else p
+        if step_opts:
+            try:
+                p = p.__class__(**step_opts)
+            except TypeError:
+                p = p
         t0 = time.time()
         a = p(a)
         return a, {**timings, step: time.time() - t0}

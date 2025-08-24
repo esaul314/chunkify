@@ -12,10 +12,17 @@ def test_collect_warnings_flags_known_issues() -> None:
         pipeline=[],
         options={"pdf_parse": {"exclude_pages": "1", "engine": "pymupdf4llm"}},
     )
-    warnings = _collect_warnings(Artifact(payload=payload, meta={}), spec)
+    warnings = _collect_warnings(Artifact(payload=payload, meta={}), spec, generate_metadata=True)
     assert set(warnings) == {
         "footnote_anchors",
         "page_exclusion_noop",
         "metadata_gaps",
         "underscore_loss",
     }
+
+
+def test_collect_warnings_ignores_metadata_when_disabled() -> None:
+    payload = [{"text": "plain"}]
+    spec = PipelineSpec(options={"split_semantic": {"generate_metadata": False}})
+    warnings = _collect_warnings(Artifact(payload=payload, meta={}), spec, generate_metadata=False)
+    assert "metadata_gaps" not in warnings
