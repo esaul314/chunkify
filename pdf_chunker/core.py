@@ -1,4 +1,4 @@
-"""Core orchestration logic for PDF chunking."""
+"""Core orchestration logic for document chunking."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from functools import partial
 from .ai_enrichment import classify_chunk_utterance
 from .splitter import semantic_chunker
 from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
+from .parsing import extract_structured_text
 
 import logging
 
@@ -112,28 +113,20 @@ def log_chunk_stats(chunks: Sequence[str], *, label: str = "Chunk") -> None:
 
     oversized_chunks = [i for i, size in enumerate(chunk_sizes) if size > 10000]
     if oversized_chunks:
-        logger.warning(
-            "%d %ss exceed 10k characters", len(oversized_chunks), label.lower()
-        )
+        logger.warning("%d %ss exceed 10k characters", len(oversized_chunks), label.lower())
         list(
             map(
-                lambda i: logger.debug(
-                    "%s %d: %d characters", label, i, chunk_sizes[i]
-                ),
+                lambda i: logger.debug("%s %d: %d characters", label, i, chunk_sizes[i]),
                 oversized_chunks[:3],
             )
         )
 
     extreme_chunks = [i for i, size in enumerate(chunk_sizes) if size > 25000]
     if extreme_chunks:
-        logger.error(
-            "%d %ss exceed 25k characters!", len(extreme_chunks), label.lower()
-        )
+        logger.error("%d %ss exceed 25k characters!", len(extreme_chunks), label.lower())
         list(
             map(
-                lambda i: logger.debug(
-                    "%s %d: %d characters", label, i, chunk_sizes[i]
-                ),
+                lambda i: logger.debug("%s %d: %d characters", label, i, chunk_sizes[i]),
                 extreme_chunks,
             )
         )
@@ -142,9 +135,7 @@ def log_chunk_stats(chunks: Sequence[str], *, label: str = "Chunk") -> None:
 def filter_blocks(blocks: Iterable[dict], excluded_pages: Set[int]) -> List[dict]:
     """Remove blocks that originate from excluded pages."""
     filtered = [
-        block
-        for block in blocks
-        if block.get("source", {}).get("page") not in excluded_pages
+        block for block in blocks if block.get("source", {}).get("page") not in excluded_pages
     ]
     logger.debug("After filtering excluded pages, have %d blocks", len(filtered))
 
@@ -156,9 +147,7 @@ def filter_blocks(blocks: Iterable[dict], excluded_pages: Set[int]) -> List[dict
     logger.debug("Remaining pages after filtering: %s", sorted(remaining_pages))
     leaked_pages = remaining_pages & excluded_pages
     if leaked_pages:
-        logger.error(
-            "Excluded pages still present after filtering: %s", sorted(leaked_pages)
-        )
+        logger.error("Excluded pages still present after filtering: %s", sorted(leaked_pages))
     else:
         logger.debug("No excluded pages found in structured blocks")
     return filtered
@@ -173,9 +162,7 @@ def chunk_text(
     enable_dialogue_detection: bool,
 ) -> List[str]:
     """Chunk blocks of text into semantic units."""
-    full_text = "\n\n".join(
-        block.get("text", "") for block in blocks if block.get("text", "")
-    )
+    full_text = "\n\n".join(block.get("text", "") for block in blocks if block.get("text", ""))
     chunks = semantic_chunker(
         full_text,
         chunk_size,
@@ -224,9 +211,7 @@ def validate_chunks(
 
     logger.debug("Final pipeline output: %d chunks", len(final_chunks))
     if final_chunks:
-        log_chunk_stats(
-            [chunk.get("text", "") for chunk in final_chunks], label="Final chunk"
-        )
+        log_chunk_stats([chunk.get("text", "") for chunk in final_chunks], label="Final chunk")
         [
             logger.debug("Final chunk %d: %d characters", i, len(chunk.get("text", "")))
             for i, chunk in enumerate(final_chunks[:3])
@@ -243,9 +228,7 @@ def validate_chunks(
     return final_chunks
 
 
-def setup_enrichment(
-    generate_metadata: bool, ai_enrichment: bool
-) -> tuple[bool, Callable | None]:
+def setup_enrichment(generate_metadata: bool, ai_enrichment: bool) -> tuple[bool, Callable | None]:
     """Initialize enrichment components based on configuration."""
     perform_ai_enrichment = generate_metadata and ai_enrichment
     if not perform_ai_enrichment:
@@ -275,11 +258,11 @@ def process_document(
     exclude_pages: str | None = None,
     min_chunk_size: int | None = None,
     enable_dialogue_detection: bool = True,
-    extractor: Extractor = extract_blocks,
+    extractor: Extractor = extract_structured_text,
     chunker: Chunker = chunk_text,
     enricher: Enricher = utils_format_chunks_with_metadata,
 ) -> List[dict]:
-    """Process a document through extraction, chunking and enrichment.
+    """Process a PDF or EPUB document through extraction, chunking and enrichment.
 
     Parameters allow injection of custom callables for each stage, enabling
     alternate pipelines or simplified testing while defaulting to the standard
@@ -302,11 +285,10 @@ def process_document(
     if min_chunk_size is None:
         min_chunk_size = max(8, chunk_size // 10)
 
-    perform_ai_enrichment, enrichment_fn = setup_enrichment(
-        generate_metadata, ai_enrichment
-    )
+    perform_ai_enrichment, enrichment_fn = setup_enrichment(generate_metadata, ai_enrichment)
 
     excluded_pages = parse_exclusions(exclude_pages)
+    # EPUB extractor interprets exclude_pages as spine indices
     blocks = extractor(filepath, exclude_pages)
     filtered_blocks = filter_blocks(blocks, excluded_pages)
     haystack_chunks = chunker(
@@ -319,8 +301,7 @@ def process_document(
     from haystack.dataclasses import Document
 
     haystack_documents = [
-        Document(content=text, id=f"chunk_{i}")
-        for i, text in enumerate(haystack_chunks)
+        Document(content=text, id=f"chunk_{i}") for i, text in enumerate(haystack_chunks)
     ]
     enricher_fn = partial(
         enricher,
