@@ -185,4 +185,14 @@ class _SplitSemanticPass:
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
 
-split_semantic = register(_SplitSemanticPass())
+def make_splitter(**opts: Any) -> _SplitSemanticPass:
+    """Factory returning a configured ``split_semantic`` pass."""
+    chunk_size = int(opts.get("chunk_size", 400))
+    overlap = int(opts.get("overlap", 50))
+    gen_meta = bool(opts.get("generate_metadata", True))
+    return _SplitSemanticPass(
+        chunk_size=chunk_size, overlap=overlap, generate_metadata=gen_meta
+    )
+
+
+split_semantic = register(make_splitter())

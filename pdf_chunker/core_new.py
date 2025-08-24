@@ -6,13 +6,14 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from functools import reduce
 from importlib import import_module
+from dataclasses import is_dataclass, replace
 from itertools import chain
 from pathlib import Path
 from typing import Any, Callable
 
 from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
-from pdf_chunker.framework import Artifact, registry
+from pdf_chunker.framework import Artifact, Pass, registry
 
 
 def _pass_steps(spec: PipelineSpec) -> list[str]:
@@ -59,41 +60,35 @@ def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     return _pass_steps(spec)
 
 
+def _configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
+    """Return ``pass_obj`` with ``opts`` merged into its configuration."""
+    if not opts:
+        return pass_obj
+    if is_dataclass(pass_obj):
+        return replace(pass_obj, **opts)
+    try:
+        return pass_obj.__class__(**{**pass_obj.__dict__, **opts})
+    except Exception:  # pragma: no cover - best effort
+        return pass_obj
+
+
 def _time_step(
-    opts: Mapping[str, Mapping[str, Any]],
-) -> Callable[[tuple[Artifact, dict[str, float]], str], tuple[Artifact, dict[str, float]]]:
-    """Return reducer that runs ``step`` with optional ``opts`` and records timing."""
-
-    def runner(
-        acc: tuple[Artifact, dict[str, float]], step: str
-    ) -> tuple[Artifact, dict[str, float]]:
-        a, timings = acc
-        p = registry()[step]
-        step_opts = opts.get(step, {})
-        if step_opts:
-            try:
-                p = p.__class__(**step_opts)
-            except TypeError:
-                p = p
-        t0 = time.time()
-        a = p(a)
-        return a, {**timings, step: time.time() - t0}
-
-    return runner
-
-
-def _run_passes(
-    steps: Iterable[str],
-    a: Artifact,
-    opts: Mapping[str, Mapping[str, Any]] | None = None,
+    acc: tuple[Artifact, dict[str, float]],
+    p: Pass,
 ) -> tuple[Artifact, dict[str, float]]:
-    """Run ``steps`` sequentially while capturing per-step timings."""
-    a, timings = reduce(_time_step(opts or {}), steps, (a, {}))
-    # Timings previously nested under ``meta['metrics']['_timings']``.  The
-    # report helper now owns them, so we return the artifact unchanged and let
-    # ``assemble_report`` incorporate timings alongside metrics.  Behaviour is
-    # equivalent: callers still receive step timings, but artifact metadata stays
-    # focused on pass-emitted metrics.
+    """Apply ``p`` to ``acc`` while recording its execution time."""
+    a, timings = acc
+    t0 = time.time()
+    a = p(a)
+    return a, {**timings, p.name: time.time() - t0}
+
+
+def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, float]]:
+    """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
+    passes = [
+        _configure_pass(registry()[s], spec.options.get(s, {})) for s in spec.pipeline
+    ]
+    a, timings = reduce(_time_step, passes, (a, {}))
     return a, timings
 
 
@@ -142,7 +137,8 @@ def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
     artifact = _input_artifact(path, spec)
     steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
-    artifact, _ = _run_passes(steps, artifact, spec.options)
+    run_spec = PipelineSpec(pipeline=steps, options=spec.options)
+    artifact, _ = _run_passes(run_spec, artifact)
     return _rows_from_payload(artifact.payload)
 
 
@@ -247,7 +243,8 @@ def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
 def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, float]]:
     """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
-    a, timings = _run_passes(steps, a, spec.options)
+    run_spec = PipelineSpec(pipeline=steps, options=spec.options)
+    a, timings = _run_passes(run_spec, a)
     _maybe_emit_jsonl(a, spec, timings)
     gen_meta = _generate_metadata_enabled(spec)
     warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
