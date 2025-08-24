@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator
 from functools import partial
 from itertools import chain
-from typing import Any
+from typing import Any, Mapping
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.utils import _build_metadata
@@ -126,23 +126,41 @@ def _with_source(block: Block, page: int, filename: str | None) -> Block:
     return {**block, "source": {k: v for k, v in source.items() if v is not None}}
 
 
-def _chunk_items(doc: Doc, split_fn: SplitFn, generate_metadata: bool) -> Iterator[Chunk]:
+def _chunk_text(text: str) -> Chunk:
+    """Return chunk payload containing only ``text``."""
+
+    return {"text": text}
+
+
+def _chunk_with_meta(text: str, meta: Mapping[str, Any]) -> Chunk:
+    """Return chunk payload enriched with ``meta``."""
+
+    return {"text": text, "meta": dict(meta)}
+
+
+def _chunk_items(
+    doc: Doc, split_fn: SplitFn, generate_metadata: bool = True
+) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
     merged = _merge_headings(_block_texts(doc, split_fn))
     return (
         {
-            **{"id": str(i), "text": text},
+            "id": str(i),
             **(
-                {"meta": _build_metadata(text, _with_source(block, page, filename), i, {})}
+                _chunk_with_meta(
+                    text,
+                    _build_metadata(
+                        text, _with_source(block, page, filename), i, {}
+                    ),
+                )
                 if generate_metadata
-                else {}
+                else _chunk_text(text)
             ),
         }
         for i, (page, block, text) in enumerate(merged)
     )
-
 
 def _update_meta(
     meta: dict[str, Any] | None, count: int, extra: dict[str, int | bool]

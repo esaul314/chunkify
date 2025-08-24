@@ -6,10 +6,10 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from functools import reduce
 from importlib import import_module
-from dataclasses import is_dataclass, replace
+from dataclasses import is_dataclass, replace, fields
 from itertools import chain
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
@@ -65,9 +65,17 @@ def _configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
     if not opts:
         return pass_obj
     if is_dataclass(pass_obj):
-        return replace(pass_obj, **opts)
+        names = {f.name for f in fields(pass_obj)}
+        valid = {k: v for k, v in opts.items() if k in names}
+        return replace(pass_obj, **valid) if valid else pass_obj
+    params = pass_obj.__dict__
+    valid = {
+        k: (type(params[k])(v) if not isinstance(v, type(params[k])) else v)
+        for k, v in opts.items()
+        if k in params
+    }
     try:
-        return pass_obj.__class__(**{**pass_obj.__dict__, **opts})
+        return pass_obj.__class__(**{**params, **valid}) if valid else pass_obj
     except Exception:  # pragma: no cover - best effort
         return pass_obj
 
