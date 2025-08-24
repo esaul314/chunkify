@@ -11,6 +11,13 @@ import typer
 
 from pdf_chunker.config import PipelineSpec, load_spec
 
+
+def _resolve_spec_path(path: str | Path) -> Path:
+    """Resolve pipeline spec relative to this package if not found."""
+    candidate = Path(path)
+    return candidate if candidate.exists() else Path(__file__).resolve().parent / candidate
+
+
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
@@ -112,10 +119,8 @@ def convert(
     """Run the configured pipeline on ``input_path``."""
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
-        spec,
-        overrides=_cli_overrides(
-            out, chunk_size, overlap, enrich, exclude_pages, no_metadata
-        ),
+        _resolve_spec_path(spec),
+        overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages, no_metadata),
     )
     s = _enrich_spec(s) if enrich else s
     run_convert(_input_artifact(str(input_path), s), s)
