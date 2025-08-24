@@ -9,9 +9,10 @@ metadata so downstream passes can enrich and emit JSONL rows.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, replace
 from functools import partial
 from itertools import chain
-from typing import Any, Mapping
+from typing import Any, ClassVar, Mapping
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.utils import _build_metadata
@@ -138,9 +139,7 @@ def _chunk_with_meta(text: str, meta: Mapping[str, Any]) -> Chunk:
     return {"text": text, "meta": dict(meta)}
 
 
-def _chunk_items(
-    doc: Doc, split_fn: SplitFn, generate_metadata: bool = True
-) -> Iterator[Chunk]:
+def _chunk_items(doc: Doc, split_fn: SplitFn, generate_metadata: bool = True) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
@@ -151,9 +150,7 @@ def _chunk_items(
             **(
                 _chunk_with_meta(
                     text,
-                    _build_metadata(
-                        text, _with_source(block, page, filename), i, {}
-                    ),
+                    _build_metadata(text, _with_source(block, page, filename), i, {}),
                 )
                 if generate_metadata
                 else _chunk_text(text)
@@ -161,6 +158,7 @@ def _chunk_items(
         }
         for i, (page, block, text) in enumerate(merged)
     )
+
 
 def _update_meta(
     meta: dict[str, Any] | None, count: int, extra: dict[str, int | bool]
@@ -175,23 +173,19 @@ def _update_meta(
     }
 
 
+@dataclass(frozen=True)
 class _SplitSemanticPass:
-    name = "split_semantic"
-    input_type = dict  # expects {"type": "page_blocks"}
-    output_type = dict  # returns {"type": "chunks", "items": [...]}
+    name: ClassVar[str] = "split_semantic"
+    input_type: ClassVar[type] = dict  # expects {"type": "page_blocks"}
+    output_type: ClassVar[type] = dict  # returns {"type": "chunks", "items": [...]}
+    chunk_size: int = 400
+    overlap: int = 50
+    min_chunk_size: int | None = None
+    generate_metadata: bool = True
 
-    def __init__(
-        self,
-        chunk_size: int = 400,
-        overlap: int = 50,
-        min_chunk_size: int | None = None,
-        *,
-        generate_metadata: bool = True,
-    ) -> None:
-        self.chunk_size = chunk_size
-        self.overlap = overlap
-        self.min_chunk_size = min_chunk_size or max(8, chunk_size // 10)
-        self.generate_metadata = generate_metadata
+    def __post_init__(self) -> None:
+        if self.min_chunk_size is None:
+            object.__setattr__(self, "min_chunk_size", max(8, self.chunk_size // 10))
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload
@@ -203,14 +197,19 @@ class _SplitSemanticPass:
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
 
+DEFAULT_SPLITTER = _SplitSemanticPass()
+
+
 def make_splitter(**opts: Any) -> _SplitSemanticPass:
-    """Factory returning a configured ``split_semantic`` pass."""
-    chunk_size = int(opts.get("chunk_size", 400))
-    overlap = int(opts.get("overlap", 50))
-    gen_meta = bool(opts.get("generate_metadata", True))
-    return _SplitSemanticPass(
-        chunk_size=chunk_size, overlap=overlap, generate_metadata=gen_meta
-    )
+    """Return a configured ``split_semantic`` pass from ``opts``."""
+    opts_map = {
+        "chunk_size": int(opts.get("chunk_size", DEFAULT_SPLITTER.chunk_size)),
+        "overlap": int(opts.get("overlap", DEFAULT_SPLITTER.overlap)),
+        "generate_metadata": bool(
+            opts.get("generate_metadata", DEFAULT_SPLITTER.generate_metadata)
+        ),
+    }
+    return replace(DEFAULT_SPLITTER, **opts_map)
 
 
 split_semantic = register(make_splitter())

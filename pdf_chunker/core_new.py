@@ -60,24 +60,13 @@ def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     return _pass_steps(spec)
 
 
-def _configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
-    """Return ``pass_obj`` with ``opts`` merged into its configuration."""
-    if not opts:
+def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
+    """Return a new pass with ``opts`` merged without mutating ``pass_obj``."""
+    if not opts or not is_dataclass(pass_obj):
         return pass_obj
-    if is_dataclass(pass_obj):
-        names = {f.name for f in fields(pass_obj)}
-        valid = {k: v for k, v in opts.items() if k in names}
-        return replace(pass_obj, **valid) if valid else pass_obj
-    params = pass_obj.__dict__
-    valid = {
-        k: (type(params[k])(v) if not isinstance(v, type(params[k])) else v)
-        for k, v in opts.items()
-        if k in params
-    }
-    try:
-        return pass_obj.__class__(**{**params, **valid}) if valid else pass_obj
-    except Exception:  # pragma: no cover - best effort
-        return pass_obj
+    names = {f.name for f in fields(pass_obj)}
+    valid = {k: v for k, v in opts.items() if k in names}
+    return replace(pass_obj, **valid) if valid else pass_obj
 
 
 def _time_step(
@@ -93,9 +82,8 @@ def _time_step(
 
 def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, float]]:
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
-    passes = [
-        _configure_pass(registry()[s], spec.options.get(s, {})) for s in spec.pipeline
-    ]
+    chain = (registry()[s] for s in spec.pipeline)
+    passes = [configure_pass(p, spec.options.get(p.name, {})) for p in chain]
     a, timings = reduce(_time_step, passes, (a, {}))
     return a, timings
 
