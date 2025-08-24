@@ -36,6 +36,8 @@ dev = [
   "mypy>=1.11.2",
   "nox>=2024.4.15",
   "types-PyYAML>=6.0.12",
+  "ebooklib>=0.19",
+  "beautifulsoup4>=4.12",
 ]
 
 [project.scripts]
