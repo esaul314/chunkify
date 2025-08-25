@@ -9,11 +9,26 @@ from importlib import import_module
 from dataclasses import is_dataclass, replace, fields
 from itertools import chain
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Final, Mapping
 
 from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, Pass, registry
+
+
+_PARSER_MAP: Final[Mapping[str, str]] = {
+    ext: name
+    for name, exts in {
+        "pdf_parse": (".pdf",),
+        "epub_parse": (".epub",),
+    }.items()
+    for ext in exts
+}
+
+
+def choose_parser(suffix: str) -> str:
+    """Return parser step for ``suffix`` using a lookup table."""
+    return _PARSER_MAP[suffix.lower()]
 
 
 def _pass_steps(spec: PipelineSpec) -> list[str]:
@@ -36,28 +51,21 @@ def _ensure_clean_precedes_split(steps: Sequence[str]) -> None:
         raise ValueError(f"{split_name} requires text_clean to run beforehand")
 
 
-def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> None:
-    """Validate PDF/EPUB pass separation and match to ``ext``."""
+def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> list[str]:
+    """Return ``steps`` with parse step aligned to ``ext``; reject mixed media."""
     prefixes = {s.split("_", 1)[0] for s in steps if s.startswith(("pdf_", "epub_"))}
     if len(prefixes) > 1:
         raise ValueError(f"pipeline mixes media types: {sorted(prefixes)}")
-    ext_map = {".pdf": "pdf", ".epub": "epub"}
-    expected = ext_map.get(ext)
-    if prefixes and expected and prefixes != {expected}:
-        found = next(iter(prefixes))
-        raise ValueError(f"{ext} input cannot use {found} passes")
+    parser = choose_parser(ext)
+    return [parser if s in {"pdf_parse", "epub_parse"} else s for s in steps]
 
 
 def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     """Return validated steps while enforcing order and media-type invariants."""
-    steps = list(spec.pipeline)
     ext = Path(input_path).suffix.lower()
-    validators = (
-        _ensure_clean_precedes_split,
-        lambda s: _ensure_pdf_epub_separation(s, ext),
-    )
-    tuple(v(steps) for v in validators)
-    return _pass_steps(spec)
+    steps = _ensure_pdf_epub_separation(list(spec.pipeline), ext)
+    _ensure_clean_precedes_split(steps)
+    return _pass_steps(PipelineSpec(pipeline=steps, options=spec.options))
 
 
 def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
