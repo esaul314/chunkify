@@ -233,6 +233,7 @@ For Codex agent — Idempotent task behavior
 
 Parity-first (fixtures):
 * For `tests/golden` and `tests/parity` fixtures, prefer exact legacy equivalence. If a deviation is intentional, add it to `tests/parity/EXCEPTIONS.md` with a reason; otherwise, adjust passes/adapters to match legacy.
+* Parity-first, with exceptions: Match legacy for fixtures unless the legacy behavior is clearly inferior. For those cases, encode an explicit exception in tests/parity/EXCEPTIONS.md (short reason + affected fixtures/flags), and adjust parity checks to consult exceptions. Keep exceptions rare and reviewed.
 
 
 For Codex agent — Start Now
