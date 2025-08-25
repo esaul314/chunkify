@@ -46,7 +46,9 @@ def _serialize(rows: Iterable[dict[str, Any]]) -> Iterator[str]:
 
 def _write(path: str, lines: Iterable[str]) -> None:
     """Write ``lines`` to ``path`` with trailing newlines."""
-    with Path(path).open("w", encoding="utf-8") as f:
+    path_obj = Path(path)
+    path_obj.parent.mkdir(parents=True, exist_ok=True)
+    with path_obj.open("w", encoding="utf-8") as f:
         f.writelines(f"{line}\n" for line in lines)
 
 
