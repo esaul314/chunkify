@@ -174,6 +174,23 @@ def _update_meta(
     }
 
 
+def _resolve_opts(
+    meta: dict[str, Any] | None, defaults: _SplitSemanticPass
+) -> tuple[int, int, int]:
+    """Return ``chunk_size``, ``overlap``, ``min_chunk_size`` from meta overrides."""
+    opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
+    chunk = int(opts.get("chunk_size", defaults.chunk_size))
+    overlap = int(opts.get("overlap", defaults.overlap))
+    calc = max(8, chunk // 10)
+    explicit = (
+        defaults.min_chunk_size is not None
+        and defaults.min_chunk_size <= max(8, defaults.chunk_size // 10)
+        and "chunk_size" not in opts
+    )
+    min_size = defaults.min_chunk_size if explicit else calc
+    return chunk, overlap, min_size
+
+
 @dataclass(frozen=True)
 class _SplitSemanticPass:
     name: ClassVar[str] = "split_semantic"
@@ -192,7 +209,8 @@ class _SplitSemanticPass:
         doc = a.payload
         if not isinstance(doc, dict) or doc.get("type") != "page_blocks":
             return a
-        split_fn, metric_fn = _get_split_fn(self.chunk_size, self.overlap, self.min_chunk_size)
+        chunk_size, overlap, min_chunk_size = _resolve_opts(a.meta, self)
+        split_fn, metric_fn = _get_split_fn(chunk_size, overlap, min_chunk_size)
         items = list(_chunk_items(doc, split_fn, self.generate_metadata))
         meta = _update_meta(a.meta, len(items), metric_fn())
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)

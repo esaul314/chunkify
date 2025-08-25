@@ -240,11 +240,13 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
     """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
-    a, timings = _run_passes(run_spec, a)
+    opts = {**spec.options, **((a.meta or {}).get("options") or {})}
+    seeded = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
+    a, timings = _run_passes(run_spec, seeded)
     _maybe_emit_jsonl(a, spec, timings)
     gen_meta = _generate_metadata_enabled(spec)
     warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
-    meta = {**(a.meta or {}), "warnings": warnings}
+    meta = {**(a.meta or {}), "options": opts, "warnings": warnings}
     report = assemble_report(timings, meta)
     write_run_report(spec, report)
     return Artifact(payload=a.payload, meta=meta), timings
