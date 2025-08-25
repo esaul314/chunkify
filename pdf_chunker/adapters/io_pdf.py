@@ -10,6 +10,8 @@ from pathlib import Path
 from subprocess import CompletedProcess, run
 from typing import Any
 
+from pdf_chunker.page_utils import parse_page_ranges
+
 
 _PDFTOTEXT_TIMEOUT = 60
 
@@ -38,6 +40,13 @@ def _group_blocks(blocks: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     key = _page_key
     sorted_blocks = _sorted_blocks(blocks)
     return [{"page": page, "blocks": list(group)} for page, group in groupby(sorted_blocks, key)]
+
+
+def _excluded(pages: Sequence[int] | str | None) -> set[int]:
+    """Parse ``pages`` spec into a set of page numbers."""
+    if pages is None or pages == "":
+        return set()
+    return parse_page_ranges(pages) if isinstance(pages, str) else {int(p) for p in pages}
 
 
 def _format_exclusions(pages: Sequence[int] | str | None) -> str | None:
@@ -100,14 +109,17 @@ def read(
     global _PDFTOTEXT_TIMEOUT
     _PDFTOTEXT_TIMEOUT = timeout
     abs_path = str(Path(path))
-    blocks = _primary_blocks(abs_path, exclude_pages, use_pymupdf4llm)
+    excluded = _excluded(exclude_pages)
+    blocks = _primary_blocks(abs_path, sorted(excluded), use_pymupdf4llm)
     if not blocks:
-        blocks = _fallback_blocks(abs_path, exclude_pages)
-    return {
-        "type": "page_blocks",
-        "source_path": abs_path,
-        "pages": _group_blocks(blocks),
-    }
+        blocks = _fallback_blocks(abs_path, sorted(excluded))
+    filtered = [
+        b
+        for b in blocks
+        if b.get("source", {}).get("page") not in excluded
+    ]
+    pages = [p for p in _group_blocks(filtered) if p["page"] not in excluded]
+    return {"type": "page_blocks", "source_path": abs_path, "pages": pages}
 
 
 def run_pdftotext(cmd: Sequence[str], timeout: int | None = None) -> CompletedProcess[str]:
