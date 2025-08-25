@@ -55,7 +55,7 @@ def test_e2e_parity_flags(tmp_path: Path, flags: tuple[str, ...]) -> None:
     if "--no-metadata" in flags:
         assert all(
             row.keys() == {"text"}
-            for path in chain.from_iterable(pairs)
+            for path in chain.from_iterable(p[1] for p in pairs)
             for row in canonical_rows(path)
         )
 
