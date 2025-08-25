@@ -1,10 +1,6 @@
-"""Nox sessions scoped to bootstrap code for Story A.
+"""Nox sessions for linting, type checking, and testing."""
 
-This temporary narrowing avoids legacy modules until they are
-refactored in later stories.
-"""
-
-import os
+from pathlib import Path
 
 import nox
 
@@ -21,7 +17,7 @@ def lint(session):
 @nox.session
 def typecheck(session):
     session.install("-e", ".[dev]")
-    targets = [t for t in ["pdf_chunker/__init__.py"] if os.path.exists(t)]
+    targets = [t for t in ["pdf_chunker/__init__.py"] if Path(t).exists()]
     if targets:
         session.run("mypy", "--allow-untyped-globals", *targets)
     else:
@@ -31,9 +27,5 @@ def typecheck(session):
 @nox.session
 def tests(session):
     session.install("-e", ".[dev]")
-    paths = (
-        f"tests/{suite}"
-        for suite in ("bootstrap", "golden", "parity")
-        if os.path.exists(f"tests/{suite}")
-    )
+    paths = (p.as_posix() for p in [Path("tests")] if p.exists())
     session.run("pytest", "-q", *paths)
