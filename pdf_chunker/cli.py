@@ -34,7 +34,6 @@ def _resolve_spec_path(path: str | Path) -> Path:
     return next((p for p in _spec_path_candidates(path) if p.exists()), Path(path))
 
 
-
 def _run_convert(
     input_path: Path,
     out: Path | None,
@@ -44,6 +43,7 @@ def _run_convert(
     exclude_pages: str | None,
     no_metadata: bool,
     spec: str,
+    verbose: bool,
 ) -> None:
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
@@ -159,7 +159,8 @@ if typer:
         enrich: bool = typer.Option(False, "--enrich/--no-enrich"),
         exclude_pages: str | None = typer.Option(None, "--exclude-pages"),
         no_metadata: bool = typer.Option(False, "--no-metadata"),
-        spec: str = "pipeline.yaml",
+        spec: str = typer.Option("pipeline.yaml", "--spec"),
+        verbose: bool = typer.Option(False, "--verbose"),
     ) -> None:
         _run_convert(
             input_path,
@@ -170,6 +171,7 @@ if typer:
             exclude_pages,
             no_metadata,
             spec,
+            verbose,
         )
 
     @app.command()
@@ -177,6 +179,7 @@ if typer:
         _run_inspect()
 
 else:
+
     def app(argv: list[str] | None = None) -> None:
         parser = argparse.ArgumentParser(prog="pdf_chunker")
         sub = parser.add_subparsers(dest="cmd", required=True)
@@ -191,6 +194,7 @@ else:
         conv.add_argument("--exclude-pages")
         conv.add_argument("--no-metadata", action="store_true")
         conv.add_argument("--spec", default="pipeline.yaml")
+        conv.add_argument("--verbose", action="store_true")
         conv.set_defaults(
             enrich=False,
             func=lambda ns: _run_convert(
@@ -202,6 +206,7 @@ else:
                 ns.exclude_pages,
                 ns.no_metadata,
                 ns.spec,
+                ns.verbose,
             ),
         )
 
