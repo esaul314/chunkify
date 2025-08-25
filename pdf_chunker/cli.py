@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, Callable
 
 import importlib.util as ilu
@@ -12,10 +13,20 @@ import typer
 from pdf_chunker.config import PipelineSpec, load_spec
 
 
-def _resolve_spec_path(path: str | Path) -> Path:
-    """Resolve pipeline spec relative to this package if not found."""
+def _spec_path_candidates(path: str | Path) -> Iterator[Path]:
+    """Yield potential spec locations without hitting the filesystem."""
     candidate = Path(path)
-    return candidate if candidate.exists() else Path(__file__).resolve().parent / candidate
+    pkg_dir = Path(__file__).resolve().parent
+    yield from (
+        candidate,
+        pkg_dir.parent / candidate,
+        pkg_dir / candidate,
+    )
+
+
+def _resolve_spec_path(path: str | Path) -> Path:
+    """Pick the first existing pipeline spec from candidate locations."""
+    return next((p for p in _spec_path_candidates(path) if p.exists()), Path(path))
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
