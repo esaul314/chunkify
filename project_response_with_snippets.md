@@ -19,7 +19,7 @@ structured.append(
     {
         "type": block_type,
         "text": block_text,
-        "language": _detect_language(block_text),
+        "language": default_language(),
         "source": {"filename": filename, "page": page_num, "location": None},
         "bbox": b[:4],
     }

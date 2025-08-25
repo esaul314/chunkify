@@ -30,14 +30,14 @@ from .page_artifacts import (
 
 try:
     from .extraction_fallbacks import (
-        _detect_language,
+        default_language,
         _assess_text_quality,
         _extract_with_pdftotext,
         _extract_with_pdfminer,
         PDFMINER_AVAILABLE,
     )
 except Exception:
-    _detect_language = lambda *a, **k: ""
+    default_language = lambda: ""
     _assess_text_quality = lambda *a, **k: {}
     _extract_with_pdftotext = lambda *a, **k: ""
     _extract_with_pdfminer = lambda *a, **k: ""
@@ -450,6 +450,36 @@ def _spans_indicate_heading(spans: Sequence[dict], text: str) -> bool:
     )
 
 
+def _structured_block(page, block_tuple, page_num, filename) -> dict | None:
+    """Convert a raw PyMuPDF block tuple into a structured block dict."""
+    raw_text = block_tuple[4]
+    logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
+    cleaned = clean_text(remove_page_artifact_lines(raw_text, page_num))
+    logger.debug(f"Block text after cleaning: {repr(cleaned[:50])}")
+    if not cleaned:
+        return None
+    if is_page_artifact({"text": cleaned}, page_num):
+        logger.debug(f"Skipping page artifact on page {page_num}: {repr(cleaned)}")
+        return None
+
+    is_heading = False
+    if len(cleaned.split()) < 15:
+        try:
+            block_dict = page.get_text("dict", clip=block_tuple[:4])["blocks"][0]
+            spans = block_dict["lines"][0]["spans"]
+            is_heading = _spans_indicate_heading(spans, cleaned)
+        except (KeyError, IndexError, TypeError):
+            is_heading = _detect_heading_fallback(cleaned)
+
+    return {
+        "type": "heading" if is_heading else "paragraph",
+        "text": cleaned,
+        "language": default_language(),
+        "source": {"filename": filename, "page": page_num, "location": None},
+        "bbox": block_tuple[:4],
+    }
+
+
 def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
     """
     Extract and classify text blocks from a PDF page,
@@ -465,47 +495,12 @@ def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
         len(filtered),
     )
 
-    structured = []
-    for b in filtered:
-        raw_text = b[4]
-        logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
-
-        # Remove obvious header/footer lines before full cleaning
-        raw_text = remove_page_artifact_lines(raw_text, page_num)
-
-        block_text = clean_text(raw_text)
-        logger.debug(f"Block text after cleaning: {repr(block_text[:50])}")
-
-        if not block_text:
-            continue
-
-        # Filter out headers, footers, and similar page artifacts
-        if is_page_artifact({"text": block_text}, page_num):
-            logger.debug(f"Skipping page artifact on page {page_num}: {repr(block_text)}")
-            continue
-
-        # Determine heading via font flags or fallback
-        is_heading = False
-        if len(block_text.split()) < 15:
-            try:
-                block_dict = page.get_text("dict", clip=b[:4])["blocks"][0]
-                spans = block_dict["lines"][0]["spans"]
-                is_heading = _spans_indicate_heading(spans, block_text)
-            except (KeyError, IndexError, TypeError):
-                is_heading = _detect_heading_fallback(block_text)
-
-        block_type = "heading" if is_heading else "paragraph"
-        structured.append(
-            {
-                "type": block_type,
-                "text": block_text,
-                "language": _detect_language(block_text),
-                "source": {"filename": filename, "page": page_num, "location": None},
-                "bbox": b[:4],
-            }
-        )
-
-    return structured
+    return [
+        block
+        for b in filtered
+        for block in [_structured_block(page, b, page_num, filename)]
+        if block
+    ]
 
 
 def is_page_artifact(block: dict, page_num: int) -> bool:
