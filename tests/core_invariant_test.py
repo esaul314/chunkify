@@ -10,15 +10,15 @@ def _check(spec: PipelineSpec, path: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "spec,path",
+    "spec",
     [
-        (PipelineSpec(pipeline=["split_semantic", "text_clean"]), "dummy.pdf"),
-        (PipelineSpec(pipeline=["pdf_parse", "epub_parse"]), "dummy.pdf"),
+        PipelineSpec(pipeline=["split_semantic", "text_clean"]),
+        PipelineSpec(pipeline=["pdf_parse", "epub_parse"]),
     ],
 )
-def test_invalid_pipelines_rejected(spec: PipelineSpec, path: str) -> None:
+def test_invalid_pipelines_rejected(spec: PipelineSpec) -> None:
     with pytest.raises(ValueError):
-        _check(spec, path)
+        _check(spec, "dummy.pdf")
 
 
 def test_valid_pipeline_passes() -> None:
@@ -26,7 +26,12 @@ def test_valid_pipeline_passes() -> None:
     _check(spec, "dummy.pdf")
 
 
-def test_parse_step_replaced_for_mismatch() -> None:
+def test_parse_step_replaced_for_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = PipelineSpec(pipeline=["pdf_parse", "text_clean"])
+    monkeypatch.setattr(
+        "pdf_chunker.core_new.registry",
+        lambda: {"epub_parse": object(), "text_clean": object()},
+        raising=False,
+    )
     steps = _enforce_invariants(spec, input_path="dummy.epub")
-    assert steps[0] == "epub_parse"
+    assert steps == ["epub_parse", "text_clean"]
