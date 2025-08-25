@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from typing import Dict, List, TypedDict
 from .text_cleaning import clean_paragraph
 from .heading_detection import _detect_heading_fallback
-from .extraction_fallbacks import _detect_language
+from .extraction_fallbacks import default_language
 
 
 class TextBlock(TypedDict):
@@ -57,7 +57,7 @@ def _element_to_block(element, filename: str, item_name: str) -> TextBlock | Non
     return {
         "type": block_type,
         "text": block_text,
-        "language": _detect_language(block_text),
+        "language": default_language(),
         "source": {"filename": filename, "location": item_name},
     }
 

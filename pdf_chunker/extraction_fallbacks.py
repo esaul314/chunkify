@@ -3,8 +3,6 @@ import re
 import sys
 from subprocess import TimeoutExpired
 
-from langdetect import LangDetectException, detect
-
 try:
     from pdfminer.high_level import extract_text
     from pdfminer.layout import LAParams
@@ -17,12 +15,9 @@ from .page_artifacts import remove_page_artifact_lines
 from .text_cleaning import clean_text
 
 
-def _detect_language(text: str) -> str:
-    """Detects language of a text block, defaults to 'un' (unknown) on failure."""
-    try:
-        return detect(text)
-    except LangDetectException:
-        return "un"
+def default_language() -> str:
+    """Return the deterministic default language code."""
+    return "en"
 
 
 def _assess_text_quality(text: str) -> dict:
@@ -84,7 +79,7 @@ def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
         {
             "type": "heading" if _is_heading(t) else "paragraph",
             "text": t,
-            "language": _detect_language(t),
+            "language": default_language(),
             "source": {"filename": os.path.basename(filepath), "method": method},
         }
         for t in (clean_text(p) for p in text.split("\n\n"))
