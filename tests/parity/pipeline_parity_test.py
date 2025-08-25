@@ -4,6 +4,7 @@ from pathlib import Path
 
 from scripts import parity as sp
 from tests.parity.normalize import canonical_rows
+from tests.parity import exceptions
 
 SAMPLES = Path("tests/golden/samples")
 ARTIFACTS = Path("artifacts/parity")
@@ -21,13 +22,17 @@ def _rows(path: Path) -> list[dict]:
     ]
 
 
-def _equal(pdf: Path, tmp: Path) -> bool:
-    legacy, new = sp.run_parity(pdf, tmp, diffdir=ARTIFACTS)
-    return _rows(legacy) == _rows(new)
+def _equal(pdf: Path, tmp: Path, *, test: str, flags: tuple[str, ...]) -> bool:
+    legacy, new = sp.run_parity(pdf, tmp, flags=flags, diffdir=ARTIFACTS)
+    rule = exceptions.get(test, flags, pdf.name)
+    return exceptions.apply(_rows(legacy), rule) == exceptions.apply(_rows(new), rule)
 
 
 def test_new_matches_legacy(tmp_path: Path) -> None:
-    assert all(_equal(pdf, tmp_path / pdf.stem) for pdf in _pdfs())
+    assert all(
+        _equal(pdf, tmp_path / pdf.stem, test="test_new_matches_legacy", flags=())
+        for pdf in _pdfs()
+    )
 
 
 def test_no_metadata_rows_contain_only_text(tmp_path: Path) -> None:
