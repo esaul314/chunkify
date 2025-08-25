@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from collections.abc import Iterator
@@ -8,7 +9,11 @@ from typing import Any, Callable
 import importlib.util as ilu
 import sys
 import types
-import typer
+
+try:  # pragma: no cover - exercised via CLI tests
+    import typer
+except ModuleNotFoundError:  # pragma: no cover - fallback when Typer is absent
+    typer = None  # type: ignore[assignment]
 
 from pdf_chunker.config import PipelineSpec, load_spec
 
@@ -29,7 +34,33 @@ def _resolve_spec_path(path: str | Path) -> Path:
     return next((p for p in _spec_path_candidates(path) if p.exists()), Path(path))
 
 
-app = typer.Typer(add_completion=False, no_args_is_help=True)
+
+def _run_convert(
+    input_path: Path,
+    out: Path | None,
+    chunk_size: int | None,
+    overlap: int | None,
+    enrich: bool,
+    exclude_pages: str | None,
+    no_metadata: bool,
+    spec: str,
+) -> None:
+    _input_artifact, run_convert, _ = _core_helpers(enrich)
+    s = load_spec(
+        _resolve_spec_path(spec),
+        overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages, no_metadata),
+    )
+    s = _enrich_spec(s) if enrich else s
+    run_convert(_input_artifact(str(input_path), s), s)
+    print("convert: OK")
+
+
+def _run_inspect() -> None:
+    _, _, run_inspect = _core_helpers(False)
+    print(json.dumps(run_inspect(), indent=2))
+
+
+app = typer.Typer(add_completion=False, no_args_is_help=True) if typer else None
 
 
 def _core_helpers(
@@ -116,33 +147,69 @@ def _enrich_spec(spec: PipelineSpec) -> PipelineSpec:
     )
 
 
-@app.command()
-def convert(
-    input_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
-    out: Path | None = typer.Option(None, "--out"),
-    chunk_size: int | None = typer.Option(None, "--chunk-size"),
-    overlap: int | None = typer.Option(None, "--overlap"),
-    enrich: bool = typer.Option(False, "--enrich/--no-enrich"),
-    exclude_pages: str | None = typer.Option(None, "--exclude-pages"),
-    no_metadata: bool = typer.Option(False, "--no-metadata"),
-    spec: str = "pipeline.yaml",
-):
-    """Run the configured pipeline on ``input_path``."""
-    _input_artifact, run_convert, _ = _core_helpers(enrich)
-    s = load_spec(
-        _resolve_spec_path(spec),
-        overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages, no_metadata),
-    )
-    s = _enrich_spec(s) if enrich else s
-    run_convert(_input_artifact(str(input_path), s), s)
-    typer.echo("convert: OK")
+if typer:
+    app = typer.Typer(add_completion=False, no_args_is_help=True)
 
+    @app.command()
+    def convert(  # pragma: no cover - exercised in parity tests
+        input_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+        out: Path | None = typer.Option(None, "--out"),
+        chunk_size: int | None = typer.Option(None, "--chunk-size"),
+        overlap: int | None = typer.Option(None, "--overlap"),
+        enrich: bool = typer.Option(False, "--enrich/--no-enrich"),
+        exclude_pages: str | None = typer.Option(None, "--exclude-pages"),
+        no_metadata: bool = typer.Option(False, "--no-metadata"),
+        spec: str = "pipeline.yaml",
+    ) -> None:
+        _run_convert(
+            input_path,
+            out,
+            chunk_size,
+            overlap,
+            enrich,
+            exclude_pages,
+            no_metadata,
+            spec,
+        )
 
-@app.command()
-def inspect():
-    """Print registered passes with their declared input/output types."""
-    _, _, run_inspect = _core_helpers(False)
-    typer.echo(json.dumps(run_inspect(), indent=2))
+    @app.command()
+    def inspect() -> None:  # pragma: no cover - exercised in tests
+        _run_inspect()
+
+else:
+    def app(argv: list[str] | None = None) -> None:
+        parser = argparse.ArgumentParser(prog="pdf_chunker")
+        sub = parser.add_subparsers(dest="cmd", required=True)
+
+        conv = sub.add_parser("convert")
+        conv.add_argument("input_path", type=Path)
+        conv.add_argument("--out", type=Path)
+        conv.add_argument("--chunk-size", type=int)
+        conv.add_argument("--overlap", type=int)
+        conv.add_argument("--enrich", dest="enrich", action="store_true")
+        conv.add_argument("--no-enrich", dest="enrich", action="store_false")
+        conv.add_argument("--exclude-pages")
+        conv.add_argument("--no-metadata", action="store_true")
+        conv.add_argument("--spec", default="pipeline.yaml")
+        conv.set_defaults(
+            enrich=False,
+            func=lambda ns: _run_convert(
+                ns.input_path,
+                ns.out,
+                ns.chunk_size,
+                ns.overlap,
+                ns.enrich,
+                ns.exclude_pages,
+                ns.no_metadata,
+                ns.spec,
+            ),
+        )
+
+        insp = sub.add_parser("inspect")
+        insp.set_defaults(func=lambda ns: _run_inspect())
+
+        args = parser.parse_args(argv)
+        args.func(args)
 
 
 if __name__ == "__main__":
