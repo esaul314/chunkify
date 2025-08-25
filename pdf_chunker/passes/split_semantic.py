@@ -8,7 +8,7 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
 from itertools import chain
@@ -65,7 +65,9 @@ def _get_split_fn(chunk_size: int, overlap: int, min_chunk_size: int) -> tuple[S
             soft_hits += int(len(truncated) > 8_000)
             return [_soft_truncate(truncated)] if truncated else []
 
-    metrics = lambda: {"soft_limit_hits": soft_hits, "hard_limit_hit": hard_hit}
+    def metrics() -> dict[str, int | bool]:
+        return {"soft_limit_hits": soft_hits, "hard_limit_hit": hard_hit}
+
     return split, metrics
 
 
@@ -174,20 +176,16 @@ def _update_meta(
     }
 
 
-def _resolve_opts(
-    meta: dict[str, Any] | None, defaults: _SplitSemanticPass
-) -> tuple[int, int, int]:
-    """Return ``chunk_size``, ``overlap``, ``min_chunk_size`` from meta overrides."""
+def _resolve_opts(meta: Mapping[str, Any] | None, base: _SplitSemanticPass) -> tuple[int, int, int]:
+    """Return ``chunk_size``, ``overlap``, ``min_chunk_size`` from options."""
     opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
-    chunk = int(opts.get("chunk_size", defaults.chunk_size))
-    overlap = int(opts.get("overlap", defaults.overlap))
-    calc = max(8, chunk // 10)
-    explicit = (
-        defaults.min_chunk_size is not None
-        and defaults.min_chunk_size <= max(8, defaults.chunk_size // 10)
-        and "chunk_size" not in opts
+    values = {k: int(opts.get(k, getattr(base, k))) for k in ("chunk_size", "overlap")}
+    chunk, overlap = values["chunk_size"], values["overlap"]
+    min_size = (
+        base.min_chunk_size
+        if base.min_chunk_size is not None and "chunk_size" not in opts
+        else max(8, chunk // 10)
     )
-    min_size = defaults.min_chunk_size if explicit else calc
     return chunk, overlap, min_size
 
 

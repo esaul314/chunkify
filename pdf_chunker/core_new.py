@@ -4,17 +4,16 @@ import json
 import re
 import time
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import fields, is_dataclass, replace
 from functools import reduce
 from importlib import import_module
-from dataclasses import is_dataclass, replace, fields
 from itertools import chain
 from pathlib import Path
-from typing import Any, Callable, Final, Mapping
+from typing import Any, Final
 
 from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, Pass, registry
-
 
 _PARSER_MAP: Final[Mapping[str, str]] = {
     ext: name
@@ -107,8 +106,9 @@ def _excluded_all(path: str, exclude: str | None) -> bool:
     """Return True when ``exclude`` removes every page of ``path``."""
     if not exclude:
         return False
-    from pdf_chunker.page_utils import parse_page_ranges
     import fitz
+
+    from pdf_chunker.page_utils import parse_page_ranges
 
     excluded = parse_page_ranges(exclude)
     with fitz.open(path) as doc:
@@ -248,7 +248,8 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
     """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
-    opts = {**spec.options, **((a.meta or {}).get("options") or {})}
+    existing = (a.meta or {}).get("options") or {}
+    opts = {**existing, **spec.options}
     seeded = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
     a, timings = _run_passes(run_spec, seeded)
     _maybe_emit_jsonl(a, spec, timings)
