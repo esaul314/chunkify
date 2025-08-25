@@ -14,7 +14,6 @@ def _check(spec: PipelineSpec, path: str) -> None:
     [
         (PipelineSpec(pipeline=["split_semantic", "text_clean"]), "dummy.pdf"),
         (PipelineSpec(pipeline=["pdf_parse", "epub_parse"]), "dummy.pdf"),
-        (PipelineSpec(pipeline=["pdf_parse", "text_clean"]), "dummy.epub"),
     ],
 )
 def test_invalid_pipelines_rejected(spec: PipelineSpec, path: str) -> None:
@@ -25,3 +24,9 @@ def test_invalid_pipelines_rejected(spec: PipelineSpec, path: str) -> None:
 def test_valid_pipeline_passes() -> None:
     spec = PipelineSpec(pipeline=["pdf_parse", "text_clean", "split_semantic"])
     _check(spec, "dummy.pdf")
+
+
+def test_parse_step_replaced_for_mismatch() -> None:
+    spec = PipelineSpec(pipeline=["pdf_parse", "text_clean"])
+    steps = _enforce_invariants(spec, input_path="dummy.epub")
+    assert steps[0] == "epub_parse"
