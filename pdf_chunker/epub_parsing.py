@@ -23,13 +23,43 @@ class TextBlock(TypedDict):
 def get_element_text_content(element) -> str:
     """Extract text from BeautifulSoup element without extra separators."""
     return " ".join(
-        (
-            " ".join(child.stripped_strings)
-            if hasattr(child, "stripped_strings")
-            else child
-        )
+        (" ".join(child.stripped_strings) if hasattr(child, "stripped_strings") else child)
         for child in element.contents
     )
+
+
+def _prefixed_list_text(element, text: str) -> str:
+    """Prefix ordered list items with their index."""
+    parent = element.find_parent(["ol", "ul"])
+    if parent and parent.name == "ol":
+        siblings = [li for li in parent.find_all("li", recursive=False)]
+        index = next((i for i, li in enumerate(siblings, 1) if li is element), 0)
+        return f"{index}. {text}" if index else text
+    return text
+
+
+def _element_to_block(element, filename: str, item_name: str) -> TextBlock | None:
+    """Convert a BeautifulSoup element into a TextBlock."""
+    raw_text = get_element_text_content(element)
+    block_text = clean_paragraph(raw_text)
+    if not block_text:
+        return None
+
+    if element.name == "li":
+        block_text = _prefixed_list_text(element, block_text)
+
+    block_type = (
+        "heading"
+        if element.name.startswith("h") or _detect_heading_fallback(block_text)
+        else "paragraph"
+    )
+
+    return {
+        "type": block_type,
+        "text": block_text,
+        "language": _detect_language(block_text),
+        "source": {"filename": filename, "location": item_name},
+    }
 
 
 def process_epub_item(item: epub.EpubHtml, filename: str) -> List[TextBlock]:
@@ -39,29 +69,18 @@ def process_epub_item(item: epub.EpubHtml, filename: str) -> List[TextBlock]:
     if not body:
         return []
 
-    blocks: List[TextBlock] = []
-    for element in body.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"]):
-        raw_text = get_element_text_content(element)
-        block_text = clean_paragraph(raw_text)
-        if not block_text:
-            continue
-
-        block_type = (
-            "heading"
-            if element.name.startswith("h") or _detect_heading_fallback(block_text)
-            else "paragraph"
+    item_name = item.get_name()
+    elements = body.find_all(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6"])
+    return [
+        block
+        for block in (_element_to_block(element, filename, item_name) for element in elements)
+        if block
+        and not (
+            item_name == "nav.xhtml"
+            and block["type"] == "heading"
+            and block["text"] == "Table of Contents"
         )
-
-        blocks.append(
-            {
-                "type": block_type,
-                "text": block_text,
-                "language": _detect_language(block_text),
-                "source": {"filename": filename, "location": item.get_name()},
-            }
-        )
-
-    return blocks
+    ]
 
 
 def extract_text_blocks_from_epub(
@@ -91,9 +110,7 @@ def extract_text_blocks_from_epub(
             from .page_utils import parse_page_ranges, validate_page_exclusions
 
             excluded_spines = parse_page_ranges(exclude_spines)
-            excluded_spines = validate_page_exclusions(
-                excluded_spines, len(spine_items), filename
-            )
+            excluded_spines = validate_page_exclusions(excluded_spines, len(spine_items), filename)
         except ValueError as e:
             print(f"Error parsing spine exclusions: {e}", file=sys.stderr)
             print("Continuing without spine exclusions", file=sys.stderr)
@@ -101,9 +118,7 @@ def extract_text_blocks_from_epub(
 
     # Process spine items with exclusion filtering
     all_blocks = []
-    for spine_index, item in enumerate(
-        spine_items, 1
-    ):  # 1-based indexing like PDF pages
+    for spine_index, item in enumerate(spine_items, 1):  # 1-based indexing like PDF pages
         if spine_index in excluded_spines:
             print(
                 f"Skipping excluded spine item {spine_index}: {item.get_name()}",
@@ -111,9 +126,7 @@ def extract_text_blocks_from_epub(
             )
             continue
 
-        print(
-            f"Processing spine item {spine_index}: {item.get_name()}", file=sys.stderr
-        )
+        print(f"Processing spine item {spine_index}: {item.get_name()}", file=sys.stderr)
         blocks = process_epub_item(item, filename)
         all_blocks.extend(blocks)
 
@@ -144,9 +157,7 @@ def list_epub_spines(filepath: str) -> list[dict]:
 
             # Extract text from all elements, similar to process_epub_item
             text_parts = []
-            for element in body.find_all(
-                ["p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "span"]
-            ):
+            for element in body.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "span"]):
                 raw_text = get_element_text_content(element)
                 if raw_text and raw_text.strip():
                     text_parts.append(raw_text.strip())
