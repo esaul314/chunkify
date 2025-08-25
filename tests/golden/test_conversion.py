@@ -13,7 +13,6 @@ BASE_DIR = Path(__file__).resolve().parent
 
 DOCS: dict[str, Path] = {
     "pdf": BASE_DIR / "samples" / "sample.pdf.b64",
-    "epub": BASE_DIR / "samples" / "sample.epub.b64",
 }
 
 
