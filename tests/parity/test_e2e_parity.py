@@ -8,6 +8,7 @@ import pytest
 
 from scripts.parity import run_parity
 from tests.parity.normalize import canonical_rows
+from tests.parity import exceptions
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import emit_jsonl
 
@@ -45,8 +46,12 @@ def flag_sets() -> list[tuple[str, ...]]:
 
 @pytest.mark.parametrize("flags", flag_sets(), ids=lambda f: " ".join(f) or "base")
 def test_e2e_parity_flags(tmp_path: Path, flags: tuple[str, ...]) -> None:
-    pairs = [run_parity(pdf, tmp_path / f"{i}", flags) for i, pdf in enumerate(PDFS)]
-    assert all(_rows(l) == _rows(n) for l, n in pairs)
+    pairs = [(pdf, run_parity(pdf, tmp_path / f"{i}", flags)) for i, pdf in enumerate(PDFS)]
+    assert all(
+        exceptions.apply(_rows(l), exceptions.get("test_e2e_parity_flags", flags, pdf.name))
+        == exceptions.apply(_rows(n), exceptions.get("test_e2e_parity_flags", flags, pdf.name))
+        for pdf, (l, n) in pairs
+    )
     if "--no-metadata" in flags:
         assert all(
             row.keys() == {"text"}
