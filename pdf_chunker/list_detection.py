@@ -35,4 +35,3 @@ __all__ = [
     "is_numbered_continuation",
     "_last_non_empty_line",
 ]
-
