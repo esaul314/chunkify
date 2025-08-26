@@ -19,7 +19,9 @@ class Pass(Protocol):
     input_type: Type
     output_type: Type
 
-    def __call__(self, a: Artifact) -> Artifact: ...
+    def __call__(self, a: Artifact) -> Artifact:
+        """Execute the pass."""
+        ...
 
 
 _REGISTRY: Mapping[str, Pass] = MappingProxyType({})
