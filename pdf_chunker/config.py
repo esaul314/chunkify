@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import pathlib
+import warnings
 from functools import reduce
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, Mapping, List
 
 import yaml
 from pydantic import BaseModel, Field
@@ -54,6 +55,17 @@ def _merge_options(
     return {s: {**base.get(s, {}), **override.get(s, {})} for s in set(base) | set(override)}
 
 
+def _warn_unknown_options(pipeline: Iterable[str], opts: Mapping[str, Any]) -> None:
+    """Emit a warning when options contain steps absent from the pipeline."""
+
+    unknown = [step for step in opts if step not in pipeline]
+    if unknown:
+        warnings.warn(
+            f"Unknown pipeline options: {', '.join(sorted(unknown))}",
+            stacklevel=2,
+        )
+
+
 def load_spec(
     path: str | os.PathLike | None = "pipeline.yaml",
     overrides: Dict[str, Dict[str, Any]] | None = None,
@@ -66,6 +78,8 @@ def load_spec(
         filter(None, [opts, _env_overrides(), overrides]),
         {},
     )
+    pipeline = data.get("pipeline", [])
+    _warn_unknown_options(pipeline, merged)
     if merged:
         data = {**data, "options": merged}
     return PipelineSpec.model_validate(data)

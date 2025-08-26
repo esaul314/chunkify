@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "pdf-chunker"
 version = "0.1.0"
 description = "CLI pipeline to convert PDFs/EPUBs into JSONL for LoRA/RAG, with declarative passes."
+readme = "README.md"
 authors = [{name = "Alex"}]
 requires-python = ">=3.10"
 license = {text = "MIT"}
