@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, Callable
 
 import importlib.util as ilu
@@ -34,6 +34,24 @@ def _resolve_spec_path(path: str | Path) -> Path:
     return next((p for p in _spec_path_candidates(path) if p.exists()), Path(path))
 
 
+def _format_timings(timings: Mapping[str, float]) -> str:
+    """Return ``timings`` as newline-delimited ``name: seconds`` strings."""
+    return "\n".join(f"{n}: {t:.2f}s" for n, t in timings.items())
+
+
+def _exit_with_error(exc: Exception) -> None:
+    """Print ``exc`` to stderr and exit with status 1."""
+    print(f"error: {exc}", file=sys.stderr)
+    raise typer.Exit(1) if typer else SystemExit(1)
+
+
+def _safe(func: Callable[[], None]) -> None:
+    """Invoke ``func`` and exit non-zero on any exception."""
+    try:
+        func()
+    except Exception as exc:  # pragma: no cover - exercised in CLI tests
+        _exit_with_error(exc)
+
 
 def _run_convert(
     input_path: Path,
@@ -44,6 +62,7 @@ def _run_convert(
     exclude_pages: str | None,
     no_metadata: bool,
     spec: str,
+    verbose: bool,
 ) -> None:
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
@@ -51,7 +70,9 @@ def _run_convert(
         overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages, no_metadata),
     )
     s = _enrich_spec(s) if enrich else s
-    run_convert(_input_artifact(str(input_path), s), s)
+    _, timings = run_convert(_input_artifact(str(input_path), s), s)
+    if verbose:
+        print(_format_timings(timings))
     print("convert: OK")
 
 
@@ -159,17 +180,21 @@ if typer:
         enrich: bool = typer.Option(False, "--enrich/--no-enrich"),
         exclude_pages: str | None = typer.Option(None, "--exclude-pages"),
         no_metadata: bool = typer.Option(False, "--no-metadata"),
-        spec: str = "pipeline.yaml",
+        spec: str = typer.Option("pipeline.yaml", "--spec"),
+        verbose: bool = typer.Option(False, "--verbose"),
     ) -> None:
-        _run_convert(
-            input_path,
-            out,
-            chunk_size,
-            overlap,
-            enrich,
-            exclude_pages,
-            no_metadata,
-            spec,
+        _safe(
+            lambda: _run_convert(
+                input_path,
+                out,
+                chunk_size,
+                overlap,
+                enrich,
+                exclude_pages,
+                no_metadata,
+                spec,
+                verbose,
+            )
         )
 
     @app.command()
@@ -177,6 +202,7 @@ if typer:
         _run_inspect()
 
 else:
+
     def app(argv: list[str] | None = None) -> None:
         parser = argparse.ArgumentParser(prog="pdf_chunker")
         sub = parser.add_subparsers(dest="cmd", required=True)
@@ -191,17 +217,21 @@ else:
         conv.add_argument("--exclude-pages")
         conv.add_argument("--no-metadata", action="store_true")
         conv.add_argument("--spec", default="pipeline.yaml")
+        conv.add_argument("--verbose", action="store_true")
         conv.set_defaults(
             enrich=False,
-            func=lambda ns: _run_convert(
-                ns.input_path,
-                ns.out,
-                ns.chunk_size,
-                ns.overlap,
-                ns.enrich,
-                ns.exclude_pages,
-                ns.no_metadata,
-                ns.spec,
+            func=lambda ns: _safe(
+                lambda: _run_convert(
+                    ns.input_path,
+                    ns.out,
+                    ns.chunk_size,
+                    ns.overlap,
+                    ns.enrich,
+                    ns.exclude_pages,
+                    ns.no_metadata,
+                    ns.spec,
+                    ns.verbose,
+                )
             ),
         )
 
