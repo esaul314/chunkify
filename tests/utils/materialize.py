@@ -16,4 +16,3 @@ def materialize_base64(src: Path, dst_dir: Path, filename: str) -> Path:
     target = dst_dir / filename
     target.write_bytes(data)
     return target
-
