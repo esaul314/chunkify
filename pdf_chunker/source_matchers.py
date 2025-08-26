@@ -4,16 +4,21 @@
 # for additional strategies.
 from __future__ import annotations
 
-from typing import Callable, List, Tuple
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
-Matcher = Callable[[str, dict, list[dict]], bool]
+Matcher = Callable[[str, Mapping[str, Any], Sequence[Mapping[str, Any]]], bool]
 
 
-def substring_match(chunk_start: str, block: dict, _blocks: list[dict]) -> bool:
+def substring_match(
+    chunk_start: str, block: Mapping[str, Any], _blocks: Sequence[Mapping[str, Any]]
+) -> bool:
     return bool(chunk_start) and chunk_start in block.get("text", "")
 
 
-def start_match(chunk_start: str, block: dict, _blocks: list[dict]) -> bool:
+def start_match(
+    chunk_start: str, block: Mapping[str, Any], _blocks: Sequence[Mapping[str, Any]]
+) -> bool:
     block_text = block.get("text", "").strip()
     if not block_text:
         return False
@@ -23,7 +28,9 @@ def start_match(chunk_start: str, block: dict, _blocks: list[dict]) -> bool:
     return lower_chunk.startswith(lower_block) or lower_block.startswith(lower_chunk)
 
 
-def fuzzy_match(chunk_start: str, block: dict, _blocks: list[dict]) -> bool:
+def fuzzy_match(
+    chunk_start: str, block: Mapping[str, Any], _blocks: Sequence[Mapping[str, Any]]
+) -> bool:
     import re
 
     def normalize(s: str) -> str:
@@ -33,12 +40,16 @@ def fuzzy_match(chunk_start: str, block: dict, _blocks: list[dict]) -> bool:
     return normalize(block_start).startswith(normalize(chunk_start)[:15])
 
 
-def overlap_match(chunk_start: str, block: dict, _blocks: list[dict]) -> bool:
+def overlap_match(
+    chunk_start: str, block: Mapping[str, Any], _blocks: Sequence[Mapping[str, Any]]
+) -> bool:
     block_text = block.get("text", "")
     return any(chunk_start[:n] in block_text for n in range(30, 10, -5))
 
 
-def header_match(chunk_start: str, block: dict, blocks: list[dict]) -> bool:
+def header_match(
+    chunk_start: str, block: Mapping[str, Any], blocks: Sequence[Mapping[str, Any]]
+) -> bool:
     return (
         block is blocks[0]
         and bool(chunk_start)
@@ -50,7 +61,7 @@ def header_match(chunk_start: str, block: dict, blocks: list[dict]) -> bool:
     )
 
 
-MATCHERS: List[Tuple[str, Matcher]] = [
+MATCHERS: list[tuple[str, Matcher]] = [
     ("substring match", substring_match),
     ("start match", start_match),
     ("fuzzy match", fuzzy_match),
