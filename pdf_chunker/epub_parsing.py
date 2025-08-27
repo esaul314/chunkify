@@ -2,10 +2,10 @@
 
 import os
 import sys
-import ebooklib
+import ebooklib  # type: ignore[import-untyped]
 from ebooklib import epub
-from bs4 import BeautifulSoup
-from typing import Dict, List, TypedDict
+from bs4 import BeautifulSoup, Tag
+from typing import Dict, List, TypedDict, cast
 from .text_cleaning import clean_paragraph
 from .heading_detection import _detect_heading_fallback
 from .extraction_fallbacks import default_language
@@ -66,14 +66,27 @@ def process_epub_item(item: epub.EpubHtml, filename: str) -> List[TextBlock]:
     """Convert a spine item into structured text blocks."""
     soup = BeautifulSoup(item.get_content(), "html.parser")
     body = soup.find("body")
-    if not body:
+    if not isinstance(body, Tag):
         return []
 
+    body_tag = cast(Tag, body)
+
     item_name = item.get_name()
-    elements = body.find_all(["p", "li", "h1", "h2", "h3", "h4", "h5", "h6"])
+    elements = body_tag.find_all([
+        "p",
+        "li",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+    ])
     return [
         block
-        for block in (_element_to_block(element, filename, item_name) for element in elements)
+        for block in (
+            _element_to_block(element, filename, item_name) for element in elements
+        )
         if block
         and not (
             item_name == "nav.xhtml"
@@ -152,15 +165,20 @@ def list_epub_spines(filepath: str) -> list[dict]:
         try:
             soup = BeautifulSoup(item.get_content(), "html.parser")
             body = soup.find("body")
-            if not body:
+            if not isinstance(body, Tag):
                 return "No readable content"
 
-            # Extract text from all elements, similar to process_epub_item
-            text_parts = []
-            for element in body.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "span"]):
-                raw_text = get_element_text_content(element)
-                if raw_text and raw_text.strip():
-                    text_parts.append(raw_text.strip())
+            body_tag = cast(Tag, body)
+            text_parts = [
+                raw_text.strip()
+                for raw_text in (
+                    get_element_text_content(element)
+                    for element in body_tag.find_all(
+                        ["p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "span"]
+                    )
+                )
+                if raw_text and raw_text.strip()
+            ]
 
             if not text_parts:
                 return "No readable content"
