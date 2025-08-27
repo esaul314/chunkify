@@ -44,11 +44,7 @@ def _detect_heading_fallback(text: str) -> bool:
         return True
 
     # Text that starts with common heading patterns
-    if (
-        _has_heading_starter(words)
-        and len(words) <= 8
-        and not text.endswith(TRAILING_PUNCTUATION)
-    ):
+    if _has_heading_starter(words) and len(words) <= 8 and not text.endswith(TRAILING_PUNCTUATION):
         return True
 
     # Text that's mostly numbers (like "1.2.3 Some Topic")
@@ -105,9 +101,7 @@ def detect_headings_from_font_analysis(
     """Extract heading information using traditional font-based analysis."""
 
     def _is_heading(text: str, block_type: str) -> bool:
-        declared_heading = block_type == "heading" and not text.endswith(
-            TRAILING_PUNCTUATION
-        )
+        declared_heading = block_type == "heading" and not text.endswith(TRAILING_PUNCTUATION)
         return declared_heading or _detect_heading_fallback(text)
 
     def _make_heading(i: int, block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -203,9 +197,7 @@ def detect_headings_hybrid(
             block.get("metadata", {}).get("text_enhanced_with_pymupdf4llm", False)
             for block in blocks
         )
-        extraction_method = (
-            "pymupdf4llm_enhanced" if has_pymupdf4llm_enhancement else "traditional"
-        )
+        extraction_method = "pymupdf4llm_enhanced" if has_pymupdf4llm_enhancement else "traditional"
 
     # For PyMuPDF4LLM-enhanced extraction, use traditional font-based analysis
     # since PyMuPDF4LLM is only used for text cleaning in the simplified approach
@@ -308,9 +300,7 @@ def validate_heading_consistency(
 
     # Calculate consistency metrics
     total_unique_headings = len(pymupdf4llm_texts | traditional_texts)
-    overlap_ratio = (
-        len(common_headings) / total_unique_headings if total_unique_headings > 0 else 0
-    )
+    overlap_ratio = len(common_headings) / total_unique_headings if total_unique_headings > 0 else 0
 
     return {
         "total_pymupdf4llm_headings": len(pymupdf4llm_headings),
