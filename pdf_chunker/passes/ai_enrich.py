@@ -30,29 +30,28 @@ def classify_chunk_utterance(
     if not text_chunk or not text_chunk.strip():
         return {"classification": "unclassified", "tags": []}
 
+    tag_lines = [f"- {cat}: {', '.join(tags)}\n" for cat, tags in tag_configs.items()]
     available_tags = (
-        "\n\nAvailable tags by category:\n" +
-        "".join(
-            f"- {cat}: {', '.join(tags)}\n" for cat, tags in tag_configs.items()
-        ) +
-        "\nSelect 2-4 most relevant tags from the available categories."
+        (
+            "\n\nAvailable tags by category:\n"
+            + "".join(tag_lines)
+            + "\nSelect 2-4 most relevant tags from the available categories."
+        )
         if tag_configs
         else ""
     )
 
-    prompt = f"""Given the following text, classify its primary utterance type and assign relevant tags.
-
-Classification: Choose the best fit from this list: {UTTERANCE_TYPES}.
-
-{available_tags}
-
-Respond in this exact format:
-Classification: [chosen_type]
-Tags: [tag1, tag2, tag3]
-
-Text: \"{text_chunk}\"
-
-Response:"""
+    prompt = (
+        "Given the following text, classify its primary utterance type and "
+        "assign relevant tags.\n\n"
+        f"Classification: Choose the best fit from this list: {UTTERANCE_TYPES}.\n\n"
+        f"{available_tags}\n\n"
+        "Respond in this exact format:\n"
+        "Classification: [chosen_type]\n"
+        "Tags: [tag1, tag2, tag3]\n\n"
+        f'Text: "{text_chunk}"\n\n'
+        "Response:"
+    )
 
     try:
         response_text = completion_fn(prompt).strip()
@@ -80,15 +79,15 @@ Response:"""
 class ClassifyClient(Protocol):
     def classify_chunk_utterance(
         self, text_chunk: str, *, tag_configs: Dict[str, List[str]]
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
 
 def _classify_chunk(
     chunk: Chunk, *, client: ClassifyClient, tag_configs: Dict[str, List[str]]
 ) -> Chunk:
     result = client.classify_chunk_utterance(
-        chunk.get("text", ""), tag_configs=tag_configs
+        chunk.get("text", ""),
+        tag_configs=tag_configs,
     )
     meta = {
         **chunk.get("metadata", {}),
@@ -106,10 +105,7 @@ def _classify_chunk(
 def _classify_all(
     chunks: Chunks, *, client: ClassifyClient, tag_configs: Dict[str, List[str]]
 ) -> Chunks:
-    return [
-        _classify_chunk(c, client=client, tag_configs=tag_configs)
-        for c in chunks
-    ]
+    return [_classify_chunk(c, client=client, tag_configs=tag_configs) for c in chunks]
 
 
 def _update_meta(meta: Dict[str, Any] | None, count: int) -> Dict[str, Any]:
@@ -135,9 +131,7 @@ class _AiEnrichPass:
         if not client:
             return a
         tag_configs = options.get("tag_configs", {})
-        enriched = _classify_all(
-            chunks, client=client, tag_configs=tag_configs
-        )
+        enriched = _classify_all(chunks, client=client, tag_configs=tag_configs)
         meta = _update_meta(a.meta, len(enriched))
         return Artifact(payload=enriched, meta=meta)
 

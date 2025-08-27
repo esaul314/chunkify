@@ -1,5 +1,5 @@
 import sys
-from typing import Iterable
+from collections.abc import Iterable
 
 
 def _to_int(part: str) -> int:
@@ -34,8 +34,10 @@ def parse_page_ranges(page_spec: str) -> set[int]:
 
 
 def validate_page_exclusions(
-    excluded_pages: set, total_pages: int, filename: str
-) -> set:
+    excluded_pages: set[int],
+    total_pages: int,
+    filename: str,
+) -> set[int]:
     """
     Validate page exclusions against the actual document and log warnings.
 
@@ -58,7 +60,8 @@ def validate_page_exclusions(
     if invalid_pages:
         invalid_list = sorted(invalid_pages)
         print(
-            f"Warning: Excluding pages beyond document bounds in '{filename}': {invalid_list} (document has {total_pages} pages)",
+            "Warning: Excluding pages beyond document bounds in "
+            f"'{filename}': {invalid_list} (document has {total_pages} pages)",
             file=sys.stderr,
         )
 
@@ -73,7 +76,8 @@ def validate_page_exclusions(
     # Check if all pages would be excluded
     if len(valid_exclusions) >= total_pages:
         print(
-            f"Warning: Page exclusions would exclude all pages in '{filename}'. Processing will continue with no exclusions.",
+            "Warning: Page exclusions would exclude all pages in "
+            f"'{filename}'. Processing will continue with no exclusions.",
             file=sys.stderr,
         )
         return set()

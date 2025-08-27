@@ -20,7 +20,13 @@ text_strategy = st.text(
 )
 bullet_char_strategy = st.sampled_from(list(BULLET_CHARS) + ["-"])
 
-bullet_start_chars = BULLET_CHARS | {"-"}
+bullet_start_chars = set(BULLET_CHARS) | {"-"}
+
+
+def test_bullet_char_union() -> None:
+    expected = set(BULLET_CHARS) | {"-"}
+    assert bullet_start_chars == expected
+
 
 non_bullet_strategy = text_strategy.filter(
     lambda s: s and not any(s.startswith(ch) for ch in bullet_start_chars)
@@ -32,7 +38,11 @@ non_number_strategy = text_strategy.filter(lambda s: not s[0].isdigit())
 def bullet_pairs(draw):
     bullet = draw(bullet_char_strategy)
     prefix, first, second = draw(st.tuples(text_strategy, text_strategy, text_strategy))
-    bullet_line = lambda b, txt: f"{('- ' if b == '-' else b + ' ')}{txt}"
+
+    def bullet_line(b: str, txt: str) -> str:
+        marker = "- " if b == "-" else f"{b} "
+        return f"{marker}{txt}"
+
     curr = draw(
         st.one_of(
             st.just(bullet_line(bullet, first)),
@@ -64,7 +74,10 @@ def numbered_pairs(draw):
     n1, n2 = draw(st.tuples(number_strategy, number_strategy))
     delim = draw(delim_strategy)
     prefix, first, second = draw(st.tuples(text_strategy, text_strategy, text_strategy))
-    num_line = lambda n, txt: f"{n}{delim} {txt}"
+
+    def num_line(n: int, txt: str) -> str:
+        return f"{n}{delim} {txt}"
+
     curr = draw(
         st.one_of(
             st.just(num_line(n1, first)),

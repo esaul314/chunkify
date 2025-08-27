@@ -91,7 +91,8 @@ def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, fl
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
     chain = (registry()[s] for s in spec.pipeline)
     passes = [configure_pass(p, spec.options.get(p.name, {})) for p in chain]
-    a, timings = reduce(_time_step, passes, (a, {}))
+    acc: tuple[Artifact, dict[str, float]] = (a, {})
+    a, timings = reduce(_time_step, passes, acc)
     return a, timings
 
 
@@ -140,7 +141,8 @@ def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
 def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
     artifact = _input_artifact(path, spec)
-    steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
+    input_path = (artifact.meta or {}).get("input", "")
+    steps = _enforce_invariants(spec, input_path=input_path)
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
     artifact, _ = _run_passes(run_spec, artifact)
     return _rows_from_payload(artifact.payload)
@@ -149,7 +151,7 @@ def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
 def _maybe_emit_jsonl(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
     """Write JSONL output when pipeline requests ``emit_jsonl``."""
     if "emit_jsonl" in spec.pipeline:
-        emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), timings)
+        emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), dict(timings))
 
 
 def _has_footnote(texts: Iterable[str]) -> bool:

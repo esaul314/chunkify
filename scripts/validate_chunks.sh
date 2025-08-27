@@ -3,8 +3,32 @@
 # Validate chunks script
 # Performs structural validation on JSONL chunk files and detects duplicates
 
-# Default file path
-JSONL_FILE="${1:-output_chunks_pdf.jsonl}"
+set -euo pipefail
+
+usage() {
+    echo "Usage: $0 [-i <jsonl_file>]" >&2
+}
+
+DEFAULT_FILE="test_data/sample_chunks.jsonl"
+JSONL_FILE=""
+
+while getopts ":i:h" opt; do
+    case "$opt" in
+        i) JSONL_FILE="$OPTARG" ;;
+        h) usage; exit 0 ;;
+        *) usage; exit 1 ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [[ -z "$JSONL_FILE" && $# -gt 0 ]]; then
+    JSONL_FILE="$1"
+fi
+
+JSONL_FILE="${JSONL_FILE:-$DEFAULT_FILE}"
+
+# Ensure directory exists for the provided path
+mkdir -p "$(dirname "$JSONL_FILE")"
 
 # Exit codes
 EXIT_SUCCESS=0
@@ -36,9 +60,9 @@ validation_failed=0
 while IFS= read -r line; do
     # Skip empty lines
     [[ -z "$line" ]] && continue
-    
+
     total_chunks=$((total_chunks + 1))
-    
+
     # Extract text field using python for reliable JSON parsing
     text=$(echo "$line" | python3 -c "
 import json, sys
@@ -48,14 +72,14 @@ try:
 except:
     pass
 " 2>/dev/null)
-    
+
     # Check for empty text
     if [[ -z "$text" || "$text" =~ ^[[:space:]]*$ ]]; then
         empty_text_count=$((empty_text_count + 1))
         echo "Warning: Empty text in chunk on line $total_chunks" >&2
         validation_failed=1
     fi
-    
+
     # Check for lines starting mid-sentence (no capital letter after whitespace)
     if [[ -n "$text" ]]; then
         # Remove leading whitespace and check first character
@@ -66,20 +90,20 @@ except:
             validation_failed=1
         fi
     fi
-    
+
     # Check for over-long chunks (>8000 characters suggests concatenation issues)
     if [[ ${#text} -gt 8000 ]]; then
         overlong_count=$((overlong_count + 1))
         echo "Warning: Overlong chunk (${#text} chars) on line $total_chunks" >&2
         validation_failed=1
     fi
-    
+
 done < "$JSONL_FILE"
 
 echo "Structural validation complete:"
 echo "  Total chunks: $total_chunks"
 echo "  Empty text: $empty_text_count"
-echo "  Mid-sentence starts: $mid_sentence_count" 
+echo "  Mid-sentence starts: $mid_sentence_count"
 echo "  Overlong chunks: $overlong_count"
 
 # Run duplicate detection

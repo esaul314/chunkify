@@ -2,6 +2,7 @@ import os
 import re
 import sys
 from subprocess import TimeoutExpired
+from typing import Optional
 
 try:
     from pdfminer.high_level import extract_text
@@ -59,7 +60,9 @@ def _assess_text_quality(text: str) -> dict:
 def _clean_fallback_text(text: str) -> str:
     """Remove page artifacts across pages in fallback extraction."""
     pages = text.split("\f")
-    cleaned_pages = [remove_page_artifact_lines(page, i + 1) for i, page in enumerate(pages)]
+    cleaned_pages = [
+        remove_page_artifact_lines(page, i + 1) for i, page in enumerate(pages)
+    ]  # noqa: E501
     return "\f".join(cleaned_pages)
 
 
@@ -67,7 +70,9 @@ def _filter_text_by_pages(text: str, excluded: set[int]) -> str:
     """Return text with pages in ``excluded`` removed."""
     if not excluded:
         return text
-    return "\f".join(page for i, page in enumerate(text.split("\f"), start=1) if i not in excluded)
+    return "\f".join(
+        page for i, page in enumerate(text.split("\f"), start=1) if i not in excluded
+    )  # noqa: E501
 
 
 def _is_heading(text: str) -> bool:
@@ -87,13 +92,16 @@ def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
     ]
 
 
-def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[dict]:
+def _extract_with_pdftotext(
+    filepath: str,
+    exclude_pages: Optional[str] = None,
+) -> list[dict]:
     """
     Fallback extraction using pdftotext with layout preservation.
 
     Args:
         filepath: Path to the PDF file
-        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
+        exclude_pages: Optional page ranges to exclude (e.g., "1,3,5-10,15-20")
     """
     try:
         # Parse page exclusions if provided
@@ -153,13 +161,16 @@ def _extract_with_pdftotext(filepath: str, exclude_pages: str = None) -> list[di
         return []
 
 
-def _extract_with_pdfminer(filepath: str, exclude_pages: str = None) -> list[dict]:
+def _extract_with_pdfminer(
+    filepath: str,
+    exclude_pages: Optional[str] = None,
+) -> list[dict]:
     """
     Final fallback extraction using pdfminer.six with tunable LAParams.
 
     Args:
         filepath: Path to the PDF file
-        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
+        exclude_pages: Optional page ranges to exclude (e.g., "1,3,5-10,15-20")
     """
     try:
         # Parse page exclusions if provided
@@ -246,7 +257,14 @@ def should_use_pymupdf4llm_cleaning(text: str) -> bool:
     has_hyphenation_issues = bool(re.search(r"-\s*\n\s*[a-z]", text))
 
     # Use PyMuPDF4LLM if any potential issues are detected
-    return has_ligatures or has_joining_issues or has_whitespace_issues or has_hyphenation_issues
+    return any(
+        [
+            has_ligatures,
+            has_joining_issues,
+            has_whitespace_issues,
+            has_hyphenation_issues,
+        ]
+    )
 
 
 def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> dict:
@@ -309,15 +327,17 @@ def assess_text_cleaning_quality(original_text: str, cleaned_text: str) -> dict:
 
 
 def execute_fallback_extraction(
-    filepath: str, exclude_pages: str = None, fallback_reason: str = None
+    filepath: str,
+    exclude_pages: Optional[str] = None,
+    fallback_reason: Optional[str] = None,
 ) -> list[dict]:
     """
     Execute the traditional three-tier fallback extraction system.
 
     Args:
         filepath: Path to the PDF file
-        exclude_pages: Page ranges to exclude (e.g., "1,3,5-10,15-20")
-        fallback_reason: Reason for falling back (for logging)
+        exclude_pages: Optional page ranges to exclude (e.g., "1,3,5-10,15-20")
+        fallback_reason: Optional reason for falling back (for logging)
 
     Returns:
         List of extracted text blocks using traditional methods
@@ -328,7 +348,9 @@ def execute_fallback_extraction(
 
     if fallback_reason:
         logger.info(
-            f"Executing fallback extraction for {os.path.basename(filepath)}: {fallback_reason}"
+            "Executing fallback extraction for %s: %s",
+            os.path.basename(filepath),
+            fallback_reason,
         )
     else:
         logger.info(f"Executing fallback extraction for {os.path.basename(filepath)}")
@@ -345,7 +367,10 @@ def execute_fallback_extraction(
         logger.debug("Attempting pdfminer extraction")
         pdfminer_blocks = _extract_with_pdfminer(filepath, exclude_pages)
         if pdfminer_blocks:
-            logger.info(f"pdfminer extraction successful: {len(pdfminer_blocks)} blocks")
+            logger.info(
+                "pdfminer extraction successful: %s blocks",
+                len(pdfminer_blocks),
+            )
             return pdfminer_blocks
     else:
         logger.warning("pdfminer.six not available for fallback extraction")

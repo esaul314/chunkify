@@ -22,10 +22,10 @@ def _score(blocks: list[Block]) -> float:
     return float(_assess_text_quality(text).get("quality_score", 0.0))
 
 
-def _metrics(reason: str | None, blocks: list[Block]) -> dict[str, Any]:
+def _metrics(reason: str | None, blocks: list[Block]) -> dict[str, float | str]:
     """Return fallback metrics combining ``reason`` and quality ``score``."""
 
-    metrics = {"score": _score(blocks)}
+    metrics: dict[str, float | str] = {"score": _score(blocks)}
     return metrics if reason is None else {**metrics, "reason": reason}
 
 
@@ -38,12 +38,15 @@ def _extract(path: str, reason: str | None) -> tuple[list[Block], dict[str, Any]
     return blocks, _metrics(reason, blocks)
 
 
-def _meta(meta: dict[str, Any] | None, metrics: dict[str, Any]) -> dict[str, Any]:
+def _meta(meta: dict[str, Any] | None, metrics: dict[str, float | str]) -> dict[str, Any]:
     """Return a new meta dict with fallback metrics merged immutably."""
 
     metrics_root = (meta or {}).get("metrics", {})
     fallback = {**metrics_root.get("extraction_fallback", {}), **metrics}
-    return {**(meta or {}), "metrics": {**metrics_root, "extraction_fallback": fallback}}
+    return {
+        **(meta or {}),
+        "metrics": {**metrics_root, "extraction_fallback": fallback},
+    }
 
 
 class _ExtractionFallbackPass:
