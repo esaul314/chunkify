@@ -24,7 +24,9 @@ def starts_with_bullet(text: str) -> bool:
     """Return True if ``text`` begins with a bullet marker or hyphen bullet."""
 
     stripped = text.lstrip()
-    return stripped.startswith(tuple(BULLET_CHARS)) or stripped.startswith(HYPHEN_BULLET_PREFIX)
+    return stripped.startswith(tuple(BULLET_CHARS)) or stripped.startswith(
+        HYPHEN_BULLET_PREFIX
+    )  # noqa: E501
 
 
 def _last_non_empty_line(text: str) -> str:
@@ -42,7 +44,7 @@ def is_bullet_continuation(curr: str, nxt: str) -> bool:
 
 
 def is_bullet_fragment(curr: str, nxt: str) -> bool:
-    """Return True when ``nxt`` starts with text that continues the last bullet in ``curr``."""
+    """Return True when ``nxt`` continues the last bullet in ``curr``."""
 
     last_line = _last_non_empty_line(curr)
     return (
@@ -64,13 +66,13 @@ def split_bullet_fragment(text: str) -> Tuple[str, str]:
 def is_bullet_list_pair(curr: str, nxt: str) -> bool:
     """Return True when ``curr`` and ``nxt`` belong to the same bullet list."""
 
-    colon_bullet = curr.rstrip().endswith(":") or re.search(
-        rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", curr
+    colon_bullet = curr.rstrip().endswith(":") or bool(
+        re.search(rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", curr)
     )
     has_bullet = starts_with_bullet(curr) or any(
         starts_with_bullet(line) for line in curr.splitlines()
     )
-    return starts_with_bullet(nxt) and (has_bullet or colon_bullet)
+    return bool(starts_with_bullet(nxt) and (has_bullet or colon_bullet))
 
 
 def starts_with_number(text: str) -> bool:
@@ -116,12 +118,15 @@ def _annotate(prev: Block | None, block: Block) -> Block:
 
 
 def _annotate_blocks(blocks: Iterable[Block]) -> List[Block]:
-    def step(state: Tuple[Block | None, List[Block]], block: Block) -> Tuple[Block, List[Block]]:
+    def step(
+        state: Tuple[Block | None, List[Block]], block: Block
+    ) -> Tuple[Block | None, List[Block]]:
         prev, acc = state
         annotated = _annotate(prev, block)
         return annotated, [*acc, annotated]
 
-    return reduce(step, blocks, (None, []))[1]
+    initial: Tuple[Block | None, List[Block]] = (None, [])
+    return reduce(step, blocks, initial)[1]
 
 
 def _annotate_page(page: Dict[str, Any]) -> Dict[str, Any]:
