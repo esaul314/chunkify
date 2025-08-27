@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pdf_chunker.framework import Artifact, register
 
@@ -22,14 +22,14 @@ def _score(blocks: list[Block]) -> float:
     return float(_assess_text_quality(text).get("quality_score", 0.0))
 
 
-def _metrics(reason: Optional[str], blocks: list[Block]) -> dict[str, Any]:
+def _metrics(reason: str | None, blocks: list[Block]) -> dict[str, float | str]:
     """Return fallback metrics combining ``reason`` and quality ``score``."""
 
-    metrics = {"score": _score(blocks)}
+    metrics: dict[str, float | str] = {"score": _score(blocks)}
     return metrics if reason is None else {**metrics, "reason": reason}
 
 
-def _extract(path: str, reason: Optional[str]) -> tuple[list[Block], dict[str, Any]]:
+def _extract(path: str, reason: str | None) -> tuple[list[Block], dict[str, Any]]:
     """Run fallback extraction for ``path`` and compute metrics."""
 
     from pdf_chunker.extraction_fallbacks import execute_fallback_extraction
@@ -38,7 +38,7 @@ def _extract(path: str, reason: Optional[str]) -> tuple[list[Block], dict[str, A
     return blocks, _metrics(reason, blocks)
 
 
-def _meta(meta: dict[str, Any] | None, metrics: dict[str, Any]) -> dict[str, Any]:
+def _meta(meta: dict[str, Any] | None, metrics: dict[str, float | str]) -> dict[str, Any]:
     """Return a new meta dict with fallback metrics merged immutably."""
 
     metrics_root = (meta or {}).get("metrics", {})
