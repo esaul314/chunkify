@@ -91,7 +91,8 @@ def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, fl
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
     chain = (registry()[s] for s in spec.pipeline)
     passes = [configure_pass(p, spec.options.get(p.name, {})) for p in chain]
-    a, timings = reduce(_time_step, passes, (a, {}))
+    acc: tuple[Artifact, dict[str, float]] = (a, {})
+    a, timings = reduce(_time_step, passes, acc)
     return a, timings
 
 

@@ -73,11 +73,11 @@ def load_spec(
     """Load YAML + env/CLI overrides into a validated PipelineSpec."""
     data = _read_yaml(path)
     opts = data.get("options", {})
-    merged = reduce(
-        _merge_options,
-        filter(None, [opts, _env_overrides(), overrides]),
-        {},
+    sources: Iterable[Dict[str, Dict[str, Any]]] = (
+        d for d in (opts, _env_overrides(), overrides) if d
     )
+    acc: Dict[str, Dict[str, Any]] = {}
+    merged = reduce(_merge_options, sources, acc)
     pipeline = data.get("pipeline", [])
     _warn_unknown_options(pipeline, merged)
     if merged:
