@@ -1,12 +1,16 @@
 import logging
 from collections import Counter
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type
 
-from haystack.components.preprocessors import DocumentSplitter
-
-# from haystack.dataclasses import Document
-from haystack import Document
+DocumentSplitter: Type[Any] | None
+try:  # Optional haystack dependency
+    from haystack.components.preprocessors import (
+        DocumentSplitter as _DocumentSplitter,
+    )
+    DocumentSplitter = _DocumentSplitter
+except Exception:  # pragma: no cover - dependency optional
+    DocumentSplitter = None
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
@@ -15,16 +19,23 @@ from .list_detection import starts_with_bullet
 logger = logging.getLogger(__name__)
 
 # Try importing RecursiveCharacterTextSplitter from both possible locations
+RecursiveCharacterTextSplitter: Type[Any] | None
 try:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain.text_splitter import (
+        RecursiveCharacterTextSplitter as _RecursiveCharacterTextSplitter,
+    )
 
+    RecursiveCharacterTextSplitter = _RecursiveCharacterTextSplitter
     _LANGCHAIN_SPLITTER_AVAILABLE = True
 except ImportError:
     try:
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        from langchain_text_splitters import (
+            RecursiveCharacterTextSplitter as _RecursiveCharacterTextSplitter,
+        )
 
+        RecursiveCharacterTextSplitter = _RecursiveCharacterTextSplitter
         _LANGCHAIN_SPLITTER_AVAILABLE = True
-    except ImportError:
+    except ImportError:  # pragma: no cover - dependency optional
         RecursiveCharacterTextSplitter = None
         _LANGCHAIN_SPLITTER_AVAILABLE = False
 
@@ -374,7 +385,7 @@ def analyze_chunk_relationships(chunks: List[str]) -> List[Dict[str, Any]]:
 
 
 def merge_conversational_chunks(
-    chunks: List[str], min_chunk_size: int = None
+    chunks: List[str], min_chunk_size: int | None = None
 ) -> Tuple[List[str], Dict[str, Any]]:
     """
     Merge chunks based on conversational patterns and minimum size requirements.
@@ -753,7 +764,7 @@ def _starts_with_quote_content(text: str) -> bool:
 
 def _is_quote_content(text: str) -> bool:
     """Check if text appears to be content inside quotes."""
-    return text and not text[0].isupper() and not text.rstrip().endswith(('"', "'"))
+    return bool(text) and not text[0].isupper() and not text.rstrip().endswith(('"', "'"))
 
 
 def _starts_with_closing_quote(text: str) -> bool:
@@ -842,7 +853,7 @@ def semantic_chunker(
         )
 
     # Apply conversational merging if enabled
-    if enable_dialogue_detection and min_chunk_size:
+    if enable_dialogue_detection and min_chunk_size is not None:
         merged_chunks, merge_stats = _merge_short_chunks(
             initial_chunks, min_chunk_size, very_short_threshold, short_threshold
         )
