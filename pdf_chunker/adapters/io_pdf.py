@@ -91,7 +91,7 @@ def _primary_blocks(
     with _env("PDF_CHUNKER_USE_PYMUPDF4LLM", "1" if use_pymupdf4llm else "0"):
         from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 
-        return extract_text_blocks_from_pdf(path, exclude)
+        return extract_text_blocks_from_pdf(path, exclude_pages=exclude)
 
 
 def _fallback_blocks(
@@ -102,7 +102,10 @@ def _fallback_blocks(
 
     from pdf_chunker.extraction_fallbacks import execute_fallback_extraction
 
-    return execute_fallback_extraction(path, _format_exclusions(exclude_pages))
+    return execute_fallback_extraction(
+        path,
+        exclude_pages=_format_exclusions(exclude_pages),
+    )
 
 
 def read(

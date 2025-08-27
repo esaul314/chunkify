@@ -5,6 +5,7 @@ import sys
 import re
 import logging
 from functools import reduce
+from typing import Optional
 
 try:
     import fitz  # PyMuPDF
@@ -611,7 +612,7 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
     return merged_blocks
 
 
-def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
+def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = None) -> list[dict]:
     """
     Extract structured text from a PDF using traditional extraction with optional PyMuPDF4LLM text cleaning.
 
@@ -927,7 +928,7 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
 _legacy_extract_text_blocks_from_pdf = extract_text_blocks_from_pdf
 
 
-def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str | None = None) -> list[dict]:
+def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = None) -> list[dict]:
     """Shim retaining the original extraction behavior."""
 
     return _legacy_extract_text_blocks_from_pdf(filepath, exclude_pages)
