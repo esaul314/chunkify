@@ -141,7 +141,8 @@ def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
 def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
     artifact = _input_artifact(path, spec)
-    steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
+    input_path = (artifact.meta or {}).get("input", "")
+    steps = _enforce_invariants(spec, input_path=input_path)
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
     artifact, _ = _run_passes(run_spec, artifact)
     return _rows_from_payload(artifact.payload)
@@ -150,7 +151,7 @@ def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
 def _maybe_emit_jsonl(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
     """Write JSONL output when pipeline requests ``emit_jsonl``."""
     if "emit_jsonl" in spec.pipeline:
-        emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), timings)
+        emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), dict(timings))
 
 
 def _has_footnote(texts: Iterable[str]) -> bool:
@@ -256,7 +257,7 @@ def _timed(p: Pass, a: Artifact, timings: dict[str, float]) -> Artifact:
 
 def _meta_with_warnings(
     a: Artifact, spec: PipelineSpec, opts: Mapping[str, Any]
-) -> Mapping[str, Any]:
+) -> dict[str, Any]:
     """Return meta merged with options and warning indicators."""
     gen_meta = _generate_metadata_enabled(spec)
     warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
