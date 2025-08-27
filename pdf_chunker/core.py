@@ -194,19 +194,15 @@ def validate_chunks(
     logger.debug("Final pipeline output: %d chunks", len(final_chunks))
     if final_chunks:
         log_chunk_stats([chunk.get("text", "") for chunk in final_chunks], label="Final chunk")
-        [
+        for i, chunk in enumerate(final_chunks[:3]):
             logger.debug("Final chunk %d: %d characters", i, len(chunk.get("text", "")))
-            for i, chunk in enumerate(final_chunks[:3])
-        ]
-        [
-            logger.error(
-                "Final chunk %d is still oversized (%d characters)!",
-                i,
-                len(chunk.get("text", "")),
-            )
-            for i, chunk in enumerate(final_chunks[:3])
-            if len(chunk.get("text", "")) > 10000
-        ]
+        for i, chunk in enumerate(final_chunks[:3]):
+            if len(chunk.get("text", "")) > 10000:
+                logger.error(
+                    "Final chunk %d is still oversized (%d characters)!",
+                    i,
+                    len(chunk.get("text", "")),
+                )
     return final_chunks
 
 
@@ -272,7 +268,7 @@ def process_document(
     excluded_pages = parse_exclusions(exclude_pages)
     path = Path(filepath)
     extractor = extractor or parsing.extract_structured_text
-    blocks = extractor(path, exclude_pages=exclude_pages)
+    blocks = extractor(path, exclude_pages)
     filtered_blocks = filter_blocks(blocks, excluded_pages)
     haystack_chunks = chunker(
         filtered_blocks,
