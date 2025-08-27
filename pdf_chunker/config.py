@@ -78,6 +78,7 @@ def load_spec(
     )
     acc: Dict[str, Dict[str, Any]] = {}
     merged = reduce(_merge_options, sources, acc)
+
     pipeline = data.get("pipeline", [])
     _warn_unknown_options(pipeline, merged)
     if merged:

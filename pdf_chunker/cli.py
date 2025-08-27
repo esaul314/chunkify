@@ -51,6 +51,7 @@ def _safe(func: Callable[[], None]) -> None:
         func()
     except Exception as exc:  # pragma: no cover - exercised in CLI tests
         _exit_with_error(exc)
+        
 
 def _run_convert(
     input_path: Path,

@@ -257,7 +257,7 @@ def _timed(p: Pass, a: Artifact, timings: dict[str, float]) -> Artifact:
 
 def _meta_with_warnings(
     a: Artifact, spec: PipelineSpec, opts: Mapping[str, Any]
-) -> dict[str, Any]:
+) -> Mapping[str, Any]:
     """Return meta merged with options and warning indicators."""
     gen_meta = _generate_metadata_enabled(spec)
     warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)

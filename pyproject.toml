@@ -6,10 +6,19 @@ build-backend = "hatchling.build"
 name = "pdf-chunker"
 version = "0.1.0"
 description = "CLI pipeline to convert PDFs/EPUBs into JSONL for LoRA/RAG, with declarative passes."
-readme = "README.md"
+readme = {file = "README.md", content-type = "text/markdown"}
 authors = [{name = "Alex"}]
 requires-python = ">=3.10"
 license = {text = "MIT"}
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Text Processing",
+]
 dependencies = [
   "typer[all]>=0.12",
   "pydantic>=2.4",
