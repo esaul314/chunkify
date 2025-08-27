@@ -102,14 +102,18 @@ def _core_helpers(
     sys.modules.setdefault("pdf_chunker.adapters", pkg)
 
     def _load(name: str) -> None:
-        spec = ilu.spec_from_file_location(f"pdf_chunker.adapters.{name}", base / f"{name}.py")
-        mod = ilu.module_from_spec(spec)
-        assert spec.loader
-        spec.loader.exec_module(mod)
-        sys.modules[f"pdf_chunker.adapters.{name}"] = mod
-        setattr(pkg, name, mod)
+        spec = ilu.spec_from_file_location(
+            f"pdf_chunker.adapters.{name}", base / f"{name}.py"
+        )
+        if not spec or not spec.loader:
+            raise ImportError(f"Cannot load adapter module: {name}")
+        module = ilu.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules[f"pdf_chunker.adapters.{name}"] = module
+        setattr(pkg, name, module)
 
-    tuple(_load(n) for n in ("emit_jsonl", "io_pdf", "io_epub"))
+    for name in ("emit_jsonl", "io_pdf", "io_epub"):
+        _load(name)
     from pdf_chunker.core_new import _input_artifact, run_convert, run_inspect
 
     return _input_artifact, run_convert, run_inspect
