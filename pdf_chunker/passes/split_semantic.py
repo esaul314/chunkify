@@ -199,7 +199,9 @@ def _resolve_opts(meta: Mapping[str, Any] | None, base: _SplitSemanticPass) -> t
 class _SplitSemanticPass:
     name: str = field(default="split_semantic", init=False)
     input_type: type = field(default=dict, init=False)  # expects {"type": "page_blocks"}
-    output_type: type = field(default=dict, init=False)  # returns {"type": "chunks", "items": [...]}
+    output_type: type = field(
+        default=dict, init=False
+    )  # returns {"type": "chunks", "items": [...]}
     chunk_size: int = 400
     overlap: int = 50
     min_chunk_size: int | None = None
