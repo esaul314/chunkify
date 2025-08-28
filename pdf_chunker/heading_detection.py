@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, cast
 
 
 TRAILING_PUNCTUATION = (".", "!", "?", ";", ":")
@@ -226,7 +226,7 @@ def enhance_blocks_with_heading_metadata(
     from pdf_chunker.passes.heading_detect import heading_detect
 
     artifact = Artifact(payload=blocks, meta={"extraction_method": extraction_method})
-    return heading_detect(artifact).payload  # type: ignore[no-any-return]
+    return cast(List[Dict[str, Any]], heading_detect(artifact).payload)
 
 
 def get_heading_hierarchy(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
