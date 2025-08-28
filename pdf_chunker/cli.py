@@ -51,7 +51,7 @@ def _safe(func: Callable[[], None]) -> None:
         func()
     except Exception as exc:  # pragma: no cover - exercised in CLI tests
         _exit_with_error(exc)
-        
+
 
 def _run_convert(
     input_path: Path,
@@ -103,9 +103,7 @@ def _core_helpers(
     sys.modules.setdefault("pdf_chunker.adapters", pkg)
 
     def _load(name: str) -> None:
-        spec = ilu.spec_from_file_location(
-            f"pdf_chunker.adapters.{name}", base / f"{name}.py"
-        )
+        spec = ilu.spec_from_file_location(f"pdf_chunker.adapters.{name}", base / f"{name}.py")
         if not spec or not spec.loader:
             raise ImportError(f"Cannot load adapter module: {name}")
         module = ilu.module_from_spec(spec)
