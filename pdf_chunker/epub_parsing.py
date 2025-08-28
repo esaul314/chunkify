@@ -72,21 +72,21 @@ def process_epub_item(item: epub.EpubHtml, filename: str) -> List[TextBlock]:
     body_tag = cast(Tag, body)
 
     item_name = item.get_name()
-    elements = body_tag.find_all([
-        "p",
-        "li",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-    ])
+    elements = body_tag.find_all(
+        [
+            "p",
+            "li",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+        ]
+    )
     return [
         block
-        for block in (
-            _element_to_block(element, filename, item_name) for element in elements
-        )
+        for block in (_element_to_block(element, filename, item_name) for element in elements)
         if block
         and not (
             item_name == "nav.xhtml"
