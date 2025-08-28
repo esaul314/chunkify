@@ -1,6 +1,6 @@
+import importlib
 import logging
-import textstat  # type: ignore[import]
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable, cast
 from itertools import accumulate
 from haystack.dataclasses import Document
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +8,8 @@ from functools import partial
 from dataclasses import dataclass
 from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
+
+textstat = cast(Any, importlib.import_module("textstat"))
 
 
 logger = logging.getLogger(__name__)
@@ -131,9 +133,7 @@ def _build_metadata(
     page = source_block.get("source", {}).get("page", 0)
     location = source_block.get("source", {}).get("location")
 
-    location_value = (
-        None if location is None and filename.lower().endswith(".pdf") else location
-    )
+    location_value = None if location is None and filename.lower().endswith(".pdf") else location
     page_value = page if isinstance(page, int) and page > 0 else None
 
     base_metadata = {
@@ -169,7 +169,7 @@ def process_chunk(
     enrichment_fn: Callable[[str], dict] | None,
     char_map: dict,
     original_blocks: list[dict],
-    ) -> dict | None:
+) -> dict | None:
     """Process a single chunk, optionally generating metadata.
 
     When ``generate_metadata`` is ``False`` only the cleaned ``text`` field is
@@ -249,11 +249,7 @@ def format_chunks_with_metadata(
     }
     logger.debug("Original blocks contain pages: %s", sorted(original_pages))
 
-    char_map = (
-        _build_char_map(original_blocks)
-        if generate_metadata
-        else {"char_positions": ()}
-    )
+    char_map = _build_char_map(original_blocks) if generate_metadata else {"char_positions": ()}
 
     processor = partial(
         process_chunk,
@@ -392,9 +388,7 @@ def _find_source_block(
 
     chunk_text = chunk.content.strip()
     chunk_start = chunk_text[:50].replace("\n", " ").strip()
-    logger.debug(
-        "Looking for source block for chunk starting with: '%s...'", chunk_start
-    )
+    logger.debug("Looking for source block for chunk starting with: '%s...'", chunk_start)
 
     match, label = _match_source_block(chunk_start, original_blocks, matchers)
     if match:
