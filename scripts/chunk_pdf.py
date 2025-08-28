@@ -48,9 +48,7 @@ def main() -> None:
 
             print(f"EPUB Spine Structure ({len(spine_items)} items):")
             for item in spine_items:
-                print(
-                    f"{item['index']:3d}. {item['filename']} - {item['content_preview']}"
-                )
+                print(f"{item['index']:3d}. {item['filename']} - {item['content_preview']}")
 
             return 0
         except Exception as e:
