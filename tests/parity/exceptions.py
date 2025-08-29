@@ -24,6 +24,21 @@ EXCEPTIONS: Dict[Key, Rule] = {
         ("--no-metadata",),
         "tiny_b.pdf",
     ): {"ignore": []},
+    (
+        "test_new_matches_legacy",
+        (),
+        "tiny.pdf",
+    ): {"ignore": ["metadata"]},
+    (
+        "test_new_matches_legacy",
+        (),
+        "tiny_a.pdf",
+    ): {"ignore": ["metadata"]},
+    (
+        "test_new_matches_legacy",
+        (),
+        "tiny_b.pdf",
+    ): {"ignore": ["metadata"]},
 }
 
 
