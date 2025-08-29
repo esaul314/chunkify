@@ -87,6 +87,7 @@ def process_epub_item(item: epub.EpubHtml, filename: str) -> List[TextBlock]:
             "h6",
         ]
     )
+
     blocks = (_element_to_block(element, filename, item_name) for element in elements)
     return [
         block
