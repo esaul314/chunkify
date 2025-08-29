@@ -3,12 +3,13 @@ import os
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
+from importlib import import_module
 from pathlib import Path
-from typing import cast
-
-import yaml  # type: ignore[import-untyped]
+from typing import Any, cast
 
 from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
+
+yaml = cast(Any, import_module("yaml"))
 
 
 class Client:
@@ -49,7 +50,10 @@ def _load_tag_configs(config_dir: str = "config/tags") -> dict[str, list[str]]:
         except FileNotFoundError:
             return {}
 
-    def merge_dicts(acc: dict[str, list[str]], nxt: dict[str, list[str]]) -> dict[str, list[str]]:
+    def merge_dicts(
+        acc: dict[str, list[str]],
+        nxt: dict[str, list[str]],
+    ) -> dict[str, list[str]]:
         return {key: acc.get(key, []) + nxt.get(key, []) for key in set(acc) | set(nxt)}
 
     merged: dict[str, list[str]] = reduce(
