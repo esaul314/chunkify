@@ -2,7 +2,7 @@
 
 import os
 import sys
-import ebooklib  # type: ignore[import-untyped]
+import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup, Tag
 from typing import Dict, List, TypedDict, cast
@@ -22,10 +22,13 @@ class TextBlock(TypedDict):
 
 def get_element_text_content(element) -> str:
     """Extract text from BeautifulSoup element without extra separators."""
-    return " ".join(
-        (" ".join(child.stripped_strings) if hasattr(child, "stripped_strings") else child)
-        for child in element.contents
-    )
+
+    def _to_text(child) -> str:
+        if hasattr(child, "stripped_strings"):
+            return " ".join(child.stripped_strings)
+        return child
+
+    return " ".join(_to_text(child) for child in element.contents)
 
 
 def _prefixed_list_text(element, text: str) -> str:
@@ -84,9 +87,11 @@ def process_epub_item(item: epub.EpubHtml, filename: str) -> List[TextBlock]:
             "h6",
         ]
     )
+
+    blocks = (_element_to_block(element, filename, item_name) for element in elements)
     return [
         block
-        for block in (_element_to_block(element, filename, item_name) for element in elements)
+        for block in blocks
         if block
         and not (
             item_name == "nav.xhtml"
@@ -123,7 +128,11 @@ def extract_text_blocks_from_epub(
             from .page_utils import parse_page_ranges, validate_page_exclusions
 
             excluded_spines = parse_page_ranges(exclude_spines)
-            excluded_spines = validate_page_exclusions(excluded_spines, len(spine_items), filename)
+            excluded_spines = validate_page_exclusions(
+                excluded_spines,
+                len(spine_items),
+                filename,
+            )
         except ValueError as e:
             print(f"Error parsing spine exclusions: {e}", file=sys.stderr)
             print("Continuing without spine exclusions", file=sys.stderr)
@@ -131,7 +140,7 @@ def extract_text_blocks_from_epub(
 
     # Process spine items with exclusion filtering
     all_blocks = []
-    for spine_index, item in enumerate(spine_items, 1):  # 1-based indexing like PDF pages
+    for spine_index, item in enumerate(spine_items, 1):
         if spine_index in excluded_spines:
             print(
                 f"Skipping excluded spine item {spine_index}: {item.get_name()}",
@@ -139,7 +148,10 @@ def extract_text_blocks_from_epub(
             )
             continue
 
-        print(f"Processing spine item {spine_index}: {item.get_name()}", file=sys.stderr)
+        print(
+            f"Processing spine item {spine_index}: {item.get_name()}",
+            file=sys.stderr,
+        )
         blocks = process_epub_item(item, filename)
         all_blocks.extend(blocks)
 
@@ -148,14 +160,16 @@ def extract_text_blocks_from_epub(
 
 def list_epub_spines(filepath: str) -> list[dict]:
     """
-    Lists spine items from an EPUB file with their indices, filenames, and content previews.
+    Lists spine items from an EPUB file with their indices,
+    filenames, and content previews.
 
     Args:
         filepath: Path to the EPUB file
 
     Returns:
         List of dictionaries containing spine information:
-        [{"index": 1, "filename": "cover.xhtml", "content_preview": "Cover Page..."}, ...]
+        [{"index": 1, "filename": "cover.xhtml",
+          "content_preview": "Cover Page..."}, ...]
     """
     book = epub.read_epub(filepath)
     spine_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
