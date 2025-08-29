@@ -4,10 +4,12 @@ import os
 import pathlib
 import warnings
 from functools import reduce
-from typing import Any, Dict, Iterable, Mapping, List
+from importlib import import_module
+from typing import Any, Dict, Iterable, Mapping, List, cast
 
-import yaml
 from pydantic import BaseModel, Field
+
+yaml = cast(Any, import_module("yaml"))
 
 
 class PipelineSpec(BaseModel):
@@ -52,7 +54,8 @@ def _merge_options(
     base: Dict[str, Dict[str, Any]], override: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
     """Shallow-merge per-step options with comprehension; override wins."""
-    return {s: {**base.get(s, {}), **override.get(s, {})} for s in set(base) | set(override)}
+    sources = set(base) | set(override)
+    return {s: {**base.get(s, {}), **override.get(s, {})} for s in sources}
 
 
 def _warn_unknown_options(pipeline: Iterable[str], opts: Mapping[str, Any]) -> None:
