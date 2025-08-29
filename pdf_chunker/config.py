@@ -54,7 +54,7 @@ def _merge_options(
     base: Dict[str, Dict[str, Any]], override: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
     """Shallow-merge per-step options with comprehension; override wins."""
-    sources = set(base) | set(override)
+    sources = set(base).union(override)
     return {s: {**base.get(s, {}), **override.get(s, {})} for s in sources}
 
 
