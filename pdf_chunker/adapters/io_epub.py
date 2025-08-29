@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from itertools import groupby
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Iterable, cast
 
 
-def _page_key(mapping: Dict[str, int], block: Dict[str, Any]) -> int:
+def _page_key(mapping: dict[str, int], block: dict[str, Any]) -> int:
     """Resolve spine index for grouping.
 
     Unknown locations are appended after known spine items instead of
@@ -18,13 +18,17 @@ def _page_key(mapping: Dict[str, int], block: Dict[str, Any]) -> int:
 
 
 def _group_blocks(
-    blocks: Iterable[Dict[str, Any]], mapping: Dict[str, int]
-) -> List[Dict[str, Any]]:
+    blocks: Iterable[dict[str, Any]], mapping: dict[str, int]
+) -> list[dict[str, Any]]:
     """Group blocks by computed spine index."""
 
-    key = lambda blk: _page_key(mapping, blk)
+    def key(blk: dict[str, Any]) -> int:
+        return _page_key(mapping, blk)
+
     sorted_blocks = sorted(blocks, key=key)
-    return [{"page": page, "blocks": list(group)} for page, group in groupby(sorted_blocks, key)]
+    groups = groupby(sorted_blocks, key)
+    pages = [{"page": page, "blocks": list(group)} for page, group in groups]
+    return pages
 
 
 def _excluded_spines(spec: str | None, total: int, filename: str) -> set[int]:
@@ -40,7 +44,7 @@ def _excluded_spines(spec: str | None, total: int, filename: str) -> set[int]:
         return set()
 
 
-def read_epub(path: str, spine: str | None = None) -> Dict[str, Any]:
+def read_epub(path: str, spine: str | None = None) -> dict[str, Any]:
     """Load an EPUB file and emit grouped PageBlocks."""
 
     import ebooklib
@@ -64,17 +68,17 @@ def read_epub(path: str, spine: str | None = None) -> Dict[str, Any]:
     return {
         "type": "page_blocks",
         "source_path": abs_path,
-        "pages": _group_blocks(blocks, mapping),
+        "pages": _group_blocks(cast(Iterable[dict[str, Any]], blocks), mapping),
     }
 
 
-def read(path: str, exclude_pages: str | None = None) -> Dict[str, Any]:
+def read(path: str, exclude_pages: str | None = None) -> dict[str, Any]:
     """Compatibility wrapper exposing a standard ``read`` entrypoint."""
 
     return read_epub(path, spine=exclude_pages)
 
 
-def describe_epub(path: str) -> Dict[str, str]:
+def describe_epub(path: str) -> dict[str, str]:
     """Return a lightweight descriptor for an EPUB file."""
 
     return {"type": "epub_document", "source_path": str(Path(path).resolve())}

@@ -4,16 +4,17 @@ import argparse
 import json
 from pathlib import Path
 from collections.abc import Iterator, Mapping
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import importlib.util as ilu
+from importlib import import_module
 import sys
 import types
 
 try:  # pragma: no cover - exercised via CLI tests
-    import typer
+    typer = cast(Any, import_module("typer"))
 except ModuleNotFoundError:  # pragma: no cover - fallback when Typer is absent
-    typer = None  # type: ignore[assignment]
+    typer = None
 
 from pdf_chunker.config import PipelineSpec, load_spec
 
@@ -51,7 +52,7 @@ def _safe(func: Callable[[], None]) -> None:
         func()
     except Exception as exc:  # pragma: no cover - exercised in CLI tests
         _exit_with_error(exc)
-        
+
 
 def _run_convert(
     input_path: Path,
@@ -67,7 +68,14 @@ def _run_convert(
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
         _resolve_spec_path(spec),
-        overrides=_cli_overrides(out, chunk_size, overlap, enrich, exclude_pages, no_metadata),
+        overrides=_cli_overrides(
+            out,
+            chunk_size,
+            overlap,
+            enrich,
+            exclude_pages,
+            no_metadata,
+        ),
     )
     s = _enrich_spec(s) if enrich else s
     _, timings = run_convert(_input_artifact(str(input_path), s), s)
@@ -104,7 +112,8 @@ def _core_helpers(
 
     def _load(name: str) -> None:
         spec = ilu.spec_from_file_location(
-            f"pdf_chunker.adapters.{name}", base / f"{name}.py"
+            f"pdf_chunker.adapters.{name}",
+            base / f"{name}.py",
         )
         if not spec or not spec.loader:
             raise ImportError(f"Cannot load adapter module: {name}")
@@ -177,7 +186,12 @@ if typer:
 
     @app.command()
     def convert(  # pragma: no cover - exercised in parity tests
-        input_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+        input_path: Path = typer.Argument(
+            ...,
+            exists=True,
+            dir_okay=False,
+            readable=True,
+        ),
         out: Path | None = typer.Option(None, "--out"),
         chunk_size: int | None = typer.Option(None, "--chunk-size"),
         overlap: int | None = typer.Option(None, "--overlap"),
