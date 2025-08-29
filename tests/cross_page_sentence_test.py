@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 
-import sys
-import os
-
-sys.path.insert(0, ".")
-
 from pdf_chunker.pdf_parsing import merge_continuation_blocks
 
 

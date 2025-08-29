@@ -1,7 +1,6 @@
 # pdf_parsing.py
 
 import os
-import sys
 import re
 import logging
 from functools import reduce
@@ -14,7 +13,10 @@ except Exception:
 try:
     from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
 except Exception:
-    clean_text = lambda text: text
+
+    def clean_text(text: str) -> str:
+        return text
+
     HYPHEN_CHARS_ESC = ""
 
     def remove_stray_bullet_lines(text: str) -> str:
@@ -22,7 +24,7 @@ except Exception:
 
 
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
-from .page_utils import parse_page_ranges, validate_page_exclusions
+from .page_utils import validate_page_exclusions
 from .page_artifacts import (
     is_page_artifact_text,
     remove_page_artifact_lines,
@@ -38,24 +40,28 @@ try:
         PDFMINER_AVAILABLE,
     )
 except Exception:
-    default_language = lambda: ""
-    _assess_text_quality = lambda *a, **k: {}
-    _extract_with_pdftotext_impl = lambda *a, **k: []
-    _extract_with_pdfminer_impl = lambda *a, **k: []
+
+    def default_language() -> str:
+        return ""
+
+    def _assess_text_quality(text: str) -> dict[Any, Any]:
+        return {}
+
+    def _extract_with_pdftotext_impl(
+        filepath: str, exclude_pages: Optional[str] = None
+    ) -> list[dict[Any, Any]]:
+        return []
+
+    def _extract_with_pdfminer_impl(
+        filepath: str, exclude_pages: Optional[str] = None
+    ) -> list[dict[Any, Any]]:
+        return []
+
     PDFMINER_AVAILABLE = False
 
-_extract_with_pdftotext: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
-    _extract_with_pdftotext_impl
-)
-_extract_with_pdfminer: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
-    _extract_with_pdfminer_impl
-)
 from .pymupdf4llm_integration import (
     extract_with_pymupdf4llm,
-    is_pymupdf4llm_available,
-    PyMuPDF4LLMExtractionError,
     should_apply_pymupdf4llm_cleaning,
-    PyMuPDF4LLMExtractionError,
 )
 
 from .list_detection import (
@@ -69,6 +75,13 @@ from .list_detection import (
     split_bullet_fragment,
     starts_with_bullet,
     _last_non_empty_line,
+)
+
+_extract_with_pdftotext: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
+    _extract_with_pdftotext_impl
+)
+_extract_with_pdfminer: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
+    _extract_with_pdfminer_impl
 )
 
 
