@@ -6,15 +6,18 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $0 [-i <jsonl_file>]" >&2
+    echo "Usage: $0 [-i <jsonl_file>] [-d <document_file>]" >&2
 }
 
-DEFAULT_FILE="test_data/sample_chunks.jsonl"
+DEFAULT_JSONL_FILE="output_chunks_pdf.jsonl"
+DEFAULT_DOCUMENT_FILE="sample-local-pdf.pdf"
 JSONL_FILE=""
+DOCUMENT_FILE=""
 
-while getopts ":i:h" opt; do
+while getopts ":i:d:h" opt; do
     case "$opt" in
         i) JSONL_FILE="$OPTARG" ;;
+        d) DOCUMENT_FILE="$OPTARG" ;;
         h) usage; exit 0 ;;
         *) usage; exit 1 ;;
     esac
@@ -24,21 +27,36 @@ shift $((OPTIND-1))
 if [[ -z "$JSONL_FILE" && $# -gt 0 ]]; then
     JSONL_FILE="$1"
 fi
+if [[ -z "$DOCUMENT_FILE" && $# -gt 1 ]]; then
+    DOCUMENT_FILE="$2"
+fi
 
-JSONL_FILE="${JSONL_FILE:-$DEFAULT_FILE}"
+JSONL_FILE="${JSONL_FILE:-$DEFAULT_JSONL_FILE}"
+DOCUMENT_FILE="${DOCUMENT_FILE:-$DEFAULT_DOCUMENT_FILE}"
 
 # Ensure directory exists for the provided path
 mkdir -p "$(dirname "$JSONL_FILE")"
+
+generate_jsonl() {
+    local src="$1"
+    local dest="$2"
+    PYTHONPATH=. python3 scripts/chunk_pdf.py "$src" > "$dest"
+}
 
 # Exit codes
 EXIT_SUCCESS=0
 EXIT_VALIDATION_FAILED=1
 EXIT_FILE_NOT_FOUND=2
 
-# Check if file exists
-if [[ ! -f "$JSONL_FILE" ]]; then
-    echo "Error: File '$JSONL_FILE' not found" >&2
-    exit $EXIT_FILE_NOT_FOUND
+# Generate JSONL file if missing or empty
+if [[ ! -s "$JSONL_FILE" ]]; then
+    if [[ -f "$DOCUMENT_FILE" ]]; then
+        echo "Chunk file '$JSONL_FILE' not found or empty. Generating from '$DOCUMENT_FILE'..."
+        generate_jsonl "$DOCUMENT_FILE" "$JSONL_FILE"
+    else
+        echo "Error: File '$JSONL_FILE' not found and document '$DOCUMENT_FILE' unavailable" >&2
+        exit $EXIT_FILE_NOT_FOUND
+    fi
 fi
 
 # Fail fast if the file contains no chunks
