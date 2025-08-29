@@ -24,9 +24,7 @@ def create_test_epub() -> str:
     # EPUB is essentially a ZIP file with specific structure
     with zipfile.ZipFile(epub_path, "w", zipfile.ZIP_DEFLATED) as epub:
         # mimetype file (must be first and uncompressed)
-        epub.writestr(
-            "mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED
-        )
+        epub.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
 
         # META-INF/container.xml
         container_xml = """<?xml version="1.0" encoding="UTF-8"?>

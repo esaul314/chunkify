@@ -76,12 +76,7 @@ class Correction:
 def enhanced_correction_step(
     words: Iterable[str], texts: List[str], workers: int = 5
 ) -> Dict[Tuple[int, str], str]:
-    pairs = [
-        (i, word, text)
-        for i, text in enumerate(texts)
-        for word in words
-        if word in text
-    ]
+    pairs = [(i, word, text) for i, text in enumerate(texts) for word in words if word in text]
 
     def correct(args: Tuple[int, str, str]) -> Optional[Correction]:
         i, word, text = args
@@ -121,9 +116,7 @@ def main(path: str, output_path: str, summary: bool = True) -> None:
     records = load_jsonl(path)
     texts = [record["text"] for record in records]
 
-    candidates_pipeline = compose(
-        aspell_bad, lambda texts: set(mapcat(extract_candidates, texts))
-    )
+    candidates_pipeline = compose(aspell_bad, lambda texts: set(mapcat(extract_candidates, texts)))
 
     print("[INFO] Extracting suspicious candidates...")
     suspicious = candidates_pipeline(texts)
@@ -139,9 +132,7 @@ def main(path: str, output_path: str, summary: bool = True) -> None:
     cleaned_records = [
         {
             **record,
-            "text": apply_corrections_to_text(
-                record["text"], rec_word_corrections.get(i, {})
-            ),
+            "text": apply_corrections_to_text(record["text"], rec_word_corrections.get(i, {})),
         }
         for i, record in enumerate(records)
     ]

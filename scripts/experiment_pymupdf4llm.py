@@ -211,24 +211,16 @@ def extract_with_pymupdf4llm(
                                         md_text = result
                                     elif isinstance(result, list):
                                         if result and hasattr(result[0], "text"):
-                                            md_text = "\n".join(
-                                                [doc.text for doc in result]
-                                            )
+                                            md_text = "\n".join([doc.text for doc in result])
                                         else:
-                                            md_text = "\n".join(
-                                                [str(doc) for doc in result]
-                                            )
+                                            md_text = "\n".join([str(doc) for doc in result])
                                     else:
                                         md_text = str(result)
 
-                                    extraction_method = (
-                                        f"pymupdf4llm.{class_name}().{method_name}"
-                                    )
+                                    extraction_method = f"pymupdf4llm.{class_name}().{method_name}"
                                     break
                                 except Exception as e:
-                                    print(
-                                        f"DEBUG: {class_name}.{method_name} failed: {e}"
-                                    )
+                                    print(f"DEBUG: {class_name}.{method_name} failed: {e}")
                                     continue
 
                         if md_text is not None:
@@ -248,14 +240,10 @@ def extract_with_pymupdf4llm(
                                 method = getattr(submodule, method_name)
                                 print(f"DEBUG: Trying {submodule_name}.{method_name}")
                                 md_text = method(pdf_path)
-                                extraction_method = (
-                                    f"pymupdf4llm.{submodule_name}.{method_name}"
-                                )
+                                extraction_method = f"pymupdf4llm.{submodule_name}.{method_name}"
                                 break
                             except Exception as e:
-                                print(
-                                    f"DEBUG: {submodule_name}.{method_name} failed: {e}"
-                                )
+                                print(f"DEBUG: {submodule_name}.{method_name} failed: {e}")
                                 continue
 
                     if md_text is not None:
@@ -383,9 +371,7 @@ def calculate_comparison_metrics(
     if current.text_length > 0 and pymupdf4llm.text_length > 0:
         length_ratio = pymupdf4llm.text_length / current.text_length
         metrics["text_length_ratio"] = length_ratio
-        metrics["text_length_difference"] = (
-            pymupdf4llm.text_length - current.text_length
-        )
+        metrics["text_length_difference"] = pymupdf4llm.text_length - current.text_length
     else:
         metrics["text_length_ratio"] = 0
         metrics["text_length_difference"] = 0
@@ -394,9 +380,7 @@ def calculate_comparison_metrics(
     metrics["chunk_count_difference"] = pymupdf4llm.chunk_count - current.chunk_count
 
     # Heading detection comparison
-    metrics["heading_count_difference"] = (
-        pymupdf4llm.heading_count - current.heading_count
-    )
+    metrics["heading_count_difference"] = pymupdf4llm.heading_count - current.heading_count
 
     # Performance comparison
     if current.processing_time > 0:
@@ -434,9 +418,7 @@ def generate_recommendations(comparison: ComparisonReport) -> List[str]:
 
     # Error analysis
     if current.errors and not pymupdf4llm.errors:
-        recommendations.append(
-            "PyMuPDF4LLM shows better error handling - consider migration"
-        )
+        recommendations.append("PyMuPDF4LLM shows better error handling - consider migration")
     elif pymupdf4llm.errors and not current.errors:
         recommendations.append(
             "Current pipeline shows better error handling - keep current approach"
@@ -464,35 +446,23 @@ def generate_recommendations(comparison: ComparisonReport) -> List[str]:
 
     # Performance
     if metrics.get("speed_ratio", 0) > 2:
-        recommendations.append(
-            "PyMuPDF4LLM is significantly faster - performance benefit"
-        )
+        recommendations.append("PyMuPDF4LLM is significantly faster - performance benefit")
     elif metrics.get("speed_ratio", 0) < 0.5:
-        recommendations.append(
-            "Current pipeline is faster - PyMuPDF4LLM has performance cost"
-        )
+        recommendations.append("Current pipeline is faster - PyMuPDF4LLM has performance cost")
 
     # Heading overlap
     if metrics.get("heading_overlap_ratio", 0) < 0.5:
-        recommendations.append(
-            "Low heading overlap - methods detect different document structures"
-        )
+        recommendations.append("Low heading overlap - methods detect different document structures")
     elif metrics.get("heading_overlap_ratio", 0) > 0.8:
-        recommendations.append(
-            "High heading overlap - methods agree on document structure"
-        )
+        recommendations.append("High heading overlap - methods agree on document structure")
 
     if not recommendations:
-        recommendations.append(
-            "Results are comparable - choice depends on specific requirements"
-        )
+        recommendations.append("Results are comparable - choice depends on specific requirements")
 
     return recommendations
 
 
-def run_comparison(
-    pdf_path: str, pages_to_exclude: Optional[List[int]] = None
-) -> ComparisonReport:
+def run_comparison(pdf_path: str, pages_to_exclude: Optional[List[int]] = None) -> ComparisonReport:
     """Run comparison between current pipeline and PyMuPDF4LLM"""
 
     print(f"Running comparison on: {pdf_path}")
@@ -535,9 +505,7 @@ def print_comparison_report(comparison: ComparisonReport) -> None:
     metrics = comparison.comparison_metrics
 
     # Summary table
-    print(
-        f"\n{'EXTRACTION SUMMARY':<30} {'Current':<15} {'PyMuPDF4LLM':<15} {'Difference':<15}"
-    )
+    print(f"\n{'EXTRACTION SUMMARY':<30} {'Current':<15} {'PyMuPDF4LLM':<15} {'Difference':<15}")
     print(f"{'-'*75}")
     print(
         f"{'Text Length':<30} {current.text_length:<15} {pymupdf4llm.text_length:<15} {metrics.get('text_length_difference', 0):<15}"
@@ -627,13 +595,9 @@ def main() -> None:
     pages_to_exclude = None
     if args.pages_to_exclude:
         try:
-            pages_to_exclude = [
-                int(p.strip()) for p in args.pages_to_exclude.split(",")
-            ]
+            pages_to_exclude = [int(p.strip()) for p in args.pages_to_exclude.split(",")]
         except ValueError:
-            print(
-                "ERROR: Invalid pages format. Use comma-separated integers (e.g., 1,2,3)"
-            )
+            print("ERROR: Invalid pages format. Use comma-separated integers (e.g., 1,2,3)")
             sys.exit(1)
 
     # Run comparison

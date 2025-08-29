@@ -1,19 +1,23 @@
 # pdf_parsing.py
 
 import os
-import sys
 import re
 import logging
 from functools import reduce
-from typing import Optional, Callable, Any, Tuple, Sequence
+from typing import Any, Callable, Optional, Sequence, Tuple
+
 try:
     import fitz  # PyMuPDF
 except Exception:
     fitz = None
+
 try:
     from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
 except Exception:
-    clean_text = lambda text: text
+
+    def clean_text(text: str) -> str:
+        return text
+
     HYPHEN_CHARS_ESC = ""
 
     def remove_stray_bullet_lines(text: str) -> str:
@@ -27,36 +31,6 @@ from .page_artifacts import (
     remove_page_artifact_lines,
     strip_page_artifact_suffix,
 )
-
-try:
-    from .extraction_fallbacks import (
-        default_language,
-        _assess_text_quality,
-        _extract_with_pdftotext as _extract_with_pdftotext_impl,
-        _extract_with_pdfminer as _extract_with_pdfminer_impl,
-        PDFMINER_AVAILABLE,
-    )
-except Exception:
-    default_language = lambda: ""
-    _assess_text_quality = lambda *a, **k: {}
-    _extract_with_pdftotext_impl = lambda *a, **k: []
-    _extract_with_pdfminer_impl = lambda *a, **k: []
-    PDFMINER_AVAILABLE = False
-
-_extract_with_pdftotext: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
-    _extract_with_pdftotext_impl
-)
-_extract_with_pdfminer: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
-    _extract_with_pdfminer_impl
-)
-from .pymupdf4llm_integration import (
-    extract_with_pymupdf4llm,
-    is_pymupdf4llm_available,
-    PyMuPDF4LLMExtractionError,
-    should_apply_pymupdf4llm_cleaning,
-    PyMuPDF4LLMExtractionError,
-)
-
 from .list_detection import (
     BULLET_CHARS,
     BULLET_CHARS_ESC,
@@ -68,6 +42,45 @@ from .list_detection import (
     split_bullet_fragment,
     starts_with_bullet,
     _last_non_empty_line,
+)
+from .pymupdf4llm_integration import (
+    extract_with_pymupdf4llm,
+    should_apply_pymupdf4llm_cleaning,
+)
+
+try:
+    from .extraction_fallbacks import (
+        default_language,
+        _assess_text_quality,
+        _extract_with_pdftotext as _extract_with_pdftotext_impl,
+        _extract_with_pdfminer as _extract_with_pdfminer_impl,
+        PDFMINER_AVAILABLE,
+    )
+except Exception:
+
+    def default_language() -> str:
+        return ""
+
+    def _assess_text_quality(text: str) -> dict[Any, Any]:
+        return {}
+
+    def _extract_with_pdftotext_impl(
+        filepath: str, exclude_pages: Optional[str] = None
+    ) -> list[dict[Any, Any]]:
+        return []
+
+    def _extract_with_pdfminer_impl(
+        filepath: str, exclude_pages: Optional[str] = None
+    ) -> list[dict[Any, Any]]:
+        return []
+
+    PDFMINER_AVAILABLE = False
+
+_extract_with_pdftotext: Callable[[str, Optional[str]], list[dict[Any, Any]]] = (
+    _extract_with_pdftotext_impl
+)
+_extract_with_pdfminer: Callable[[str, Optional[str]], list[dict[Any, Any]]] = (
+    _extract_with_pdfminer_impl
 )
 
 
@@ -637,15 +650,13 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
 
     logger.info(f"Starting PDF text extraction from: {filepath}")
     logger.info(
-        f"PyMuPDF4LLM enhancement: {'enabled' if os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM','').lower() not in ('false','0','no','off') else 'disabled'}"
+        f"PyMuPDF4LLM enhancement: {'enabled' if os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', '').lower() not in ('false', '0', 'no', 'off') else 'disabled'}"
     )
 
     # Parse excluded pages first
     excluded_pages_set = set()
     if exclude_pages:
         try:
-            from .page_utils import parse_page_ranges
-
             excluded_pages_set = parse_page_ranges(exclude_pages)
             logger.info(f"Excluding pages: {sorted(excluded_pages_set)}")
         except Exception as e:

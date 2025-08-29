@@ -38,7 +38,7 @@ import logging
 import os
 import re
 from functools import reduce
-from typing import Callable, Iterable, List, Match, Tuple, TypeVar
+from typing import Callable, List, Match, Tuple, TypeVar
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -133,24 +133,26 @@ COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
 SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 
-STOPWORDS: frozenset[str] = frozenset({
-    "the",
-    "of",
-    "for",
-    "and",
-    "with",
-    "from",
-    "this",
-    "that",
-    "is",
-    "to",
-    "in",
-    "on",
-    "as",
-    "by",
-    "then",
-    "up",
-})
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "of",
+        "for",
+        "and",
+        "with",
+        "from",
+        "this",
+        "that",
+        "is",
+        "to",
+        "in",
+        "on",
+        "as",
+        "by",
+        "then",
+        "up",
+    }
+)
 
 # Footnote handling
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
@@ -170,6 +172,7 @@ HYPHEN_SPACE_RE = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}(
 # ---------------------------------------------------------------------------
 # Hyphenation and word glue fixes
 # ---------------------------------------------------------------------------
+
 
 def _join_hyphenated_words(text: str) -> str:
     """Merge words broken with hyphenation across line breaks."""
@@ -232,6 +235,7 @@ def _fix_split_words(text: str) -> str:
 # Quote & ligature normalization
 # ---------------------------------------------------------------------------
 
+
 def _map_smart_quotes(text: str) -> str:
     """Map smart quotes to their ASCII equivalents."""
     return "".join(SMART_QUOTES.get(ch, ch) for ch in text)
@@ -253,6 +257,7 @@ def normalize_ligatures(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Newline & list handling
 # ---------------------------------------------------------------------------
+
 
 def collapse_artifact_breaks(text: str) -> str:
     """Remove unwanted breaks after ., _, etc. (e.g., systems._\nThis → systems. This)"""
@@ -304,7 +309,11 @@ def _split_inline_numbered(match: Match[str]) -> str:
     head, tail = match.groups()
     tokens = head.rstrip().split()
     last = tokens[-1] if tokens else ""
-    return match.group(0) if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head else f"{head}\n"
+    return (
+        match.group(0)
+        if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head
+        else f"{head}\n"
+    )
 
 
 def _apply_inline_numbered(text: str) -> str:
@@ -322,11 +331,7 @@ def insert_numbered_list_newlines(text: str) -> str:
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
     placeholder = "[[LIST_BREAK]]"
-    return (
-        LIST_BREAK_RE.sub(placeholder, text)
-        .replace("\n", " ")
-        .replace(placeholder, "\n")
-    )
+    return LIST_BREAK_RE.sub(placeholder, text).replace("\n", " ").replace(placeholder, "\n")
 
 
 def collapse_single_newlines(text: str) -> str:
@@ -354,6 +359,7 @@ def collapse_single_newlines(text: str) -> str:
 # Heading/list detection & footnotes
 # ---------------------------------------------------------------------------
 
+
 def _starts_list_item(line: str) -> bool:
     return bool(re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", line))
 
@@ -375,11 +381,7 @@ def _is_probable_heading(text: str) -> bool:
         return False
 
     # Short phrases with at least one capitalized word are often headings.
-    if (
-        1 < len(words) <= 3
-        and stripped[0].isupper()
-        and not re.search(r"[.!?]$", stripped)
-    ):
+    if 1 < len(words) <= 3 and stripped[0].isupper() and not re.search(r"[.!?]$", stripped):
         return True
 
     # Quoted fragments are likely part of sentences, not headings
@@ -457,6 +459,7 @@ def _normalize_inline_footnotes(text: str) -> str:
 # Safety & whitespace utilities
 # ---------------------------------------------------------------------------
 
+
 def normalize_newlines(text: str) -> str:
     """Convert CRLF/CR and unicode separators to LF."""
     return (
@@ -489,6 +492,7 @@ def strip_underscore_wrapping(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Paragraph merge logic
 # ---------------------------------------------------------------------------
+
 
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
@@ -526,6 +530,7 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
 # ---------------------------------------------------------------------------
 # JSON safety helpers
 # ---------------------------------------------------------------------------
+
 
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
     issues: List[str] = []
@@ -573,6 +578,7 @@ def apply_json_safety_fixes(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Pipelines
 # ---------------------------------------------------------------------------
+
 
 def clean_paragraph(paragraph: str) -> str:
     """
@@ -631,7 +637,9 @@ def _clean_text_impl(text: str) -> str:
             else:
                 logger.debug("PyMuPDF4LLM not available, falling back to traditional")
         except Exception as e:  # noqa: BLE001 - keep behaviour identical
-            logger.debug(f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional")
+            logger.debug(
+                f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional"
+            )
             pass
 
     logger.debug("Using traditional text cleaning path")

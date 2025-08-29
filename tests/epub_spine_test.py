@@ -20,9 +20,7 @@ def test_epub_spine_exclusion():
         print("Skipping EPUB spine exclusion checks.")
         return True
 
-    print(
-        f"Testing spine-based exclusion functionality with known-good EPUB: {test_epub_path}"
-    )
+    print(f"Testing spine-based exclusion functionality with known-good EPUB: {test_epub_path}")
     success_count = 0
 
     epub_file = test_epub_path
@@ -52,9 +50,7 @@ def test_epub_spine_exclusion():
                 # Test excluding first spine item
                 print(f"  Test 1: Excluding spine item 1")
                 try:
-                    excluded_blocks = extract_structured_text(
-                        epub_file, exclude_pages="1"
-                    )
+                    excluded_blocks = extract_structured_text(epub_file, exclude_pages="1")
                     excluded_spines = set()
                     for block in excluded_blocks:
                         location = block.get("source", {}).get("location")
@@ -65,20 +61,16 @@ def test_epub_spine_exclusion():
                     first_spine_content = [
                         block
                         for block in baseline_blocks
-                        if block.get("source", {}).get("location")
-                        == sorted(spine_items)[0]
+                        if block.get("source", {}).get("location") == sorted(spine_items)[0]
                     ]
                     first_spine_in_excluded = [
                         block
                         for block in excluded_blocks
-                        if block.get("source", {}).get("location")
-                        == sorted(spine_items)[0]
+                        if block.get("source", {}).get("location") == sorted(spine_items)[0]
                     ]
 
                     if first_spine_in_excluded:
-                        print(
-                            f"    ERROR: First spine item content still appears in output!"
-                        )
+                        print(f"    ERROR: First spine item content still appears in output!")
                     else:
                         print(f"    SUCCESS: First spine item successfully excluded")
                         success_count += 1
@@ -111,25 +103,17 @@ def test_epub_spine_exclusion():
 
                         sorted_spines = sorted(spine_items)
                         first_spine_in_chunks = (
-                            sorted_spines[0] in chunk_locations
-                            if sorted_spines
-                            else False
+                            sorted_spines[0] in chunk_locations if sorted_spines else False
                         )
 
                         if first_spine_in_chunks:
-                            print(
-                                f"    ERROR: Excluded first spine item appears in final chunks!"
-                            )
+                            print(f"    ERROR: Excluded first spine item appears in final chunks!")
                         else:
-                            print(
-                                f"    SUCCESS: Spine exclusion works in full pipeline"
-                            )
+                            print(f"    SUCCESS: Spine exclusion works in full pipeline")
                             success_count += 1
 
                         print(f"    Final chunks generated: {len(chunks)}")
-                        print(
-                            f"    Spine items in final chunks: {len(chunk_locations)}"
-                        )
+                        print(f"    Spine items in final chunks: {len(chunk_locations)}")
                     else:
                         print(f"    ERROR: No chunks generated in full pipeline")
 
