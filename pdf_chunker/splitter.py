@@ -1,44 +1,13 @@
 import logging
 from collections import Counter
 import re
-from typing import Any, Dict, List, Optional, Tuple, Type
-
-DocumentSplitter: Type[Any] | None
-try:  # Optional haystack dependency
-    from haystack.components.preprocessors import (
-        DocumentSplitter as _DocumentSplitter,
-    )
-
-    DocumentSplitter = _DocumentSplitter
-except Exception:  # pragma: no cover - dependency optional
-    DocumentSplitter = None
+from typing import Any, Dict, List, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
 
 
 logger = logging.getLogger(__name__)
-
-# Try importing RecursiveCharacterTextSplitter from both possible locations
-RecursiveCharacterTextSplitter: Type[Any] | None
-try:
-    from langchain.text_splitter import (
-        RecursiveCharacterTextSplitter as _RecursiveCharacterTextSplitter,
-    )
-
-    RecursiveCharacterTextSplitter = _RecursiveCharacterTextSplitter
-    _LANGCHAIN_SPLITTER_AVAILABLE = True
-except ImportError:
-    try:
-        from langchain_text_splitters import (
-            RecursiveCharacterTextSplitter as _RecursiveCharacterTextSplitter,
-        )
-
-        RecursiveCharacterTextSplitter = _RecursiveCharacterTextSplitter
-        _LANGCHAIN_SPLITTER_AVAILABLE = True
-    except ImportError:  # pragma: no cover - dependency optional
-        RecursiveCharacterTextSplitter = None
-        _LANGCHAIN_SPLITTER_AVAILABLE = False
 
 # Centralized chunk threshold constants
 CHUNK_THRESHOLDS = {
@@ -265,8 +234,8 @@ def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
             tlen = len(tail)
             i = tlen
             while i <= len(combined) - tlen:
-                if combined[i : i + tlen] == tail:
-                    combined = combined[:i] + combined[i + tlen :]
+                if combined[i:i + tlen] == tail:
+                    combined = combined[:i] + combined[i + tlen:]
                     break
                 i += 1
             cleaned: List[str] = []
@@ -483,99 +452,15 @@ def _merge_short_chunks(
 
 
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
-    """Split text into chunks using sentence boundaries."""
+    """Return ``text`` split into word windows respecting ``overlap``."""
 
-    if _LANGCHAIN_SPLITTER_AVAILABLE and RecursiveCharacterTextSplitter is not None:
-        # Convert word-based sizes to character estimates
-        chunk_size_chars = chunk_size * 6  # Rough estimate: 6 chars per word
-        overlap_chars = overlap * 6
-
-        logger.debug(
-            f"Text splitting: {chunk_size} words ({chunk_size_chars} chars), "
-            f"{overlap} words overlap ({overlap_chars} chars)"
-        )
-
-        # Check for potential quote-related splitting issues
-        quote_count = text.count('"') + text.count("'")
-        if quote_count > 0:
-            logger.debug(
-                f"Text contains {quote_count} quote characters - monitoring for split issues"
-            )
-
-        # Use quote-aware separators - avoid splitting at quotes when possible
-        separators = [
-            "\n\n",  # Paragraph breaks (highest priority)
-            "\n",  # Line breaks
-            ". ",  # Sentence endings with space
-            "! ",  # Exclamation with space
-            "? ",  # Question with space
-            "; ",  # Semicolon with space
-            ": ",  # Colon with space
-            ", ",  # Comma with space (lower priority)
-            " ",  # Word boundaries (very low priority)
-            "",  # Character boundaries (last resort)
-        ]
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size_chars,
-            chunk_overlap=overlap_chars,
-            length_function=len,
-            separators=separators,
-        )
-
-        chunks = splitter.split_text(text)
-
-        logger.debug(f"RecursiveCharacterTextSplitter produced {len(chunks)} chunks")
-
-        # Post-process to fix quote and heading related issues
-        fixed_chunks = _fix_heading_splitting_issues(_fix_quote_splitting_issues(chunks))
-
-        if len(fixed_chunks) != len(chunks):
-            logger.info(f"Boundary fixes applied: {len(chunks)} → {len(fixed_chunks)} chunks")
-
-        # Log potential issues with quote handling
-        for i, chunk in enumerate(fixed_chunks):
-            if chunk.startswith('"') and not chunk.endswith('"'):
-                logger.warning(
-                    f"Chunk {i} starts with quote but doesn't end with quote - potential split issue"
-                )
-            elif chunk.endswith('"') and not chunk.startswith('"'):
-                logger.warning(
-                    f"Chunk {i} ends with quote but doesn't start with quote - potential split issue"
-                )
-
-            # Check for suspicious text ordering
-            if i > 0:
-                prev_chunk = fixed_chunks[i - 1]
-                if chunk.strip() and prev_chunk.strip():
-                    # Simple heuristic: if current chunk starts with lowercase and previous ends without punctuation
-                    if chunk[0].islower() and not prev_chunk.rstrip().endswith(
-                        (".", "!", "?", ":", ";")
-                    ):
-                        logger.debug(f"Potential continuation split between chunks {i-1} and {i}")
-
-        return fixed_chunks
-    else:
-        # Fallback: simple paragraph-based splitting
-        logger.warning(
-            "LangChain RecursiveCharacterTextSplitter not available, using fallback splitter."
-        )
-        # Split by double newlines (paragraphs)
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-        chunks = []
-        current_chunk = ""
-        for para in paragraphs:
-            if not current_chunk:
-                current_chunk = para
-            elif len(current_chunk) + len(para) + 2 < chunk_size * 6:
-                current_chunk += "\n\n" + para
-            else:
-                chunks.append(current_chunk)
-                current_chunk = para
-        if current_chunk:
-            chunks.append(current_chunk)
-        logger.info(f"Fallback splitter produced {len(chunks)} chunks")
-        return _fix_heading_splitting_issues(chunks)
+    words = text.split()
+    if not words or chunk_size <= 0:
+        return []
+    step = max(1, chunk_size - overlap + 1)
+    windows = (words[i:i + chunk_size] for i in range(0, len(words) - chunk_size + 1, step))
+    chunks = [" ".join(w) for w in windows]
+    return chunks or [" ".join(words)]
 
 
 def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
@@ -786,6 +671,9 @@ def semantic_chunker(
         f"Starting semantic chunking: {len(text)} chars, target size={chunk_size} words, overlap={overlap} words, min_chunk_size={min_chunk_size} words, dialogue_detection={enable_dialogue_detection}"
     )
 
+    if min_chunk_size is None:
+        min_chunk_size = max(8, chunk_size // 10)
+
     # Log text preview for debugging
     text_preview = text[:200].replace("\n", "\\n")
     logger.debug(f"Input text preview: '{text_preview}...'")
@@ -799,8 +687,8 @@ def semantic_chunker(
     )
 
     # Initial splitting
-    initial_chunks = _split_text_into_chunks(text, chunk_size, overlap)
-    logger.info(f"DocumentSplitter produced {len(initial_chunks)} initial chunks")
+    initial_chunks = _split_text_into_chunks(text, chunk_size, overlap + 1)
+    logger.info(f"Sliding window produced {len(initial_chunks)} initial chunks")
 
     # Count and log short chunks before processing
     initial_short_count = sum(

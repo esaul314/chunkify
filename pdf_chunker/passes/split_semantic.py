@@ -22,8 +22,8 @@ def _soft_truncate(text: str, max_size: int = 8_000) -> str:
     """Truncate ``text`` to ``max_size`` characters using simple heuristics."""
     if len(text) <= max_size:
         return text
-    cut = text.rfind(" ", 0, max_size - 100)
-    return text[: cut if cut > 0 else max_size - 100].strip()
+    cut = text.rfind(" ", 0, max_size)
+    return text[: cut if cut != -1 else max_size].strip()
 
 
 Doc = dict[str, Any]
