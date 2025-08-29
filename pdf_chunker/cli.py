@@ -137,7 +137,7 @@ def _cli_overrides(
     exclude_pages: str | None,
     no_metadata: bool,
 ) -> dict[str, dict[str, Any]]:
-    split_opts = {
+    split_opts: dict[str, Any] = {
         k: v
         for k, v in {
             "chunk_size": chunk_size,
@@ -146,7 +146,7 @@ def _cli_overrides(
         }.items()
         if v is not None
     }
-    emit_opts = {
+    emit_opts: dict[str, Any] = {
         k: v
         for k, v in {
             "output_path": str(out) if out else None,
@@ -154,8 +154,14 @@ def _cli_overrides(
         }.items()
         if v is not None
     }
-    enrich_opts = {"enabled": True} if enrich else {}
-    parse_opts = {"exclude_pages": exclude_pages} if exclude_pages else {}
+    enrich_opts: dict[str, Any] = {"enabled": True} if enrich else {}
+    parse_opts: dict[str, Any] = {
+        k: v
+        for k, v in {
+            "exclude_pages": exclude_pages,
+        }.items()
+        if v
+    }
     return {
         k: v
         for k, v in {
