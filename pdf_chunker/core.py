@@ -234,7 +234,7 @@ def process_document(
     overlap: int,
     *,
     generate_metadata: bool = True,
-    ai_enrichment: bool = True,
+    ai_enrichment: bool = False,
     exclude_pages: str | None = None,
     min_chunk_size: int | None = None,
     enable_dialogue_detection: bool = True,
