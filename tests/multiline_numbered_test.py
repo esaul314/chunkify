@@ -15,8 +15,7 @@ def test_multiline_numbered_items() -> None:
     )
     chunks = semantic_chunker(text, chunk_size=40, overlap=0)
     assert any(
-        "1. First item is long" in chunk
-        and "Continuation of first item to ensure split." in chunk
+        "1. First item is long" in chunk and "Continuation of first item to ensure split." in chunk
         for chunk in chunks
     )
     assert any(

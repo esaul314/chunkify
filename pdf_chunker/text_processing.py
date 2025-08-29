@@ -99,9 +99,7 @@ def _detect_text_reordering(*args: Any, **kwargs: Any) -> bool:
     return False
 
 
-def _validate_chunk_integrity(
-    chunks: List[str], original_text: str | None = None
-) -> List[str]:
+def _validate_chunk_integrity(chunks: List[str], original_text: str | None = None) -> List[str]:
     """Stub for test compatibility. Returns chunks unchanged."""
     return chunks
 

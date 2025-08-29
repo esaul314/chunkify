@@ -147,8 +147,7 @@ def detect_short_chunks(
             "index": i,
             "word_count": word_count,
             "char_count": len(text),
-            "text_preview": text[:100].replace("\n", " ")
-            + ("..." if len(text) > 100 else ""),
+            "text_preview": text[:100].replace("\n", " ") + ("..." if len(text) > 100 else ""),
             "full_text": text,
         }
 
@@ -242,9 +241,7 @@ def detect_dialogue_patterns(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
         ):
             response_indicators = [
                 text.strip().endswith("?"),
-                text.strip().startswith(
-                    ("Yes", "No", "Well", "Oh", "Ah", "Indeed", "Certainly")
-                ),
+                text.strip().startswith(("Yes", "No", "Well", "Oh", "Ah", "Indeed", "Certainly")),
                 any(
                     word in text_lower
                     for word in ["indeed", "certainly", "perhaps", "maybe", "probably"]
@@ -435,9 +432,7 @@ def generate_quality_report(
         if total_dialogue_chunks == 0:
             return ("dialogue_handling", 1.0, 0.3)
 
-        fragment_ratio = (
-            len(dialogue_analysis["potential_fragments"]) / total_dialogue_chunks
-        )
+        fragment_ratio = len(dialogue_analysis["potential_fragments"]) / total_dialogue_chunks
         dialogue_score = max(0.0, 1.0 - fragment_ratio)
         return ("dialogue_handling", dialogue_score, 0.3)
 
@@ -466,9 +461,7 @@ def generate_quality_report(
             issues.append(
                 f"High ratio of short chunks (≤{VALIDATION_THRESHOLDS['short']} words): {short_ratio:.1%}"
             )
-            recommendations.append(
-                "Review conversational text handling and chunk merging"
-            )
+            recommendations.append("Review conversational text handling and chunk merging")
 
     # Factor 2: Text flow quality (0.4 weight)
     flow_score = flow_analysis["flow_score"]
@@ -476,14 +469,10 @@ def generate_quality_report(
 
     if flow_score < 0.8:
         issues.append(f"Poor text flow continuity: {flow_score:.2f}")
-        recommendations.append(
-            "Improve page boundary handling and sentence reconstruction"
-        )
+        recommendations.append("Improve page boundary handling and sentence reconstruction")
 
     if len(flow_analysis["abrupt_transitions"]) > 0:
-        issues.append(
-            f"{len(flow_analysis['abrupt_transitions'])} abrupt transitions detected"
-        )
+        issues.append(f"{len(flow_analysis['abrupt_transitions'])} abrupt transitions detected")
         recommendations.append("Review semantic chunking boundaries")
 
     # Factor 3: Dialogue handling (0.3 weight)
@@ -579,9 +568,7 @@ def detect_word_gluing_issues(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
                         "chunk_index": i,
                         "example": quote_gluing[0],
                         "context": text[
-                            max(0, text.find(quote_gluing[0]) - 20) : text.find(
-                                quote_gluing[0]
-                            )
+                            max(0, text.find(quote_gluing[0]) - 20) : text.find(quote_gluing[0])
                             + 30
                         ],
                     }
@@ -589,9 +576,7 @@ def detect_word_gluing_issues(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         # Check for potential page boundary issues (very long words that might be glued)
         long_words = re.findall(r"\b\w{15,}\b", text)
-        suspicious_long_words = [
-            word for word in long_words if re.search(r"[a-z][A-Z]", word)
-        ]
+        suspicious_long_words = [word for word in long_words if re.search(r"[a-z][A-Z]", word)]
         if suspicious_long_words:
             gluing_issues["page_boundary_gluing"] += len(suspicious_long_words)
             chunk_has_issues = True
@@ -602,9 +587,9 @@ def detect_word_gluing_issues(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
                         "chunk_index": i,
                         "example": suspicious_long_words[0],
                         "context": text[
-                            max(
-                                0, text.find(suspicious_long_words[0]) - 20
-                            ) : text.find(suspicious_long_words[0])
+                            max(0, text.find(suspicious_long_words[0]) - 20) : text.find(
+                                suspicious_long_words[0]
+                            )
                             + 30
                         ],
                     }
@@ -723,9 +708,7 @@ def validate_text_processing_quality(chunks: List[Dict[str, Any]]) -> Dict[str, 
     )
 
     if validation_results["total_chunks"] > 0:
-        quality_score = max(
-            0.0, 1.0 - (total_issues / validation_results["total_chunks"])
-        )
+        quality_score = max(0.0, 1.0 - (total_issues / validation_results["total_chunks"]))
         validation_results["overall_quality_score"] = quality_score
 
     # Generate recommendations
@@ -754,13 +737,9 @@ def validate_text_processing_quality(chunks: List[Dict[str, Any]]) -> Dict[str, 
 
 def print_text_processing_validation_report(validation_results: Dict[str, Any]) -> None:
     """Print a detailed text processing validation report."""
-    print(
-        "================================================================================"
-    )
+    print("================================================================================")
     print("TEXT PROCESSING QUALITY VALIDATION REPORT")
-    print(
-        "================================================================================"
-    )
+    print("================================================================================")
 
     print(f"Total Chunks Analyzed: {validation_results['total_chunks']}")
     print(f"Overall Quality Score: {validation_results['overall_quality_score']:.3f}")
@@ -809,9 +788,7 @@ def print_text_processing_validation_report(validation_results: Dict[str, Any]) 
         print()
 
 
-def compare_quality_reports(
-    report1: Dict[str, Any], report2: Dict[str, Any]
-) -> Dict[str, Any]:
+def compare_quality_reports(report1: Dict[str, Any], report2: Dict[str, Any]) -> Dict[str, Any]:
     """Compare two quality reports and generate improvement analysis."""
     comparison = {
         "file1": report1["filename"],
@@ -870,13 +847,9 @@ def compare_quality_reports(
         if factor_name in factors2:
             improvement = factors2[factor_name] - factors1[factor_name]
             if improvement > 0.05:
-                comparison["improvements"].append(
-                    f"Improved {factor_name}: {improvement:+.3f}"
-                )
+                comparison["improvements"].append(f"Improved {factor_name}: {improvement:+.3f}")
             elif improvement < -0.05:
-                comparison["regressions"].append(
-                    f"Degraded {factor_name}: {improvement:+.3f}"
-                )
+                comparison["regressions"].append(f"Degraded {factor_name}: {improvement:+.3f}")
 
     return comparison
 
@@ -910,16 +883,10 @@ def print_quality_report(
         reordering = validation_results["text_reordering_issues"]
         print("TEXT REORDERING ISSUES")
         print("----------------------------------------")
-        print(
-            f"Quote Splitting Issues:  {reordering['quote_splitting_issues']} instances"
-        )
-        print(
-            f"Sentence Fragmentation:  {reordering['sentence_fragmentation']} instances"
-        )
+        print(f"Quote Splitting Issues:  {reordering['quote_splitting_issues']} instances")
+        print(f"Sentence Fragmentation:  {reordering['sentence_fragmentation']} instances")
         print(f"Suspicious Starts:       {reordering['suspicious_starts']} instances")
-        print(
-            f"JSON Escaping Issues:    {reordering['json_escaping_issues']} instances"
-        )
+        print(f"JSON Escaping Issues:    {reordering['json_escaping_issues']} instances")
         print(f"Chunks Affected:         {reordering['total_chunks_affected']}")
         print()
 
@@ -930,9 +897,7 @@ def print_quality_report(
             print("----------------------------------------")
             for i, example in enumerate(all_examples[:5]):  # Show up to 5 examples
                 print(f"Example {i+1} ({example['type']}):")
-                print(
-                    f"  Chunk {example['chunk_index']}: {example.get('example', 'N/A')}"
-                )
+                print(f"  Chunk {example['chunk_index']}: {example.get('example', 'N/A')}")
                 if "context" in example:
                     print(f"  Context: ...{example['context']}...")
                 if "issue" in example:
@@ -978,9 +943,7 @@ def print_quality_report(
     print("-" * 40)
     for factor in report.get("quality_factors", []):
         factor_name, score, weight = factor
-        print(
-            f"{factor_name.replace('_', ' ').title():<20} {score:.3f} (weight: {weight:.1f})"
-        )
+        print(f"{factor_name.replace('_', ' ').title():<20} {score:.3f} (weight: {weight:.1f})")
     print()
 
     # Issues and recommendations
@@ -1031,18 +994,10 @@ def print_quality_report(
         if any(dialogue.values()):
             print("DIALOGUE ANALYSIS")
             print("-" * 40)
-            print(
-                f"Quoted Speech Chunks:      {len(dialogue.get('quoted_speech', []))}"
-            )
-            print(
-                f"Dialogue Attribution:      {len(dialogue.get('dialogue_attribution', []))}"
-            )
-            print(
-                f"Conversational Responses:  {len(dialogue.get('conversational_responses', []))}"
-            )
-            print(
-                f"Potential Fragments:       {len(dialogue.get('potential_fragments', []))}"
-            )
+            print(f"Quoted Speech Chunks:      {len(dialogue.get('quoted_speech', []))}")
+            print(f"Dialogue Attribution:      {len(dialogue.get('dialogue_attribution', []))}")
+            print(f"Conversational Responses:  {len(dialogue.get('conversational_responses', []))}")
+            print(f"Potential Fragments:       {len(dialogue.get('potential_fragments', []))}")
             print()
 
         # Flow analysis
@@ -1129,17 +1084,13 @@ def generate_chunks_from_pdf(
         os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "false"
         min_chunk_size = None  # Use default large chunk size
         enable_dialogue_detection = False
-        print(
-            f"Using traditional approach: PyMuPDF4LLM disabled, dialogue detection disabled"
-        )
+        print(f"Using traditional approach: PyMuPDF4LLM disabled, dialogue detection disabled")
     else:
         # Enhanced: enable PyMuPDF4LLM and conversational text handling
         os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "true"
         min_chunk_size = 8  # Use small minimum chunk size for conversational merging
         enable_dialogue_detection = True
-        print(
-            f"Using enhanced approach: PyMuPDF4LLM enabled, dialogue detection enabled"
-        )
+        print(f"Using enhanced approach: PyMuPDF4LLM enabled, dialogue detection enabled")
 
     try:
         # Process the document
@@ -1179,9 +1130,7 @@ def save_chunks_to_jsonl(chunks: List[Dict[str, Any]], output_path: str) -> None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Validate chunk quality from JSONL output"
-    )
+    parser = argparse.ArgumentParser(description="Validate chunk quality from JSONL output")
 
     # Main operation modes
     group = parser.add_mutually_exclusive_group(required=True)
@@ -1199,9 +1148,7 @@ def main() -> None:
         metavar="BASELINE_JSONL",
         help="Baseline JSONL file for comparison",
     )
-    parser.add_argument(
-        "--detailed", action="store_true", help="Show detailed analysis"
-    )
+    parser.add_argument("--detailed", action="store_true", help="Show detailed analysis")
 
     # Options for PDF generation
 
@@ -1251,9 +1198,7 @@ def main() -> None:
             enhanced = args.enhanced
 
         # Generate the chunks
-        chunks = generate_chunks_from_pdf(
-            pdf_path, traditional=traditional, enhanced=enhanced
-        )
+        chunks = generate_chunks_from_pdf(pdf_path, traditional=traditional, enhanced=enhanced)
 
         # Determine output path
         if args.save_jsonl:
@@ -1265,12 +1210,8 @@ def main() -> None:
         # Analyze
         report = generate_quality_report(chunks, f"{pdf_path} ({approach})")
         # Generate validation_results and pass to print_quality_report
-        validation_results = (
-            validate_text_processing_quality(chunks) if args.detailed else None
-        )
-        print_quality_report(
-            report, detailed=args.detailed, validation_results=validation_results
-        )
+        validation_results = validate_text_processing_quality(chunks) if args.detailed else None
+        print_quality_report(report, detailed=args.detailed, validation_results=validation_results)
 
         if args.detailed and validation_results:
             print("\n")
@@ -1286,9 +1227,7 @@ def main() -> None:
         chunks2 = load_jsonl(file2)
 
         if not chunks1 or not chunks2:
-            print(
-                "Error: Could not load chunks from one or both files", file=sys.stderr
-            )
+            print("Error: Could not load chunks from one or both files", file=sys.stderr)
             sys.exit(1)
 
         # Generate reports
@@ -1296,12 +1235,8 @@ def main() -> None:
         report2 = generate_quality_report(chunks2, file2)
 
         # Generate validation_results for both files if detailed
-        validation_results1 = (
-            validate_text_processing_quality(chunks1) if args.detailed else None
-        )
-        validation_results2 = (
-            validate_text_processing_quality(chunks2) if args.detailed else None
-        )
+        validation_results1 = validate_text_processing_quality(chunks1) if args.detailed else None
+        validation_results2 = validate_text_processing_quality(chunks2) if args.detailed else None
 
         # Print individual reports
         print(f"\nAnalysis of {file1}:")
@@ -1329,12 +1264,8 @@ def main() -> None:
         chunks = load_jsonl(jsonl_file)
         report = generate_quality_report(chunks, jsonl_file)
         # Generate validation_results and pass to print_quality_report
-        validation_results = (
-            validate_text_processing_quality(chunks) if args.detailed else None
-        )
-        print_quality_report(
-            report, detailed=args.detailed, validation_results=validation_results
-        )
+        validation_results = validate_text_processing_quality(chunks) if args.detailed else None
+        print_quality_report(report, detailed=args.detailed, validation_results=validation_results)
 
         if args.detailed and validation_results:
             print("\n")
@@ -1351,9 +1282,7 @@ def main() -> None:
                 baseline_chunks = load_jsonl(args.baseline)
 
                 if baseline_chunks:
-                    baseline_report = generate_quality_report(
-                        baseline_chunks, args.baseline
-                    )
+                    baseline_report = generate_quality_report(baseline_chunks, args.baseline)
 
                     print(f"\nComparison (Baseline vs Current):")
                     comparison = compare_quality_reports(baseline_report, report)

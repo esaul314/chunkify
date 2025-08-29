@@ -15,14 +15,18 @@ def _doc(text: str) -> dict:
 def test_enforces_limits_and_structure(monkeypatch) -> None:
     captured: dict[str, tuple[int, int, int]] = {}
 
-    def fake_semantic_chunker(text: str, chunk_size: int, overlap: int, *, min_chunk_size: int) -> list[str]:
+    def fake_semantic_chunker(
+        text: str, chunk_size: int, overlap: int, *, min_chunk_size: int
+    ) -> list[str]:
         captured["args"] = (chunk_size, overlap, min_chunk_size)
         return [text]
 
     monkeypatch.setattr("pdf_chunker.splitter.semantic_chunker", fake_semantic_chunker)
 
     long_text = "x" * 30_000
-    art = _SplitSemanticPass(chunk_size=123, overlap=7, min_chunk_size=11)(Artifact(payload=_doc(long_text)))
+    art = _SplitSemanticPass(chunk_size=123, overlap=7, min_chunk_size=11)(
+        Artifact(payload=_doc(long_text))
+    )
 
     chunk = art.payload["items"][0]
     metrics = art.meta["metrics"]["split_semantic"]

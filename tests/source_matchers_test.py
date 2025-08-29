@@ -17,7 +17,5 @@ def test_find_source_block_uses_injected_matcher():
     def always_match(chunk_start, block, blocks):
         return True
 
-    result = utils._find_source_block(
-        chunk, {}, blocks, matchers=[("custom", always_match)]
-    )
+    result = utils._find_source_block(chunk, {}, blocks, matchers=[("custom", always_match)])
     assert result == blocks[0]

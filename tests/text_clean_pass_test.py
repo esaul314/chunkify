@@ -9,7 +9,7 @@ def _build_doc() -> dict:
             {
                 "page": 1,
                 "blocks": [
-                    {"text": "Foo\u00A0bar"},
+                    {"text": "Foo\u00a0bar"},
                     {"text": "One-\nline"},
                 ],
             }

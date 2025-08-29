@@ -11,9 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_conversion_epub_cli(tmp_path: Path) -> None:
-    epub_path = materialize_base64(
-        BASE / "samples" / "sample.epub.b64", tmp_path, "sample.epub"
-    )
+    epub_path = materialize_base64(BASE / "samples" / "sample.epub.b64", tmp_path, "sample.epub")
     out_file = tmp_path / "out.jsonl"
     cmd = [
         "python",

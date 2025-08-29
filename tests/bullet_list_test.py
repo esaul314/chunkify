@@ -19,9 +19,7 @@ def test_bullet_list_preservation():
     assert report.boundary_overlaps == []
 
     blob = "\n\n".join(b["text"] for b in blocks)
-    items = [
-        line.strip() for line in blob.splitlines() if line.lstrip().startswith("•")
-    ]
+    items = [line.strip() for line in blob.splitlines() if line.lstrip().startswith("•")]
     assert len(items) == 3
     assert all(not item.rstrip().endswith(".") for item in items)
     assert "•\n\n•" not in blob

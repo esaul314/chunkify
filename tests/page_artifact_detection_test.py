@@ -92,9 +92,7 @@ class TestPageArtifactDetection(unittest.TestCase):
             "4 Footnote text. The sentence continues here."
         )
         cleaned = remove_page_artifact_lines(text, 115)
-        self.assertEqual(
-            cleaned, "First part of sentence\nThe sentence continues here."
-        )
+        self.assertEqual(cleaned, "First part of sentence\nThe sentence continues here.")
 
     def test_header_inserted_mid_sentence(self):
         text = (
@@ -124,9 +122,7 @@ class TestPageArtifactDetection(unittest.TestCase):
             "|Person Name, PMP<br>Alma, Quebec, Canada|Person Name, PMP<br>Alma, Quebec, Canada|"
         )
         expected = (
-            "This closed car smells of salt fish\n"
-            "Person Name, PMP\n"
-            "Alma, Quebec, Canada"
+            "This closed car smells of salt fish\n" "Person Name, PMP\n" "Alma, Quebec, Canada"
         )
         cleaned = remove_page_artifact_lines(table_text, 1)
         self.assertEqual(cleaned, expected)
