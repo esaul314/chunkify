@@ -54,7 +54,8 @@ def _load_tag_configs(config_dir: str = "config/tags") -> dict[str, list[str]]:
         acc: dict[str, list[str]],
         nxt: dict[str, list[str]],
     ) -> dict[str, list[str]]:
-        return {key: acc.get(key, []) + nxt.get(key, []) for key in set(acc) | set(nxt)}
+        keys = set(acc).union(nxt)
+        return {key: acc.get(key, []) + nxt.get(key, []) for key in keys}
 
     merged: dict[str, list[str]] = reduce(
         merge_dicts,
