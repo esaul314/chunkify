@@ -41,7 +41,10 @@ def _pass_steps(spec: PipelineSpec) -> list[str]:
 
 def _ensure_clean_precedes_split(steps: Sequence[str]) -> None:
     """Raise descriptive error if a split pass precedes ``text_clean``."""
-    first_split = next(((s, i) for i, s in enumerate(steps) if s.startswith("split")), None)
+    first_split = next(
+        ((s, i) for i, s in enumerate(steps) if s.startswith("split")),
+        None,
+    )
     if not first_split:
         return
     clean_index = next((i for i, s in enumerate(steps) if s == "text_clean"), None)
@@ -99,7 +102,9 @@ def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, fl
 def _adapter_for(path: str):
     """Return IO adapter for ``path`` based on its extension."""
     ext = Path(path).suffix.lower()
-    module = {".epub": "pdf_chunker.adapters.io_epub"}.get(ext, "pdf_chunker.adapters.io_pdf")
+    module = {
+        ".epub": "pdf_chunker.adapters.io_epub",
+    }.get(ext, "pdf_chunker.adapters.io_pdf")
     return import_module(module)
 
 
@@ -148,10 +153,18 @@ def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     return _rows_from_payload(artifact.payload)
 
 
-def _maybe_emit_jsonl(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
+def _maybe_emit_jsonl(
+    a: Artifact,
+    spec: PipelineSpec,
+    timings: Mapping[str, float],
+) -> None:
     """Write JSONL output when pipeline requests ``emit_jsonl``."""
     if "emit_jsonl" in spec.pipeline:
-        emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), dict(timings))
+        emit_jsonl.maybe_write(
+            a,
+            spec.options.get("emit_jsonl", {}),
+            dict(timings),
+        )
 
 
 def _has_footnote(texts: Iterable[str]) -> bool:
@@ -215,7 +228,12 @@ def _warning_checks(
     return chain(core, meta) if generate_metadata else core
 
 
-def _collect_warnings(a: Artifact, spec: PipelineSpec, *, generate_metadata: bool) -> list[str]:
+def _collect_warnings(
+    a: Artifact,
+    spec: PipelineSpec,
+    *,
+    generate_metadata: bool,
+) -> list[str]:
     """Return list of known-issue warnings derived from ``a`` and ``spec``."""
     return [name for name, flag in _warning_checks(a, spec, generate_metadata) if flag]
 
@@ -226,10 +244,14 @@ def _legacy_counts(metrics: Mapping[str, Any]) -> dict[str, int]:
     chunks = (metrics.get("split_semantic") or {}).get("chunks") or (
         metrics.get("emit_jsonl") or {}
     ).get("rows")
-    return {k: v for k, v in (("page_count", pages), ("chunk_count", chunks)) if v is not None}
+    pairs = (("page_count", pages), ("chunk_count", chunks))
+    return {k: v for k, v in pairs if v is not None}
 
 
-def assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
+def assemble_report(
+    timings: Mapping[str, float],
+    meta: Mapping[str, Any],
+) -> dict[str, Any]:
     """Purely assemble run report data without performing IO."""
     metrics = dict(meta.get("metrics") or {})
     counts = _legacy_counts(metrics)
@@ -273,20 +295,28 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
     a = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
     timings: dict[str, float] = {}
     try:
-        for p in (
-            configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline
-        ):
+        passes = [
+            configure_pass(
+                registry()[s],
+                spec.options.get(s, {}),
+            )
+            for s in run_spec.pipeline
+        ]
+        for p in passes:
             a = _timed(p, a, timings)
     except Exception as exc:
         meta = _meta_with_warnings(a, spec, opts)
-        report = assemble_report(timings, {**meta, "error": str(exc)})
+        report = assemble_report(
+            timings,
+            {**meta, "error": str(exc)},
+        )
         write_run_report(spec, report)
         raise
     _maybe_emit_jsonl(a, spec, timings)
     meta = _meta_with_warnings(a, spec, opts)
     report = assemble_report(timings, meta)
     write_run_report(spec, report)
-    return Artifact(payload=a.payload, meta=meta), timings
+    return Artifact(payload=a.payload, meta=dict(meta)), timings
 
 
 def run_inspect() -> dict[str, dict[str, str]]:
