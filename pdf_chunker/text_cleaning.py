@@ -38,7 +38,7 @@ import logging
 import os
 import re
 from functools import reduce
-from typing import Callable, Iterable, List, Match, Tuple, TypeVar
+from typing import Callable, List, Match, Tuple, TypeVar
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -86,11 +86,12 @@ SMART_QUOTES = {
 }
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
-    (re.compile(r'(?<!\s)"(?=[A-Z])'), r' "'),
-    (re.compile(r'(?<=\w)"(?=\w)'), r'" '),
+    # ensure space before an opening quote stuck to previous text
+    (re.compile(r'(?<=\S)"(?=\w)'), r' "'),
+    # ensure space after a closing quote stuck to following text
+    (re.compile(r'(?<=\w)"(?=\S)'), r'" '),
     (re.compile(r'"{2,}'), '"'),
     (re.compile(r"'{2,}"), "'"),
-    (re.compile(r'\s+"([^\"]*?)"\s+'), r' "\1" '),
 ]
 
 # Hyphenation (handles soft and unicode hyphens across line breaks)
@@ -107,6 +108,8 @@ END_PUNCT = ".!?…"
 
 # Inline artifacts
 COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(\w)")
+PIPE_RE = re.compile(r"\|")
+UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
 
 # Stray bullet variants
 STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
@@ -269,7 +272,7 @@ def merge_number_suffix_lines(text: str) -> str:
 
     def repl(match: Match[str]) -> str:
         start = match.start()
-        prev = text[text.rfind("\n", 0, start) + 1 : start].strip()
+        prev = text[text.rfind("\n", 0, start) + 1:start].strip()
         last = prev.split()[-1].lower() if prev else ""
         if (
             not prev
@@ -478,10 +481,14 @@ def consolidate_whitespace(text: str) -> str:
     return re.sub(r"[ \t\r\f\v]+", " ", text).strip()
 
 
+def replace_pipes(text: str) -> str:
+    """Normalize stray pipe characters to colons."""
+    return PIPE_RE.sub(":", text)
+
+
 def remove_underscore_emphasis(text: str) -> str:
-    """Remove single/double underscore emphasis markers and stray edges."""
-    cleaned = re.sub(r"_{1,2}([^_]+)_{1,2}", r"\1", text)
-    return cleaned.strip("_")
+    """Remove single/double underscore emphasis markers."""
+    return UNDERSCORE_WRAP_RE.sub(r"\1", text)
 
 
 def strip_underscore_wrapping(text: str) -> str:
@@ -588,6 +595,7 @@ def clean_paragraph(paragraph: str) -> str:
     return pipe(
         paragraph,
         rejoin_hyphenated_words,
+        replace_pipes,
         strip_headers_and_footers,
         collapse_artifact_breaks,
         cleanup_bullet_fragments,
