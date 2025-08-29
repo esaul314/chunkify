@@ -19,9 +19,7 @@ def test_pdf_extraction():
                 test_files.append(os.path.join(root, file))
 
     if not test_files:
-        print(
-            "No PDF files found for testing. Please add a PDF file to test the extraction."
-        )
+        print("No PDF files found for testing. Please add a PDF file to test the extraction.")
         return False
 
     print(f"Found {len(test_files)} PDF file(s) for testing:")
@@ -59,14 +57,10 @@ def test_pdf_extraction():
                         print(
                             f"  WARNING: Found {len(long_lines)} lines longer than 1000 characters"
                         )
-                        print(
-                            f"    Longest line: {len(max(long_lines, key=len))} characters"
-                        )
+                        print(f"    Longest line: {len(max(long_lines, key=len))} characters")
 
                     if space_density < 0.05:
-                        print(
-                            f"  WARNING: Very low space density detected ({space_density:.3f})"
-                        )
+                        print(f"  WARNING: Very low space density detected ({space_density:.3f})")
 
                     # Show sample text from first few blocks
                     print(f"  Sample text from first block:")
@@ -80,20 +74,12 @@ def test_pdf_extraction():
                         print(f"  Extraction method: {method}")
 
                     # Check heading detection
-                    headings = [
-                        block for block in blocks if block.get("type") == "heading"
-                    ]
-                    paragraphs = [
-                        block for block in blocks if block.get("type") == "paragraph"
-                    ]
-                    print(
-                        f"  Block types: {len(headings)} headings, {len(paragraphs)} paragraphs"
-                    )
+                    headings = [block for block in blocks if block.get("type") == "heading"]
+                    paragraphs = [block for block in blocks if block.get("type") == "paragraph"]
+                    print(f"  Block types: {len(headings)} headings, {len(paragraphs)} paragraphs")
 
                     if headings:
-                        print(
-                            f'  Sample heading: "{headings[0].get("text", "")[:100]}..."'
-                        )
+                        print(f'  Sample heading: "{headings[0].get("text", "")[:100]}..."')
 
                     success_count += 1
                 else:

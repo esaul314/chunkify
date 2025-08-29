@@ -15,10 +15,7 @@ def test_hyphenation_fix_with_pymupdf4llm(force_pymupdf4llm):
     sample = "a con-\n tainer and special-\n ists in man-\n agement"
     cleaned = clean_text(sample)
     assert all(word in cleaned for word in ("container", "specialists", "management"))
-    assert all(
-        broken not in cleaned
-        for broken in ("con- tainer", "special- ists", "man- agement")
-    )
+    assert all(broken not in cleaned for broken in ("con- tainer", "special- ists", "man- agement"))
 
 
 @pytest.mark.parametrize(

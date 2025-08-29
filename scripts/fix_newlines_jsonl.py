@@ -24,9 +24,7 @@ SPELLER_CMD = ["aspell", "list"]
 
 def is_real_word(w: str) -> bool:
     """Return True if aspell knows this word."""
-    p = subprocess.Popen(
-        SPELLER_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
-    )
+    p = subprocess.Popen(SPELLER_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     out, _ = p.communicate(w + "\n")
     return out.strip() == ""
 

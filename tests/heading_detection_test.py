@@ -27,9 +27,7 @@ class TestHeadingDetectionFallback(unittest.TestCase):
         """Font-emphasized lines ending with punctuation should remain body text."""
         spans = [{"flags": 2}]
         self.assertFalse(
-            _spans_indicate_heading(
-                spans, "Considering this issue, no decision was made."
-            )
+            _spans_indicate_heading(spans, "Considering this issue, no decision was made.")
         )
 
 

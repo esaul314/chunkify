@@ -64,10 +64,7 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _canonical_lines(path: Path) -> list[str]:
-    return [
-        json.dumps(_normalize(r), sort_keys=True)
-        for r in _load_rows(path)
-    ]
+    return [json.dumps(_normalize(r), sort_keys=True) for r in _load_rows(path)]
 
 
 def _write_diff(name: str, legacy: Path, new: Path, diffdir: Path) -> None:

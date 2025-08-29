@@ -6,6 +6,7 @@ import re
 import logging
 from functools import reduce
 from typing import Optional, Callable, Any, Tuple, Sequence
+
 try:
     import fitz  # PyMuPDF
 except Exception:
