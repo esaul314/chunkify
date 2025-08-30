@@ -470,6 +470,7 @@ def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
     joined = " ".join(tokens)
     joined = re.sub(rf"{NEWLINE_TOKEN}([\-\*\u2022])", r"\n\1", joined)
     joined = joined.replace(NEWLINE_TOKEN, "\n")
+
     return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
 
 
