@@ -1,7 +1,7 @@
 import logging
 from collections import Counter
 import re
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Match, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
@@ -234,8 +234,8 @@ def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
             tlen = len(tail)
             i = tlen
             while i <= len(combined) - tlen:
-                if combined[i:i + tlen] == tail:
-                    combined = combined[:i] + combined[i + tlen:]
+                if combined[i : i + tlen] == tail:
+                    combined = combined[:i] + combined[i + tlen :]
                     break
                 i += 1
             cleaned: List[str] = []
@@ -452,16 +452,25 @@ def _merge_short_chunks(
 
 
 NEWLINE_TOKEN = "[[BR]]"
+_BULLET_AFTER_NEWLINE = re.compile(r"\n\s*([\-\*\u2022]\s+)")
 
 
 def _tokenize_with_newlines(text: str) -> List[str]:
-    """Return tokens while preserving explicit newline markers."""
-    return text.replace("\n", f" {NEWLINE_TOKEN} ").split()
+    """Return tokens while preserving explicit newline and list markers."""
+
+    def _join_newline_bullet(match: Match[str]) -> str:
+        return f" {NEWLINE_TOKEN}{match.group(1)}"
+
+    prepared = _BULLET_AFTER_NEWLINE.sub(_join_newline_bullet, text)
+    return prepared.replace("\n", f" {NEWLINE_TOKEN} ").split()
 
 
 def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
-    """Rebuild text from tokens, restoring newline markers."""
-    joined = " ".join(tokens).replace(NEWLINE_TOKEN, "\n")
+    """Rebuild text from tokens, restoring newline and list markers."""
+    joined = " ".join(tokens)
+    joined = re.sub(rf"{NEWLINE_TOKEN}([\-\*\u2022])", r"\n\1", joined)
+    joined = joined.replace(NEWLINE_TOKEN, "\n")
+
     return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
 
 
@@ -478,9 +487,7 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
         head, tail = text[:split_at].strip(), text[split_at + 2 :].strip()
         return [head, tail] if tail else [head]
     step = max(1, chunk_size - overlap + 1)
-    windows = (
-        tokens[i:i + chunk_size] for i in range(0, len(tokens) - chunk_size + 1, step)
-    )
+    windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens) - chunk_size + 1, step))
     chunks = [_detokenize_with_newlines(w) for w in windows]
     return chunks or [_detokenize_with_newlines(tokens)]
 
