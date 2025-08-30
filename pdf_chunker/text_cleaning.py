@@ -110,6 +110,7 @@ END_PUNCT = ".!?…"
 COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(\w)")
 PIPE_RE = re.compile(r"\|")
 UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
+DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
 
 # Stray bullet variants
 STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
@@ -275,7 +276,7 @@ def merge_number_suffix_lines(text: str) -> str:
 
     def repl(match: Match[str]) -> str:
         start = match.start()
-        prev = text[text.rfind("\n", 0, start) + 1:start].strip()
+        prev = text[text.rfind("\n", 0, start) + 1 : start].strip()
         last = prev.split()[-1].lower() if prev else ""
         if (
             not prev
@@ -500,6 +501,11 @@ def remove_underscore_emphasis(text: str) -> str:
 def strip_underscore_wrapping(text: str) -> str:
     """Public helper that removes underscore emphasis wrappers."""
     return remove_underscore_emphasis(text)
+
+
+def remove_dangling_underscores(text: str) -> str:
+    """Remove underscores that don't join word characters."""
+    return DANGLING_UNDERSCORE_RE.sub("", text)
 
 
 # ---------------------------------------------------------------------------
@@ -738,6 +744,7 @@ __all__ = [
     "normalize_quotes",
     "remove_underscore_emphasis",
     "strip_underscore_wrapping",
+    "remove_dangling_underscores",
     "normalize_newlines",
     "remove_control_characters",
     "consolidate_whitespace",

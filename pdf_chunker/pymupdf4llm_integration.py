@@ -246,6 +246,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     from .text_cleaning import (
         pipe,
         remove_underscore_emphasis,
+        remove_dangling_underscores,
         fix_hyphenated_linebreaks,
         normalize_ligatures,
         normalize_quotes,
@@ -267,6 +268,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         remove_underscore_emphasis,
         fix_hyphenated_linebreaks,
         remove_underscore_emphasis,
+        remove_dangling_underscores,
         normalize_ligatures,
         normalize_quotes,
         remove_control_characters,
