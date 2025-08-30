@@ -113,7 +113,10 @@ UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
 
 # Stray bullet variants
 STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
-STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])")
+# Guard against collapsing legitimate list items (e.g., after colons)
+STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(
+    rf"(?<![\n:{BULLET_CHARS_ESC}])\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])"
+)
 STRAY_BULLET_INLINE_RE = re.compile(rf"(?<=\S)[ \t][{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])")
 
 # Numbered list helpers
@@ -288,11 +291,14 @@ def merge_number_suffix_lines(text: str) -> str:
 
 
 def remove_stray_bullet_lines(text: str) -> str:
-    """Collapse bullet markers that appear alone or mid-item while preserving line breaks."""
-    text = STRAY_BULLET_SOLO_RE.sub("\n", text)
-    text = STRAY_BULLET_AFTER_NEWLINE_RE.sub(" ", text)
-    text = STRAY_BULLET_INLINE_RE.sub(" ", text)
-    return re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", text)
+    """Collapse stray bullet markers while keeping legitimate list breaks intact."""
+    return pipe(
+        text,
+        lambda t: STRAY_BULLET_SOLO_RE.sub("\n", t),
+        lambda t: STRAY_BULLET_AFTER_NEWLINE_RE.sub(" ", t),
+        lambda t: STRAY_BULLET_INLINE_RE.sub(" ", t),
+        lambda t: re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", t),
+    )
 
 
 def cleanup_bullet_fragments(text: str) -> str:
@@ -595,8 +601,8 @@ def clean_paragraph(paragraph: str) -> str:
     return pipe(
         paragraph,
         rejoin_hyphenated_words,
-        replace_pipes,
         strip_headers_and_footers,
+        replace_pipes,
         collapse_artifact_breaks,
         cleanup_bullet_fragments,
         _preserve_list_newlines,

@@ -473,6 +473,20 @@ def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
     return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
 
 
+def _split_short_text(text: str) -> List[str]:
+    """Split short passages near the middle, preferring paragraph breaks."""
+    mid = len(text) // 2
+    for sep in ("\n\n", "\n", " "):
+        split_at = text.rfind(sep, 0, mid)
+        if split_at == -1:
+            split_at = text.find(sep, mid)
+        if split_at != -1:
+            head = text[:split_at].strip()
+            tail = text[split_at + len(sep) :].strip()
+            return [head, tail] if tail else [head]
+    return [text.strip()]
+
+
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
     """Return ``text`` split into word windows respecting ``overlap``."""
 
@@ -480,11 +494,7 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
     if not tokens or chunk_size <= 0:
         return []
     if len(tokens) <= chunk_size:
-        split_at = text.rfind("\n\n", 0, len(text) // 2)
-        if split_at == -1:
-            return [text.strip()]
-        head, tail = text[:split_at].strip(), text[split_at + 2 :].strip()
-        return [head, tail] if tail else [head]
+        return _split_short_text(text)
     step = max(1, chunk_size - overlap + 1)
     windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens) - chunk_size + 1, step))
     chunks = [_detokenize_with_newlines(w) for w in windows]
