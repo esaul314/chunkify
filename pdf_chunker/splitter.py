@@ -1,7 +1,7 @@
 import logging
 from collections import Counter
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Match, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
@@ -234,8 +234,8 @@ def _rebalance_bullet_chunks(chunks: List[str]) -> List[str]:
             tlen = len(tail)
             i = tlen
             while i <= len(combined) - tlen:
-                if combined[i:i + tlen] == tail:
-                    combined = combined[:i] + combined[i + tlen:]
+                if combined[i : i + tlen] == tail:
+                    combined = combined[:i] + combined[i + tlen :]
                     break
                 i += 1
             cleaned: List[str] = []
@@ -451,16 +451,54 @@ def _merge_short_chunks(
     return merged_chunks, merge_stats
 
 
+NEWLINE_TOKEN = "[[BR]]"
+_BULLET_AFTER_NEWLINE = re.compile(r"\n\s*([\-\*\u2022]\s+)")
+
+
+def _tokenize_with_newlines(text: str) -> List[str]:
+    """Return tokens while preserving explicit newline and list markers."""
+
+    def _join_newline_bullet(match: Match[str]) -> str:
+        return f" {NEWLINE_TOKEN}{match.group(1)}"
+
+    prepared = _BULLET_AFTER_NEWLINE.sub(_join_newline_bullet, text)
+    return prepared.replace("\n", f" {NEWLINE_TOKEN} ").split()
+
+
+def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
+    """Rebuild text from tokens, restoring newline and list markers."""
+    joined = " ".join(tokens)
+    joined = re.sub(rf"{NEWLINE_TOKEN}([\-\*\u2022])", r"\n\1", joined)
+    joined = joined.replace(NEWLINE_TOKEN, "\n")
+    return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
+
+
+def _split_short_text(text: str) -> List[str]:
+    """Split short passages near the middle, preferring paragraph breaks."""
+    mid = len(text) // 2
+    for sep in ("\n\n", "\n", " "):
+        split_at = text.rfind(sep, 0, mid)
+        if split_at == -1:
+            split_at = text.find(sep, mid)
+        if split_at != -1:
+            head = text[:split_at].strip()
+            tail = text[split_at + len(sep) :].strip()
+            return [head, tail] if tail else [head]
+    return [text.strip()]
+
+
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
     """Return ``text`` split into word windows respecting ``overlap``."""
 
-    words = text.split()
-    if not words or chunk_size <= 0:
+    tokens = _tokenize_with_newlines(text)
+    if not tokens or chunk_size <= 0:
         return []
+    if len(tokens) <= chunk_size:
+        return _split_short_text(text)
     step = max(1, chunk_size - overlap + 1)
-    windows = (words[i:i + chunk_size] for i in range(0, len(words) - chunk_size + 1, step))
-    chunks = [" ".join(w) for w in windows]
-    return chunks or [" ".join(words)]
+    windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens) - chunk_size + 1, step))
+    chunks = [_detokenize_with_newlines(w) for w in windows]
+    return chunks or [_detokenize_with_newlines(tokens)]
 
 
 def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
