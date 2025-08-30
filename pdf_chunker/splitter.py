@@ -1,7 +1,7 @@
 import logging
 from collections import Counter
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
@@ -451,16 +451,38 @@ def _merge_short_chunks(
     return merged_chunks, merge_stats
 
 
+NEWLINE_TOKEN = "[[BR]]"
+
+
+def _tokenize_with_newlines(text: str) -> List[str]:
+    """Return tokens while preserving explicit newline markers."""
+    return text.replace("\n", f" {NEWLINE_TOKEN} ").split()
+
+
+def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
+    """Rebuild text from tokens, restoring newline markers."""
+    joined = " ".join(tokens).replace(NEWLINE_TOKEN, "\n")
+    return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
+
+
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
     """Return ``text`` split into word windows respecting ``overlap``."""
 
-    words = text.split()
-    if not words or chunk_size <= 0:
+    tokens = _tokenize_with_newlines(text)
+    if not tokens or chunk_size <= 0:
         return []
+    if len(tokens) <= chunk_size:
+        split_at = text.rfind("\n\n", 0, len(text) // 2)
+        if split_at == -1:
+            return [text.strip()]
+        head, tail = text[:split_at].strip(), text[split_at + 2 :].strip()
+        return [head, tail] if tail else [head]
     step = max(1, chunk_size - overlap + 1)
-    windows = (words[i:i + chunk_size] for i in range(0, len(words) - chunk_size + 1, step))
-    chunks = [" ".join(w) for w in windows]
-    return chunks or [" ".join(words)]
+    windows = (
+        tokens[i:i + chunk_size] for i in range(0, len(tokens) - chunk_size + 1, step)
+    )
+    chunks = [_detokenize_with_newlines(w) for w in windows]
+    return chunks or [_detokenize_with_newlines(tokens)]
 
 
 def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
