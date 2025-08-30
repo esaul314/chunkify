@@ -34,12 +34,27 @@ fi
 JSONL_FILE="${JSONL_FILE:-$DEFAULT_JSONL_FILE}"
 DOCUMENT_FILE="${DOCUMENT_FILE:-$DEFAULT_DOCUMENT_FILE}"
 
+ensure_haystack() {
+    python3 - <<'PY' >/dev/null 2>&1
+import importlib, sys
+try:
+    importlib.import_module("haystack")
+except ModuleNotFoundError:
+    sys.exit(1)
+PY
+    if [[ $? -ne 0 ]]; then
+        echo "Installing haystack dependencies..." >&2
+        python3 -m pip install --quiet haystack-ai==2.15.1 haystack-experimental==0.10.0
+    fi
+}
+
 # Ensure directory exists for the provided path
 mkdir -p "$(dirname "$JSONL_FILE")"
 
 generate_jsonl() {
     local src="$1"
     local dest="$2"
+    ensure_haystack
     PYTHONPATH=. python3 scripts/chunk_pdf.py "$src" > "$dest"
 }
 
