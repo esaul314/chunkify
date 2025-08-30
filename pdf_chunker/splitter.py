@@ -493,9 +493,9 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
     tokens = _tokenize_with_newlines(text)
     if not tokens or chunk_size <= 0:
         return []
-    if len(tokens) <= chunk_size * 2:
-        return _split_short_text(text)
-    step = max(1, chunk_size - overlap + 1)
+    if len(tokens) <= chunk_size:
+        return [_detokenize_with_newlines(tokens)]
+    step = max(1, chunk_size - overlap)
     windows = (
         tokens[i : i + chunk_size]
         for i in range(0, len(tokens) - chunk_size + 1, step)
