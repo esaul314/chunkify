@@ -87,6 +87,7 @@ SMART_QUOTES = {
 }
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
+
     # ensure space before an opening quote stuck to previous text (letters only)
     (re.compile(r'(?<=[A-Za-z])"(?=\w)'), r' "'),
     # ensure space after a closing quote stuck to a word character
