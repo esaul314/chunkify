@@ -292,6 +292,17 @@ def merge_number_suffix_lines(text: str) -> str:
     return NUMBER_SUFFIX_LINE_RE.sub(repl, text)
 
 
+def drop_spurious_number_markers(text: str) -> str:
+    """Remove numbered markers created by hyphenated splits or isolated lines."""
+    return pipe(
+        text,
+        lambda t: re.sub(r"-\n\d+[.)]\s*", "-", t),
+        lambda t: re.sub(r"\n\d+[.)]\n", "\n", t),
+        lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]\s+(?=[a-z])", " ", t),
+        lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]$", "", t),
+    )
+
+
 def remove_stray_bullet_lines(text: str) -> str:
     """Collapse stray bullet markers while keeping legitimate list breaks intact."""
     return pipe(
@@ -683,6 +694,10 @@ def _clean_text_impl(text: str) -> str:
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {_preview(text)}")
 
+    logger.debug("Calling drop_spurious_number_markers")
+    text = drop_spurious_number_markers(text)
+    logger.debug(f"After drop_spurious_number_markers: {_preview(text)}")
+
     logger.debug("Calling insert_numbered_list_newlines")
     text = insert_numbered_list_newlines(text)
     logger.debug(f"After insert_numbered_list_newlines: {_preview(text)}")
@@ -736,6 +751,7 @@ __all__ = [
     "remove_stray_bullet_lines",
     "cleanup_bullet_fragments",
     "merge_number_suffix_lines",
+    "drop_spurious_number_markers",
     "insert_numbered_list_newlines",
     "collapse_single_newlines",
     "normalize_ligatures",
