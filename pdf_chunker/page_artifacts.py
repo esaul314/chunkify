@@ -69,7 +69,7 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         )
     return list(reversed(trimmed))
 
-
+  
 def _starts_with_multiple_numbers(text: str) -> bool:
     """Return ``True`` if ``text`` begins with two or more numbers."""
 
