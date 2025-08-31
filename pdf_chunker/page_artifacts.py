@@ -66,7 +66,12 @@ def _looks_like_bullet_footer(text: str) -> bool:
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
 
-    trailing = list(takewhile(_looks_like_bullet_footer, reversed(lines)))
+    def _bulletish(line: str) -> bool:
+        stripped = line.strip()
+        short = len(stripped.split()) <= 8 and not any(p in stripped for p in ".!?;")
+        return _starts_with_bullet(stripped) or short
+
+    trailing = list(takewhile(_bulletish, reversed(lines)))
     if not trailing or len(trailing) == len(lines):
         return lines
     prev_idx = len(lines) - len(trailing) - 1
@@ -77,6 +82,12 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
             "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
         )
     return lines[: -len(trailing)]
+
+
+def _strip_spurious_number_prefix(text: str) -> str:
+    """Remove leading number markers preceding lowercase continuation."""
+
+    return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
@@ -215,6 +226,8 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
         return True
 
     if len(text.split()) <= 3 and len(text) <= 30 and any(char.isdigit() for char in text):
+        if re.match(r"^\d+\.$", text.strip()):
+            return False
         return True
 
     return False
@@ -386,7 +399,7 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
         if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(cleaned):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
-        stripped = strip_page_artifact_suffix(ln, page_num)
+        stripped = _strip_spurious_number_prefix(strip_page_artifact_suffix(ln, page_num))
         if stripped != ln:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
