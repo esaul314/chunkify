@@ -524,6 +524,7 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
     chunks = _dedupe_overlapping_chunks(chunks)
     if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
         chunks = chunks[:-1]
+
     return chunks or [
         "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
     ]
