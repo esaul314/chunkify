@@ -299,7 +299,8 @@ def drop_spurious_number_markers(text: str) -> str:
         lambda t: re.sub(r"-\n\d+[.)]\s*", "-", t),
         lambda t: re.sub(r"\n\d+[.)]\n", "\n", t),
         lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]\s+(?=[a-z])", " ", t),
-        lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]$", "", t),
+        lambda t: re.sub("(?<=[a-z])\\s+\\d+[.)](?:['\"\\u2019])?(?=\\s*$)", "", t),
+        lambda t: re.sub(r"\n{2,}(\d+[.)])", r"\n\1", t),
     )
 
 
