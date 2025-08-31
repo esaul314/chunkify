@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable, Iterable, Sequence
 from functools import partial
 from pathlib import Path
+from typing import Any, cast
 
 from . import parsing
 from .ai_enrichment import classify_chunk_utterance
@@ -15,9 +16,10 @@ from .utils import format_chunks_with_metadata as utils_format_chunks_with_metad
 logger = logging.getLogger(__name__)
 
 # Type aliases enable dependency injection for testability
-Extractor = Callable[[Path, str | None], list[dict]]
+Block = dict[str, Any]
+Extractor = Callable[[Path | str, str | None], Sequence[Block]]
 Chunker = Callable[..., list[str]]
-Enricher = Callable[..., list[dict]]
+Enricher = Callable[..., list[Block]]
 
 
 def parse_exclusions(exclude_pages: str | None) -> set[int]:
@@ -114,7 +116,7 @@ def log_chunk_stats(chunks: Sequence[str], *, label: str = "Chunk") -> None:
         )
 
 
-def filter_blocks(blocks: Iterable[dict], excluded_pages: set[int]) -> list[dict]:
+def filter_blocks(blocks: Iterable[Block], excluded_pages: set[int]) -> list[Block]:
     """Remove blocks that originate from excluded pages."""
     filtered = [
         block for block in blocks if block.get("source", {}).get("page") not in excluded_pages
@@ -136,7 +138,7 @@ def filter_blocks(blocks: Iterable[dict], excluded_pages: set[int]) -> list[dict
 
 
 def chunk_text(
-    blocks: Iterable[dict],
+    blocks: Iterable[Block],
     chunk_size: int,
     overlap: int,
     *,
@@ -162,10 +164,10 @@ def chunk_text(
 
 
 def validate_chunks(
-    final_chunks: list[dict],
+    final_chunks: list[Block],
     exclude_pages: str | None,
     generate_metadata: bool,
-) -> list[dict]:
+) -> list[Block]:
     """Validate final chunks for exclusions and size limits."""
     if exclude_pages and generate_metadata:
         logger.debug("Validating page exclusions in final chunks")
@@ -194,19 +196,15 @@ def validate_chunks(
     logger.debug("Final pipeline output: %d chunks", len(final_chunks))
     if final_chunks:
         log_chunk_stats([chunk.get("text", "") for chunk in final_chunks], label="Final chunk")
-        [
+        for i, chunk in enumerate(final_chunks[:3]):
             logger.debug("Final chunk %d: %d characters", i, len(chunk.get("text", "")))
-            for i, chunk in enumerate(final_chunks[:3])
-        ]
-        [
-            logger.error(
-                "Final chunk %d is still oversized (%d characters)!",
-                i,
-                len(chunk.get("text", "")),
-            )
-            for i, chunk in enumerate(final_chunks[:3])
-            if len(chunk.get("text", "")) > 10000
-        ]
+        for i, chunk in enumerate(final_chunks[:3]):
+            if len(chunk.get("text", "")) > 10000:
+                logger.error(
+                    "Final chunk %d is still oversized (%d characters)!",
+                    i,
+                    len(chunk.get("text", "")),
+                )
     return final_chunks
 
 
@@ -236,14 +234,14 @@ def process_document(
     overlap: int,
     *,
     generate_metadata: bool = True,
-    ai_enrichment: bool = True,
+    ai_enrichment: bool = False,
     exclude_pages: str | None = None,
     min_chunk_size: int | None = None,
     enable_dialogue_detection: bool = True,
     extractor: Extractor | None = None,
     chunker: Chunker = chunk_text,
     enricher: Enricher = utils_format_chunks_with_metadata,
-) -> list[dict]:
+) -> list[Block]:
     """Process a PDF or EPUB document through extraction, chunking and enrichment.
 
     Parameters allow injection of custom callables for each stage, enabling
@@ -271,8 +269,8 @@ def process_document(
 
     excluded_pages = parse_exclusions(exclude_pages)
     path = Path(filepath)
-    extractor = extractor or parsing.extract_structured_text
-    blocks = extractor(path, exclude_pages=exclude_pages)
+    extractor = cast(Extractor, extractor or parsing.extract_structured_text)
+    blocks = extractor(path, exclude_pages)
     filtered_blocks = filter_blocks(blocks, excluded_pages)
     haystack_chunks = chunker(
         filtered_blocks,

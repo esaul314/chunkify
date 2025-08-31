@@ -38,7 +38,7 @@ import logging
 import os
 import re
 from functools import reduce
-from typing import Callable, Iterable, List, Match, Tuple, TypeVar
+from typing import Callable, List, Match, Tuple, TypeVar
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -80,17 +80,20 @@ SMART_QUOTES = {
     "”": '"',
     "„": '"',
     "‚": '"',
+    "\x84": '"',
     "‘": "'",
     "’": "'",
     "`": "'",
 }
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
-    (re.compile(r'(?<!\s)"(?=[A-Z])'), r' "'),
-    (re.compile(r'(?<=\w)"(?=\w)'), r'" '),
+
+    # ensure space before an opening quote stuck to previous text (letters only)
+    (re.compile(r'(?<=[A-Za-z])"(?=\w)'), r' "'),
+    # ensure space after a closing quote stuck to a word character
+    (re.compile(r'(?<=[A-Za-z])"(?=[A-Za-z])'), r'" '),
     (re.compile(r'"{2,}'), '"'),
     (re.compile(r"'{2,}"), "'"),
-    (re.compile(r'\s+"([^\"]*?)"\s+'), r' "\1" '),
 ]
 
 # Hyphenation (handles soft and unicode hyphens across line breaks)
@@ -106,11 +109,18 @@ BULLET_CHARS_ESC = re.escape("*•")
 END_PUNCT = ".!?…"
 
 # Inline artifacts
-COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(\w)")
+# Avoid collapsing list markers like "2.\n3." by skipping digits after the break
+COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(?!\d)(\w)")
+PIPE_RE = re.compile(r"\|")
+UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
+DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
 
 # Stray bullet variants
 STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
-STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])")
+# Guard against collapsing legitimate list items (e.g., after colons)
+STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(
+    rf"(?<![\n:{BULLET_CHARS_ESC}])\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])"
+)
 STRAY_BULLET_INLINE_RE = re.compile(rf"(?<=\S)[ \t][{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])")
 
 # Numbered list helpers
@@ -133,24 +143,26 @@ COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
 SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 
-STOPWORDS: frozenset[str] = frozenset({
-    "the",
-    "of",
-    "for",
-    "and",
-    "with",
-    "from",
-    "this",
-    "that",
-    "is",
-    "to",
-    "in",
-    "on",
-    "as",
-    "by",
-    "then",
-    "up",
-})
+STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "of",
+        "for",
+        "and",
+        "with",
+        "from",
+        "this",
+        "that",
+        "is",
+        "to",
+        "in",
+        "on",
+        "as",
+        "by",
+        "then",
+        "up",
+    }
+)
 
 # Footnote handling
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
@@ -170,6 +182,7 @@ HYPHEN_SPACE_RE = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}(
 # ---------------------------------------------------------------------------
 # Hyphenation and word glue fixes
 # ---------------------------------------------------------------------------
+
 
 def _join_hyphenated_words(text: str) -> str:
     """Merge words broken with hyphenation across line breaks."""
@@ -232,6 +245,7 @@ def _fix_split_words(text: str) -> str:
 # Quote & ligature normalization
 # ---------------------------------------------------------------------------
 
+
 def _map_smart_quotes(text: str) -> str:
     """Map smart quotes to their ASCII equivalents."""
     return "".join(SMART_QUOTES.get(ch, ch) for ch in text)
@@ -243,7 +257,8 @@ def _fix_quote_spacing(text: str) -> str:
 
 
 def normalize_quotes(text: str) -> str:
-    return text if not text else pipe(text, _map_smart_quotes, _fix_quote_spacing)
+    """Map smart quotes to ASCII without altering spacing."""
+    return text if not text else _map_smart_quotes(text)
 
 
 def normalize_ligatures(text: str) -> str:
@@ -253,6 +268,7 @@ def normalize_ligatures(text: str) -> str:
 # ---------------------------------------------------------------------------
 # Newline & list handling
 # ---------------------------------------------------------------------------
+
 
 def collapse_artifact_breaks(text: str) -> str:
     """Remove unwanted breaks after ., _, etc. (e.g., systems._\nThis → systems. This)"""
@@ -279,12 +295,28 @@ def merge_number_suffix_lines(text: str) -> str:
     return NUMBER_SUFFIX_LINE_RE.sub(repl, text)
 
 
+def drop_spurious_number_markers(text: str) -> str:
+    """Remove numbered markers created by hyphenated splits or isolated lines."""
+    return pipe(
+        text,
+        lambda t: re.sub(r"-\n\d+[.)]\s*", "-", t),
+        lambda t: re.sub(r"\n\d+[.)]\n", "\n", t),
+        lambda t: re.sub(r"\n\d+[.)]\s+(?=[A-Z]{2,}\b)", "\n", t),
+        lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]\s+(?=[a-z])", " ", t),
+        lambda t: re.sub("(?<=[a-z])\\s+\\d+[.)](?:['\"\\u2019])?(?=\\s*$)", "", t),
+        lambda t: re.sub(r"\n{2,}(\d+[.)])", r"\n\1", t),
+    )
+
+
 def remove_stray_bullet_lines(text: str) -> str:
-    """Collapse bullet markers that appear alone or mid-item while preserving line breaks."""
-    text = STRAY_BULLET_SOLO_RE.sub("\n", text)
-    text = STRAY_BULLET_AFTER_NEWLINE_RE.sub(" ", text)
-    text = STRAY_BULLET_INLINE_RE.sub(" ", text)
-    return re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", text)
+    """Collapse stray bullet markers while keeping legitimate list breaks intact."""
+    return pipe(
+        text,
+        lambda t: STRAY_BULLET_SOLO_RE.sub("\n", t),
+        lambda t: STRAY_BULLET_AFTER_NEWLINE_RE.sub(" ", t),
+        lambda t: STRAY_BULLET_INLINE_RE.sub(" ", t),
+        lambda t: re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", t),
+    )
 
 
 def cleanup_bullet_fragments(text: str) -> str:
@@ -304,7 +336,11 @@ def _split_inline_numbered(match: Match[str]) -> str:
     head, tail = match.groups()
     tokens = head.rstrip().split()
     last = tokens[-1] if tokens else ""
-    return match.group(0) if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head else f"{head}\n"
+    return (
+        match.group(0)
+        if last.istitle() and tail.rstrip(".)").isdigit() and "\n" not in head
+        else f"{head}\n"
+    )
 
 
 def _apply_inline_numbered(text: str) -> str:
@@ -322,37 +358,34 @@ def insert_numbered_list_newlines(text: str) -> str:
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
     placeholder = "[[LIST_BREAK]]"
-    return (
-        LIST_BREAK_RE.sub(placeholder, text)
-        .replace("\n", " ")
-        .replace(placeholder, "\n")
-    )
+    return LIST_BREAK_RE.sub(placeholder, text).replace("\n", " ").replace(placeholder, "\n")
 
 
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {_preview(text)}")
 
-    list_break = "[[LIST_BREAK]]"
-    para_break = "[[PARAGRAPH_BREAK]]"
+    list_break, para_break = "[[LIST_BREAK]]", "[[PARAGRAPH_BREAK]]"
 
-    # Normalize colon bullet starts and protect paragraph and list breaks
-    text = merge_number_suffix_lines(text)
-    text = COLON_BULLET_START_RE.sub(":\n", text)
-    text = LIST_BREAK_RE.sub(list_break, text)
-    text = PARAGRAPH_BREAK.sub(para_break, text)
-    text = text.replace("\n", " ")
+    result = pipe(
+        text,
+        merge_number_suffix_lines,
+        lambda t: COLON_BULLET_START_RE.sub(":\n", t),
+        lambda t: LIST_BREAK_RE.sub(list_break, t),
+        lambda t: PARAGRAPH_BREAK.sub(para_break, t),
+        lambda t: t.replace("\n", " "),
+        lambda t: t.replace(para_break, "\n\n").replace(list_break, "\n"),
+        _fix_quote_spacing,
+    )
 
-    # Restore preserved breaks
-    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
-
-    logger.debug(f"Output text preview: {_preview(text)}")
-    return text
+    logger.debug(f"Output text preview: {_preview(result)}")
+    return result
 
 
 # ---------------------------------------------------------------------------
 # Heading/list detection & footnotes
 # ---------------------------------------------------------------------------
+
 
 def _starts_list_item(line: str) -> bool:
     return bool(re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", line))
@@ -375,11 +408,7 @@ def _is_probable_heading(text: str) -> bool:
         return False
 
     # Short phrases with at least one capitalized word are often headings.
-    if (
-        1 < len(words) <= 3
-        and stripped[0].isupper()
-        and not re.search(r"[.!?]$", stripped)
-    ):
+    if 1 < len(words) <= 3 and stripped[0].isupper() and not re.search(r"[.!?]$", stripped):
         return True
 
     # Quoted fragments are likely part of sentences, not headings
@@ -457,6 +486,7 @@ def _normalize_inline_footnotes(text: str) -> str:
 # Safety & whitespace utilities
 # ---------------------------------------------------------------------------
 
+
 def normalize_newlines(text: str) -> str:
     """Convert CRLF/CR and unicode separators to LF."""
     return (
@@ -475,10 +505,14 @@ def consolidate_whitespace(text: str) -> str:
     return re.sub(r"[ \t\r\f\v]+", " ", text).strip()
 
 
+def replace_pipes(text: str) -> str:
+    """Normalize stray pipe characters to colons."""
+    return PIPE_RE.sub(":", text)
+
+
 def remove_underscore_emphasis(text: str) -> str:
-    """Remove single/double underscore emphasis markers and stray edges."""
-    cleaned = re.sub(r"_{1,2}([^_]+)_{1,2}", r"\1", text)
-    return cleaned.strip("_")
+    """Remove single/double underscore emphasis markers."""
+    return UNDERSCORE_WRAP_RE.sub(r"\1", text)
 
 
 def strip_underscore_wrapping(text: str) -> str:
@@ -486,9 +520,15 @@ def strip_underscore_wrapping(text: str) -> str:
     return remove_underscore_emphasis(text)
 
 
+def remove_dangling_underscores(text: str) -> str:
+    """Remove underscores that don't join word characters."""
+    return DANGLING_UNDERSCORE_RE.sub("", text)
+
+
 # ---------------------------------------------------------------------------
 # Paragraph merge logic
 # ---------------------------------------------------------------------------
+
 
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
@@ -527,6 +567,7 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
 # JSON safety helpers
 # ---------------------------------------------------------------------------
 
+
 def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
     issues: List[str] = []
     try:
@@ -556,8 +597,6 @@ def apply_json_safety_fixes(text: str) -> str:
         fixed = fixed[3:]
     elif fixed.startswith('"') and len(fixed) > 1 and fixed[1].islower():
         fixed = fixed[1:]
-    if fixed.endswith(', "') or fixed.endswith(',"'):
-        fixed = fixed[:-2]
     try:
         fixed = fixed.encode("utf-8", errors="replace").decode("utf-8")
     except UnicodeError:
@@ -574,6 +613,7 @@ def apply_json_safety_fixes(text: str) -> str:
 # Pipelines
 # ---------------------------------------------------------------------------
 
+
 def clean_paragraph(paragraph: str) -> str:
     """
     Cleans a single paragraph: removes mid-line hyphens, artifacts,
@@ -583,14 +623,12 @@ def clean_paragraph(paragraph: str) -> str:
         paragraph,
         rejoin_hyphenated_words,
         strip_headers_and_footers,
+        replace_pipes,
         collapse_artifact_breaks,
         cleanup_bullet_fragments,
         _preserve_list_newlines,
-        normalize_quotes,
         remove_control_characters,
-        consolidate_whitespace,
         normalize_ligatures,
-        strip_underscore_wrapping,
         consolidate_whitespace,
     )
 
@@ -609,10 +647,9 @@ def _clean_text_impl(text: str) -> str:
     # Optional strategy via env
     from .env_utils import use_pymupdf4llm as _use_pymupdf4llm
 
-    enabled = _use_pymupdf4llm()
-    logger.debug(
-        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}"
-    )
+    env_flag = os.getenv("PDF_CHUNKER_USE_PYMUPDF4LLM")
+    enabled = bool(env_flag) and _use_pymupdf4llm()
+    logger.debug(f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {env_flag or 'not set'}")
     logger.debug(f"use_pymupdf4llm evaluated to: {enabled}")
 
     if enabled:
@@ -631,7 +668,9 @@ def _clean_text_impl(text: str) -> str:
             else:
                 logger.debug("PyMuPDF4LLM not available, falling back to traditional")
         except Exception as e:  # noqa: BLE001 - keep behaviour identical
-            logger.debug(f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional")
+            logger.debug(
+                f"PyMuPDF4LLM cleaning failed with exception: {e}, falling back to traditional"
+            )
             pass
 
     logger.debug("Using traditional text cleaning path")
@@ -656,6 +695,10 @@ def _clean_text_impl(text: str) -> str:
     logger.debug("Calling _fix_double_newlines")
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {_preview(text)}")
+
+    logger.debug("Calling drop_spurious_number_markers")
+    text = drop_spurious_number_markers(text)
+    logger.debug(f"After drop_spurious_number_markers: {_preview(text)}")
 
     logger.debug("Calling insert_numbered_list_newlines")
     text = insert_numbered_list_newlines(text)
@@ -710,12 +753,14 @@ __all__ = [
     "remove_stray_bullet_lines",
     "cleanup_bullet_fragments",
     "merge_number_suffix_lines",
+    "drop_spurious_number_markers",
     "insert_numbered_list_newlines",
     "collapse_single_newlines",
     "normalize_ligatures",
     "normalize_quotes",
     "remove_underscore_emphasis",
     "strip_underscore_wrapping",
+    "remove_dangling_underscores",
     "normalize_newlines",
     "remove_control_characters",
     "consolidate_whitespace",

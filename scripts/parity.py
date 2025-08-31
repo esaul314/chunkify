@@ -14,11 +14,8 @@ import difflib
 from scripts import chunk_pdf
 
 
-LEGACY_FLAG_MAP = {"--chunk-size": "--chunk_size"}
-
-
 def _legacy_flags(flags: Sequence[str]) -> Sequence[str]:
-    return [LEGACY_FLAG_MAP.get(flag, flag) for flag in flags]
+    return list(flags)
 
 
 def _run_legacy(pdf: Path, out_path: Path, flags: Sequence[str] = ()) -> Path:
@@ -64,10 +61,7 @@ def _normalize(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _canonical_lines(path: Path) -> list[str]:
-    return [
-        json.dumps(_normalize(r), sort_keys=True)
-        for r in _load_rows(path)
-    ]
+    return [json.dumps(_normalize(r), sort_keys=True) for r in _load_rows(path)]
 
 
 def _write_diff(name: str, legacy: Path, new: Path, diffdir: Path) -> None:

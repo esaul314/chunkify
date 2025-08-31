@@ -4,10 +4,12 @@ import os
 import pathlib
 import warnings
 from functools import reduce
-from typing import Any, Dict, Iterable, Mapping, List
+from importlib import import_module
+from typing import Any, Dict, Iterable, Mapping, List, cast
 
-import yaml
 from pydantic import BaseModel, Field
+
+yaml = cast(Any, import_module("yaml"))
 
 
 class PipelineSpec(BaseModel):
@@ -52,7 +54,19 @@ def _merge_options(
     base: Dict[str, Dict[str, Any]], override: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Dict[str, Any]]:
     """Shallow-merge per-step options with comprehension; override wins."""
-    return {s: {**base.get(s, {}), **override.get(s, {})} for s in set(base) | set(override)}
+    sources = set(base).union(override)
+    return {s: {**base.get(s, {}), **override.get(s, {})} for s in sources}
+
+
+def _warn_unknown_options(pipeline: Iterable[str], opts: Mapping[str, Any]) -> None:
+    """Emit a warning when options contain steps absent from the pipeline."""
+
+    unknown = [step for step in opts if step not in pipeline]
+    if unknown:
+        warnings.warn(
+            f"Unknown pipeline options: {', '.join(sorted(unknown))}",
+            stacklevel=2,
+        )
 
 
 def _warn_unknown_options(pipeline: Iterable[str], opts: Mapping[str, Any]) -> None:
@@ -73,11 +87,11 @@ def load_spec(
     """Load YAML + env/CLI overrides into a validated PipelineSpec."""
     data = _read_yaml(path)
     opts = data.get("options", {})
-    merged = reduce(
-        _merge_options,
-        filter(None, [opts, _env_overrides(), overrides]),
-        {},
+    sources: Iterable[Dict[str, Dict[str, Any]]] = (
+        d for d in (opts, _env_overrides(), overrides) if d
     )
+    acc: Dict[str, Dict[str, Any]] = {}
+    merged = reduce(_merge_options, sources, acc)
     pipeline = data.get("pipeline", [])
     _warn_unknown_options(pipeline, merged)
     if merged:

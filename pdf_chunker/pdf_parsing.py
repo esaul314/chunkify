@@ -1,19 +1,27 @@
 # pdf_parsing.py
 
 import os
-import sys
 import re
 import logging
 from functools import reduce
+from typing import Optional, Callable, Any, Tuple, Sequence
 
 try:
     import fitz  # PyMuPDF
 except Exception:
     fitz = None
 try:
-    from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
+    from .text_cleaning import (
+        clean_text,
+        HYPHEN_CHARS_ESC,
+        remove_stray_bullet_lines,
+        insert_numbered_list_newlines,
+    )
 except Exception:
-    clean_text = lambda text: text
+
+    def clean_text(text: str) -> str:
+        return text
+
     HYPHEN_CHARS_ESC = ""
 
     def remove_stray_bullet_lines(text: str) -> str:
@@ -21,7 +29,7 @@ except Exception:
 
 
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
-from .page_utils import parse_page_ranges, validate_page_exclusions
+from .page_utils import validate_page_exclusions
 from .page_artifacts import (
     is_page_artifact_text,
     remove_page_artifact_lines,
@@ -32,22 +40,33 @@ try:
     from .extraction_fallbacks import (
         default_language,
         _assess_text_quality,
-        _extract_with_pdftotext,
-        _extract_with_pdfminer,
+        _extract_with_pdftotext as _extract_with_pdftotext_impl,
+        _extract_with_pdfminer as _extract_with_pdfminer_impl,
         PDFMINER_AVAILABLE,
     )
 except Exception:
-    default_language = lambda: ""
-    _assess_text_quality = lambda *a, **k: {}
-    _extract_with_pdftotext = lambda *a, **k: ""
-    _extract_with_pdfminer = lambda *a, **k: ""
+
+    def default_language() -> str:
+        return ""
+
+    def _assess_text_quality(text: str) -> dict[Any, Any]:
+        return {}
+
+    def _extract_with_pdftotext_impl(
+        filepath: str, exclude_pages: Optional[str] = None
+    ) -> list[dict[Any, Any]]:
+        return []
+
+    def _extract_with_pdfminer_impl(
+        filepath: str, exclude_pages: Optional[str] = None
+    ) -> list[dict[Any, Any]]:
+        return []
+
     PDFMINER_AVAILABLE = False
+
 from .pymupdf4llm_integration import (
     extract_with_pymupdf4llm,
-    is_pymupdf4llm_available,
-    PyMuPDF4LLMExtractionError,
     should_apply_pymupdf4llm_cleaning,
-    PyMuPDF4LLMExtractionError,
 )
 
 from .list_detection import (
@@ -60,9 +79,16 @@ from .list_detection import (
     is_numbered_list_pair,
     split_bullet_fragment,
     starts_with_bullet,
+    starts_with_number,
     _last_non_empty_line,
 )
-from typing import List, Dict, Any, Tuple, Optional, Sequence, Callable
+
+_extract_with_pdftotext: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
+    _extract_with_pdftotext_impl
+)
+_extract_with_pdfminer: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
+    _extract_with_pdfminer_impl
+)
 
 
 MIN_WORDS_FOR_CONTINUATION = 6
@@ -157,7 +183,7 @@ def _is_cross_page_continuation(
 
 
 def _is_cross_page_paragraph_continuation(
-    curr_block: Dict[str, Any], next_block: Dict[str, Any]
+    curr_block: dict[str, Any], next_block: dict[str, Any]
 ) -> bool:
     """Detect when a paragraph is split across pages despite ending with punctuation."""
 
@@ -213,7 +239,7 @@ def _is_same_page_continuation(
 
 
 def _should_merge_blocks(
-    curr_block: Dict[str, Any], next_block: Dict[str, Any]
+    curr_block: dict[str, Any], next_block: dict[str, Any]
 ) -> Tuple[bool, str]:
     """Determine if two blocks should be merged and return the reason."""
     curr_text = curr_block.get("text", "").strip()
@@ -261,6 +287,14 @@ def _should_merge_blocks(
     if is_numbered_continuation(curr_text, next_text):
         logger.debug("Merge decision: NUMBERED_CONTINUATION")
         return True, "numbered_continuation"
+
+    if re.fullmatch(r"\d+[.)]", curr_text) and not starts_with_number(next_text):
+        logger.debug("Merge decision: NUMBERED_STANDALONE")
+        return True, "numbered_standalone"
+
+    if re.search(r"\n\d+[.)]\s*$", curr_text) and not starts_with_number(next_text):
+        logger.debug("Merge decision: NUMBERED_SUFFIX")
+        return True, "numbered_suffix"
 
     # Check for quote-related splitting issues
     curr_has_quote = '"' in curr_text or "'" in curr_text
@@ -329,7 +363,7 @@ def _merge_bullet_text(reason: str, current: str, nxt: str) -> Tuple[str, Option
         adjusted = re.sub(rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", current)
         return adjusted + "\n" + nxt, None
 
-    handlers: Dict[str, Callable[[], Tuple[str, Optional[str]]]] = {
+    handlers: dict[str, Callable[[], Tuple[str, Optional[str]]]] = {
         "bullet_fragment": merge_fragment,
         "bullet_continuation": merge_continuation,
         "bullet_short_fragment": merge_short_fragment,
@@ -518,7 +552,7 @@ def is_page_artifact(block: dict, page_num: int) -> bool:
     return is_page_artifact_text(text, page_num)
 
 
-def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def merge_continuation_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge blocks that are continuations of each other."""
     if not blocks:
         return blocks
@@ -577,6 +611,14 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "numbered_continuation":
                     merged_text = current_text + " " + next_text
+                elif merge_reason == "numbered_standalone":
+                    processed = insert_numbered_list_newlines(next_text)
+                    merged_text = current_text + " " + processed
+                elif merge_reason == "numbered_suffix":
+                    marker = re.search(r"\n(\d+[.)])\s*$", current_text).group(1)
+                    base = re.sub(r"\n\d+[.)]\s*$", "", current_text)
+                    processed = insert_numbered_list_newlines(next_text)
+                    merged_text = f"{base}\n{marker} {processed}".strip()
                 elif merge_reason == "indented_continuation":
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "author_attribution":
@@ -611,7 +653,7 @@ def merge_continuation_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, An
     return merged_blocks
 
 
-def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
+def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = None) -> list[dict]:
     """
     Extract structured text from a PDF using traditional extraction with optional PyMuPDF4LLM text cleaning.
 
@@ -767,7 +809,7 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                     )
 
             if enhanced_blocks:
-                original_pages = {
+                original_page_set = {
                     p
                     for b in pre_merge_blocks
                     if (p := b.get("source", {}).get("page")) is not None and p not in excluded
@@ -777,7 +819,7 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
                     for b in enhanced_blocks
                     if b.get("source", {}).get("page") is not None
                 }
-                missing = original_pages - enhanced_pages
+                missing = original_page_set - enhanced_pages
                 if missing:
                     logger.warning("PyMuPDF4LLM enhancement dropped pages: %s", sorted(missing))
                     enhancement_stats["degraded"] = len(enhanced_blocks)
@@ -886,10 +928,9 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     if merged_blocks and isinstance(merged_blocks[0], dict) and "source" in merged_blocks[0]:
         # Try to propagate page numbers from original blocks to enhanced blocks if missing
         # Build a list of original page numbers for each block index
-        original_pages = []
-        for block in merged_blocks:
-            page_val = block.get("source", {}).get("page")
-            original_pages.append(page_val)
+        original_pages: list[Optional[int]] = [
+            block.get("source", {}).get("page") for block in merged_blocks
+        ]
         # If any page is None, try to assign sequentially (fallback)
         for idx, block in enumerate(merged_blocks):
             if "source" not in block or not isinstance(block["source"], dict):
@@ -924,10 +965,12 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> li
     return filtered_blocks
 
 
-_legacy_extract_text_blocks_from_pdf = extract_text_blocks_from_pdf
-
-
-def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str | None = None) -> list[dict]:
+def legacy_extract_text_blocks_from_pdf(
+    filepath: str, exclude_pages: Optional[str] = None
+) -> list[dict]:
     """Shim retaining the original extraction behavior."""
 
-    return _legacy_extract_text_blocks_from_pdf(filepath, exclude_pages)
+    return extract_text_blocks_from_pdf(filepath, exclude_pages)
+
+
+_legacy_extract_text_blocks_from_pdf = extract_text_blocks_from_pdf

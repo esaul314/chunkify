@@ -41,7 +41,10 @@ def _pass_steps(spec: PipelineSpec) -> list[str]:
 
 def _ensure_clean_precedes_split(steps: Sequence[str]) -> None:
     """Raise descriptive error if a split pass precedes ``text_clean``."""
-    first_split = next(((s, i) for i, s in enumerate(steps) if s.startswith("split")), None)
+    first_split = next(
+        ((s, i) for i, s in enumerate(steps) if s.startswith("split")),
+        None,
+    )
     if not first_split:
         return
     clean_index = next((i for i, s in enumerate(steps) if s == "text_clean"), None)
@@ -73,7 +76,17 @@ def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
         return pass_obj
     names = {f.name for f in fields(pass_obj)}
     valid = {k: v for k, v in opts.items() if k in names}
-    return replace(pass_obj, **valid) if valid else pass_obj
+    if not valid:
+        return pass_obj
+
+    if "chunk_size" in valid and "min_chunk_size" not in valid and hasattr(pass_obj, "min_chunk_size"):
+        valid["min_chunk_size"] = None
+
+    new_pass = replace(pass_obj, **valid)
+    post = getattr(new_pass, "__post_init__", None)
+    if callable(post):
+        post()
+    return new_pass
 
 
 def _time_step(
@@ -91,14 +104,17 @@ def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, fl
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
     chain = (registry()[s] for s in spec.pipeline)
     passes = [configure_pass(p, spec.options.get(p.name, {})) for p in chain]
-    a, timings = reduce(_time_step, passes, (a, {}))
+    acc: tuple[Artifact, dict[str, float]] = (a, {})
+    a, timings = reduce(_time_step, passes, acc)
     return a, timings
 
 
 def _adapter_for(path: str):
     """Return IO adapter for ``path`` based on its extension."""
     ext = Path(path).suffix.lower()
-    module = {".epub": "pdf_chunker.adapters.io_epub"}.get(ext, "pdf_chunker.adapters.io_pdf")
+    module = {
+        ".epub": "pdf_chunker.adapters.io_epub",
+    }.get(ext, "pdf_chunker.adapters.io_pdf")
     return import_module(module)
 
 
@@ -140,16 +156,25 @@ def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
 def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
     artifact = _input_artifact(path, spec)
-    steps = _enforce_invariants(spec, input_path=artifact.meta["input"])
+    input_path = (artifact.meta or {}).get("input", "")
+    steps = _enforce_invariants(spec, input_path=input_path)
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
     artifact, _ = _run_passes(run_spec, artifact)
     return _rows_from_payload(artifact.payload)
 
 
-def _maybe_emit_jsonl(a: Artifact, spec: PipelineSpec, timings: Mapping[str, float]) -> None:
+def _maybe_emit_jsonl(
+    a: Artifact,
+    spec: PipelineSpec,
+    timings: Mapping[str, float],
+) -> None:
     """Write JSONL output when pipeline requests ``emit_jsonl``."""
     if "emit_jsonl" in spec.pipeline:
-        emit_jsonl.maybe_write(a, spec.options.get("emit_jsonl", {}), timings)
+        emit_jsonl.maybe_write(
+            a,
+            spec.options.get("emit_jsonl", {}),
+            dict(timings),
+        )
 
 
 def _has_footnote(texts: Iterable[str]) -> bool:
@@ -213,7 +238,12 @@ def _warning_checks(
     return chain(core, meta) if generate_metadata else core
 
 
-def _collect_warnings(a: Artifact, spec: PipelineSpec, *, generate_metadata: bool) -> list[str]:
+def _collect_warnings(
+    a: Artifact,
+    spec: PipelineSpec,
+    *,
+    generate_metadata: bool,
+) -> list[str]:
     """Return list of known-issue warnings derived from ``a`` and ``spec``."""
     return [name for name, flag in _warning_checks(a, spec, generate_metadata) if flag]
 
@@ -224,10 +254,14 @@ def _legacy_counts(metrics: Mapping[str, Any]) -> dict[str, int]:
     chunks = (metrics.get("split_semantic") or {}).get("chunks") or (
         metrics.get("emit_jsonl") or {}
     ).get("rows")
-    return {k: v for k, v in (("page_count", pages), ("chunk_count", chunks)) if v is not None}
+    pairs = (("page_count", pages), ("chunk_count", chunks))
+    return {k: v for k, v in pairs if v is not None}
 
 
-def assemble_report(timings: Mapping[str, float], meta: Mapping[str, Any]) -> dict[str, Any]:
+def assemble_report(
+    timings: Mapping[str, float],
+    meta: Mapping[str, Any],
+) -> dict[str, Any]:
     """Purely assemble run report data without performing IO."""
     metrics = dict(meta.get("metrics") or {})
     counts = _legacy_counts(metrics)
@@ -284,7 +318,7 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
     meta = _meta_with_warnings(a, spec, opts)
     report = assemble_report(timings, meta)
     write_run_report(spec, report)
-    return Artifact(payload=a.payload, meta=meta), timings
+    return Artifact(payload=a.payload, meta=dict(meta)), timings
 
 
 def run_inspect() -> dict[str, dict[str, str]]:

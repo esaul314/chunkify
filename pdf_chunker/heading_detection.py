@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, cast
 
 
 TRAILING_PUNCTUATION = (".", "!", "?", ";", ":")
@@ -29,10 +29,12 @@ def _detect_heading_fallback(text: str) -> bool:
     text = text.strip()
     words = text.split()
 
-    # Very short text (1-3 words) without a terminal period is likely a heading.
-    # Short sentences such as "It ended." should remain part of the body text
-    # rather than being treated as headings.
+    # Very short text (1-3 words) without a terminal period is likely a heading
+    # but single words like "Body" should only qualify when they are explicit
+    # structural starters or are fully capitalized.
     if len(words) <= 3 and not text.endswith(TRAILING_PUNCTUATION):
+        if len(words) == 1 and not (text.isupper() or _has_heading_starter(words)):
+            return False
         return True
 
     # Text that's all uppercase might be a heading
@@ -44,11 +46,7 @@ def _detect_heading_fallback(text: str) -> bool:
         return True
 
     # Text that starts with common heading patterns
-    if (
-        _has_heading_starter(words)
-        and len(words) <= 8
-        and not text.endswith(TRAILING_PUNCTUATION)
-    ):
+    if _has_heading_starter(words) and len(words) <= 8 and not text.endswith(TRAILING_PUNCTUATION):
         return True
 
     # Text that's mostly numbers (like "1.2.3 Some Topic")
@@ -105,9 +103,7 @@ def detect_headings_from_font_analysis(
     """Extract heading information using traditional font-based analysis."""
 
     def _is_heading(text: str, block_type: str) -> bool:
-        declared_heading = block_type == "heading" and not text.endswith(
-            TRAILING_PUNCTUATION
-        )
+        declared_heading = block_type == "heading" and not text.endswith(TRAILING_PUNCTUATION)
         return declared_heading or _detect_heading_fallback(text)
 
     def _make_heading(i: int, block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -203,9 +199,7 @@ def detect_headings_hybrid(
             block.get("metadata", {}).get("text_enhanced_with_pymupdf4llm", False)
             for block in blocks
         )
-        extraction_method = (
-            "pymupdf4llm_enhanced" if has_pymupdf4llm_enhancement else "traditional"
-        )
+        extraction_method = "pymupdf4llm_enhanced" if has_pymupdf4llm_enhancement else "traditional"
 
     # For PyMuPDF4LLM-enhanced extraction, use traditional font-based analysis
     # since PyMuPDF4LLM is only used for text cleaning in the simplified approach
@@ -234,7 +228,7 @@ def enhance_blocks_with_heading_metadata(
     from pdf_chunker.passes.heading_detect import heading_detect
 
     artifact = Artifact(payload=blocks, meta={"extraction_method": extraction_method})
-    return heading_detect(artifact).payload  # type: ignore[no-any-return]
+    return cast(List[Dict[str, Any]], heading_detect(artifact).payload)
 
 
 def get_heading_hierarchy(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -308,9 +302,7 @@ def validate_heading_consistency(
 
     # Calculate consistency metrics
     total_unique_headings = len(pymupdf4llm_texts | traditional_texts)
-    overlap_ratio = (
-        len(common_headings) / total_unique_headings if total_unique_headings > 0 else 0
-    )
+    overlap_ratio = len(common_headings) / total_unique_headings if total_unique_headings > 0 else 0
 
     return {
         "total_pymupdf4llm_headings": len(pymupdf4llm_headings),

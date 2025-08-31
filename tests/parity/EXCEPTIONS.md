@@ -22,4 +22,13 @@ Current candidates:
 - `pipeline_parity_test.test_no_metadata_rows_contain_only_text` on
   `tiny_b.pdf` – stray newline removed during normalization; accept the
   sanitized output.
+- `pipeline_parity_test.test_new_matches_legacy` on `tiny.pdf` – new
+  pipeline emits a `meta` field absent in legacy; accept the enriched
+  metadata.
+- `pipeline_parity_test.test_new_matches_legacy` on `tiny_a.pdf` – new
+  pipeline emits a `meta` field absent in legacy; accept the enriched
+  metadata.
+- `pipeline_parity_test.test_new_matches_legacy` on `tiny_b.pdf` – new
+  pipeline emits a `meta` field absent in legacy; accept the enriched
+  metadata.
 ```

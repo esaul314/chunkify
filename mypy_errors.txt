@@ -1,0 +1,67 @@
+pdf_chunker/passes/list_detect.py:73: error: Incompatible return value type (got "bool | Match[str] | None", expected "bool")  [return-value]
+pdf_chunker/passes/list_detect.py:124: error: Argument 1 to "reduce" has incompatible type "Callable[[tuple[dict[str, Any] | None, list[dict[str, Any]]], dict[str, Any]], tuple[dict[str, Any], list[dict[str, Any]]]]"; expected "Callable[[tuple[None, list[Never]], dict[str, Any]], tuple[None, list[Never]]]"  [arg-type]
+pdf_chunker/config.py:9: error: Library stubs not installed for "yaml"  [import-untyped]
+pdf_chunker/config.py:76: error: Need type annotation for "merged" (hint: "merged: dict[<type>, <type>] = ...")  [var-annotated]
+pdf_chunker/config.py:77: error: Argument 1 to "reduce" has incompatible type "Callable[[dict[str, dict[str, Any]], dict[str, dict[str, Any]]], dict[str, dict[str, Any]]]"; expected "Callable[[dict[Never, Never], Any], dict[Never, Never]]"  [arg-type]
+pdf_chunker/passes/text_clean.py:44: error: Incompatible types in assignment (expression has type "dict[str, Any]", variable has type "str")  [assignment]
+pdf_chunker/extraction_fallbacks.py:90: error: Incompatible default for argument "exclude_pages" (default has type "None", argument has type "str")  [assignment]
+pdf_chunker/extraction_fallbacks.py:90: note: PEP 484 prohibits implicit Optional. Accordingly, mypy has changed its default to no_implicit_optional=True
+pdf_chunker/extraction_fallbacks.py:90: note: Use https://github.com/hauntsaninja/no_implicit_optional to automatically upgrade your codebase
+pdf_chunker/extraction_fallbacks.py:156: error: Incompatible default for argument "exclude_pages" (default has type "None", argument has type "str")  [assignment]
+pdf_chunker/extraction_fallbacks.py:156: note: PEP 484 prohibits implicit Optional. Accordingly, mypy has changed its default to no_implicit_optional=True
+pdf_chunker/extraction_fallbacks.py:156: note: Use https://github.com/hauntsaninja/no_implicit_optional to automatically upgrade your codebase
+pdf_chunker/extraction_fallbacks.py:312: error: Incompatible default for argument "exclude_pages" (default has type "None", argument has type "str")  [assignment]
+pdf_chunker/extraction_fallbacks.py:312: note: PEP 484 prohibits implicit Optional. Accordingly, mypy has changed its default to no_implicit_optional=True
+pdf_chunker/extraction_fallbacks.py:312: note: Use https://github.com/hauntsaninja/no_implicit_optional to automatically upgrade your codebase
+pdf_chunker/extraction_fallbacks.py:312: error: Incompatible default for argument "fallback_reason" (default has type "None", argument has type "str")  [assignment]
+pdf_chunker/adapters/io_pdf.py:94: error: Argument 2 to "extract_text_blocks_from_pdf" has incompatible type "str | None"; expected "str"  [arg-type]
+pdf_chunker/adapters/io_pdf.py:105: error: Argument 2 to "execute_fallback_extraction" has incompatible type "str | None"; expected "str"  [arg-type]
+pdf_chunker/pdf_parsing.py:42: error: Incompatible types in assignment (expression has type "Callable[[str, str], str]", variable has type "Callable[[str, str], list[dict[Any, Any]]]")  [assignment]
+pdf_chunker/pdf_parsing.py:43: error: Incompatible types in assignment (expression has type "Callable[[str, str], str]", variable has type "Callable[[str, str], list[dict[Any, Any]]]")  [assignment]
+pdf_chunker/pdf_parsing.py:614: error: Incompatible default for argument "exclude_pages" (default has type "None", argument has type "str")  [assignment]
+pdf_chunker/pdf_parsing.py:614: note: PEP 484 prohibits implicit Optional. Accordingly, mypy has changed its default to no_implicit_optional=True
+pdf_chunker/pdf_parsing.py:614: note: Use https://github.com/hauntsaninja/no_implicit_optional to automatically upgrade your codebase
+pdf_chunker/pdf_parsing.py:889: error: Incompatible types in assignment (expression has type "list[Never]", variable has type "set[Any]")  [assignment]
+pdf_chunker/pdf_parsing.py:892: error: "set[Any]" has no attribute "append"  [attr-defined]
+pdf_chunker/pdf_parsing.py:901: error: Value of type "set[Any]" is not indexable  [index]
+pdf_chunker/pdf_parsing.py:902: error: Value of type "set[Any]" is not indexable  [index]
+pdf_chunker/pdf_parsing.py:930: error: Name "extract_text_blocks_from_pdf" already defined on line 614  [no-redef]
+pdf_chunker/pdf_parsing.py:933: error: Argument 2 has incompatible type "str | None"; expected "str"  [arg-type]
+pdf_chunker/epub_parsing.py:73: error: "PageElement" has no attribute "find_all"; maybe "_find_all" or "find_all_next"?  [attr-defined]
+pdf_chunker/epub_parsing.py:160: error: "PageElement" has no attribute "find_all"; maybe "_find_all" or "find_all_next"?  [attr-defined]
+pdf_chunker/passes/extraction_fallback.py:29: error: Dict entry 1 has incompatible type "str": "str"; expected "str": "float"  [dict-item]
+pdf_chunker/passes/extraction_fallback.py:37: error: Argument "fallback_reason" to "execute_fallback_extraction" has incompatible type "str | None"; expected "str"  [arg-type]
+pdf_chunker/parsing.py:19: error: Argument "exclude_pages" to "extract_text_blocks_from_pdf" has incompatible type "str | None"; expected "str"  [arg-type]
+pdf_chunker/parsing.py:23: error: Incompatible return value type (got "list[TextBlock]", expected "list[dict[Any, Any]]")  [return-value]
+pdf_chunker/adapters/io_epub.py:67: error: Argument 1 to "_group_blocks" has incompatible type "list[TextBlock]"; expected "Iterable[dict[str, Any]]"  [arg-type]
+pdf_chunker/splitter.py:28: error: Cannot assign to a type  [misc]
+pdf_chunker/splitter.py:28: error: Incompatible types in assignment (expression has type "None", variable has type "type[RecursiveCharacterTextSplitter]")  [assignment]
+pdf_chunker/splitter.py:377: error: Incompatible default for argument "min_chunk_size" (default has type "None", argument has type "int")  [assignment]
+pdf_chunker/splitter.py:377: note: PEP 484 prohibits implicit Optional. Accordingly, mypy has changed its default to no_implicit_optional=True
+pdf_chunker/splitter.py:377: note: Use https://github.com/hauntsaninja/no_implicit_optional to automatically upgrade your codebase
+pdf_chunker/splitter.py:756: error: Incompatible return value type (got "Literal[''] | bool", expected "bool")  [return-value]
+pdf_chunker/adapters/ai_enrich.py:9: error: Library stubs not installed for "yaml"  [import-untyped]
+pdf_chunker/adapters/ai_enrich.py:9: note: Hint: "python3 -m pip install types-PyYAML"
+pdf_chunker/adapters/ai_enrich.py:9: note: (or run "mypy --install-types" to install all missing stub packages)
+pdf_chunker/adapters/ai_enrich.py:9: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+pdf_chunker/adapters/ai_enrich.py:55: error: Need type annotation for "merged" (hint: "merged: dict[<type>, <type>] = ...")  [var-annotated]
+pdf_chunker/passes/split_semantic.py:229: error: Argument 2 to "replace" of "_SplitSemanticPass" has incompatible type "**dict[str, int]"; expected "bool"  [arg-type]
+pdf_chunker/passes/split_semantic.py:232: error: Argument 1 to "register" has incompatible type "_SplitSemanticPass"; expected "Pass"  [arg-type]
+pdf_chunker/passes/split_semantic.py:232: note: Protocol member Pass.input_type expected instance variable, got class variable
+pdf_chunker/passes/split_semantic.py:232: note: Protocol member Pass.name expected instance variable, got class variable
+pdf_chunker/passes/split_semantic.py:232: note:     <1 more conflict(s) not shown>
+pdf_chunker/passes/split_semantic.py:232: note: "Pass.__call__" has type "Callable[[Arg(Artifact, 'a')], Artifact]"
+pdf_chunker/core_new.py:94: error: Need type annotation for "timings" (hint: "timings: dict[<type>, <type>] = ...")  [var-annotated]
+pdf_chunker/core_new.py:94: error: Argument 1 to "reduce" has incompatible type "Callable[[tuple[Artifact, dict[str, float]], Pass], tuple[Artifact, dict[str, float]]]"; expected "Callable[[tuple[Artifact, dict[Never, Never]], Pass], tuple[Artifact, dict[Never, Never]]]"  [arg-type]
+pdf_chunker/core_new.py:143: error: Value of type "dict[str, Any] | None" is not indexable  [index]
+pdf_chunker/core_new.py:152: error: Argument 3 to "maybe_write" has incompatible type "Mapping[str, float]"; expected "dict[str, float] | None"  [arg-type]
+pdf_chunker/core_new.py:287: error: Argument "meta" to "Artifact" has incompatible type "Mapping[str, Any]"; expected "dict[str, Any] | None"  [arg-type]
+pdf_chunker/core.py:198: error: "debug" of "Logger" does not return a value (it only ever returns None)  [func-returns-value]
+pdf_chunker/core.py:202: error: "error" of "Logger" does not return a value (it only ever returns None)  [func-returns-value]
+pdf_chunker/core.py:275: error: Unexpected keyword argument "exclude_pages"  [call-arg]
+pdf_chunker/cli.py:106: error: Argument 1 to "module_from_spec" has incompatible type "ModuleSpec | None"; expected "ModuleSpec"  [arg-type]
+pdf_chunker/cli.py:107: error: Item "None" of "ModuleSpec | None" has no attribute "loader"  [union-attr]
+pdf_chunker/cli.py:108: error: Item "None" of "ModuleSpec | None" has no attribute "loader"  [union-attr]
+pdf_chunker/cli.py:112: error: "_load" does not return a value (it only ever returns None)  [func-returns-value]
+pdf_chunker/cli.py:146: error: Value expression in dictionary comprehension has incompatible type "object"; expected type "dict[str, Any]"  [misc]
+Found 49 errors in 16 files (checked 38 source files)

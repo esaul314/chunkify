@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from pdf_chunker.framework import Artifact, register
 
@@ -35,13 +35,15 @@ class _TextCleanPass:
     def __call__(self, a: Artifact) -> Artifact:
         payload = a.payload
         block_count: int | None = None
+        cleaned: str | Dict[str, Any]
 
         if isinstance(payload, str):
             from pdf_chunker.text_cleaning import _clean_text_impl
 
             cleaned = _clean_text_impl(payload)
         elif isinstance(payload, dict) and payload.get("type") == "page_blocks":
-            cleaned, block_count = _clean_doc(payload)
+            typed_payload = cast(Dict[str, Any], payload)
+            cleaned, block_count = _clean_doc(typed_payload)
         else:
             return a
 

@@ -145,6 +145,7 @@ pdf_chunker/
     ├── README.md
     ├── hyphenation.b64
     ├── ligature.b64
+    ├── sample_chunks.jsonl
     ├── sample_test.pdf
     └── underscore.b64
 `````

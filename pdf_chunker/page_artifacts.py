@@ -1,7 +1,7 @@
 import logging
 import re
 from functools import reduce
-from itertools import takewhile
+from itertools import takewhile, dropwhile
 from typing import Optional
 
 try:
@@ -44,6 +44,51 @@ def _looks_like_footnote(text: str) -> bool:
 
     pattern = rf"^(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z]"
     return bool(re.match(pattern, stripped))
+
+
+_BULLET_CHARS = ("\u2022", "*", "-")
+
+
+def _starts_with_bullet(line: str) -> bool:
+    """Return ``True`` if ``line`` begins with a bullet marker."""
+
+    return line.lstrip().startswith(_BULLET_CHARS)
+
+
+def _looks_like_bullet_footer(text: str) -> bool:
+    """Heuristic for bullet footer lines embedded in text."""
+
+    stripped = text.strip()
+    words = stripped.split()
+    return _starts_with_bullet(stripped) and ("?" in stripped or len(words) <= 2)
+
+
+def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
+    """Remove isolated trailing bullet lines while preserving real lists."""
+
+    def _bulletish(line: str) -> bool:
+        stripped = line.strip()
+        short = len(stripped.split()) <= 8 and not any(p in stripped for p in ".!?;")
+        return _starts_with_bullet(stripped) or short
+
+    trailing = list(takewhile(_bulletish, reversed(lines)))
+    if not trailing or len(trailing) == len(lines):
+        return lines
+    keep_to = len(lines) - len(trailing)
+    prev_idx = keep_to - 1
+    if prev_idx >= 0:
+        prev = lines[prev_idx].strip()
+        if _starts_with_bullet(prev) or (len(prev.split()) <= 3 and not re.search(r"[.!?]$", prev)):
+            keep_to -= 1
+    for ln in lines[keep_to:]:
+        logger.debug("remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30])
+    return lines[:keep_to]
+
+
+def _strip_spurious_number_prefix(text: str) -> str:
+    """Remove leading number markers preceding lowercase continuation."""
+
+    return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
@@ -182,6 +227,8 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
         return True
 
     if len(text.split()) <= 3 and len(text) <= 30 and any(char.isdigit() for char in text):
+        if re.match(r"^\d+\.$", text.strip()):
+            return False
         return True
 
     return False
@@ -349,13 +396,15 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     lines = text.splitlines()
 
     def _clean_line(ln: str) -> Optional[str]:
-        if is_page_artifact_text(clean_text(ln), page_num):
+        cleaned = clean_text(ln)
+        if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(cleaned):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
-        stripped = strip_page_artifact_suffix(ln, page_num)
+        stripped = _strip_spurious_number_prefix(strip_page_artifact_suffix(ln, page_num))
         if stripped != ln:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
 
-    cleaned = filter(None, (_clean_line(ln) for ln in lines))
-    return "\n".join(cleaned)
+    cleaned_lines = list(filter(None, (_clean_line(ln) for ln in lines)))
+    cleaned_lines = _drop_trailing_bullet_footers(cleaned_lines)
+    return "\n".join(cleaned_lines)

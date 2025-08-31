@@ -181,8 +181,7 @@ class TestTextCorruptionDetection(unittest.TestCase):
         text = "This hasWordGluing and moreIssues here."
         # This test passes - it's testing detection
         gluing_detected = any(
-            i > 0 and text[i - 1].islower() and text[i].isupper()
-            for i in range(len(text))
+            i > 0 and text[i - 1].islower() and text[i].isupper() for i in range(len(text))
         )
         self.assertTrue(gluing_detected)
 
@@ -198,10 +197,7 @@ class TestTextCorruptionDetection(unittest.TestCase):
         text = "This is well-formatted text with proper spacing and punctuation."
         # This test passes - it's testing validation
         issues = []
-        if any(
-            i > 0 and text[i - 1].islower() and text[i].isupper()
-            for i in range(len(text))
-        ):
+        if any(i > 0 and text[i - 1].islower() and text[i].isupper() for i in range(len(text))):
             issues.append("word_gluing")
         if '",' in text:
             issues.append("json_escaping")

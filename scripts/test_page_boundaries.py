@@ -108,9 +108,7 @@ def detect_page_artifacts(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         # Page numbers (standalone digits)
         if re.match(r"^\d+$", text):
-            artifacts["page_numbers"].append(
-                {"block_index": i, "page": page, "text": text}
-            )
+            artifacts["page_numbers"].append({"block_index": i, "page": page, "text": text})
             continue
 
         # Headers (common patterns at top of pages)
@@ -137,13 +135,9 @@ def detect_page_artifacts(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         # Other potential artifacts (very short text with specific patterns)
         if len(text.split()) <= 3 and (
-            any(char.isdigit() for char in text)
-            or text.isupper()
-            or re.match(r"^[A-Z\s]+$", text)
+            any(char.isdigit() for char in text) or text.isupper() or re.match(r"^[A-Z\s]+$", text)
         ):
-            artifacts["other_artifacts"].append(
-                {"block_index": i, "page": page, "text": text}
-            )
+            artifacts["other_artifacts"].append({"block_index": i, "page": page, "text": text})
 
     return artifacts
 
@@ -227,12 +221,8 @@ def compare_text_quality(
     """Compare text quality between traditional and PyMuPDF4LLM approaches."""
 
     # Combine text from all blocks
-    traditional_text = "\n\n".join(
-        block.get("text", "") for block in traditional_blocks
-    )
-    pymupdf4llm_text = "\n\n".join(
-        block.get("text", "") for block in pymupdf4llm_blocks
-    )
+    traditional_text = "\n\n".join(block.get("text", "") for block in traditional_blocks)
+    pymupdf4llm_text = "\n\n".join(block.get("text", "") for block in pymupdf4llm_blocks)
 
     # Analyze sentence boundaries
     traditional_sentences = analyze_sentence_boundaries(traditional_text)
@@ -253,9 +243,7 @@ def compare_text_quality(
         # Penalize for sentence issues
         if sentences["total_sentences"] > 0:
             fragment_ratio = sentences["short_fragments"] / sentences["total_sentences"]
-            lowercase_ratio = (
-                sentences["lowercase_starts"] / sentences["total_sentences"]
-            )
+            lowercase_ratio = sentences["lowercase_starts"] / sentences["total_sentences"]
             abrupt_ratio = sentences["abrupt_endings"] / sentences["total_sentences"]
 
             score -= fragment_ratio * 0.3
@@ -308,17 +296,13 @@ def compare_text_quality(
             "block_count_change": len(pymupdf4llm_blocks) - len(traditional_blocks),
             "character_count_change": len(pymupdf4llm_text) - len(traditional_text),
             "better_approach": (
-                "PyMuPDF4LLM"
-                if pymupdf4llm_score > traditional_score
-                else "Traditional"
+                "PyMuPDF4LLM" if pymupdf4llm_score > traditional_score else "Traditional"
             ),
         },
     }
 
 
-def generate_comparison_report(
-    comparison_results: Dict[str, Any], pdf_path: str
-) -> str:
+def generate_comparison_report(comparison_results: Dict[str, Any], pdf_path: str) -> str:
     """Generate a detailed comparison report."""
     report = []
     report.append("=" * 80)
@@ -405,17 +389,13 @@ def generate_comparison_report(
 
     # Print Flow Issue Ratio for both columns in a single line
     if trad["flow"]["total_transitions"] > 0:
-        trad_flow_ratio = (
-            trad["flow"]["total_flow_issues"] / trad["flow"]["total_transitions"]
-        )
+        trad_flow_ratio = trad["flow"]["total_flow_issues"] / trad["flow"]["total_transitions"]
         trad_ratio_str = f"{trad_flow_ratio:>11.3f}"
     else:
         trad_ratio_str = f"{'N/A':>11s}"
 
     if pymu["flow"]["total_transitions"] > 0:
-        pymu_flow_ratio = (
-            pymu["flow"]["total_flow_issues"] / pymu["flow"]["total_transitions"]
-        )
+        pymu_flow_ratio = pymu["flow"]["total_flow_issues"] / pymu["flow"]["total_transitions"]
         pymu_ratio_str = f"{pymu_flow_ratio:>11.3f}"
     else:
         pymu_ratio_str = f"{'N/A':>11s}"

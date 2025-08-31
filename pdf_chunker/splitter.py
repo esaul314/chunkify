@@ -1,32 +1,15 @@
 import logging
 from collections import Counter
 import re
-from typing import Any, Dict, List, Optional, Tuple
-
-from haystack.components.preprocessors import DocumentSplitter
-
-# from haystack.dataclasses import Document
-from haystack import Document
+from functools import reduce
+from typing import Any, Dict, Iterable, List, Match, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
+from .page_artifacts import _drop_trailing_bullet_footers
 
 
 logger = logging.getLogger(__name__)
-
-# Try importing RecursiveCharacterTextSplitter from both possible locations
-try:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-
-    _LANGCHAIN_SPLITTER_AVAILABLE = True
-except ImportError:
-    try:
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-        _LANGCHAIN_SPLITTER_AVAILABLE = True
-    except ImportError:
-        RecursiveCharacterTextSplitter = None
-        _LANGCHAIN_SPLITTER_AVAILABLE = False
 
 # Centralized chunk threshold constants
 CHUNK_THRESHOLDS = {
@@ -91,9 +74,7 @@ def _is_very_short_fragment(words: List[str]) -> bool:
     return len(words) <= CHUNK_THRESHOLDS["fragment"]
 
 
-def _is_related_short_chunks(
-    current_words: List[str], next_words: List[str], current: str
-) -> bool:
+def _is_related_short_chunks(current_words: List[str], next_words: List[str], current: str) -> bool:
     """Check for adjacent related short chunks that should merge."""
     return (
         len(current_words) <= CHUNK_THRESHOLDS["related_short"]
@@ -146,11 +127,7 @@ def _merge_forward(
     if not current:
         return _merge_forward(chunks, relationships, idx + 1)
 
-    if (
-        idx < len(relationships)
-        and relationships[idx]["should_merge"]
-        and idx + 1 < len(chunks)
-    ):
+    if idx < len(relationships) and relationships[idx]["should_merge"] and idx + 1 < len(chunks):
         next_chunk = chunks[idx + 1].strip()
         rest, counter = _merge_forward(chunks, relationships, idx + 2)
         reason = relationships[idx]["merge_reason"]
@@ -220,15 +197,18 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
         current = chunks[idx].strip()
         if idx + 1 < len(chunks):
             nxt = chunks[idx + 1].strip()
-            if _starting_number(current) is not None and _starting_number(nxt) is None:
+            curr_last = _last_number(current)
+            nxt_first = _starting_number(nxt)
+            if curr_last is not None and nxt_first is not None and nxt_first == curr_last + 1:
+                merged.append(_combine(current, nxt))
+                idx += 2
+                continue
+            if _starting_number(current) is not None and nxt_first is None:
                 merged.append(_combine(current, nxt))
                 idx += 2
                 continue
             last_line = current.rsplit("\n", 1)[-1]
-            if (
-                NUMBERED_ITEM_ANYWHERE.search(last_line)
-                and _starting_number(nxt) is None
-            ):
+            if NUMBERED_ITEM_ANYWHERE.search(last_line) and nxt_first is None:
                 merged.append(_combine(current, nxt))
                 idx += 2
                 continue
@@ -294,9 +274,7 @@ def _merge_standalone_lists(chunks: List[str]) -> List[str]:
     merged: List[str] = []
     for chunk in chunks:
         stripped = chunk.lstrip()
-        if merged and (
-            starts_with_bullet(stripped) or _starting_number(stripped) is not None
-        ):
+        if merged and (starts_with_bullet(stripped) or _starting_number(stripped) is not None):
             merged[-1] = f"{merged[-1].rstrip()}\n{stripped}"
         else:
             merged.append(chunk.rstrip())
@@ -374,7 +352,7 @@ def analyze_chunk_relationships(chunks: List[str]) -> List[Dict[str, Any]]:
 
 
 def merge_conversational_chunks(
-    chunks: List[str], min_chunk_size: int = None
+    chunks: List[str], min_chunk_size: int | None = None
 ) -> Tuple[List[str], Dict[str, Any]]:
     """
     Merge chunks based on conversational patterns and minimum size requirements.
@@ -481,106 +459,79 @@ def _merge_short_chunks(
     return merged_chunks, merge_stats
 
 
+NEWLINE_TOKEN = "[[BR]]"
+NBSP = "\u00A0"
+NBSP_TOKEN = "[[NBSP]]"
+_BULLET_AFTER_NEWLINE = re.compile(r"\n\s*([\-\*\u2022]\s+)")
+
+
+def _tokenize_with_newlines(text: str) -> List[str]:
+    """Return tokens while preserving explicit newline and list markers."""
+
+    def _join_newline_bullet(match: Match[str]) -> str:
+        return f" {NEWLINE_TOKEN}{match.group(1)}"
+
+    prepared = _BULLET_AFTER_NEWLINE.sub(_join_newline_bullet, text)
+    prepared = prepared.replace(NBSP, f" {NBSP_TOKEN} ")
+    prepared = prepared.replace("\n", f" {NEWLINE_TOKEN} ")
+    return prepared.split()
+
+
+def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
+    """Rebuild text from tokens, restoring newline and list markers."""
+    joined = " ".join(tokens)
+    joined = re.sub(rf"{NEWLINE_TOKEN}([\-\*\u2022])", r"\n\1", joined)
+    joined = joined.replace(NEWLINE_TOKEN, "\n").replace(NBSP_TOKEN, NBSP)
+    joined = re.sub(rf" ?{NBSP} ?", NBSP, joined)
+    return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
+
+
+def _split_short_text(text: str) -> List[str]:
+    """Split short passages near the middle, preferring paragraph breaks."""
+    mid = len(text) // 2
+    for sep in ("\n\n", "\n", " "):
+        split_at = text.rfind(sep, 0, mid)
+        if split_at == -1:
+            split_at = text.find(sep, mid)
+        if split_at != -1:
+            head = text[:split_at].strip()
+            tail = text[split_at + len(sep) :].strip()
+            return [head, tail] if tail else [head]
+    return [text.strip()]
+
+
+def _dedupe_overlapping_chunks(chunks: List[str]) -> List[str]:
+    """Drop chunks fully contained within their predecessor."""
+
+    return reduce(
+        lambda acc, c: acc if acc and c and c in acc[-1] else acc + [c],
+        chunks,
+        [],
+    )
+
+
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
-    """Split text into chunks using sentence boundaries."""
+    """Return ``text`` split into word windows respecting ``overlap``."""
 
-    if _LANGCHAIN_SPLITTER_AVAILABLE and RecursiveCharacterTextSplitter is not None:
-        # Convert word-based sizes to character estimates
-        chunk_size_chars = chunk_size * 6  # Rough estimate: 6 chars per word
-        overlap_chars = overlap * 6
-
-        logger.debug(
-            f"Text splitting: {chunk_size} words ({chunk_size_chars} chars), "
-            f"{overlap} words overlap ({overlap_chars} chars)"
-        )
-
-        # Check for potential quote-related splitting issues
-        quote_count = text.count('"') + text.count("'")
-        if quote_count > 0:
-            logger.debug(
-                f"Text contains {quote_count} quote characters - monitoring for split issues"
-            )
-
-        # Use quote-aware separators - avoid splitting at quotes when possible
-        separators = [
-            "\n\n",  # Paragraph breaks (highest priority)
-            "\n",  # Line breaks
-            ". ",  # Sentence endings with space
-            "! ",  # Exclamation with space
-            "? ",  # Question with space
-            "; ",  # Semicolon with space
-            ": ",  # Colon with space
-            ", ",  # Comma with space (lower priority)
-            " ",  # Word boundaries (very low priority)
-            "",  # Character boundaries (last resort)
+    tokens = _tokenize_with_newlines(text)
+    if not tokens or chunk_size <= 0:
+        return []
+    if len(tokens) <= chunk_size:
+        return [
+            "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
         ]
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size_chars,
-            chunk_overlap=overlap_chars,
-            length_function=len,
-            separators=separators,
-        )
-
-        chunks = splitter.split_text(text)
-
-        logger.debug(f"RecursiveCharacterTextSplitter produced {len(chunks)} chunks")
-
-        # Post-process to fix quote and heading related issues
-        fixed_chunks = _fix_heading_splitting_issues(
-            _fix_quote_splitting_issues(chunks)
-        )
-
-        if len(fixed_chunks) != len(chunks):
-            logger.info(
-                f"Boundary fixes applied: {len(chunks)} → {len(fixed_chunks)} chunks"
-            )
-
-        # Log potential issues with quote handling
-        for i, chunk in enumerate(fixed_chunks):
-            if chunk.startswith('"') and not chunk.endswith('"'):
-                logger.warning(
-                    f"Chunk {i} starts with quote but doesn't end with quote - potential split issue"
-                )
-            elif chunk.endswith('"') and not chunk.startswith('"'):
-                logger.warning(
-                    f"Chunk {i} ends with quote but doesn't start with quote - potential split issue"
-                )
-
-            # Check for suspicious text ordering
-            if i > 0:
-                prev_chunk = fixed_chunks[i - 1]
-                if chunk.strip() and prev_chunk.strip():
-                    # Simple heuristic: if current chunk starts with lowercase and previous ends without punctuation
-                    if chunk[0].islower() and not prev_chunk.rstrip().endswith(
-                        (".", "!", "?", ":", ";")
-                    ):
-                        logger.debug(
-                            f"Potential continuation split between chunks {i-1} and {i}"
-                        )
-
-        return fixed_chunks
-    else:
-        # Fallback: simple paragraph-based splitting
-        logger.warning(
-            "LangChain RecursiveCharacterTextSplitter not available, using fallback splitter."
-        )
-        # Split by double newlines (paragraphs)
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-        chunks = []
-        current_chunk = ""
-        for para in paragraphs:
-            if not current_chunk:
-                current_chunk = para
-            elif len(current_chunk) + len(para) + 2 < chunk_size * 6:
-                current_chunk += "\n\n" + para
-            else:
-                chunks.append(current_chunk)
-                current_chunk = para
-        if current_chunk:
-            chunks.append(current_chunk)
-        logger.info(f"Fallback splitter produced {len(chunks)} chunks")
-        return _fix_heading_splitting_issues(chunks)
+    step = max(1, chunk_size - overlap)
+    windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens), step))
+    chunks = [
+        "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(w).splitlines()))
+        for w in windows
+    ]
+    chunks = _dedupe_overlapping_chunks(chunks)
+    if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
+        chunks = chunks[:-1]
+    return chunks or [
+        "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
+    ]
 
 
 def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
@@ -600,9 +551,7 @@ def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
             next_chunk = chunks[i + 1]
 
             # Case 1: Current chunk ends with opening quote, next starts with content
-            if _ends_with_opening_quote(current_chunk) and _starts_with_quote_content(
-                next_chunk
-            ):
+            if _ends_with_opening_quote(current_chunk) and _starts_with_quote_content(next_chunk):
                 logger.debug(f"Fixing quote split: merging chunks {i} and {i+1}")
                 merged = current_chunk + " " + next_chunk
                 fixed_chunks.append(merged)
@@ -610,9 +559,7 @@ def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
                 continue
 
             # Case 2: Current chunk is quote content, next starts with closing quote
-            if _is_quote_content(current_chunk) and _starts_with_closing_quote(
-                next_chunk
-            ):
+            if _is_quote_content(current_chunk) and _starts_with_closing_quote(next_chunk):
                 logger.debug(f"Fixing quote split: merging chunks {i} and {i+1}")
                 merged = current_chunk + " " + next_chunk
                 fixed_chunks.append(merged)
@@ -709,9 +656,7 @@ def _validate_chunk_integrity(chunks: List[str], original_text: str) -> List[str
     for i, chunk in enumerate(chunks):
         quote_balance = _check_quote_balance(chunk)
         if quote_balance != 0:
-            logger.warning(
-                f"Chunk {i} has unbalanced quotes (balance: {quote_balance})"
-            )
+            logger.warning(f"Chunk {i} has unbalanced quotes (balance: {quote_balance})")
 
     # Check 3: Look for obvious corruption patterns
     validated_chunks = []
@@ -746,14 +691,12 @@ def _starts_with_quote_content(text: str) -> bool:
     continuation_words = {"and", "but", "or", "so", "yet", "for", "nor"}
     first_word = text.split()[0].lower() if text.split() else ""
 
-    return (
-        text[0].islower() or first_word in continuation_words or not text[0].isupper()
-    )
+    return text[0].islower() or first_word in continuation_words or not text[0].isupper()
 
 
 def _is_quote_content(text: str) -> bool:
     """Check if text appears to be content inside quotes."""
-    return text and not text[0].isupper() and not text.rstrip().endswith(('"', "'"))
+    return bool(text) and not text[0].isupper() and not text.rstrip().endswith(('"', "'"))
 
 
 def _starts_with_closing_quote(text: str) -> bool:
@@ -762,8 +705,7 @@ def _starts_with_closing_quote(text: str) -> bool:
 
     # Pattern: starts with quote followed by punctuation or attribution
     return bool(
-        re.match(r'^["\'][,.;:]', text)
-        or re.match(r'^["\'].*?(said|asked|replied)', text.lower())
+        re.match(r'^["\'][,.;:]', text) or re.match(r'^["\'].*?(said|asked|replied)', text.lower())
     )
 
 
@@ -779,9 +721,7 @@ def _is_text_reordered(chunk1: str, chunk2: str) -> bool:
     )
 
     setup_enders = [",", ":", ";", "said", "asked", "replied"]
-    chunk2_ends_setup = any(
-        chunk2.lower().rstrip().endswith(ender) for ender in setup_enders
-    )
+    chunk2_ends_setup = any(chunk2.lower().rstrip().endswith(ender) for ender in setup_enders)
 
     return chunk1_starts_continuation and chunk2_ends_setup
 
@@ -802,6 +742,9 @@ def semantic_chunker(
         f"Starting semantic chunking: {len(text)} chars, target size={chunk_size} words, overlap={overlap} words, min_chunk_size={min_chunk_size} words, dialogue_detection={enable_dialogue_detection}"
     )
 
+    if min_chunk_size is None:
+        min_chunk_size = max(8, chunk_size // 10)
+
     # Log text preview for debugging
     text_preview = text[:200].replace("\n", "\\n")
     logger.debug(f"Input text preview: '{text_preview}...'")
@@ -816,7 +759,7 @@ def semantic_chunker(
 
     # Initial splitting
     initial_chunks = _split_text_into_chunks(text, chunk_size, overlap)
-    logger.info(f"DocumentSplitter produced {len(initial_chunks)} initial chunks")
+    logger.info(f"Sliding window produced {len(initial_chunks)} initial chunks")
 
     # Count and log short chunks before processing
     initial_short_count = sum(
@@ -826,9 +769,7 @@ def semantic_chunker(
         1 for chunk in initial_chunks if len(chunk.split()) <= very_short_threshold
     )
 
-    logger.info(
-        f"Initial short chunks (≤{short_threshold} words): {initial_short_count}"
-    )
+    logger.info(f"Initial short chunks (≤{short_threshold} words): {initial_short_count}")
     logger.info(
         f"Initial very short chunks (≤{very_short_threshold} words): {initial_very_short_count}"
     )
@@ -837,12 +778,10 @@ def semantic_chunker(
     for i, chunk in enumerate(initial_chunks):
         word_count = len(chunk.split())
         chunk_preview = chunk[:100].replace("\n", "\\n")
-        logger.info(
-            f"Initial chunk {i}: {word_count} words, preview: '{chunk_preview}...'"
-        )
+        logger.info(f"Initial chunk {i}: {word_count} words, preview: '{chunk_preview}...'")
 
     # Apply conversational merging if enabled
-    if enable_dialogue_detection and min_chunk_size:
+    if enable_dialogue_detection and min_chunk_size is not None:
         merged_chunks, merge_stats = _merge_short_chunks(
             initial_chunks, min_chunk_size, very_short_threshold, short_threshold
         )
@@ -852,9 +791,7 @@ def semantic_chunker(
         logger.info("Dialogue detection disabled")
 
     # Validate chunk integrity and repair heading boundaries
-    validated_chunks = _fix_heading_splitting_issues(
-        _validate_chunk_integrity(merged_chunks, text)
-    )
+    validated_chunks = _fix_heading_splitting_issues(_validate_chunk_integrity(merged_chunks, text))
 
     # Merge numbered list items that were split across chunks
     numbered_chunks = _merge_numbered_list_chunks(validated_chunks)
@@ -864,9 +801,7 @@ def semantic_chunker(
     list_chunks = _merge_standalone_lists(bullet_chunks)
 
     # Final statistics
-    final_short_count = sum(
-        1 for chunk in list_chunks if len(chunk.split()) <= short_threshold
-    )
+    final_short_count = sum(1 for chunk in list_chunks if len(chunk.split()) <= short_threshold)
     final_very_short_count = sum(
         1 for chunk in list_chunks if len(chunk.split()) <= very_short_threshold
     )
@@ -939,6 +874,4 @@ def _attempt_chunk_repair(chunk: str) -> str:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
