@@ -108,7 +108,8 @@ BULLET_CHARS_ESC = re.escape("*•")
 END_PUNCT = ".!?…"
 
 # Inline artifacts
-COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(\w)")
+# Avoid collapsing list markers like "2.\n3." by skipping digits after the break
+COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(?!\d)(\w)")
 PIPE_RE = re.compile(r"\|")
 UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
 DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
@@ -298,6 +299,7 @@ def drop_spurious_number_markers(text: str) -> str:
         text,
         lambda t: re.sub(r"-\n\d+[.)]\s*", "-", t),
         lambda t: re.sub(r"\n\d+[.)]\n", "\n", t),
+        lambda t: re.sub(r"\n\d+[.)]\s+(?=[A-Z]{2,}\b)", "\n", t),
         lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]\s+(?=[a-z])", " ", t),
         lambda t: re.sub("(?<=[a-z])\\s+\\d+[.)](?:['\"\\u2019])?(?=\\s*$)", "", t),
         lambda t: re.sub(r"\n{2,}(\d+[.)])", r"\n\1", t),
@@ -646,9 +648,7 @@ def _clean_text_impl(text: str) -> str:
 
     env_flag = os.getenv("PDF_CHUNKER_USE_PYMUPDF4LLM")
     enabled = bool(env_flag) and _use_pymupdf4llm()
-    logger.debug(
-        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {env_flag or 'not set'}"
-    )
+    logger.debug(f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {env_flag or 'not set'}")
     logger.debug(f"use_pymupdf4llm evaluated to: {enabled}")
 
     if enabled:
