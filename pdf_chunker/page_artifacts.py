@@ -1,7 +1,7 @@
 import logging
 import re
 from functools import reduce
-from itertools import takewhile
+from itertools import takewhile, dropwhile
 from typing import Optional
 
 try:
@@ -89,7 +89,7 @@ def _strip_spurious_number_prefix(text: str) -> str:
 
     return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
 
-
+  
 def _starts_with_multiple_numbers(text: str) -> bool:
     """Return ``True`` if ``text`` begins with two or more numbers."""
 
