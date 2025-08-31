@@ -1,7 +1,7 @@
 import logging
 import re
 from functools import reduce
-from itertools import takewhile
+from itertools import takewhile, dropwhile
 from typing import Optional
 
 try:
@@ -57,6 +57,19 @@ def _looks_like_bullet_footer(text: str) -> bool:
     return 0 < len(words) <= 3
 
 
+def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
+    """Remove trailing bullet footer lines from ``lines``."""
+
+    rev = list(reversed(lines))
+    trimmed = list(dropwhile(_looks_like_bullet_footer, rev))
+    dropped = rev[: len(rev) - len(trimmed)]
+    for ln in dropped:
+        logger.debug(
+            "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
+        )
+    return list(reversed(trimmed))
+
+  
 def _starts_with_multiple_numbers(text: str) -> bool:
     """Return ``True`` if ``text`` begins with two or more numbers."""
 
@@ -369,5 +382,6 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
 
-    cleaned = filter(None, (_clean_line(ln) for ln in lines))
-    return "\n".join(cleaned)
+    cleaned_lines = list(filter(None, (_clean_line(ln) for ln in lines)))
+    cleaned_lines = _drop_trailing_bullet_footers(cleaned_lines)
+    return "\n".join(cleaned_lines)
