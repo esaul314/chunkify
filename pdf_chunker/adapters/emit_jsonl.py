@@ -13,12 +13,9 @@ def _rows(payload: Any) -> Iterable[dict[str, Any]]:
     return payload if isinstance(payload, list) else []
 
 
-def _sanitize_meta(meta: dict[str, Any]) -> dict[str, Any]:
-    """Copy metadata and repair empty ``utterance_type`` entries."""
-    sanitized = meta.copy()
-    if isinstance(sanitized.get("utterance_type"), dict) and not sanitized["utterance_type"]:
-        sanitized["utterance_type"] = {"classification": "error", "tags": []}
-    return sanitized
+def _copy_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    """Return a shallow metadata copy without mutating ``meta``."""
+    return {k: v for k, v in meta.items()}
 
 
 def _maybe_drop_meta(rows: Iterable[dict[str, Any]], drop: bool) -> Iterable[dict[str, Any]]:
@@ -31,7 +28,7 @@ def _maybe_drop_meta(rows: Iterable[dict[str, Any]], drop: bool) -> Iterable[dic
             key: value
             for key, value in [
                 ("text", text),
-                ("meta", _sanitize_meta(meta) if meta else None),
+                ("meta", _copy_meta(meta) if meta else None),
             ]
             if key == "text" or (not drop and meta)
         }
