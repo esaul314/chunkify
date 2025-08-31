@@ -11,7 +11,12 @@ try:
 except Exception:
     fitz = None
 try:
-    from .text_cleaning import clean_text, HYPHEN_CHARS_ESC, remove_stray_bullet_lines
+    from .text_cleaning import (
+        clean_text,
+        HYPHEN_CHARS_ESC,
+        remove_stray_bullet_lines,
+        insert_numbered_list_newlines,
+    )
 except Exception:
 
     def clean_text(text: str) -> str:
@@ -74,6 +79,7 @@ from .list_detection import (
     is_numbered_list_pair,
     split_bullet_fragment,
     starts_with_bullet,
+    starts_with_number,
     _last_non_empty_line,
 )
 
@@ -281,6 +287,14 @@ def _should_merge_blocks(
     if is_numbered_continuation(curr_text, next_text):
         logger.debug("Merge decision: NUMBERED_CONTINUATION")
         return True, "numbered_continuation"
+
+    if re.fullmatch(r"\d+[.)]", curr_text) and not starts_with_number(next_text):
+        logger.debug("Merge decision: NUMBERED_STANDALONE")
+        return True, "numbered_standalone"
+
+    if re.search(r"\n\d+[.)]\s*$", curr_text) and not starts_with_number(next_text):
+        logger.debug("Merge decision: NUMBERED_SUFFIX")
+        return True, "numbered_suffix"
 
     # Check for quote-related splitting issues
     curr_has_quote = '"' in curr_text or "'" in curr_text
@@ -597,6 +611,14 @@ def merge_continuation_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, An
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "numbered_continuation":
                     merged_text = current_text + " " + next_text
+                elif merge_reason == "numbered_standalone":
+                    processed = insert_numbered_list_newlines(next_text)
+                    merged_text = current_text + " " + processed
+                elif merge_reason == "numbered_suffix":
+                    marker = re.search(r"\n(\d+[.)])\s*$", current_text).group(1)
+                    base = re.sub(r"\n\d+[.)]\s*$", "", current_text)
+                    processed = insert_numbered_list_newlines(next_text)
+                    merged_text = f"{base}\n{marker} {processed}".strip()
                 elif merge_reason == "indented_continuation":
                     merged_text = current_text + "\n" + next_text
                 elif merge_reason == "author_attribution":
