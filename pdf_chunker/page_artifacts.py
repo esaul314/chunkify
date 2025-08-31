@@ -1,7 +1,7 @@
 import logging
 import re
 from functools import reduce
-from itertools import takewhile
+from itertools import takewhile, dropwhile
 from typing import Optional
 
 try:
@@ -54,7 +54,7 @@ def _starts_with_bullet(line: str) -> bool:
 
     return line.lstrip().startswith(_BULLET_CHARS)
 
-
+  
 def _looks_like_bullet_footer(text: str) -> bool:
     """Heuristic for bullet footer lines embedded in text."""
 
@@ -88,8 +88,6 @@ def _strip_spurious_number_prefix(text: str) -> str:
     """Remove leading number markers preceding lowercase continuation."""
 
     return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
-
-
 def _starts_with_multiple_numbers(text: str) -> bool:
     """Return ``True`` if ``text`` begins with two or more numbers."""
 
