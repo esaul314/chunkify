@@ -1,6 +1,7 @@
 import logging
 from collections import Counter
 import re
+from functools import reduce
 from typing import Any, Dict, Iterable, List, Match, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
@@ -494,6 +495,16 @@ def _split_short_text(text: str) -> List[str]:
     return [text.strip()]
 
 
+def _dedupe_overlapping_chunks(chunks: List[str]) -> List[str]:
+    """Drop chunks fully contained within their predecessor."""
+
+    return reduce(
+        lambda acc, c: acc if acc and c and c in acc[-1] else acc + [c],
+        chunks,
+        [],
+    )
+
+
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
     """Return ``text`` split into word windows respecting ``overlap``."""
 
@@ -510,6 +521,10 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
         "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(w).splitlines()))
         for w in windows
     ]
+    chunks = _dedupe_overlapping_chunks(chunks)
+    if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
+        chunks = chunks[:-1]
+
     return chunks or [
         "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
     ]

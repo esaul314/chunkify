@@ -47,29 +47,28 @@ def _looks_like_footnote(text: str) -> bool:
 
 
 def _looks_like_bullet_footer(text: str) -> bool:
-    """Return ``True`` if ``text`` is a short bullet footer line."""
+    """Heuristic for bullet footer lines embedded in text."""
 
     stripped = text.strip()
-    if not stripped.startswith(("\u2022", "*", "-")):
-        return False
-
-    words = stripped.lstrip("\u2022*-").strip().split()
-    return 0 < len(words) <= 3
+    return stripped.startswith(("\u2022", "*", "-")) and "?" in stripped
 
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
-    """Remove trailing bullet footer lines from ``lines``."""
+    """Remove isolated trailing bullet lines while preserving real lists."""
 
     rev = list(reversed(lines))
-    trimmed = list(dropwhile(_looks_like_bullet_footer, rev))
-    dropped = rev[: len(rev) - len(trimmed)]
-    for ln in dropped:
-        logger.debug(
-            "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
-        )
-    return list(reversed(trimmed))
+    trailing = list(takewhile(lambda ln: ln.lstrip().startswith(("\u2022", "*", "-")), rev))
+    if not trailing or len(trailing) == len(lines):
+        return lines
+    if len(trailing) <= 2 and not lines[-len(trailing) - 1].lstrip().startswith(("\u2022", "*", "-")):
+        for ln in trailing:
+            logger.debug(
+                "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
+            )
+        return lines[: -len(trailing)]
+    return lines
 
-  
+
 def _starts_with_multiple_numbers(text: str) -> bool:
     """Return ``True`` if ``text`` begins with two or more numbers."""
 
@@ -374,7 +373,7 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
 
     def _clean_line(ln: str) -> Optional[str]:
         cleaned = clean_text(ln)
-        if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(ln):
+        if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(cleaned):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
         stripped = strip_page_artifact_suffix(ln, page_num)
