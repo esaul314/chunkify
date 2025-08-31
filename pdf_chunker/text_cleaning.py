@@ -581,8 +581,6 @@ def apply_json_safety_fixes(text: str) -> str:
         fixed = fixed[3:]
     elif fixed.startswith('"') and len(fixed) > 1 and fixed[1].islower():
         fixed = fixed[1:]
-    if fixed.endswith(', "') or fixed.endswith(',"'):
-        fixed = fixed[:-2]
     try:
         fixed = fixed.encode("utf-8", errors="replace").decode("utf-8")
     except UnicodeError:
@@ -615,10 +613,7 @@ def clean_paragraph(paragraph: str) -> str:
         _preserve_list_newlines,
         normalize_quotes,
         remove_control_characters,
-        consolidate_whitespace,
         normalize_ligatures,
-        normalize_quotes,
-        strip_underscore_wrapping,
         consolidate_whitespace,
     )
 
