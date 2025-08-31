@@ -11,6 +11,7 @@ This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other
 | --- | --- | --- |
 | `ai_enrich` | `pdf_chunker.passes.ai_enrich` |  |
 | `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` |  |
+| `epub_parse` | `pdf_chunker.passes.epub_parse` |  |
 | `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` |  |
 | `heading_detect` | `pdf_chunker.passes.heading_detect` |  |
 | `list_detect` | `pdf_chunker.passes.list_detect` | List detection pass. |

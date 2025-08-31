@@ -244,18 +244,44 @@ def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
     Path(path).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
+def _timed(p: Pass, a: Artifact, timings: dict[str, float]) -> Artifact:
+    """Run ``p`` while recording its execution duration."""
+    t0 = time.time()
+    try:
+        return p(a)
+    finally:
+        timings[p.name] = time.time() - t0
+
+
+def _meta_with_warnings(
+    a: Artifact, spec: PipelineSpec, opts: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Return meta merged with options and warning indicators."""
+    gen_meta = _generate_metadata_enabled(spec)
+    warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
+    return {**(a.meta or {}), "options": opts, "warnings": warnings}
+
+
 def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, float]]:
     """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
     existing = (a.meta or {}).get("options") or {}
     opts = {**existing, **spec.options}
-    seeded = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
-    a, timings = _run_passes(run_spec, seeded)
+    a = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
+    timings: dict[str, float] = {}
+    try:
+        for p in (
+            configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline
+        ):
+            a = _timed(p, a, timings)
+    except Exception as exc:
+        meta = _meta_with_warnings(a, spec, opts)
+        report = assemble_report(timings, {**meta, "error": str(exc)})
+        write_run_report(spec, report)
+        raise
     _maybe_emit_jsonl(a, spec, timings)
-    gen_meta = _generate_metadata_enabled(spec)
-    warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
-    meta = {**(a.meta or {}), "options": opts, "warnings": warnings}
+    meta = _meta_with_warnings(a, spec, opts)
     report = assemble_report(timings, meta)
     write_run_report(spec, report)
     return Artifact(payload=a.payload, meta=meta), timings

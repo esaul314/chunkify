@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from tests.utils.materialize import materialize_base64
@@ -10,15 +11,22 @@ from tests.utils.materialize import materialize_base64
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "pdf_chunker.cli", *args],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
+        cwd=cwd,
+    )
+
+
 def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
     pdf_path = materialize_base64(
         Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
     )
     out_file = tmp_path / "out.jsonl"
-    cmd = [
-        "python",
-        "-m",
-        "pdf_chunker.cli",
+    result = _run_cli(
         "convert",
         str(pdf_path),
         "--chunk-size",
@@ -27,12 +35,6 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
         "0",
         "--out",
         str(out_file),
-    ]
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        env={**os.environ, "PYTHONPATH": str(ROOT)},
         cwd=tmp_path,
     )
     assert result.returncode == 0
@@ -47,3 +49,26 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
     assert report["metrics"]["page_count"] == 3
     assert report["metrics"]["chunk_count"] == len(rows)
     assert report["warnings"] == ["metadata_gaps"]
+
+
+def test_root_help_lists_commands() -> None:
+    result = _run_cli("--help")
+    assert result.returncode == 0
+    assert all(cmd in result.stdout for cmd in ("convert", "inspect"))
+
+
+def test_convert_help_lists_expected_flags() -> None:
+    result = _run_cli("convert", "--help")
+    assert result.returncode == 0
+    out = result.stdout
+    flags = (
+        "--enrich",
+        "--no-enrich",
+        "--exclude-pages",
+        "--chunk-size",
+        "--overlap",
+        "--no-metadata",
+        "--spec",
+        "--verbose",
+    )
+    assert all(f in out for f in flags)
