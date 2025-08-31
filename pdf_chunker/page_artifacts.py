@@ -46,27 +46,36 @@ def _looks_like_footnote(text: str) -> bool:
     return bool(re.match(pattern, stripped))
 
 
+_BULLET_CHARS = ("\u2022", "*", "-")
+
+
+def _starts_with_bullet(line: str) -> bool:
+    """Return ``True`` if ``line`` begins with a bullet marker."""
+
+    return line.lstrip().startswith(_BULLET_CHARS)
+
+  
 def _looks_like_bullet_footer(text: str) -> bool:
     """Heuristic for bullet footer lines embedded in text."""
 
     stripped = text.strip()
-    return stripped.startswith(("\u2022", "*", "-")) and "?" in stripped
+    words = stripped.split()
+    return _starts_with_bullet(stripped) and ("?" in stripped or len(words) <= 3)
 
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
-
-    rev = list(reversed(lines))
-    trailing = list(takewhile(lambda ln: ln.lstrip().startswith(("\u2022", "*", "-")), rev))
+    trailing = list(takewhile(_looks_like_bullet_footer, reversed(lines)))
     if not trailing or len(trailing) == len(lines):
         return lines
-    if len(trailing) <= 2 and not lines[-len(trailing) - 1].lstrip().startswith(("\u2022", "*", "-")):
-        for ln in trailing:
-            logger.debug(
-                "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
-            )
-        return lines[: -len(trailing)]
-    return lines
+    prev_idx = len(lines) - len(trailing) - 1
+    if prev_idx >= 0 and _starts_with_bullet(lines[prev_idx]):
+        return lines
+    for ln in trailing:
+        logger.debug(
+            "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
+        )
+    return lines[: -len(trailing)]
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
