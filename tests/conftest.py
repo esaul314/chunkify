@@ -2,10 +2,32 @@ from typing import Callable, Dict
 from pathlib import Path
 import sys
 import base64
+import ssl
 
+import nltk
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+
+def _download_if_missing(resource: str, name: str) -> None:
+    try:
+        nltk.data.find(resource)
+    except LookupError:
+        ssl._create_default_https_context = ssl._create_unverified_context
+        nltk.download(name, quiet=True)
+
+
+def _ensure_nltk_resources() -> None:
+    tuple(
+        _download_if_missing(res, name)
+        for res, name in (("corpora/cmudict", "cmudict"), ("tokenizers/punkt", "punkt"))
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _nltk_data() -> None:
+    _ensure_nltk_resources()
 
 from pdf_chunker.text_cleaning import (
     fix_hyphenated_linebreaks,
