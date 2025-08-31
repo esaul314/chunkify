@@ -460,6 +460,8 @@ def _merge_short_chunks(
 
 
 NEWLINE_TOKEN = "[[BR]]"
+NBSP = "\u00A0"
+NBSP_TOKEN = "[[NBSP]]"
 _BULLET_AFTER_NEWLINE = re.compile(r"\n\s*([\-\*\u2022]\s+)")
 
 
@@ -470,14 +472,17 @@ def _tokenize_with_newlines(text: str) -> List[str]:
         return f" {NEWLINE_TOKEN}{match.group(1)}"
 
     prepared = _BULLET_AFTER_NEWLINE.sub(_join_newline_bullet, text)
-    return prepared.replace("\n", f" {NEWLINE_TOKEN} ").split()
+    prepared = prepared.replace(NBSP, f" {NBSP_TOKEN} ")
+    prepared = prepared.replace("\n", f" {NEWLINE_TOKEN} ")
+    return prepared.split()
 
 
 def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
     """Rebuild text from tokens, restoring newline and list markers."""
     joined = " ".join(tokens)
     joined = re.sub(rf"{NEWLINE_TOKEN}([\-\*\u2022])", r"\n\1", joined)
-    joined = joined.replace(NEWLINE_TOKEN, "\n")
+    joined = joined.replace(NEWLINE_TOKEN, "\n").replace(NBSP_TOKEN, NBSP)
+    joined = re.sub(rf" ?{NBSP} ?", NBSP, joined)
     return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
 
 

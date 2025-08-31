@@ -80,6 +80,7 @@ SMART_QUOTES = {
     "”": '"',
     "„": '"',
     "‚": '"',
+    "\x84": '"',
     "‘": "'",
     "’": "'",
     "`": "'",
@@ -616,6 +617,7 @@ def clean_paragraph(paragraph: str) -> str:
         remove_control_characters,
         consolidate_whitespace,
         normalize_ligatures,
+        normalize_quotes,
         strip_underscore_wrapping,
         consolidate_whitespace,
     )
@@ -635,9 +637,10 @@ def _clean_text_impl(text: str) -> str:
     # Optional strategy via env
     from .env_utils import use_pymupdf4llm as _use_pymupdf4llm
 
-    enabled = _use_pymupdf4llm()
+    env_flag = os.getenv("PDF_CHUNKER_USE_PYMUPDF4LLM")
+    enabled = bool(env_flag) and _use_pymupdf4llm()
     logger.debug(
-        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}"
+        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {env_flag or 'not set'}"
     )
     logger.debug(f"use_pymupdf4llm evaluated to: {enabled}")
 

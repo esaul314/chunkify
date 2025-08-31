@@ -54,13 +54,12 @@ def _starts_with_bullet(line: str) -> bool:
 
     return line.lstrip().startswith(_BULLET_CHARS)
 
-  
 def _looks_like_bullet_footer(text: str) -> bool:
     """Heuristic for bullet footer lines embedded in text."""
 
     stripped = text.strip()
     words = stripped.split()
-    return _starts_with_bullet(stripped) and ("?" in stripped or len(words) <= 3)
+    return _starts_with_bullet(stripped) and ("?" in stripped or len(words) <= 2)
 
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
