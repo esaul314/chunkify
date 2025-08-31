@@ -80,6 +80,7 @@ SMART_QUOTES = {
     "”": '"',
     "„": '"',
     "‚": '"',
+    "\x84": '"',
     "‘": "'",
     "’": "'",
     "`": "'",
@@ -88,8 +89,8 @@ SMART_QUOTES = {
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
     # ensure space before an opening quote stuck to previous text
     (re.compile(r'(?<=\S)"(?=\w)'), r' "'),
-    # ensure space after a closing quote stuck to following text
-    (re.compile(r'(?<=\w)"(?=\S)'), r'" '),
+    # ensure space after a closing quote stuck to a word character
+    (re.compile(r'(?<=\w)"(?=\w)'), r'" '),
     (re.compile(r'"{2,}'), '"'),
     (re.compile(r"'{2,}"), "'"),
 ]
@@ -291,6 +292,17 @@ def merge_number_suffix_lines(text: str) -> str:
     return NUMBER_SUFFIX_LINE_RE.sub(repl, text)
 
 
+def drop_spurious_number_markers(text: str) -> str:
+    """Remove numbered markers created by hyphenated splits or isolated lines."""
+    return pipe(
+        text,
+        lambda t: re.sub(r"-\n\d+[.)]\s*", "-", t),
+        lambda t: re.sub(r"\n\d+[.)]\n", "\n", t),
+        lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]\s+(?=[a-z])", " ", t),
+        lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]$", "", t),
+    )
+
+
 def remove_stray_bullet_lines(text: str) -> str:
     """Collapse stray bullet markers while keeping legitimate list breaks intact."""
     return pipe(
@@ -348,21 +360,21 @@ def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {_preview(text)}")
 
-    list_break = "[[LIST_BREAK]]"
-    para_break = "[[PARAGRAPH_BREAK]]"
+    list_break, para_break = "[[LIST_BREAK]]", "[[PARAGRAPH_BREAK]]"
 
-    # Normalize colon bullet starts and protect paragraph and list breaks
-    text = merge_number_suffix_lines(text)
-    text = COLON_BULLET_START_RE.sub(":\n", text)
-    text = LIST_BREAK_RE.sub(list_break, text)
-    text = PARAGRAPH_BREAK.sub(para_break, text)
-    text = text.replace("\n", " ")
+    result = pipe(
+        text,
+        merge_number_suffix_lines,
+        lambda t: COLON_BULLET_START_RE.sub(":\n", t),
+        lambda t: LIST_BREAK_RE.sub(list_break, t),
+        lambda t: PARAGRAPH_BREAK.sub(para_break, t),
+        lambda t: t.replace("\n", " "),
+        lambda t: t.replace(para_break, "\n\n").replace(list_break, "\n"),
+        _fix_quote_spacing,
+    )
 
-    # Restore preserved breaks
-    text = text.replace(para_break, "\n\n").replace(list_break, "\n")
-
-    logger.debug(f"Output text preview: {_preview(text)}")
-    return text
+    logger.debug(f"Output text preview: {_preview(result)}")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -580,8 +592,6 @@ def apply_json_safety_fixes(text: str) -> str:
         fixed = fixed[3:]
     elif fixed.startswith('"') and len(fixed) > 1 and fixed[1].islower():
         fixed = fixed[1:]
-    if fixed.endswith(', "') or fixed.endswith(',"'):
-        fixed = fixed[:-2]
     try:
         fixed = fixed.encode("utf-8", errors="replace").decode("utf-8")
     except UnicodeError:
@@ -614,9 +624,7 @@ def clean_paragraph(paragraph: str) -> str:
         _preserve_list_newlines,
         normalize_quotes,
         remove_control_characters,
-        consolidate_whitespace,
         normalize_ligatures,
-        strip_underscore_wrapping,
         consolidate_whitespace,
     )
 
@@ -635,9 +643,10 @@ def _clean_text_impl(text: str) -> str:
     # Optional strategy via env
     from .env_utils import use_pymupdf4llm as _use_pymupdf4llm
 
-    enabled = _use_pymupdf4llm()
+    env_flag = os.getenv("PDF_CHUNKER_USE_PYMUPDF4LLM")
+    enabled = bool(env_flag) and _use_pymupdf4llm()
     logger.debug(
-        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {os.getenv('PDF_CHUNKER_USE_PYMUPDF4LLM', 'not set')}"
+        f"PDF_CHUNKER_USE_PYMUPDF4LLM environment variable: {env_flag or 'not set'}"
     )
     logger.debug(f"use_pymupdf4llm evaluated to: {enabled}")
 
@@ -684,6 +693,10 @@ def _clean_text_impl(text: str) -> str:
     logger.debug("Calling _fix_double_newlines")
     text = _fix_double_newlines(text)
     logger.debug(f"After _fix_double_newlines: {_preview(text)}")
+
+    logger.debug("Calling drop_spurious_number_markers")
+    text = drop_spurious_number_markers(text)
+    logger.debug(f"After drop_spurious_number_markers: {_preview(text)}")
 
     logger.debug("Calling insert_numbered_list_newlines")
     text = insert_numbered_list_newlines(text)
@@ -738,6 +751,7 @@ __all__ = [
     "remove_stray_bullet_lines",
     "cleanup_bullet_fragments",
     "merge_number_suffix_lines",
+    "drop_spurious_number_markers",
     "insert_numbered_list_newlines",
     "collapse_single_newlines",
     "normalize_ligatures",
