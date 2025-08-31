@@ -1,10 +1,12 @@
 import logging
 from collections import Counter
 import re
+from functools import reduce
 from typing import Any, Dict, Iterable, List, Match, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
+from .page_artifacts import _drop_trailing_bullet_footers
 
 
 logger = logging.getLogger(__name__)
@@ -195,12 +197,18 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
         current = chunks[idx].strip()
         if idx + 1 < len(chunks):
             nxt = chunks[idx + 1].strip()
-            if _starting_number(current) is not None and _starting_number(nxt) is None:
+            curr_last = _last_number(current)
+            nxt_first = _starting_number(nxt)
+            if curr_last is not None and nxt_first is not None and nxt_first == curr_last + 1:
+                merged.append(_combine(current, nxt))
+                idx += 2
+                continue
+            if _starting_number(current) is not None and nxt_first is None:
                 merged.append(_combine(current, nxt))
                 idx += 2
                 continue
             last_line = current.rsplit("\n", 1)[-1]
-            if NUMBERED_ITEM_ANYWHERE.search(last_line) and _starting_number(nxt) is None:
+            if NUMBERED_ITEM_ANYWHERE.search(last_line) and nxt_first is None:
                 merged.append(_combine(current, nxt))
                 idx += 2
                 continue
@@ -487,21 +495,38 @@ def _split_short_text(text: str) -> List[str]:
     return [text.strip()]
 
 
+def _dedupe_overlapping_chunks(chunks: List[str]) -> List[str]:
+    """Drop chunks fully contained within their predecessor."""
+
+    return reduce(
+        lambda acc, c: acc if acc and c and c in acc[-1] else acc + [c],
+        chunks,
+        [],
+    )
+
+
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
     """Return ``text`` split into word windows respecting ``overlap``."""
 
     tokens = _tokenize_with_newlines(text)
     if not tokens or chunk_size <= 0:
         return []
-    if len(tokens) <= chunk_size * 2:
-        return _split_short_text(text)
-    step = max(1, chunk_size - overlap + 1)
-    windows = (
-        tokens[i : i + chunk_size]
-        for i in range(0, len(tokens) - chunk_size + 1, step)
-    )
-    chunks = [_detokenize_with_newlines(w) for w in windows]
-    return chunks or [_detokenize_with_newlines(tokens)]
+    if len(tokens) <= chunk_size:
+        return [
+            "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
+        ]
+    step = max(1, chunk_size - overlap)
+    windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens), step))
+    chunks = [
+        "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(w).splitlines()))
+        for w in windows
+    ]
+    chunks = _dedupe_overlapping_chunks(chunks)
+    if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
+        chunks = chunks[:-1]
+    return chunks or [
+        "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
+    ]
 
 
 def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
@@ -728,7 +753,7 @@ def semantic_chunker(
     )
 
     # Initial splitting
-    initial_chunks = _split_text_into_chunks(text, chunk_size, overlap + 1)
+    initial_chunks = _split_text_into_chunks(text, chunk_size, overlap)
     logger.info(f"Sliding window produced {len(initial_chunks)} initial chunks")
 
     # Count and log short chunks before processing

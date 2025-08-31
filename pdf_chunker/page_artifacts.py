@@ -46,6 +46,29 @@ def _looks_like_footnote(text: str) -> bool:
     return bool(re.match(pattern, stripped))
 
 
+def _looks_like_bullet_footer(text: str) -> bool:
+    """Heuristic for bullet footer lines embedded in text."""
+
+    stripped = text.strip()
+    return stripped.startswith(("\u2022", "*", "-")) and "?" in stripped
+
+
+def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
+    """Remove isolated trailing bullet lines while preserving real lists."""
+
+    rev = list(reversed(lines))
+    trailing = list(takewhile(lambda ln: ln.lstrip().startswith(("\u2022", "*", "-")), rev))
+    if not trailing or len(trailing) == len(lines):
+        return lines
+    if len(trailing) <= 2 and not lines[-len(trailing) - 1].lstrip().startswith(("\u2022", "*", "-")):
+        for ln in trailing:
+            logger.debug(
+                "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
+            )
+        return lines[: -len(trailing)]
+    return lines
+
+
 def _starts_with_multiple_numbers(text: str) -> bool:
     """Return ``True`` if ``text`` begins with two or more numbers."""
 
@@ -349,7 +372,8 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     lines = text.splitlines()
 
     def _clean_line(ln: str) -> Optional[str]:
-        if is_page_artifact_text(clean_text(ln), page_num):
+        cleaned = clean_text(ln)
+        if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(cleaned):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
         stripped = strip_page_artifact_suffix(ln, page_num)
@@ -357,5 +381,6 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
 
-    cleaned = filter(None, (_clean_line(ln) for ln in lines))
-    return "\n".join(cleaned)
+    cleaned_lines = list(filter(None, (_clean_line(ln) for ln in lines)))
+    cleaned_lines = _drop_trailing_bullet_footers(cleaned_lines)
+    return "\n".join(cleaned_lines)
