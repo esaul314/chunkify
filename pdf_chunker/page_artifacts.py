@@ -1,7 +1,7 @@
 import logging
 import re
 from functools import reduce
-from itertools import takewhile
+from itertools import takewhile, dropwhile
 from typing import Optional
 
 try:
@@ -54,7 +54,6 @@ def _starts_with_bullet(line: str) -> bool:
 
     return line.lstrip().startswith(_BULLET_CHARS)
 
-
 def _looks_like_bullet_footer(text: str) -> bool:
     """Heuristic for bullet footer lines embedded in text."""
 
@@ -65,7 +64,6 @@ def _looks_like_bullet_footer(text: str) -> bool:
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
-
     trailing = list(takewhile(_looks_like_bullet_footer, reversed(lines)))
     if not trailing or len(trailing) == len(lines):
         return lines
