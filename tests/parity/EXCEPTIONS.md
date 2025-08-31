@@ -23,12 +23,12 @@ Current candidates:
   `tiny_b.pdf` – stray newline removed during normalization; accept the
   sanitized output.
 - `pipeline_parity_test.test_new_matches_legacy` on `tiny.pdf` – new
-  pipeline emits `meta` and `utterance_type` fields absent in legacy;
-  accept the enriched metadata.
+  pipeline emits a `meta` field absent in legacy; accept the enriched
+  metadata.
 - `pipeline_parity_test.test_new_matches_legacy` on `tiny_a.pdf` – new
-  pipeline emits `meta` and `utterance_type` fields absent in legacy;
-  accept the enriched metadata.
+  pipeline emits a `meta` field absent in legacy; accept the enriched
+  metadata.
 - `pipeline_parity_test.test_new_matches_legacy` on `tiny_b.pdf` – new
-  pipeline emits `meta` and `utterance_type` fields absent in legacy;
-  accept the enriched metadata.
+  pipeline emits a `meta` field absent in legacy; accept the enriched
+  metadata.
 ```
