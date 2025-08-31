@@ -46,6 +46,17 @@ def _looks_like_footnote(text: str) -> bool:
     return bool(re.match(pattern, stripped))
 
 
+def _looks_like_bullet_footer(text: str) -> bool:
+    """Return ``True`` if ``text`` is a short bullet footer line."""
+
+    stripped = text.strip()
+    if not stripped.startswith(("\u2022", "*", "-")):
+        return False
+
+    words = stripped.lstrip("\u2022*-").strip().split()
+    return 0 < len(words) <= 3
+
+
 def _starts_with_multiple_numbers(text: str) -> bool:
     """Return ``True`` if ``text`` begins with two or more numbers."""
 
@@ -349,7 +360,8 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     lines = text.splitlines()
 
     def _clean_line(ln: str) -> Optional[str]:
-        if is_page_artifact_text(clean_text(ln), page_num):
+        cleaned = clean_text(ln)
+        if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(ln):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
         stripped = strip_page_artifact_suffix(ln, page_num)
