@@ -30,5 +30,4 @@ pdf_chunker convert "sample.pdf" out.jsonl --chunk-size 400 --overlap 50
 ## Development
 
 See [AGENTS.md](AGENTS.md) for contributor guidelines. The passes table in that file is auto-generated between the fenced markers; run `python scripts/update_agents_md.py` to refresh it.
-
 Before introducing or altering architecture-level components or dependencies, consult the project maintainers to ensure alignment with overall design goals.

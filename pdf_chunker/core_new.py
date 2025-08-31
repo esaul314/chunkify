@@ -305,21 +305,13 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
     a = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
     timings: dict[str, float] = {}
     try:
-        passes = [
-            configure_pass(
-                registry()[s],
-                spec.options.get(s, {}),
-            )
-            for s in run_spec.pipeline
-        ]
-        for p in passes:
+        for p in (
+            configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline
+        ):
             a = _timed(p, a, timings)
     except Exception as exc:
         meta = _meta_with_warnings(a, spec, opts)
-        report = assemble_report(
-            timings,
-            {**meta, "error": str(exc)},
-        )
+        report = assemble_report(timings, {**meta, "error": str(exc)})
         write_run_report(spec, report)
         raise
     _maybe_emit_jsonl(a, spec, timings)

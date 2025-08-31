@@ -1,56 +1,30 @@
+"""Deprecated shim for the old ``chunk_pdf`` CLI.
+
+This module forwards all arguments to the new ``pdf_chunker`` entry point
+while emitting a one‑time deprecation warning.  It exists solely to support
+legacy automation scripts that still invoke ``scripts/chunk_pdf.py``.
+"""
+
 from __future__ import annotations
 
-import argparse
-import json
-from pathlib import Path
-from typing import Any, Iterable
+import sys
+from collections.abc import Sequence
 
-from pdf_chunker.adapters import emit_jsonl
-from pdf_chunker.cli import _cli_overrides, _resolve_spec_path
-from pdf_chunker.config import load_spec
-from pdf_chunker.core_new import convert as run_convert
+from pdf_chunker import cli
 
 
-def _to_row(row: dict[str, Any]) -> dict[str, Any]:
-    base = {"text": row.get("text", "")}
-    meta = {"metadata": row["meta"]} if "meta" in row else {}
-    return base | meta
+def _delegate(argv: Sequence[str]) -> None:
+    """Print a deprecation notice and invoke the modern CLI."""
+    print("chunk_pdf.py is deprecated; use `pdf_chunker` instead.", file=sys.stderr)
+    run = cli.app
+    args = list(argv)
+    run(args=args) if getattr(cli, "typer", None) else run(args)
 
 
-def _print_jsonl(rows: Iterable[dict[str, Any]]) -> None:
-    """Emit ``rows`` as legacy-style JSON lines to stdout."""
-
-    print("\n".join(json.dumps(_to_row(r), ensure_ascii=False) for r in rows))
-
-
-def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="chunk_pdf")
-    parser.add_argument("document_file", type=Path)
-    parser.add_argument("--out", type=Path)
-    parser.add_argument("--chunk-size", type=int)
-    parser.add_argument("--overlap", type=int)
-    parser.add_argument("--exclude-pages")
-    parser.add_argument("--no-metadata", action="store_true")
-    args = parser.parse_args(argv)
-
-    overrides = _cli_overrides(
-        args.out,
-        args.chunk_size,
-        args.overlap,
-        False,
-        args.exclude_pages,
-        args.no_metadata,
-    )
-    emit_opts = overrides.setdefault("emit_jsonl", {})
-    emit_path = str(args.out) if args.out else None
-    emit_opts["output_path"] = emit_path
-
-    spec = load_spec(_resolve_spec_path("pipeline.yaml"), overrides=overrides)
-    rows = run_convert(str(args.document_file), spec)
-    if emit_path:
-        emit_jsonl.write(rows, emit_path)
-    _print_jsonl(rows)
+def main(argv: Sequence[str] | None = None) -> None:
+    """Entry point retaining the old script's interface."""
+    _delegate(sys.argv[1:] if argv is None else argv)
 
 
-if __name__ == "__main__":  # pragma: no cover - CLI entry point
+if __name__ == "__main__":  # pragma: no cover - exercised in tests
     main()

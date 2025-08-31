@@ -69,6 +69,17 @@ def _warn_unknown_options(pipeline: Iterable[str], opts: Mapping[str, Any]) -> N
         )
 
 
+def _warn_unknown_options(pipeline: Iterable[str], opts: Mapping[str, Any]) -> None:
+    """Emit a warning when options contain steps absent from the pipeline."""
+
+    unknown = [step for step in opts if step not in pipeline]
+    if unknown:
+        warnings.warn(
+            f"Unknown pipeline options: {', '.join(sorted(unknown))}",
+            stacklevel=2,
+        )
+
+
 def load_spec(
     path: str | os.PathLike | None = "pipeline.yaml",
     overrides: Dict[str, Dict[str, Any]] | None = None,
@@ -81,7 +92,6 @@ def load_spec(
     )
     acc: Dict[str, Dict[str, Any]] = {}
     merged = reduce(_merge_options, sources, acc)
-
     pipeline = data.get("pipeline", [])
     _warn_unknown_options(pipeline, merged)
     if merged:
