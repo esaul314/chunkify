@@ -37,6 +37,12 @@ class _SplitOpts(TypedDict, total=False):
     chunk_size: int
     overlap: int
     generate_metadata: bool
+    min_chunk_size: int
+
+
+def _derive_min_chunk_size(chunk_size: int, min_size: int | None) -> int:
+    """Return ``min_size`` or derive it as a fraction of ``chunk_size``."""
+    return min_size if min_size is not None else max(8, chunk_size // 10)
 
 
 def _get_split_fn(chunk_size: int, overlap: int, min_chunk_size: int) -> tuple[SplitFn, MetricFn]:
@@ -208,8 +214,7 @@ class _SplitSemanticPass:
     generate_metadata: bool = True
 
     def __post_init__(self) -> None:
-        if self.min_chunk_size is None:
-            self.min_chunk_size = max(8, self.chunk_size // 10)
+        self.min_chunk_size = _derive_min_chunk_size(self.chunk_size, self.min_chunk_size)
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload
@@ -234,7 +239,11 @@ def make_splitter(**opts: Any) -> _SplitSemanticPass:
             opts.get("generate_metadata", DEFAULT_SPLITTER.generate_metadata)
         ),
     }
-    return replace(DEFAULT_SPLITTER, **opts_map)
+    base = replace(DEFAULT_SPLITTER, **opts_map)
+    if "chunk_size" in opts and "min_chunk_size" not in opts:
+        base = replace(base, min_chunk_size=None)
+    base.__post_init__()
+    return base
 
 
 split_semantic: Pass = register(make_splitter())
