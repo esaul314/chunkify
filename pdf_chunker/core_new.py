@@ -76,7 +76,17 @@ def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
         return pass_obj
     names = {f.name for f in fields(pass_obj)}
     valid = {k: v for k, v in opts.items() if k in names}
-    return replace(pass_obj, **valid) if valid else pass_obj
+    if not valid:
+        return pass_obj
+
+    if "chunk_size" in valid and "min_chunk_size" not in valid and hasattr(pass_obj, "min_chunk_size"):
+        valid["min_chunk_size"] = None
+
+    new_pass = replace(pass_obj, **valid)
+    post = getattr(new_pass, "__post_init__", None)
+    if callable(post):
+        post()
+    return new_pass
 
 
 def _time_step(
