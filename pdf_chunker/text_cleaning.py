@@ -87,10 +87,11 @@ SMART_QUOTES = {
 }
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
-    # ensure space before an opening quote stuck to previous text
-    (re.compile(r'(?<=\S)"(?=\w)'), r' "'),
+
+    # ensure space before an opening quote stuck to previous text (letters only)
+    (re.compile(r'(?<=[A-Za-z])"(?=\w)'), r' "'),
     # ensure space after a closing quote stuck to a word character
-    (re.compile(r'(?<=\w)"(?=\w)'), r'" '),
+    (re.compile(r'(?<=[A-Za-z])"(?=[A-Za-z])'), r'" '),
     (re.compile(r'"{2,}'), '"'),
     (re.compile(r"'{2,}"), "'"),
 ]
@@ -256,7 +257,8 @@ def _fix_quote_spacing(text: str) -> str:
 
 
 def normalize_quotes(text: str) -> str:
-    return text if not text else pipe(text, _map_smart_quotes, _fix_quote_spacing)
+    """Map smart quotes to ASCII without altering spacing."""
+    return text if not text else _map_smart_quotes(text)
 
 
 def normalize_ligatures(text: str) -> str:
@@ -625,7 +627,6 @@ def clean_paragraph(paragraph: str) -> str:
         collapse_artifact_breaks,
         cleanup_bullet_fragments,
         _preserve_list_newlines,
-        normalize_quotes,
         remove_control_characters,
         normalize_ligatures,
         consolidate_whitespace,

@@ -74,14 +74,15 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     trailing = list(takewhile(_bulletish, reversed(lines)))
     if not trailing or len(trailing) == len(lines):
         return lines
-    prev_idx = len(lines) - len(trailing) - 1
-    if prev_idx >= 0 and _starts_with_bullet(lines[prev_idx]):
-        return lines
-    for ln in trailing:
-        logger.debug(
-            "remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30]
-        )
-    return lines[: -len(trailing)]
+    keep_to = len(lines) - len(trailing)
+    prev_idx = keep_to - 1
+    if prev_idx >= 0:
+        prev = lines[prev_idx].strip()
+        if _starts_with_bullet(prev) or (len(prev.split()) <= 3 and not re.search(r"[.!?]$", prev)):
+            keep_to -= 1
+    for ln in lines[keep_to:]:
+        logger.debug("remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30])
+    return lines[:keep_to]
 
 
 def _strip_spurious_number_prefix(text: str) -> str:
