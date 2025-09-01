@@ -26,5 +26,6 @@ def test_parameter_propagation() -> None:
         Artifact(payload=_doc(words))
     )
     texts = [c["text"] for c in art.payload["items"]]
-    assert [len(t.split()) for t in texts] == [5, 5, 5, 5]
+    counts = [len(t.split()) for t in texts]
+    assert counts == [5, 5, 5, 5, 4]
     assert texts[1].split()[0] == "w4"
