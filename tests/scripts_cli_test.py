@@ -40,7 +40,6 @@ def _rows(path: Path) -> list[dict[str, object]]:
         if line.strip()
     ]
 
-
 def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
     pdf_path = materialize_base64(
         Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
@@ -182,3 +181,4 @@ def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
     assert tokens and len(tokens[0]) <= 5
     if len(tokens) >= 2:
         assert tokens[1][:2] == tokens[0][-2:]
+
