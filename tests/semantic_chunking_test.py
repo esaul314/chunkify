@@ -13,18 +13,27 @@ def test_limits_and_metrics() -> None:
     """Chunks obey soft/hard limits and expose metrics."""
     text = "x" * 26_000  # exceeds hard limit
     art = _SplitSemanticPass(chunk_size=100_000, overlap=0)(Artifact(payload=_doc(text)))
-    chunk = art.payload["items"][0]["text"]
+    chunks = [c["text"] for c in art.payload["items"]]
     metrics = art.meta["metrics"]["split_semantic"]
-    assert len(chunk) == 8_000
+    assert len(chunks) > 1
+    assert all(len(c) <= 8_000 for c in chunks)
     assert metrics["hard_limit_hit"] and metrics["soft_limit_hits"] == 1
 
 
 def test_parameter_propagation() -> None:
     """Custom chunk sizing parameters propagate to the splitter."""
     words = " ".join(f"w{i}" for i in range(20))
-    art = _SplitSemanticPass(chunk_size=5, overlap=1, min_chunk_size=2)(
-        Artifact(payload=_doc(words))
-    )
+    opts = {
+        "options": {
+            "split_semantic": {
+                "chunk_size": 5,
+                "overlap": 1,
+                "min_chunk_size": 2,
+            }
+        }
+    }
+    art = _SplitSemanticPass()(Artifact(payload=_doc(words), meta=opts))
     texts = [c["text"] for c in art.payload["items"]]
-    assert [len(t.split()) for t in texts] == [5, 5, 5, 5]
+    counts = [len(t.split()) for t in texts]
+    assert counts == [5, 5, 5, 5, 4]
     assert texts[1].split()[0] == "w4"

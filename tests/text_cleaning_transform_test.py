@@ -36,6 +36,11 @@ def test_clean_paragraph_removes_underscore_wrapping():
     assert clean_paragraph(text) == "This is bold and italics"
 
 
+def test_clean_paragraph_drops_dangling_underscores():
+    text = "_start __bold__ mid_ end__"
+    assert clean_paragraph(text) == "start bold mid end"
+
+
 def test_quotes_and_control_chars():
     text = "Here\u202d are “quotes”\u202c"
     expected = 'Here are "quotes"'

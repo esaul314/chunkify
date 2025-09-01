@@ -157,10 +157,8 @@ def _cli_overrides(
     enrich_opts: dict[str, Any] = {"enabled": True} if enrich else {}
     parse_opts: dict[str, Any] = {
         k: v
-        for k, v in {
-            "exclude_pages": exclude_pages,
-        }.items()
-        if v
+        for k, v in {"exclude_pages": exclude_pages}.items()
+        if v is not None
     }
     return {
         k: v

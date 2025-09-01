@@ -1,15 +1,8 @@
 import logging
 import re
 from functools import reduce
-from itertools import takewhile, dropwhile
+from itertools import takewhile
 from typing import Optional
-
-try:
-    from .text_cleaning import clean_text
-except Exception:
-
-    def clean_text(text: str) -> str:
-        return text
 
 
 ROMAN_RE = r"[ivxlcdm]+"
@@ -60,7 +53,7 @@ def _looks_like_bullet_footer(text: str) -> bool:
 
     stripped = text.strip()
     words = stripped.split()
-    return _starts_with_bullet(stripped) and ("?" in stripped or len(words) <= 2)
+    return _starts_with_bullet(stripped) and "?" in stripped and len(words) <= 2
 
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
@@ -68,27 +61,68 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
 
     def _bulletish(line: str) -> bool:
         stripped = line.strip()
-        short = len(stripped.split()) <= 8 and not any(p in stripped for p in ".!?;")
-        return _starts_with_bullet(stripped) or short
+        return _starts_with_bullet(stripped) and len(stripped.split()) <= 2
 
     trailing = list(takewhile(_bulletish, reversed(lines)))
-    if not trailing or len(trailing) == len(lines):
-        return lines
-    keep_to = len(lines) - len(trailing)
-    prev_idx = keep_to - 1
-    if prev_idx >= 0:
-        prev = lines[prev_idx].strip()
-        if _starts_with_bullet(prev) or (len(prev.split()) <= 3 and not re.search(r"[.!?]$", prev)):
-            keep_to -= 1
-    for ln in lines[keep_to:]:
-        logger.debug("remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30])
-    return lines[:keep_to]
+    if len(trailing) == 1:
+        logger.debug(
+            "remove_page_artifact_lines dropped trailing bullet footer: %s",
+            trailing[0][:30],
+        )
+        return lines[:-1]
+    return lines
 
 
 def _strip_spurious_number_prefix(text: str) -> str:
     """Remove leading number markers preceding lowercase continuation."""
 
     return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
+
+
+_HEADER_CONNECTORS = {"of", "the", "and", "or", "to", "a", "an", "in", "for"}
+
+
+def _strip_page_header_prefix(text: str) -> str:
+    """Remove leading header fragments without chopping real sentences.
+
+    The function walks tokens from the start, skipping over digits, connectors
+    (``of``, ``the`` …), and title-cased or uppercase words that typically form
+    headers. It tracks whether a comma-separated segment or a run of three or
+    more title-cased tokens was seen—signals that the prefix is indeed a header.
+    Once a lowercase token follows, the remaining tokens are preserved as body
+    text. Lines lacking these header cues are returned untouched.
+    """
+
+    tokens = text.split()
+    idx = 0
+    comma_seen = False
+    title_count = 0
+    while idx < len(tokens):
+        raw = tokens[idx]
+        token = raw.strip(",")
+        nxt_raw = tokens[idx + 1] if idx + 1 < len(tokens) else ""
+        nxt = nxt_raw.strip(",")
+        if raw.endswith(","):
+            comma_seen = True
+        if token.isdigit():
+            idx += 1
+            continue
+        if token.lower() in _HEADER_CONNECTORS:
+            idx += 1
+            continue
+        if token.istitle() or token.isupper():
+            title_count += 1
+            if nxt.islower() and nxt not in _HEADER_CONNECTORS:
+                break
+            idx += 1
+            continue
+        break
+    if idx == 0 or (not comma_seen and title_count < 3):
+        return text
+    remainder = " ".join(t.strip(",") for t in tokens[idx:])
+    if remainder and remainder[0].islower():
+        remainder = remainder[0].upper() + remainder[1:]
+    return remainder
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
@@ -396,15 +430,18 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     lines = text.splitlines()
 
     def _clean_line(ln: str) -> Optional[str]:
-        cleaned = clean_text(ln)
-        if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(cleaned):
+        normalized = ln if _starts_with_bullet(ln) else _strip_page_header_prefix(ln)
+        if is_page_artifact_text(normalized, page_num) or _looks_like_bullet_footer(normalized):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
-        stripped = _strip_spurious_number_prefix(strip_page_artifact_suffix(ln, page_num))
-        if stripped != ln:
+        stripped = _strip_spurious_number_prefix(strip_page_artifact_suffix(normalized, page_num))
+        if stripped != normalized:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
 
     cleaned_lines = list(filter(None, (_clean_line(ln) for ln in lines)))
+    if cleaned_lines and cleaned_lines[0] and cleaned_lines[0][0].islower():
+        first = cleaned_lines[0]
+        cleaned_lines[0] = first[0].upper() + first[1:]
     cleaned_lines = _drop_trailing_bullet_footers(cleaned_lines)
     return "\n".join(cleaned_lines)
