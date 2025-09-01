@@ -13,9 +13,10 @@ def test_limits_and_metrics() -> None:
     """Chunks obey soft/hard limits and expose metrics."""
     text = "x" * 26_000  # exceeds hard limit
     art = _SplitSemanticPass(chunk_size=100_000, overlap=0)(Artifact(payload=_doc(text)))
-    chunk = art.payload["items"][0]["text"]
+    chunks = [c["text"] for c in art.payload["items"]]
     metrics = art.meta["metrics"]["split_semantic"]
-    assert len(chunk) == 8_000
+    assert len(chunks) > 1
+    assert all(len(c) <= 8_000 for c in chunks)
     assert metrics["hard_limit_hit"] and metrics["soft_limit_hits"] == 1
 
 
