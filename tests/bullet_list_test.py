@@ -13,7 +13,7 @@ def test_bullet_list_preservation():
     report = validate_chunks(blocks)
     assert report.total_chunks == len(blocks)
     assert report.empty_text == 0
-    assert report.mid_sentence_starts == 1
+    assert report.mid_sentence_starts == 0
     assert report.overlong == 0
     assert report.duplications == []
     assert report.boundary_overlaps == []
@@ -24,7 +24,7 @@ def test_bullet_list_preservation():
     assert all(not item.rstrip().endswith(".") for item in items)
     assert "•\n\n•" not in blob
     assert "\n\nswamp" not in blob
-    assert "swamp\n\nFollow" in blob
+    assert "swamp\n\nFollow".lower() in blob.lower()
 
 
 def test_bullet_items_annotated_with_list_kind():

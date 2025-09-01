@@ -257,8 +257,8 @@ def _fix_quote_spacing(text: str) -> str:
 
 
 def normalize_quotes(text: str) -> str:
-    """Map smart quotes to ASCII without altering spacing."""
-    return text if not text else _map_smart_quotes(text)
+    """Normalize smart quotes and repair missing surrounding spaces."""
+    return text if not text else pipe(text, _map_smart_quotes, _fix_quote_spacing)
 
 
 def normalize_ligatures(text: str) -> str:
@@ -629,6 +629,8 @@ def clean_paragraph(paragraph: str) -> str:
         _preserve_list_newlines,
         remove_control_characters,
         normalize_ligatures,
+        remove_underscore_emphasis,
+        remove_dangling_underscores,
         consolidate_whitespace,
     )
 
