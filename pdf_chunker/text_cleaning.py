@@ -629,6 +629,8 @@ def clean_paragraph(paragraph: str) -> str:
         _preserve_list_newlines,
         remove_control_characters,
         normalize_ligatures,
+        remove_underscore_emphasis,
+        remove_dangling_underscores,
         consolidate_whitespace,
     )
 
