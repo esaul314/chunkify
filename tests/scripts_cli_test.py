@@ -182,3 +182,4 @@ def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
     assert tokens and len(tokens[0]) <= 5
     if len(tokens) >= 2:
         assert tokens[1][:2] == tokens[0][-2:]
+
