@@ -1,15 +1,8 @@
 import logging
 import re
 from functools import reduce
-from itertools import takewhile, dropwhile
+from itertools import takewhile
 from typing import Optional
-
-try:
-    from .text_cleaning import clean_text
-except Exception:
-
-    def clean_text(text: str) -> str:
-        return text
 
 
 ROMAN_RE = r"[ivxlcdm]+"
@@ -437,14 +430,12 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     lines = text.splitlines()
 
     def _clean_line(ln: str) -> Optional[str]:
-        cleaned = _strip_page_header_prefix(clean_text(ln))
-        if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(cleaned):
+        normalized = ln if _starts_with_bullet(ln) else _strip_page_header_prefix(ln)
+        if is_page_artifact_text(normalized, page_num) or _looks_like_bullet_footer(normalized):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
-        stripped = _strip_spurious_number_prefix(
-            strip_page_artifact_suffix(cleaned, page_num)
-        )
-        if stripped != cleaned:
+        stripped = _strip_spurious_number_prefix(strip_page_artifact_suffix(normalized, page_num))
+        if stripped != normalized:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
 
