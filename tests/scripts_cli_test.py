@@ -21,6 +21,18 @@ def _run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess
     )
 
 
+def _run_chunk_pdf(
+    *args: str, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "scripts.chunk_pdf", *args],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
+        cwd=cwd,
+    )
+
+
 def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
     pdf_path = materialize_base64(
         Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
@@ -72,3 +84,30 @@ def test_convert_help_lists_expected_flags() -> None:
         "--verbose",
     )
     assert all(f in out for f in flags)
+
+
+def test_chunk_pdf_accepts_flags(tmp_path: Path) -> None:
+    pdf_path = materialize_base64(
+        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+    )
+    out_file = tmp_path / "out.jsonl"
+    result = _run_chunk_pdf(
+        str(pdf_path),
+        "--chunk-size",
+        "1000",
+        "--overlap",
+        "0",
+        "--exclude-pages",
+        "2",
+        "--no-metadata",
+        "--out",
+        str(out_file),
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    rows = [
+        json.loads(line)
+        for line in out_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert rows and all("metadata" not in row for row in rows)
