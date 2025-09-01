@@ -60,7 +60,7 @@ def _looks_like_bullet_footer(text: str) -> bool:
 
     stripped = text.strip()
     words = stripped.split()
-    return _starts_with_bullet(stripped) and ("?" in stripped or len(words) <= 2)
+    return _starts_with_bullet(stripped) and "?" in stripped and len(words) <= 2
 
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
@@ -68,21 +68,16 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
 
     def _bulletish(line: str) -> bool:
         stripped = line.strip()
-        short = len(stripped.split()) <= 8 and not any(p in stripped for p in ".!?;")
-        return _starts_with_bullet(stripped) or short
+        return _starts_with_bullet(stripped) and len(stripped.split()) <= 2
 
     trailing = list(takewhile(_bulletish, reversed(lines)))
-    if not trailing or len(trailing) == len(lines):
-        return lines
-    keep_to = len(lines) - len(trailing)
-    prev_idx = keep_to - 1
-    if prev_idx >= 0:
-        prev = lines[prev_idx].strip()
-        if _starts_with_bullet(prev) or (len(prev.split()) <= 3 and not re.search(r"[.!?]$", prev)):
-            keep_to -= 1
-    for ln in lines[keep_to:]:
-        logger.debug("remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30])
-    return lines[:keep_to]
+    if len(trailing) == 1:
+        logger.debug(
+            "remove_page_artifact_lines dropped trailing bullet footer: %s",
+            trailing[0][:30],
+        )
+        return lines[:-1]
+    return lines
 
 
 def _strip_spurious_number_prefix(text: str) -> str:
