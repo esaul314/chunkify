@@ -33,6 +33,13 @@ def _run_chunk_pdf(
     )
 
 
+def _rows(path: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
 def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
     pdf_path = materialize_base64(
         Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
@@ -111,3 +118,67 @@ def test_chunk_pdf_accepts_flags(tmp_path: Path) -> None:
         if line.strip()
     ]
     assert rows and all("metadata" not in row for row in rows)
+
+
+def test_cli_exclude_pages_flag(tmp_path: Path) -> None:
+    pdf_path = materialize_base64(
+        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+    )
+    out_file = tmp_path / "out.jsonl"
+    result = _run_cli(
+        "convert",
+        str(pdf_path),
+        "--exclude-pages",
+        "1",
+        "--out",
+        str(out_file),
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    rows = _rows(out_file)
+    assert rows and all(r.get("meta", {}).get("page") != 1 for r in rows)
+
+
+def test_cli_no_metadata_flag(tmp_path: Path) -> None:
+    pdf_path = materialize_base64(
+        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+    )
+    out_file = tmp_path / "out.jsonl"
+    result = _run_cli(
+        "convert",
+        str(pdf_path),
+        "--chunk-size",
+        "1000",
+        "--overlap",
+        "0",
+        "--no-metadata",
+        "--out",
+        str(out_file),
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    assert _rows(out_file) and all(r.keys() == {"text"} for r in _rows(out_file))
+
+
+def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
+    pdf_path = materialize_base64(
+        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+    )
+    out_file = tmp_path / "out.jsonl"
+    result = _run_cli(
+        "convert",
+        str(pdf_path),
+        "--chunk-size",
+        "5",
+        "--overlap",
+        "2",
+        "--out",
+        str(out_file),
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    tokens = [r["text"].split() for r in _rows(out_file)]
+    assert tokens and len(tokens[0]) <= 5
+    if len(tokens) >= 2:
+        assert tokens[1][:2] == tokens[0][-2:]
+
