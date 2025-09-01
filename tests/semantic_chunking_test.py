@@ -22,9 +22,17 @@ def test_limits_and_metrics() -> None:
 def test_parameter_propagation() -> None:
     """Custom chunk sizing parameters propagate to the splitter."""
     words = " ".join(f"w{i}" for i in range(20))
-    art = _SplitSemanticPass(chunk_size=5, overlap=1, min_chunk_size=2)(
-        Artifact(payload=_doc(words))
-    )
+    opts = {
+        "options": {
+            "split_semantic": {
+                "chunk_size": 5,
+                "overlap": 1,
+                "min_chunk_size": 2,
+            }
+        }
+    }
+    art = _SplitSemanticPass()(Artifact(payload=_doc(words), meta=opts))
     texts = [c["text"] for c in art.payload["items"]]
-    assert [len(t.split()) for t in texts] == [5, 5, 5, 5]
+    counts = [len(t.split()) for t in texts]
+    assert counts == [5, 5, 5, 5, 4]
     assert texts[1].split()[0] == "w4"

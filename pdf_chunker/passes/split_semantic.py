@@ -189,16 +189,16 @@ def _update_meta(
 
 
 def _resolve_opts(meta: Mapping[str, Any] | None, base: _SplitSemanticPass) -> tuple[int, int, int]:
-    """Return ``chunk_size``, ``overlap``, ``min_chunk_size`` from options."""
+    """Return ``chunk_size``, ``overlap``, and ``min_chunk_size`` from ``meta``."""
+
     opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
-    values = {k: int(opts.get(k, getattr(base, k))) for k in ("chunk_size", "overlap")}
-    chunk, overlap = values["chunk_size"], values["overlap"]
+    chunk = int(opts.get("chunk_size", base.chunk_size))
+    overlap = int(opts.get("overlap", base.overlap))
     min_size = (
-        base.min_chunk_size
-        if base.min_chunk_size is not None and "chunk_size" not in opts
-        else max(8, chunk // 10)
+        int(opts["min_chunk_size"]) if "min_chunk_size" in opts
+        else (base.min_chunk_size if "chunk_size" not in opts else _derive_min_chunk_size(chunk, None))
     )
-    return chunk, overlap, min_size
+    return chunk, overlap, int(min_size)
 
 
 @dataclass
