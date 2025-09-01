@@ -36,6 +36,13 @@ class TestQuoteHandling(unittest.TestCase):
         # Should not have quotes glued to words
         self.assertNotIn('said"Hello"', normalized)
 
+    def test_normalize_quotes_idempotent(self):
+        """normalize_quotes should be idempotent."""
+        text = 'He said"Hello" and left.'
+        once = normalize_quotes(text)
+        twice = normalize_quotes(once)
+        self.assertEqual(once, twice)
+
     def test_quote_continuation_detection(self):
         """Test detection of quote continuations across blocks."""
         chunks = [
