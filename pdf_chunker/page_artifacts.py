@@ -60,7 +60,7 @@ def _looks_like_bullet_footer(text: str) -> bool:
 
     stripped = text.strip()
     words = stripped.split()
-    return _starts_with_bullet(stripped) and ("?" in stripped or len(words) <= 2)
+    return _starts_with_bullet(stripped) and "?" in stripped and len(words) <= 2
 
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
@@ -68,27 +68,56 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
 
     def _bulletish(line: str) -> bool:
         stripped = line.strip()
-        short = len(stripped.split()) <= 8 and not any(p in stripped for p in ".!?;")
-        return _starts_with_bullet(stripped) or short
+        return _starts_with_bullet(stripped) and len(stripped.split()) <= 2
 
     trailing = list(takewhile(_bulletish, reversed(lines)))
-    if not trailing or len(trailing) == len(lines):
-        return lines
-    keep_to = len(lines) - len(trailing)
-    prev_idx = keep_to - 1
-    if prev_idx >= 0:
-        prev = lines[prev_idx].strip()
-        if _starts_with_bullet(prev) or (len(prev.split()) <= 3 and not re.search(r"[.!?]$", prev)):
-            keep_to -= 1
-    for ln in lines[keep_to:]:
-        logger.debug("remove_page_artifact_lines dropped trailing bullet footer: %s", ln[:30])
-    return lines[:keep_to]
+    if len(trailing) == 1:
+        logger.debug(
+            "remove_page_artifact_lines dropped trailing bullet footer: %s",
+            trailing[0][:30],
+        )
+        return lines[:-1]
+    return lines
 
 
 def _strip_spurious_number_prefix(text: str) -> str:
     """Remove leading number markers preceding lowercase continuation."""
 
     return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
+
+
+_HEADER_CONNECTORS = {"of", "the", "and", "or", "to", "a", "an", "in", "for"}
+
+
+def _strip_page_header_prefix(text: str) -> str:
+    """Remove page numbers and header phrases while retaining body text.
+
+    The function skips leading numeric tokens and subsequent title-cased words,
+    including common lowercase connectors. It stops once a title-cased token is
+    followed by a lowercase token, preserving the sentence that begins the
+    actual content. This mirrors legacy logic that separated headers from body
+    text even when newlines were lost during extraction.
+    """
+
+    tokens = text.split()
+    idx = 0
+    while idx < len(tokens) and tokens[idx].isdigit():
+        idx += 1
+    if idx == 0:
+        return text
+    while idx < len(tokens):
+        token = tokens[idx]
+        nxt = tokens[idx + 1] if idx + 1 < len(tokens) else ""
+        if token.lower() in _HEADER_CONNECTORS:
+            idx += 1
+            continue
+        if token.istitle():
+            if nxt.islower() and nxt not in _HEADER_CONNECTORS:
+                break
+            idx += 1
+            continue
+        break
+    return " ".join(tokens[idx:])
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
@@ -396,12 +425,14 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     lines = text.splitlines()
 
     def _clean_line(ln: str) -> Optional[str]:
-        cleaned = clean_text(ln)
+        cleaned = _strip_page_header_prefix(clean_text(ln))
         if is_page_artifact_text(cleaned, page_num) or _looks_like_bullet_footer(cleaned):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
-        stripped = _strip_spurious_number_prefix(strip_page_artifact_suffix(ln, page_num))
-        if stripped != ln:
+        stripped = _strip_spurious_number_prefix(
+            strip_page_artifact_suffix(cleaned, page_num)
+        )
+        if stripped != cleaned:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
 
