@@ -90,34 +90,46 @@ _HEADER_CONNECTORS = {"of", "the", "and", "or", "to", "a", "an", "in", "for"}
 
 
 def _strip_page_header_prefix(text: str) -> str:
-    """Remove page numbers and header phrases while retaining body text.
+    """Remove leading header fragments without chopping real sentences.
 
-    The function skips leading numeric tokens and subsequent title-cased words,
-    including common lowercase connectors. It stops once a title-cased token is
-    followed by a lowercase token, preserving the sentence that begins the
-    actual content. This mirrors legacy logic that separated headers from body
-    text even when newlines were lost during extraction.
+    The function walks tokens from the start, skipping over digits, connectors
+    (``of``, ``the`` …), and title-cased or uppercase words that typically form
+    headers. It tracks whether a comma-separated segment or a run of three or
+    more title-cased tokens was seen—signals that the prefix is indeed a header.
+    Once a lowercase token follows, the remaining tokens are preserved as body
+    text. Lines lacking these header cues are returned untouched.
     """
 
     tokens = text.split()
     idx = 0
-    while idx < len(tokens) and tokens[idx].isdigit():
-        idx += 1
-    if idx == 0:
-        return text
+    comma_seen = False
+    title_count = 0
     while idx < len(tokens):
-        token = tokens[idx]
-        nxt = tokens[idx + 1] if idx + 1 < len(tokens) else ""
+        raw = tokens[idx]
+        token = raw.strip(",")
+        nxt_raw = tokens[idx + 1] if idx + 1 < len(tokens) else ""
+        nxt = nxt_raw.strip(",")
+        if raw.endswith(","):
+            comma_seen = True
+        if token.isdigit():
+            idx += 1
+            continue
         if token.lower() in _HEADER_CONNECTORS:
             idx += 1
             continue
-        if token.istitle():
+        if token.istitle() or token.isupper():
+            title_count += 1
             if nxt.islower() and nxt not in _HEADER_CONNECTORS:
                 break
             idx += 1
             continue
         break
-    return " ".join(tokens[idx:])
+    if idx == 0 or (not comma_seen and title_count < 3):
+        return text
+    remainder = " ".join(t.strip(",") for t in tokens[idx:])
+    if remainder and remainder[0].islower():
+        remainder = remainder[0].upper() + remainder[1:]
+    return remainder
 
 
 def _starts_with_multiple_numbers(text: str) -> bool:
@@ -437,5 +449,8 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
         return stripped
 
     cleaned_lines = list(filter(None, (_clean_line(ln) for ln in lines)))
+    if cleaned_lines and cleaned_lines[0] and cleaned_lines[0][0].islower():
+        first = cleaned_lines[0]
+        cleaned_lines[0] = first[0].upper() + first[1:]
     cleaned_lines = _drop_trailing_bullet_footers(cleaned_lines)
     return "\n".join(cleaned_lines)
