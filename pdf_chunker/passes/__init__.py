@@ -9,6 +9,7 @@ _PASS_MODULES = [
     "extraction_fallback",
     "heading_detect",
     "list_detect",
+    "detect_doc_end",
     "merge_footers",
     "detect_page_artifacts",
     "pdf_parse",
