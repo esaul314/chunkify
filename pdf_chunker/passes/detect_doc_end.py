@@ -36,10 +36,18 @@ def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
     return bool(DOC_END_RE.fullmatch(_page_text(blocks)))
 
 
+def _should_truncate(total: int, truncated: int) -> bool:
+    return truncated > 0 and (truncated <= 2 or truncated / total <= 0.1)
+
+
 def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
+    total = len(pages)
     for idx, page in enumerate(pages):
         if _is_doc_end_page(page.get("blocks", [])):
-            return pages[: idx + 1], len(pages) - idx - 1
+            truncated = total - idx - 1
+            if _should_truncate(total, truncated):
+                return pages[: idx + 1], truncated
+            return pages, 0
     return pages, 0
 
 

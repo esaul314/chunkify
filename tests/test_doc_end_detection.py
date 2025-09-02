@@ -32,7 +32,7 @@ def test_ignores_toc_entry_named_end():
     assert len(out.payload["pages"]) == 3
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
 
-    
+
 def test_truncates_after_explicit_end_marker():
     doc = {
         "type": "page_blocks",
@@ -45,3 +45,18 @@ def test_truncates_after_explicit_end_marker():
     out = run_step("detect_doc_end", Artifact(doc))
     assert len(out.payload["pages"]) == 2
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 1
+
+
+def test_skips_truncation_when_removing_too_much():
+    doc = {
+        "type": "page_blocks",
+        "pages": [
+            _page(["Intro"]),
+            _page(["THE END"]),
+            *(_page([f"p{i}"]) for i in range(3)),
+        ],
+    }
+    out = run_step("detect_doc_end", Artifact(doc))
+    assert len(out.payload["pages"]) == 5
+    assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
+
