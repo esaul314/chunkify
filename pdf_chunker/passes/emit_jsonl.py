@@ -29,6 +29,8 @@ def _max_chars() -> int:
 
 
 def _split(text: str, limit: int) -> list[str]:
+    """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
+
     def parts(t: str) -> Iterable[str]:
         while t:
             chunk = _truncate_chunk(t, limit)
@@ -48,6 +50,7 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
 
 
 def _coalesce(items: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    """Merge consecutive items until their text forms a coherent sentence."""
     buf: dict[str, Any] | None = None
 
     for item in items:
