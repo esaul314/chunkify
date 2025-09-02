@@ -1,5 +1,4 @@
 import json
-
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import emit_jsonl
 
