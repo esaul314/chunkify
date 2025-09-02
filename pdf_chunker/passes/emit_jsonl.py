@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
 Doc = dict[str, Any]
@@ -24,7 +25,8 @@ def _compat_chunk_id(chunk_id: str) -> str:
 
 def _row(item: dict[str, Any]) -> Row:
     meta_key = _metadata_key()
-    base = {"text": item.get("text", "")}
+    text = _truncate_chunk(item.get("text", ""))
+    base = {"text": text}
     meta = item.get("meta")
     if not meta:
         return base
