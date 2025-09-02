@@ -59,3 +59,4 @@ def test_skips_truncation_when_removing_too_much():
     out = run_step("detect_doc_end", Artifact(doc))
     assert len(out.payload["pages"]) == 5
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
+
