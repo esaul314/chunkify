@@ -38,13 +38,16 @@ def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
 
 def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
     total = len(pages)
-    for idx, page in enumerate(pages):
-        if _is_doc_end_page(page.get("blocks", [])):
-            truncated = total - idx - 1
-            if 0 < truncated <= 2:
-                return pages[: idx + 1], truncated
-            return pages, 0
-    return pages, 0
+    idx = next(
+        (
+            i
+            for i, page in enumerate(pages)
+            if _is_doc_end_page(page.get("blocks", []))
+            and 0 < total - i - 1 <= 2
+        ),
+        None,
+    )
+    return (pages[: idx + 1], total - idx - 1) if idx is not None else (pages, 0)
 
 
 class _DetectDocEndPass:

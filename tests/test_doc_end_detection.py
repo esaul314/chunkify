@@ -70,3 +70,16 @@ def test_skips_truncation_when_tail_exceeds_two_pages():
     assert len(out.payload["pages"]) == 40
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
 
+
+def test_ignores_early_end_marker_but_truncates_at_late_one():
+    pages = [
+        _page(["Intro"]),
+        _page(["THE END"]),  # early false positive
+        _page(["p1"]),
+        _page(["THE END"]),
+        _page(["extra"]),
+    ]
+    doc = {"type": "page_blocks", "pages": pages}
+    out = run_step("detect_doc_end", Artifact(doc))
+    assert len(out.payload["pages"]) == 4
+    assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 1
