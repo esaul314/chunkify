@@ -65,7 +65,6 @@ def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
     return pages[: idx + 1], tail
 
 
-
 class _DetectDocEndPass:
     name = "detect_doc_end"
     input_type = object
