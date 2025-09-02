@@ -16,6 +16,7 @@ from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
 from pdf_chunker.utils import _build_metadata
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 
 
 SOFT_LIMIT = 8_000
@@ -122,6 +123,21 @@ def _is_heading(block: Block) -> bool:
     return block.get("type") == "heading"
 
 
+def _infer_list_kind(text: str) -> str | None:
+    if starts_with_bullet(text):
+        return "bullet"
+    if starts_with_number(text):
+        return "numbered"
+    return None
+
+
+def _tag_list(block: Block) -> Block:
+    if block.get("type") == "list_item" and block.get("list_kind"):
+        return block
+    kind = _infer_list_kind(block.get("text", ""))
+    return {**block, "type": "list_item", "list_kind": kind} if kind else block
+
+
 def _merge_headings(seq: Iterator[tuple[int, Block, str]]) -> Iterator[tuple[int, Block, str]]:
     """Attach consecutive headings to the following block and drop trailing ones."""
 
@@ -163,9 +179,15 @@ def build_chunk_with_meta(
     text: str, block: Block, page: int, filename: str | None, index: int
 ) -> Chunk:
     """Return chunk payload enriched with metadata."""
+    annotated = _tag_list(block)
     return {
         "text": text,
-        "meta": _build_metadata(text, _with_source(block, page, filename), index, {}),
+        "meta": _build_metadata(
+            text,
+            _with_source(annotated, page, filename),
+            index,
+            {},
+        ),
     }
 
 
