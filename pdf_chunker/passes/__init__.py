@@ -10,6 +10,7 @@ _PASS_MODULES = [
     "heading_detect",
     "list_detect",
     "merge_footers",
+    "detect_page_artifacts",
     "pdf_parse",
     "epub_parse",
     "split_semantic",
