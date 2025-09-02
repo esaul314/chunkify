@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List, Tuple
 
+import logging
+
 from pdf_chunker.framework import Artifact, register
 
 Block = Dict[str, Any]
@@ -10,6 +12,8 @@ Page = Dict[str, Any]
 
 DOT_LEADER_RE = re.compile(r"(?:\.\s*){3,}")
 DOC_END_RE = re.compile(r"(?i)^(?:the\s+)?end(?:\s+of\s+document)?\.?$")
+
+logger = logging.getLogger(__name__)
 
 
 def _is_page_number(text: str) -> bool:
@@ -33,10 +37,33 @@ def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
     return len(texts) == 1 and bool(DOC_END_RE.fullmatch(texts[0]))
 
 
+def _doc_end_index(pages: List[Page]) -> int | None:
+    total = len(pages)
+    for i, page in enumerate(pages):
+        if _is_doc_end_page(page.get("blocks", [])):
+            tail = total - i - 1
+            if _should_truncate(total, tail):
+                return i
+    return None
+
+
+def _should_truncate(total: int, tail: int) -> bool:
+    return 0 < tail <= 2
+
+
 def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
-    rng = range(max(len(pages) - 3, 0), len(pages))
-    idx = next((i for i in rng if _is_doc_end_page(pages[i].get("blocks", []))), None)
-    return (pages[: idx + 1], len(pages) - idx - 1) if idx is not None else (pages, 0)
+    idx = _doc_end_index(pages)
+    if idx is None:
+        logger.debug("no doc-end marker found")
+        return pages, 0
+    tail = len(pages) - idx - 1
+    logger.info(
+        "truncating %d trailing page(s) after marker at page %d",
+        tail,
+        idx + 1,
+    )
+    return pages[: idx + 1], tail
+
 
 
 class _DetectDocEndPass:

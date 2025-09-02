@@ -1,3 +1,5 @@
+import logging
+
 from pdf_chunker.framework import Artifact, run_step
 
 
@@ -33,7 +35,7 @@ def test_ignores_toc_entry_named_end():
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
 
 
-def test_truncates_after_explicit_end_marker():
+def test_truncates_after_explicit_end_marker(caplog):
     doc = {
         "type": "page_blocks",
         "pages": [
@@ -42,9 +44,11 @@ def test_truncates_after_explicit_end_marker():
             _page(["Extra stuff"]),
         ],
     }
-    out = run_step("detect_doc_end", Artifact(doc))
+    with caplog.at_level(logging.INFO):
+        out = run_step("detect_doc_end", Artifact(doc))
     assert len(out.payload["pages"]) == 2
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 1
+    assert "truncating" in caplog.text
 
 
 def test_skips_truncation_when_removing_too_much():
