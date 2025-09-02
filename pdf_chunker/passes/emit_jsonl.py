@@ -51,7 +51,6 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
 
 def _coalesce(items: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
     """Merge consecutive items until their text forms a coherent sentence."""
-
     buf: dict[str, Any] | None = None
 
     for item in items:
