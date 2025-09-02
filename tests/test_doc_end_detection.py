@@ -60,3 +60,13 @@ def test_skips_truncation_when_removing_too_much():
     assert len(out.payload["pages"]) == 5
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
 
+
+def test_skips_truncation_when_tail_exceeds_two_pages():
+    pages = [_page([f"p{i}"]) for i in range(36)] + [_page(["THE END"])] + [
+        _page([f"x{i}"]) for i in range(3)
+    ]
+    doc = {"type": "page_blocks", "pages": pages}
+    out = run_step("detect_doc_end", Artifact(doc))
+    assert len(out.payload["pages"]) == 40
+    assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
+
