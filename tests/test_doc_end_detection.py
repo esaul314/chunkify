@@ -32,7 +32,7 @@ def test_ignores_toc_entry_named_end():
     assert len(out.payload["pages"]) == 3
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 0
 
-
+    
 def test_truncates_after_explicit_end_marker():
     doc = {
         "type": "page_blocks",
