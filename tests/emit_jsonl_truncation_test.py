@@ -4,7 +4,7 @@ from pdf_chunker.passes.emit_jsonl import emit_jsonl
 
 
 def test_emit_jsonl_splits_and_clamps_rows():
-    long_text = "a" * 9000
+    long_text = "A" + "a" * 8998 + "."
     artifact = Artifact(payload={"type": "chunks", "items": [{"text": long_text}]})
     rows = emit_jsonl(artifact).payload
     assert len(rows) > 1
