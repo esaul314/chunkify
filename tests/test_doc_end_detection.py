@@ -83,3 +83,4 @@ def test_ignores_early_end_marker_but_truncates_at_late_one():
     out = run_step("detect_doc_end", Artifact(doc))
     assert len(out.payload["pages"]) == 4
     assert out.meta["metrics"]["detect_doc_end"]["truncated_pages"] == 1
+

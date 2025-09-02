@@ -24,30 +24,19 @@ def _is_artifact(text: str) -> bool:
     return _is_page_number(text) or _is_dot_leader(text)
 
 
-def _page_text(blocks: Iterable[Block]) -> str:
-    return " ".join(
+def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
+    texts = [
         b.get("text", "").strip()
         for b in blocks
         if b.get("text") and not _is_artifact(b["text"])
-    ).strip()
-
-
-def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
-    return bool(DOC_END_RE.fullmatch(_page_text(blocks)))
+    ]
+    return len(texts) == 1 and bool(DOC_END_RE.fullmatch(texts[0]))
 
 
 def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
-    total = len(pages)
-    idx = next(
-        (
-            i
-            for i, page in enumerate(pages)
-            if _is_doc_end_page(page.get("blocks", []))
-            and 0 < total - i - 1 <= 2
-        ),
-        None,
-    )
-    return (pages[: idx + 1], total - idx - 1) if idx is not None else (pages, 0)
+    rng = range(max(len(pages) - 3, 0), len(pages))
+    idx = next((i for i in rng if _is_doc_end_page(pages[i].get("blocks", []))), None)
+    return (pages[: idx + 1], len(pages) - idx - 1) if idx is not None else (pages, 0)
 
 
 class _DetectDocEndPass:
