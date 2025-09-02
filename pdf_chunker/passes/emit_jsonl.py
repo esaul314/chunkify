@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 from typing import Any
 
 from pdf_chunker.framework import Artifact, register
@@ -8,9 +10,27 @@ Row = dict[str, Any]
 Doc = dict[str, Any]
 
 
+def _metadata_key() -> str:
+    return os.getenv("PDF_CHUNKER_JSONL_META_KEY", "metadata")
+
+
+def _compat_chunk_id(chunk_id: str) -> str:
+    match = re.search(r"_p(\d+)_c", chunk_id)
+    if not match:
+        return chunk_id
+    page = max(int(match.group(1)) - 1, 0)
+    return f"{chunk_id[: match.start(1)]}{page}{chunk_id[match.end(1):]}"
+
+
 def _row(item: dict[str, Any]) -> Row:
+    meta_key = _metadata_key()
     base = {"text": item.get("text", "")}
-    return base | ({"meta": item["meta"]} if "meta" in item else {})
+    meta = item.get("meta")
+    if not meta:
+        return base
+    chunk_id = meta.get("chunk_id")
+    meta = {**meta, **({"chunk_id": _compat_chunk_id(chunk_id)} if chunk_id else {})}
+    return base | {meta_key: meta}
 
 
 def _rows(doc: Doc) -> list[Row]:
