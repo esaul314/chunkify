@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
@@ -21,17 +22,13 @@ def _copy_meta(meta: dict[str, Any]) -> dict[str, Any]:
 def _maybe_drop_meta(rows: Iterable[dict[str, Any]], drop: bool) -> Iterable[dict[str, Any]]:
     """Skip empty metadata or drop it entirely when requested."""
 
+    meta_key = os.getenv("PDF_CHUNKER_JSONL_META_KEY", "metadata")
+
     def _row(r: dict[str, Any]) -> dict[str, Any]:
         text = r.get("text", "")
-        meta = r.get("meta")
-        return {
-            key: value
-            for key, value in [
-                ("text", text),
-                ("meta", _copy_meta(meta) if meta else None),
-            ]
-            if key == "text" or (not drop and meta)
-        }
+        meta = r.get(meta_key)
+        base = {"text": text}
+        return base | ({meta_key: _copy_meta(meta)} if (meta and not drop) else {})
 
     return (_row(r) for r in rows)
 

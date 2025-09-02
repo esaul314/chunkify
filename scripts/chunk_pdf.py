@@ -67,6 +67,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if tmp is not None:
         print(tmp.read_text(encoding="utf-8"), end="")
         tmp.unlink()
+    report = Path("run_report.json")
+    if report.exists():
+        report.unlink()
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised in tests
