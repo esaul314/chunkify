@@ -17,6 +17,11 @@ import tempfile
 from pdf_chunker import cli
 
 
+def _needs_help(argv: Sequence[str]) -> bool:
+    """Return ``True`` when ``-h`` or ``--help`` is present."""
+    return any(flag in argv for flag in ("-h", "--help"))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="chunk_pdf.py")
     parser.add_argument("input_path", type=Path)
@@ -53,7 +58,11 @@ def _delegate(argv: Sequence[str]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Entry point retaining the old script's interface."""
-    ns = _parser().parse_args(argv)
+    args = list(sys.argv[1:] if argv is None else argv)
+    if _needs_help(args):
+        _delegate(["--help"])
+        return
+    ns = _parser().parse_args(args)
     out = ns.out
     tmp: Path | None = None
     if out is None:
@@ -67,6 +76,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if tmp is not None:
         print(tmp.read_text(encoding="utf-8"), end="")
         tmp.unlink()
+    report = Path("run_report.json")
+    if report.exists():
+        report.unlink()
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised in tests
