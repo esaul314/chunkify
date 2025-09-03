@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -10,6 +11,8 @@ Page = Dict[str, Any]
 
 DOT_LEADER_RE = re.compile(r"(?:\.\s*){3,}")
 DOC_END_RE = re.compile(r"(?i)^(?:the\s+)?end(?:\s+of\s+document)?\.?$")
+
+logger = logging.getLogger(__name__)
 
 
 def _is_page_number(text: str) -> bool:
@@ -24,31 +27,35 @@ def _is_artifact(text: str) -> bool:
     return _is_page_number(text) or _is_dot_leader(text)
 
 
-def _page_text(blocks: Iterable[Block]) -> str:
-    return " ".join(
+def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
+    texts = [
         b.get("text", "").strip()
         for b in blocks
         if b.get("text") and not _is_artifact(b["text"])
-    ).strip()
+    ]
+    return len(texts) == 1 and bool(DOC_END_RE.fullmatch(texts[0]))
 
 
-def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
-    return bool(DOC_END_RE.fullmatch(_page_text(blocks)))
-
-
-def _should_truncate(total: int, truncated: int) -> bool:
-    return truncated > 0 and (truncated <= 2 or truncated / total <= 0.1)
+def _doc_end_index(pages: List[Page]) -> int | None:
+    for offset, page in enumerate(reversed(pages[-3:]), 1):
+        idx = len(pages) - offset
+        if _is_doc_end_page(page.get("blocks", [])):
+            return idx
+    return None
 
 
 def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
-    total = len(pages)
-    for idx, page in enumerate(pages):
-        if _is_doc_end_page(page.get("blocks", [])):
-            truncated = total - idx - 1
-            if _should_truncate(total, truncated):
-                return pages[: idx + 1], truncated
-            return pages, 0
-    return pages, 0
+    idx = _doc_end_index(pages)
+    if idx is None:
+        logger.debug("no doc-end marker found")
+        return pages, 0
+    tail = len(pages) - idx - 1
+    logger.info(
+        "truncating %d trailing page(s) after marker at page %d",
+        tail,
+        idx + 1,
+    )
+    return pages[: idx + 1], tail
 
 
 class _DetectDocEndPass:

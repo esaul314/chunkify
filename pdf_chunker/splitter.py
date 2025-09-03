@@ -460,7 +460,7 @@ def _merge_short_chunks(
 
 
 NEWLINE_TOKEN = "[[BR]]"
-NBSP = "\u00A0"
+NBSP = "\u00a0"
 NBSP_TOKEN = "[[NBSP]]"
 _BULLET_AFTER_NEWLINE = re.compile(r"\n\s*([\-\*\u2022]\s+)")
 
@@ -658,21 +658,18 @@ def _validate_chunk_integrity(chunks: List[str], original_text: str) -> List[str
         if quote_balance != 0:
             logger.warning(f"Chunk {i} has unbalanced quotes (balance: {quote_balance})")
 
-    # Check 3: Look for obvious corruption patterns
-    validated_chunks = []
-    for i, chunk in enumerate(chunks):
-        if _is_chunk_corrupted(chunk):
-            logger.error(f"Chunk {i} appears corrupted: '{chunk[:100]}...'")
-            # Try to fix or skip corrupted chunks
-            fixed_chunk = _attempt_chunk_repair(chunk)
-            if fixed_chunk:
-                validated_chunks.append(fixed_chunk)
-            else:
-                logger.error(f"Could not repair chunk {i}, skipping")
-        else:
-            validated_chunks.append(chunk)
+    def _handle_chunk(idx: int, chunk: str) -> str:
+        if not _is_chunk_corrupted(chunk):
+            return chunk
+        logger.error(f"Chunk {idx} appears corrupted: '{chunk[:100]}...'")
+        repaired = _attempt_chunk_repair(chunk)
+        if repaired:
+            logger.debug(f"Repaired chunk {idx} to '{repaired[:100]}...'")
+            return repaired
+        logger.debug(f"Retaining suspect chunk {idx} unmodified")
+        return chunk
 
-    return validated_chunks
+    return [_handle_chunk(i, c) for i, c in enumerate(chunks)]
 
 
 def _ends_with_opening_quote(text: str) -> bool:
