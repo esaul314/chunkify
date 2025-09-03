@@ -213,3 +213,21 @@ class TestTextCorruptionDetection(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTextTruncation(unittest.TestCase):
+    def test_table_of_contents_not_truncated(self):
+        from pdf_chunker.text_cleaning import clean_text
+        toc_text = """
+        TABLE OF CONTENTS
+
+        Chapter 1: Introduction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+        Chapter 2: The Beginning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2
+        Chapter 3: The Middle . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+        Chapter 4: The End . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+        """
+        cleaned_text = clean_text(toc_text)
+        self.assertIn("Chapter 3: The Middle", cleaned_text)
+        self.assertIn("Chapter 4: The End", cleaned_text)
+        # Check that the newline between chapters is preserved
+        self.assertRegex(cleaned_text, r"Chapter 3.*[\s\n]+.*Chapter 4")

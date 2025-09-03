@@ -12,7 +12,7 @@ Block = Dict[str, Any]
 Page = Dict[str, Any]
 
 DOT_LEADER_RE = re.compile(r"(?:\.\s*){3,}")
-DOC_END_RE = re.compile(r"(?i)^(?:the\s+)?end(?:\s+of\s+document)?\.?$")
+DOC_END_RE = re.compile(r"^(?:THE\s+)?END(?:\s+OF\s+DOCUMENT)?\.?$")
 
 logger = logging.getLogger(__name__)
 
