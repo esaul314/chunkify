@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -38,17 +39,11 @@ def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
 
 
 def _doc_end_index(pages: List[Page]) -> int | None:
-    total = len(pages)
-    for i, page in enumerate(pages):
+    for offset, page in enumerate(reversed(pages[-3:]), 1):
+        idx = len(pages) - offset
         if _is_doc_end_page(page.get("blocks", [])):
-            tail = total - i - 1
-            if _should_truncate(total, tail):
-                return i
+            return idx
     return None
-
-
-def _should_truncate(total: int, tail: int) -> bool:
-    return 0 < tail <= 2
 
 
 def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
