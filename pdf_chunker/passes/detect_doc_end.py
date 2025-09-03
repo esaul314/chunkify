@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any, Dict, Iterable, List, Tuple
 
+import logging
+
 from pdf_chunker.framework import Artifact, register
 
 Block = Dict[str, Any]
