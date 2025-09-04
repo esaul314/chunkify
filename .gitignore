@@ -250,3 +250,5 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 !test_data/sample_chunks.jsonl
+
+run_report.json
