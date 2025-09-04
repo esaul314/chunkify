@@ -1,0 +1,31 @@
+{
+  "timings": {
+    "pdf_parse": 5.7220458984375e-06,
+    "text_clean": 0.055698394775390625,
+    "heading_detect": 1.430511474609375e-06,
+    "split_semantic": 0.21825456619262695,
+    "emit_jsonl": 0.0006711483001708984
+  },
+  "metrics": {
+    "page_count": 1,
+    "chunk_count": 10,
+    "pdf_parse": {
+      "pages": 1
+    },
+    "normalized": true,
+    "text_clean": {
+      "blocks": 1
+    },
+    "split_semantic": {
+      "chunks": 10,
+      "soft_limit_hits": 0,
+      "hard_limit_hit": true
+    },
+    "emit_jsonl": {
+      "rows": 3
+    }
+  },
+  "warnings": [
+    "footnote_anchors"
+  ]
+}
