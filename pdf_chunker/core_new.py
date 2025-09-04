@@ -39,20 +39,6 @@ def _pass_steps(spec: PipelineSpec) -> list[str]:
     return [s for s in spec.pipeline if s in regs]
 
 
-def _ensure_clean_precedes_split(steps: Sequence[str]) -> None:
-    """Raise descriptive error if a split pass precedes ``text_clean``."""
-    first_split = next(
-        ((s, i) for i, s in enumerate(steps) if s.startswith("split")),
-        None,
-    )
-    if not first_split:
-        return
-    clean_index = next((i for i, s in enumerate(steps) if s == "text_clean"), None)
-    split_name, split_index = first_split
-    if clean_index is None or clean_index > split_index:
-        raise ValueError(f"{split_name} requires text_clean to run beforehand")
-
-
 def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> list[str]:
     """Return ``steps`` with parse step aligned to ``ext``; reject mixed media."""
     prefixes = {s.split("_", 1)[0] for s in steps if s.startswith(("pdf_", "epub_"))}
@@ -66,7 +52,6 @@ def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     """Return validated steps while enforcing order and media-type invariants."""
     ext = Path(input_path).suffix.lower()
     steps = _ensure_pdf_epub_separation(list(spec.pipeline), ext)
-    _ensure_clean_precedes_split(steps)
     return _pass_steps(PipelineSpec(pipeline=steps, options=spec.options))
 
 
