@@ -7,10 +7,10 @@ from pdf_chunker.framework import Artifact, register
 
 def _clean_block(block: Dict[str, Any]) -> Dict[str, Any]:
     """Return a new block with normalized text."""
-    from pdf_chunker import text_cleaning
+    from pdf_chunker.text_cleaning import _clean_text_impl
 
     text = block.get("text", "")
-    return {**block, "text": text_cleaning.clean_text(text)}
+    return {**block, "text": _clean_text_impl(text)}
 
 
 def _clean_page(page: Dict[str, Any]) -> tuple[Dict[str, Any], int]:

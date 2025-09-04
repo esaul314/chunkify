@@ -6,28 +6,13 @@ import logging
 from functools import reduce
 from typing import Optional, Callable, Any, Tuple, Sequence
 
-try:
-    import fitz  # PyMuPDF
-except Exception:
-    fitz = None
-try:
-    from .text_cleaning import (
-        clean_text,
-        HYPHEN_CHARS_ESC,
-        remove_stray_bullet_lines,
-        insert_numbered_list_newlines,
-    )
-except Exception:
-
-    def clean_text(text: str) -> str:
-        return text
-
-    HYPHEN_CHARS_ESC = ""
-
-    def remove_stray_bullet_lines(text: str) -> str:
-        return text
-
-
+from .text_cleaning import (
+    clean_text,
+    HYPHEN_CHARS_ESC,
+    remove_stray_bullet_lines,
+    insert_numbered_list_newlines,
+)
+import fitz  # PyMuPDF
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .page_utils import validate_page_exclusions
 from .page_artifacts import (
@@ -487,27 +472,21 @@ def _spans_indicate_heading(spans: Sequence[dict], text: str) -> bool:
 def _structured_block(page, block_tuple, page_num, filename) -> dict | None:
     """Convert a raw PyMuPDF block tuple into a structured block dict."""
     raw_text = block_tuple[4]
-    logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
-    cleaned = clean_text(remove_page_artifact_lines(raw_text, page_num))
-    logger.debug(f"Block text after cleaning: {repr(cleaned[:50])}")
-    if not cleaned:
-        return None
-    if is_page_artifact({"text": cleaned}, page_num):
-        logger.debug(f"Skipping page artifact on page {page_num}: {repr(cleaned)}")
+    if not raw_text.strip():
         return None
 
     is_heading = False
-    if len(cleaned.split()) < 15:
+    if len(raw_text.split()) < 15:
         try:
             block_dict = page.get_text("dict", clip=block_tuple[:4])["blocks"][0]
             spans = block_dict["lines"][0]["spans"]
-            is_heading = _spans_indicate_heading(spans, cleaned)
+            is_heading = _spans_indicate_heading(spans, raw_text)
         except (KeyError, IndexError, TypeError):
-            is_heading = _detect_heading_fallback(cleaned)
+            is_heading = _detect_heading_fallback(raw_text)
 
     return {
         "type": "heading" if is_heading else "paragraph",
-        "text": cleaned,
+        "text": raw_text,
         "language": default_language(),
         "source": {"filename": filename, "page": page_num, "location": None},
         "bbox": block_tuple[:4],
@@ -753,6 +732,8 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
     pre_merge_blocks = all_blocks
     logger.debug("Starting block merging process")
     merged_blocks = merge_continuation_blocks(all_blocks)
+    for block in merged_blocks:
+        block["text"] = clean_text(block["text"])
 
     logger.debug(f"Total blocks after merging: {len(merged_blocks)}")
     # Log text flow analysis for debugging
@@ -844,8 +825,6 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
                     # Re-apply traditional text cleaning to all blocks
                     for block in merged_blocks:
                         if "text" in block:
-                            from .text_cleaning import clean_text
-
                             logger.debug(
                                 f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
                             )
@@ -859,8 +838,6 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
                 # Re-apply traditional text cleaning to all blocks
                 for block in merged_blocks:
                     if "text" in block:
-                        from .text_cleaning import clean_text
-
                         logger.debug(
                             f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
                         )
@@ -873,8 +850,6 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
             # Re-apply traditional text cleaning to all blocks
             for block in merged_blocks:
                 if "text" in block:
-                    from .text_cleaning import clean_text
-
                     logger.debug(
                         f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
                     )
