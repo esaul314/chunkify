@@ -7,7 +7,7 @@ from functools import reduce
 from typing import Optional, Callable, Any, Tuple, Sequence
 
 from .text_cleaning import (
-    clean_text,
+    _clean_text_impl,
     HYPHEN_CHARS_ESC,
     remove_stray_bullet_lines,
     insert_numbered_list_newlines,
@@ -426,7 +426,7 @@ def is_artifact_block(
     """Detect numeric-only blocks near page margins (likely page numbers)."""
     x0, y0, x1, y1, raw_text = block[:5]
     if y0 < page_height * frac or y0 > page_height * (1 - frac):
-        cleaned = clean_text(raw_text).strip()
+        cleaned = raw_text.strip()
         words = cleaned.split()
         if 0 < len(words) <= max_words and all(NUMERIC_PATTERN.fullmatch(w) for w in words):
             return True
@@ -444,7 +444,7 @@ def _is_footer_text_block(
     x0, y0, x1, y1, raw_text = block[:5]
     if y0 <= page_height * (1 - frac):
         return False
-    stripped = strip_page_artifact_suffix(clean_text(raw_text), None)
+    stripped = strip_page_artifact_suffix(raw_text, None)
     words = stripped.split()
     return 0 < len(words) <= max_words
 
@@ -733,7 +733,7 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
     logger.debug("Starting block merging process")
     merged_blocks = merge_continuation_blocks(all_blocks)
     for block in merged_blocks:
-        block["text"] = clean_text(block["text"])
+        block["text"] = _clean_text_impl(block["text"])
 
     logger.debug(f"Total blocks after merging: {len(merged_blocks)}")
     # Log text flow analysis for debugging
@@ -822,14 +822,6 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
                     logger.debug(
                         "Ensuring traditional text cleaning pipeline is used for all blocks"
                     )
-                    # Re-apply traditional text cleaning to all blocks
-                    for block in merged_blocks:
-                        if "text" in block:
-                            logger.debug(
-                                f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
-                            )
-                            block["text"] = clean_text(block["text"])
-                            logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
             else:
                 logger.warning(
                     "PyMuPDF4LLM enhancement failed, falling back to traditional text cleaning"
@@ -839,22 +831,13 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
                 for block in merged_blocks:
                     if "text" in block:
                         logger.debug(
-                            f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
+                                f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
                         )
-                        block["text"] = clean_text(block["text"])
+                            # block["text"] = clean_text(block["text"])
                         logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
         except Exception as e:
             logger.error(f"PyMuPDF4LLM enhancement failed with error: {e}")
             logger.info("Falling back to traditional text cleaning pipeline")
-            logger.debug("Ensuring traditional text cleaning pipeline is used for all blocks")
-            # Re-apply traditional text cleaning to all blocks
-            for block in merged_blocks:
-                if "text" in block:
-                    logger.debug(
-                        f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
-                    )
-                    block["text"] = clean_text(block["text"])
-                    logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
     elif use_pymupdf4llm:
         logger.info("PyMuPDF4LLM enhancement skipped - not beneficial for this content")
         logger.debug("Using traditional text cleaning pipeline")
