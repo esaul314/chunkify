@@ -6,13 +6,25 @@ import logging
 from functools import reduce
 from typing import Optional, Callable, Any, Tuple, Sequence
 
-from .text_cleaning import (
-    _clean_text_impl,
-    HYPHEN_CHARS_ESC,
-    remove_stray_bullet_lines,
-    insert_numbered_list_newlines,
-)
 import fitz  # PyMuPDF
+try:
+    from .text_cleaning import (
+        clean_text,
+        HYPHEN_CHARS_ESC,
+        remove_stray_bullet_lines,
+        insert_numbered_list_newlines,
+    )
+except Exception:
+
+    def clean_text(text: str) -> str:
+        return text
+
+    HYPHEN_CHARS_ESC = ""
+
+    def remove_stray_bullet_lines(text: str) -> str:
+        return text
+
+
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .page_utils import validate_page_exclusions
 from .page_artifacts import (
@@ -426,7 +438,7 @@ def is_artifact_block(
     """Detect numeric-only blocks near page margins (likely page numbers)."""
     x0, y0, x1, y1, raw_text = block[:5]
     if y0 < page_height * frac or y0 > page_height * (1 - frac):
-        cleaned = raw_text.strip()
+        cleaned = clean_text(raw_text).strip()
         words = cleaned.split()
         if 0 < len(words) <= max_words and all(NUMERIC_PATTERN.fullmatch(w) for w in words):
             return True
@@ -444,7 +456,7 @@ def _is_footer_text_block(
     x0, y0, x1, y1, raw_text = block[:5]
     if y0 <= page_height * (1 - frac):
         return False
-    stripped = strip_page_artifact_suffix(raw_text, None)
+    stripped = strip_page_artifact_suffix(clean_text(raw_text), None)
     words = stripped.split()
     return 0 < len(words) <= max_words
 
@@ -472,21 +484,27 @@ def _spans_indicate_heading(spans: Sequence[dict], text: str) -> bool:
 def _structured_block(page, block_tuple, page_num, filename) -> dict | None:
     """Convert a raw PyMuPDF block tuple into a structured block dict."""
     raw_text = block_tuple[4]
-    if not raw_text.strip():
+    logger.debug(f"Raw block text before cleaning: {repr(raw_text[:50])}")
+    cleaned = clean_text(remove_page_artifact_lines(raw_text, page_num))
+    logger.debug(f"Block text after cleaning: {repr(cleaned[:50])}")
+    if not cleaned:
+        return None
+    if is_page_artifact({"text": cleaned}, page_num):
+        logger.debug(f"Skipping page artifact on page {page_num}: {repr(cleaned)}")
         return None
 
     is_heading = False
-    if len(raw_text.split()) < 15:
+    if len(cleaned.split()) < 15:
         try:
             block_dict = page.get_text("dict", clip=block_tuple[:4])["blocks"][0]
             spans = block_dict["lines"][0]["spans"]
-            is_heading = _spans_indicate_heading(spans, raw_text)
+            is_heading = _spans_indicate_heading(spans, cleaned)
         except (KeyError, IndexError, TypeError):
-            is_heading = _detect_heading_fallback(raw_text)
+            is_heading = _detect_heading_fallback(cleaned)
 
     return {
         "type": "heading" if is_heading else "paragraph",
-        "text": raw_text,
+        "text": cleaned,
         "language": default_language(),
         "source": {"filename": filename, "page": page_num, "location": None},
         "bbox": block_tuple[:4],
@@ -732,8 +750,6 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
     pre_merge_blocks = all_blocks
     logger.debug("Starting block merging process")
     merged_blocks = merge_continuation_blocks(all_blocks)
-    for block in merged_blocks:
-        block["text"] = _clean_text_impl(block["text"])
 
     logger.debug(f"Total blocks after merging: {len(merged_blocks)}")
     # Log text flow analysis for debugging
@@ -822,6 +838,16 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
                     logger.debug(
                         "Ensuring traditional text cleaning pipeline is used for all blocks"
                     )
+                    # Re-apply traditional text cleaning to all blocks
+                    for block in merged_blocks:
+                        if "text" in block:
+                            from .text_cleaning import clean_text
+
+                            logger.debug(
+                                f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
+                            )
+                            block["text"] = clean_text(block["text"])
+                            logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
             else:
                 logger.warning(
                     "PyMuPDF4LLM enhancement failed, falling back to traditional text cleaning"
@@ -830,14 +856,27 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
                 # Re-apply traditional text cleaning to all blocks
                 for block in merged_blocks:
                     if "text" in block:
+                        from .text_cleaning import clean_text
+
                         logger.debug(
-                                f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
+                            f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
                         )
-                            # block["text"] = clean_text(block["text"])
+                        block["text"] = clean_text(block["text"])
                         logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
         except Exception as e:
             logger.error(f"PyMuPDF4LLM enhancement failed with error: {e}")
             logger.info("Falling back to traditional text cleaning pipeline")
+            logger.debug("Ensuring traditional text cleaning pipeline is used for all blocks")
+            # Re-apply traditional text cleaning to all blocks
+            for block in merged_blocks:
+                if "text" in block:
+                    from .text_cleaning import clean_text
+
+                    logger.debug(
+                        f"Re-cleaning block text with traditional pipeline: {repr(block['text'][:50])}"
+                    )
+                    block["text"] = clean_text(block["text"])
+                    logger.debug(f"After traditional cleaning: {repr(block['text'][:50])}")
     elif use_pymupdf4llm:
         logger.info("PyMuPDF4LLM enhancement skipped - not beneficial for this content")
         logger.debug("Using traditional text cleaning pipeline")

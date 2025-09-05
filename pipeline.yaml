@@ -1,5 +1,6 @@
 pipeline:
   - pdf_parse
+  - text_clean
   - heading_detect
   - split_semantic
   - emit_jsonl
