@@ -46,6 +46,9 @@ wandb
 __pycache__/
 *.py[codz]
 *$py.class
+artifacts/
+run_report.json
+data/
 
 # C extensions
 *.so

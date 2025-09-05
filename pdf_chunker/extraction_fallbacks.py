@@ -137,6 +137,8 @@ def _extract_with_pdftotext(
             return []
 
         raw_text = _filter_text_by_pages(result.stdout, excluded_pages)
+        print("pdftotext output:")
+        print(raw_text)
         quality = _assess_text_quality(raw_text)
         print(
             f"pdftotext extraction quality: {quality['quality_score']:.2f}",
@@ -148,7 +150,20 @@ def _extract_with_pdftotext(
 
         raw_text = _clean_fallback_text(raw_text)
 
-        return _text_to_blocks(raw_text, filepath, "pdftotext")
+        pages = raw_text.split('\f')
+        all_blocks = []
+        for i, page_text in enumerate(pages):
+            if page_text.strip():
+                all_blocks.append({
+                    "type": "paragraph",
+                    "text": page_text,
+                    "source": {
+                        "filename": os.path.basename(filepath),
+                        "page": i + 1,
+                        "method": "pdftotext"
+                    },
+                })
+        return all_blocks
 
     except TimeoutExpired:
         print("pdftotext timed out", file=sys.stderr)

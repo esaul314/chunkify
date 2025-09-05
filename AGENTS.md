@@ -4,6 +4,18 @@ This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other
 
 ---
 
+### Stable Dependencies
+It is important to rely on well-supported libraries and keep them pinned to avoid accidental regressions. The following dependencies are considered stable and should be preserved:
+
+| Library           | Role / Rationale                                                               |
+| ----------------- | ------------------------------------------------------------------------------ |
+| **PyMuPDF**       | High‑quality PDF parsing; preserves layout and metadata.                       |
+| **pdfminer.six**  | Pure‑Python PDF text extractor—good secondary fallback.                        |
+| **pdftotext**     | Stable C‑based CLI; useful when PyMuPDF isn’t available.                       |
+| **lxml**          | Robust XML/HTML handling for EPUB or structural heuristics.                    |
+| **regex**         | Advanced regular‑expression engine used heavily in cleaning.                   |
+| **haystack** (ai) | Required for chunk validation scripts that depend on its formatting utilities. |
+
 ## Pass Responsibilities
 
 <!-- BEGIN AUTO-PASSES -->

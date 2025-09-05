@@ -6,10 +6,7 @@ import logging
 from functools import reduce
 from typing import Optional, Callable, Any, Tuple, Sequence
 
-try:
-    import fitz  # PyMuPDF
-except Exception:
-    fitz = None
+import fitz  # PyMuPDF
 try:
     from .text_cleaning import (
         clean_text,

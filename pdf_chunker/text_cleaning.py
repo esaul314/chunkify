@@ -136,7 +136,7 @@ NUMBERED_END_RE = re.compile(
 )
 
 # List break preservation
-LIST_BREAK_RE = re.compile(rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))")
+LIST_BREAK_RE = re.compile(rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]|.*\.\.))")
 COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 
 # Newline/split heuristics
