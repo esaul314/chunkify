@@ -121,8 +121,6 @@ def read(
     abs_path = str(Path(path))
     excluded = _excluded(exclude_pages)
     blocks = _primary_blocks(abs_path, sorted(excluded), use_pymupdf4llm)
-    if not blocks:
-        blocks = _fallback_blocks(abs_path, sorted(excluded))
     filtered = [b for b in blocks if b.get("source", {}).get("page") not in excluded]
     pages = [p for p in _group_blocks(filtered) if p["page"] not in excluded]
     return {"type": "page_blocks", "source_path": abs_path, "pages": pages}
