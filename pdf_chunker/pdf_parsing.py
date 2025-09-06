@@ -4,7 +4,7 @@ import os
 import re
 import logging
 from functools import reduce
-from typing import Optional, Callable, Any, Tuple, Sequence
+from typing import Optional, Callable, Any, Tuple, Sequence, Mapping
 
 import fitz  # PyMuPDF
 try:
@@ -650,6 +650,58 @@ def merge_continuation_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, An
     return merged_blocks
 
 
+def _page_count(blocks: Sequence[Mapping[str, Any]]) -> int:
+    """Return the number of distinct pages represented in ``blocks``."""
+    return len({
+        b.get("source", {}).get("page")
+        for b in blocks
+        if b.get("source", {}).get("page") is not None
+    })
+
+
+def _assess_and_maybe_fallback(
+    filepath: str,
+    exclude_pages: Optional[str],
+    blocks: list[dict[str, Any]],
+    quality_score: float,
+) -> list[dict[str, Any]]:
+    """Return ``blocks`` or a higher-quality fallback extraction."""
+
+    if quality_score >= 0.7:
+        return blocks
+
+    candidates: Sequence[tuple[str, Callable[[str, Optional[str]], list[dict[str, Any]]]]] = (
+        ("pdftotext", _extract_with_pdftotext),
+        ("pdfminer", _extract_with_pdfminer if PDFMINER_AVAILABLE else (lambda *_: [])),
+    )
+
+    base_pages = _page_count(blocks)
+    for name, extractor in candidates:
+        fallback = extractor(filepath, exclude_pages)
+        if len(fallback) <= 1:
+            logger.warning(
+                f"{name} fallback produced {len(fallback)} block(s); keeping original extraction"
+            )
+            continue
+        if _page_count(fallback) < base_pages:
+            logger.warning(
+                f"{name} fallback covered fewer pages; keeping original extraction"
+            )
+            continue
+        score = _assess_text_quality(
+            "\n".join(b.get("text", "") for b in fallback)
+        )["quality_score"]
+        if score <= quality_score:
+            logger.warning(
+                f"{name} fallback quality {score:.2f} not better than original {quality_score:.2f}"
+            )
+            continue
+        logger.info(f"Using {name} fallback extraction")
+        return merge_continuation_blocks(fallback)
+
+    return blocks
+
+
 def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = None) -> list[dict]:
     """
     Extract structured text from a PDF using traditional extraction with optional PyMuPDF4LLM text cleaning.
@@ -900,25 +952,12 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
     # Log final enhancement statistics
     logger.info(f"PyMuPDF4LLM enhancement completed: {enhancement_stats}")
 
-    # Assess text quality and apply fallbacks if needed
     text_blob = "\n".join(block["text"] for block in merged_blocks)
     quality = _assess_text_quality(text_blob)
-
     logger.debug(f"Text quality assessment: score={quality.get('quality_score', 0):.2f}")
-
-    if quality["quality_score"] < 0.7:
-        logger.warning(
-            f"Low quality score ({quality['quality_score']:.2f}), attempting fallback extraction"
-        )
-        fallback = _extract_with_pdftotext(filepath, exclude_pages)
-        if fallback:
-            logger.info("Using pdftotext fallback extraction")
-            merged_blocks = merge_continuation_blocks(fallback)
-        elif PDFMINER_AVAILABLE:
-            fallback = _extract_with_pdfminer(filepath, exclude_pages)
-            if fallback:
-                logger.info("Using pdfminer fallback extraction")
-                merged_blocks = merge_continuation_blocks(fallback)
+    merged_blocks = _assess_and_maybe_fallback(
+        filepath, exclude_pages, merged_blocks, quality["quality_score"]
+    )
 
     # --- Ensure all blocks have a proper source dictionary with filename, page, and location ---
     # If PyMuPDF4LLM enhancement was applied, propagate page numbers from original blocks if missing
