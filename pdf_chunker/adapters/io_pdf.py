@@ -10,6 +10,8 @@ from pathlib import Path
 from subprocess import CompletedProcess, run
 from typing import Any
 
+import fitz  # PyMuPDF
+
 from pdf_chunker.page_utils import parse_page_ranges
 
 
@@ -108,6 +110,29 @@ def _fallback_blocks(
     )
 
 
+def _page_numbers(path: str) -> range:
+    """Enumerate all PDF page numbers using PyMuPDF."""
+
+    with fitz.open(path) as doc:
+        return range(1, doc.page_count + 1)
+
+
+def _ensure_all_pages(
+    path: str, pages: list[dict[str, Any]], excluded: set[int]
+) -> list[dict[str, Any]]:
+    """Append empty entries for missing pages."""
+
+    existing = {p["page"]: p["blocks"] for p in pages}
+    return [
+        {
+            "page": p,
+            "blocks": existing.get(p, []),
+        }
+        for p in _page_numbers(path)
+        if p not in excluded
+    ]
+
+
 def read(
     path: str,
     exclude_pages: Sequence[int] | str | None = None,
@@ -124,7 +149,8 @@ def read(
     if not blocks:
         blocks = _fallback_blocks(abs_path, sorted(excluded))
     filtered = [b for b in blocks if b.get("source", {}).get("page") not in excluded]
-    pages = [p for p in _group_blocks(filtered) if p["page"] not in excluded]
+    grouped = _group_blocks(filtered)
+    pages = _ensure_all_pages(abs_path, grouped, excluded)
     return {"type": "page_blocks", "source_path": abs_path, "pages": pages}
 
 
