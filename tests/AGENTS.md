@@ -26,6 +26,7 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `text_cleaning_transform_test.py`: Ligature, underscore, and hyphenation normalization
 - Duplicate detection thresholds (via `detect_duplicates.py`).
 - `parity/test_page_count_regression.py`: Page count parity with sentinel phrase check and TOC dot-leader removal
+- `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters
 
 ## AI Agent Guidance
 - Use clear input/output examples
@@ -55,6 +56,8 @@ nox -s tests  # requires `pip install nox`
 - Some modules (e.g. `text_cleaning`) are not tested against known real-world PDF defects
 - Some custom PDF edge-case tests missing.
 - Real-world PDF/EPUB defects may not be simulated.
+
+Note: tests are not likely to get stuck, but they might take a long time to run. It's better to wait.
 ```
 
 ---
