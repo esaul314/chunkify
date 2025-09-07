@@ -64,7 +64,7 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
         else:
             buf = merged
 
-    if buf and _coherent(buf["text"]):
+    if buf:
         yield buf
 
 
