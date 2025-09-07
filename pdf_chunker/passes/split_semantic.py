@@ -20,7 +20,6 @@ from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 
 
 SOFT_LIMIT = 8_000
-HARD_LIMIT = 25_000
 
 
 def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
@@ -66,7 +65,6 @@ def _get_split_fn(
     """Return a semantic splitter enforcing size limits and collecting metrics."""
 
     soft_hits = 0
-    hard_hit = False
 
     try:
         from pdf_chunker.splitter import semantic_chunker
@@ -79,35 +77,21 @@ def _get_split_fn(
         )
 
         def split(text: str) -> list[str]:
-            nonlocal soft_hits, hard_hit
-            hard_hit |= len(text) > HARD_LIMIT
-            raw = list(
-                chain.from_iterable(
-                    semantic(text[i : i + HARD_LIMIT])
-                    for i in range(0, len(text), HARD_LIMIT)  # noqa: E501
-                )
-            )
+            nonlocal soft_hits
+            raw = semantic(text)
             soft_hits += sum(len(c) > SOFT_LIMIT for c in raw)
             return [seg for c in raw for seg in _soft_segments(c)]
 
     except Exception:  # pragma: no cover - safety fallback
 
         def split(text: str) -> list[str]:
-            nonlocal soft_hits, hard_hit
-            hard_hit |= len(text) > HARD_LIMIT
-            raw = [
-                seg
-                for win in (
-                    text[i : i + HARD_LIMIT] for i in range(0, len(text), HARD_LIMIT)
-                )  # noqa: E501
-                for seg in _soft_segments(win)
-                if seg
-            ]
+            nonlocal soft_hits
+            raw = _soft_segments(text)
             soft_hits += sum(len(seg) > SOFT_LIMIT for seg in raw)
             return raw
 
-    def metrics() -> dict[str, int | bool]:
-        return {"soft_limit_hits": soft_hits, "hard_limit_hit": hard_hit}
+    def metrics() -> dict[str, int]:
+        return {"soft_limit_hits": soft_hits}
 
     return split, metrics
 

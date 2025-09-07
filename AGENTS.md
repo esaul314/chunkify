@@ -2,6 +2,8 @@
 
 This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other AI agents working across this modular Python library for processing large PDF and EPUB documents. The goal is to generate high-quality, semantically coherent document chunks enriched with rich metadata for downstream local LLM workflows, particularly Retrieval-Augmented Generation (RAG).
 
+> **Remember**: keep this file and its siblings in sync with the codebase. Update instructions whenever workflows, dependencies, or project structure change.
+
 ---
 
 ### Stable Dependencies

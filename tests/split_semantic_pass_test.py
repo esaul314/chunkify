@@ -36,4 +36,4 @@ def test_enforces_limits_and_structure(monkeypatch) -> None:
     assert chunk["id"] == "0" and chunk["meta"]["page"] == 1
     assert chunk["meta"]["source"] == "src.pdf"
     assert len(chunk["text"]) == 8_000
-    assert metrics["soft_limit_hits"] == 1 and metrics["hard_limit_hit"]
+    assert metrics["soft_limit_hits"] == 1
