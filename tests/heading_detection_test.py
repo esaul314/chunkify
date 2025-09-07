@@ -6,7 +6,7 @@ from pdf_chunker.heading_detection import (
 )
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.heading_detect import heading_detect
-from pdf_chunker.pdf_parsing import _spans_indicate_heading
+from pdf_chunker.pdf_blocks import _spans_indicate_heading
 
 
 class TestHeadingDetectionFallback(unittest.TestCase):

@@ -28,6 +28,9 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
   ```
+- After conversion, verify the output contains the sentinel phrase
+  "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
+  ensure pages near the end are not truncated.
 - Or use the script wrapper:
   ```bash
   python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
