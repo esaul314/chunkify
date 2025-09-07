@@ -38,12 +38,9 @@ def extract_text_blocks_from_pdf(
     return [asdict(b) for b in blocks]
 
 
-def legacy_extract_text_blocks_from_pdf(
+def _legacy_extract_text_blocks_from_pdf(
     filepath: str, exclude_pages: Optional[str] = None
 ) -> list[dict]:
-    """Shim retaining the original function name."""
+    """Backward-compatible shim for older imports."""
 
     return extract_text_blocks_from_pdf(filepath, exclude_pages)
-
-
-_legacy_extract_text_blocks_from_pdf = extract_text_blocks_from_pdf
