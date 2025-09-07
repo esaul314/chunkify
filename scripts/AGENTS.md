@@ -18,6 +18,16 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - CLI must use `argparse` or POSIX `getopts`.
 - Output logs and JSON forming for downstream tools.
 
+## Usage
+- Convert a PDF via CLI:
+  ```bash
+  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
+  ```
+- Equivalent script invocation:
+  ```bash
+  python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
+  ```
+
 ## Known Issues
 - Command-line help may be outdated.
 - `_apply.sh` exit codes not consistently handled.

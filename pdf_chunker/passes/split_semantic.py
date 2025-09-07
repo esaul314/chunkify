@@ -58,7 +58,11 @@ def _derive_min_chunk_size(chunk_size: int, min_size: int | None) -> int:
     return min_size if min_size is not None else max(8, chunk_size // 10)
 
 
-def _get_split_fn(chunk_size: int, overlap: int, min_chunk_size: int) -> tuple[SplitFn, MetricFn]:
+def _get_split_fn(
+    chunk_size: int,
+    overlap: int,
+    min_chunk_size: int,
+) -> tuple[SplitFn, MetricFn]:
     """Return a semantic splitter enforcing size limits and collecting metrics."""
 
     soft_hits = 0
@@ -77,7 +81,12 @@ def _get_split_fn(chunk_size: int, overlap: int, min_chunk_size: int) -> tuple[S
         def split(text: str) -> list[str]:
             nonlocal soft_hits, hard_hit
             hard_hit |= len(text) > HARD_LIMIT
-            raw = semantic(text[:HARD_LIMIT])
+            raw = list(
+                chain.from_iterable(
+                    semantic(text[i : i + HARD_LIMIT])
+                    for i in range(0, len(text), HARD_LIMIT)  # noqa: E501
+                )
+            )
             soft_hits += sum(len(c) > SOFT_LIMIT for c in raw)
             return [seg for c in raw for seg in _soft_segments(c)]
 
@@ -86,9 +95,16 @@ def _get_split_fn(chunk_size: int, overlap: int, min_chunk_size: int) -> tuple[S
         def split(text: str) -> list[str]:
             nonlocal soft_hits, hard_hit
             hard_hit |= len(text) > HARD_LIMIT
-            truncated = text[:HARD_LIMIT]
-            soft_hits += int(len(truncated) > SOFT_LIMIT)
-            return _soft_segments(truncated) if truncated else []
+            raw = [
+                seg
+                for win in (
+                    text[i : i + HARD_LIMIT] for i in range(0, len(text), HARD_LIMIT)
+                )  # noqa: E501
+                for seg in _soft_segments(win)
+                if seg
+            ]
+            soft_hits += sum(len(seg) > SOFT_LIMIT for seg in raw)
+            return raw
 
     def metrics() -> dict[str, int | bool]:
         return {"soft_limit_hits": soft_hits, "hard_limit_hit": hard_hit}
@@ -138,7 +154,9 @@ def _tag_list(block: Block) -> Block:
     return {**block, "type": "list_item", "list_kind": kind} if kind else block
 
 
-def _merge_headings(seq: Iterator[tuple[int, Block, str]]) -> Iterator[tuple[int, Block, str]]:
+def _merge_headings(
+    seq: Iterator[tuple[int, Block, str]],
+) -> Iterator[tuple[int, Block, str]]:
     """Attach consecutive headings to the following block and drop trailing ones."""
 
     it = iter(seq)
@@ -191,7 +209,11 @@ def build_chunk_with_meta(
     }
 
 
-def _chunk_items(doc: Doc, split_fn: SplitFn, generate_metadata: bool = True) -> Iterator[Chunk]:
+def _chunk_items(
+    doc: Doc,
+    split_fn: SplitFn,
+    generate_metadata: bool = True,
+) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
@@ -222,7 +244,9 @@ def _update_meta(
     }
 
 
-def _resolve_opts(meta: Mapping[str, Any] | None, base: _SplitSemanticPass) -> tuple[int, int, int]:
+def _resolve_opts(
+    meta: Mapping[str, Any] | None, base: _SplitSemanticPass
+) -> tuple[int, int, int]:  # noqa: E501
     """Return ``chunk_size``, ``overlap``, and ``min_chunk_size`` from ``meta``."""
 
     opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
@@ -232,7 +256,9 @@ def _resolve_opts(meta: Mapping[str, Any] | None, base: _SplitSemanticPass) -> t
         int(opts["min_chunk_size"])
         if "min_chunk_size" in opts
         else (
-            base.min_chunk_size if "chunk_size" not in opts else _derive_min_chunk_size(chunk, None)
+            base.min_chunk_size
+            if "chunk_size" not in opts
+            else _derive_min_chunk_size(chunk, None)  # noqa: E501
         )
     )
     return chunk, overlap, cast(int, min_size)
@@ -241,7 +267,9 @@ def _resolve_opts(meta: Mapping[str, Any] | None, base: _SplitSemanticPass) -> t
 @dataclass
 class _SplitSemanticPass:
     name: str = field(default="split_semantic", init=False)
-    input_type: type = field(default=dict, init=False)  # expects {"type": "page_blocks"}
+    input_type: type = field(
+        default=dict, init=False
+    )  # expects {"type": "page_blocks"}  # noqa: E501
     output_type: type = field(
         default=dict, init=False
     )  # returns {"type": "chunks", "items": [...]}
@@ -251,7 +279,9 @@ class _SplitSemanticPass:
     generate_metadata: bool = True
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = _derive_min_chunk_size(self.chunk_size, self.min_chunk_size)
+        self.min_chunk_size = _derive_min_chunk_size(
+            self.chunk_size, self.min_chunk_size
+        )  # noqa: E501
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload
