@@ -14,6 +14,9 @@ _SUPERSCRIPT_MAP = str.maketrans(SUPERSCRIPT_DIGITS, "0123456789")
 _SUP_DIGITS_ESC = re.escape(SUPERSCRIPT_DIGITS)
 
 
+TOC_DOT_RE = re.compile(r"(?:\.\s*){2,}")
+
+
 def _roman_to_int(value: str) -> int:
     """Convert a Roman numeral to an integer."""
 
@@ -357,6 +360,19 @@ def _normalize_footnote_markers(text: str) -> str:
     return FOOTNOTE_MARKER_RE.sub(repl, text)
 
 
+def _strip_toc_dot_leaders(text: str) -> str:
+    """Remove dot leaders and trailing page numbers from Table of Contents lines."""
+
+    def strip_line(ln: str) -> str:
+        if TOC_DOT_RE.search(ln):
+            head = TOC_DOT_RE.split(ln)[0].rstrip()
+            return head if head.strip() else ""
+        return ln
+
+    lines = [strip_line(ln) for ln in text.splitlines()]
+    return "\n".join(filter(None, lines))
+
+
 TRAILING_FOOTER_RE = re.compile(
     rf"\s*\|\s*(\d{{1,3}}|{ROMAN_RE})(?![0-9ivxlcdm])\s*$", re.IGNORECASE
 )
@@ -423,6 +439,7 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
         lambda t: _remove_inline_footer(t, page_num),
         _strip_footnote_lines,
         _normalize_footnote_markers,
+        _strip_toc_dot_leaders,
         lambda t: _strip_trailing_footer(t, page_num),
     )
     text = reduce(lambda acc, fn: fn(acc), pipeline, text)
