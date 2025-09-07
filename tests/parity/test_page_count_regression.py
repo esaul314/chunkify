@@ -44,4 +44,11 @@ def test_page_count_regression(tmp_path: Path) -> None:
     pytest.importorskip("pypdf")
     truth = len(PdfReader(str(PDF)).pages)
     assert truth == page_count
-    assert SENTINEL in out.read_text()
+    text = out.read_text()
+    assert SENTINEL in text
+
+    lines = [json.loads(line)["text"] for line in text.splitlines()]
+    toc = [t for t in lines if "Why Platform Engineering Is Becoming Essential" in t]
+    assert len(toc) == 1
+    assert ". ." not in toc[0]
+    assert not toc[0].rstrip().endswith("1")
