@@ -4,11 +4,11 @@ from pdf_chunker.passes.extraction_fallback import extraction_fallback
 
 def test_extraction_fallback_records_reason_and_score(monkeypatch):
     monkeypatch.setattr(
-        "pdf_chunker.extraction_fallbacks.execute_fallback_extraction",
+        "pdf_chunker.fallbacks.execute_fallback_extraction",
         lambda path, fallback_reason=None: [{"text": "hello"}],
     )
     monkeypatch.setattr(
-        "pdf_chunker.extraction_fallbacks._assess_text_quality",
+        "pdf_chunker.fallbacks._assess_text_quality",
         lambda text: {"quality_score": 0.5},
     )
 
