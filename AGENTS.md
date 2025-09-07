@@ -21,6 +21,7 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 ### Environment Setup
 - `pip install -e .[dev]`
 - `pip install nox`  # not preinstalled in some environments
+- `apt-get install -y poppler-utils`  # provides `pdftotext`
 
 ### Quick Usage
 - Convert PDF via library CLI:
