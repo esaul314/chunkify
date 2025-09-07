@@ -34,7 +34,7 @@ from .page_artifacts import (
 )
 
 try:
-    from .extraction_fallbacks import (
+    from .fallbacks import (
         default_language,
         _assess_text_quality,
         _extract_with_pdftotext as _extract_with_pdftotext_impl,

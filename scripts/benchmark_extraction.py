@@ -33,7 +33,7 @@ from pdf_chunker.pymupdf4llm_integration import (
     assess_pymupdf4llm_quality,
     PyMuPDF4LLMExtractionError,
 )
-from pdf_chunker.extraction_fallbacks import (
+from pdf_chunker.fallbacks import (
     _assess_text_quality,
     execute_fallback_extraction,
 )

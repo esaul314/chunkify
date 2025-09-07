@@ -16,7 +16,7 @@ def _blocks_doc(blocks: list[Block], source: str) -> dict[str, Any]:
 def _score(blocks: list[Block]) -> float:
     """Calculate a quality score for ``blocks`` using text assessment."""
 
-    from pdf_chunker.extraction_fallbacks import _assess_text_quality
+    from pdf_chunker.fallbacks import _assess_text_quality
 
     text = "\n".join(b.get("text", "") for b in blocks)
     return float(_assess_text_quality(text).get("quality_score", 0.0))
@@ -32,7 +32,7 @@ def _metrics(reason: str | None, blocks: list[Block]) -> dict[str, float | str]:
 def _extract(path: str, reason: str | None) -> tuple[list[Block], dict[str, Any]]:
     """Run fallback extraction for ``path`` and compute metrics."""
 
-    from pdf_chunker.extraction_fallbacks import execute_fallback_extraction
+    from pdf_chunker.fallbacks import execute_fallback_extraction
 
     blocks = execute_fallback_extraction(path, fallback_reason=reason)
     return blocks, _metrics(reason, blocks)
