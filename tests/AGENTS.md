@@ -56,6 +56,8 @@ nox -s tests  # requires `pip install nox`
 - Some modules (e.g. `text_cleaning`) are not tested against known real-world PDF defects
 - Some custom PDF edge-case tests missing.
 - Real-world PDF/EPUB defects may not be simulated.
+
+Note: tests are not likely to get stuck, but they might take a long time to run. It's better to wait.
 ```
 
 ---
