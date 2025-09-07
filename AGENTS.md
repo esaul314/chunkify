@@ -16,6 +16,20 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 | **regex**         | Advanced regular‑expression engine used heavily in cleaning.                   |
 | **haystack** (ai) | Required for chunk validation scripts that depend on its formatting utilities. |
 
+### Environment Setup
+- `pip install -e .[dev]`
+- `pip install nox`  # not preinstalled in some environments
+
+### Quick Usage
+- Convert PDF via library CLI:
+  ```bash
+  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
+  ```
+- Or use the script wrapper:
+  ```bash
+  python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
+  ```
+
 ## Pass Responsibilities
 
 <!-- BEGIN AUTO-PASSES -->
@@ -342,9 +356,10 @@ Tests must:
 ## Programmatic Checks for OpenAI Codex
 
 ```bash
-black pdf_chunker/ scripts/ tests/
-flake8 pdf_chunker/ scripts/ tests/
-mypy pdf_chunker/
+pip install nox  # if missing
+nox -s lint
+nox -s typecheck
+nox -s tests
 bash scripts/validate_chunks.sh
 `````
 
