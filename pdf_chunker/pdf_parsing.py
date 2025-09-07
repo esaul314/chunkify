@@ -33,8 +33,8 @@ def extract_text_blocks_from_pdf(
         blk for page in read_pages(filepath, excluded) for blk in page.blocks
     )
     blocks = strip_artifacts(blocks, None)
-    blocks = merge_continuation_blocks(blocks)
     blocks = apply_fallbacks(blocks, filepath, excluded)
+    blocks = merge_continuation_blocks(blocks)
     return [asdict(b) for b in blocks]
 
 

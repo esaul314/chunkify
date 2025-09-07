@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional, Callable, Sequence, Tuple
 
-from .pdf_blocks import Block, merge_continuation_blocks
+from .pdf_blocks import Block
 
 try:
     from .extraction_fallbacks import (
@@ -77,6 +77,6 @@ def apply_fallbacks(
         )
         if score <= quality:
             continue
-        return list(merge_continuation_blocks(fallback))
+        return fallback
 
     return primary
