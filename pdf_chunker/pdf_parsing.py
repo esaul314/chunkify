@@ -4,7 +4,6 @@ import os
 import re
 import logging
 from dataclasses import asdict
-from functools import reduce
 from typing import Optional, Callable, Any, Tuple, Sequence, Mapping
 
 import fitz  # PyMuPDF
@@ -18,11 +17,7 @@ except Exception:
 
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .page_utils import validate_page_exclusions
-from .page_artifacts import (
-    is_page_artifact_text,
-    remove_page_artifact_lines,
-    strip_page_artifact_suffix,
-)
+from .page_artifacts import strip_artifacts
 
 try:
     from .extraction_fallbacks import (
@@ -62,9 +57,9 @@ from .pdf_blocks import Block, merge_continuation_blocks, _extract_page_blocks
 logger = logging.getLogger(__name__)
 
 
-def extract_blocks_from_page(page, page_num, filename) -> list[dict]:
-    """Proxy to ``_extract_page_blocks`` returning dictionaries."""
-    return [asdict(b) for b in _extract_page_blocks(page, page_num, filename)]
+def extract_blocks_from_page(page, page_num, filename) -> list[Block]:
+    """Proxy to ``_extract_page_blocks`` returning ``Block`` objects."""
+    return _extract_page_blocks(page, page_num, filename)
 
 _extract_with_pdftotext: Callable[[str, Optional[str]], list[dict[str, Any]]] = (
     _extract_with_pdftotext_impl
@@ -179,7 +174,7 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
             logger.error(f"Error validating page exclusions: {e}")
             excluded = excluded_pages_set
 
-    all_blocks = []
+    all_blocks: list[Block] = []
     page_block_counts = {}
 
     for page_num, page in enumerate(doc, start=1):
@@ -192,11 +187,10 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
         page_block_counts[page_num] = len(page_blocks)
         logger.debug(f"Page {page_num}: extracted {len(page_blocks)} blocks")
 
-        # Log block details for debugging
         for i, block in enumerate(page_blocks):
-            text_preview = block.get("text", "")[:100].replace("\n", "\\n")
+            text_preview = block.text[:100].replace("\n", "\\n")
             logger.debug(
-                f"Page {page_num}, Block {i}: {len(block.get('text', ''))} chars - {text_preview}..."
+                f"Page {page_num}, Block {i}: {len(block.text)} chars - {text_preview}..."
             )
         all_blocks.extend(page_blocks)
 
@@ -208,13 +202,13 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
 
     # Debug: Log sample text from first few blocks to trace cleaning
     for i, block in enumerate(all_blocks[:3]):
-        text_preview = block.get("text", "")[:100].replace("\n", "\\n")
+        text_preview = block.text[:100].replace("\n", "\\n")
         logger.debug(f"Raw block {i} text preview: {repr(text_preview)}")
 
     # Defensive filter: ensure no excluded pages made it through
-    filtered_blocks = []
+    filtered_blocks: list[Block] = []
     for block in all_blocks:
-        page = block.get("source", {}).get("page")
+        page = block.source.get("page")
         if page is not None and page in excluded:
             logger.warning(f"Filtering out block from excluded page {page}")
             continue
@@ -224,14 +218,10 @@ def extract_text_blocks_from_pdf(filepath: str, exclude_pages: Optional[str] = N
         logger.info(
             f"Filtered out {len(all_blocks) - len(filtered_blocks)} blocks from excluded pages"
         )
-    all_blocks = filtered_blocks
-
-    pre_merge_blocks = all_blocks
+    all_blocks = list(strip_artifacts(filtered_blocks, None))
+    pre_merge_blocks = [asdict(b) for b in all_blocks]
     logger.debug("Starting block merging process")
-    merged_blocks = [
-        asdict(b)
-        for b in merge_continuation_blocks(Block(**blk) for blk in all_blocks)
-    ]
+    merged_blocks = [asdict(b) for b in merge_continuation_blocks(all_blocks)]
 
     logger.debug(f"Total blocks after merging: {len(merged_blocks)}")
     # Log text flow analysis for debugging

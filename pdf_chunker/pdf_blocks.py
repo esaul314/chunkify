@@ -13,10 +13,6 @@ from .text_cleaning import (
     remove_stray_bullet_lines,
     insert_numbered_list_newlines,
 )
-from .page_artifacts import (
-    is_page_artifact_text,
-    remove_page_artifact_lines,
-)
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .extraction_fallbacks import default_language
 from .list_detection import (
@@ -82,8 +78,8 @@ def _spans_indicate_heading(spans: list[dict], text: str) -> bool:
 
 def _structured_block(page, block_tuple, page_num, filename) -> Block | None:
     raw_text = block_tuple[4]
-    cleaned = clean_text(remove_page_artifact_lines(raw_text, page_num))
-    if not cleaned or is_page_artifact_text(cleaned, page_num):
+    cleaned = clean_text(raw_text)
+    if not cleaned:
         return None
 
     is_heading = False
