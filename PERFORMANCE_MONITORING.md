@@ -269,7 +269,9 @@ Modify the extraction function to skip PyMuPDF4LLM entirely:
 
 ```python
 # In pdf_chunker/pdf_parsing.py, comment out or modify the PyMuPDF4LLM section
-def extract_text_blocks_from_pdf(filepath: str, exclude_pages: str = None) -> list[dict]:
+def extract_text_blocks_from_pdf(
+    filepath: str, exclude_pages: str | None = None
+) -> Iterable[Block]:
     """Extract structured text from a PDF using traditional methods only."""
     
     # Skip PyMuPDF4LLM extraction (rollback)

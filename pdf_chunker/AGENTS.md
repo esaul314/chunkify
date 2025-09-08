@@ -20,7 +20,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `utils.py`: Metadata mapping and helper functions.
 - `env_utils.py`: Environment flag helpers.
 - `page_artifacts.py`: Header/footer detection utilities, `strip_artifacts`.
-- `pdf_parsing.py`: High-level PDF parsing entry point.
+- `pdf_parsing.py`: High-level PDF parsing entry point offering streaming block extraction.
 - `pdf_blocks.py`: Dataclasses and helpers for page/block extraction and merging.
 - `fallbacks.py`: Quality assessment and block-level extraction fallbacks.
 - `pymupdf4llm_integration.py`: Optional PyMuPDF4LLM extraction and cleanup.

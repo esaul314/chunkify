@@ -1,4 +1,5 @@
 import sys
+from dataclasses import asdict
 
 sys.path.insert(0, ".")
 
@@ -9,7 +10,9 @@ from pdf_chunker.passes.list_detect import list_detect
 
 
 def test_bullet_list_preservation():
-    blocks = extract_text_blocks_from_pdf("sample_book3.pdf")
+    stream = extract_text_blocks_from_pdf("sample_book3.pdf")
+    assert not isinstance(stream, list)
+    blocks = [asdict(b) for b in stream]
     report = validate_chunks(blocks)
     assert report.total_chunks == len(blocks)
     assert report.empty_text == 0

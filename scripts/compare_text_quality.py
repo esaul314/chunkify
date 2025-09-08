@@ -111,13 +111,10 @@ def extract_with_traditional_method(pdf_file: str) -> List[Dict[str, Any]]:
         original_available = pymupdf4llm_module.PYMUPDF4LLM_AVAILABLE
         pymupdf4llm_module.PYMUPDF4LLM_AVAILABLE = False
 
-        # Extract blocks using traditional methods
-        blocks = extract_text_blocks_from_pdf(pdf_file)
+        blocks = [asdict(b) for b in extract_text_blocks_from_pdf(pdf_file)]
 
-        # Convert blocks to chunk format for comparison
-        chunks = []
-        for i, block in enumerate(blocks):
-            chunk = {
+        chunks = [
+            {
                 "text": block.get("text", ""),
                 "metadata": {
                     "chunk_id": f"traditional_{i}",
@@ -127,7 +124,8 @@ def extract_with_traditional_method(pdf_file: str) -> List[Dict[str, Any]]:
                     "extraction_method": "traditional",
                 },
             }
-            chunks.append(chunk)
+            for i, block in enumerate(blocks)
+        ]
 
         return chunks
 

@@ -18,6 +18,7 @@ import sys
 import os
 import json
 import re
+from dataclasses import asdict
 from typing import Dict, List, Any, Tuple
 from pathlib import Path
 
@@ -37,8 +38,7 @@ def extract_with_traditional_approach(pdf_path: str) -> List[Dict[str, Any]]:
     # Temporarily disable PyMuPDF4LLM for traditional extraction
     os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "false"
     try:
-        blocks = extract_text_blocks_from_pdf(pdf_path)
-        return blocks
+        return [asdict(b) for b in extract_text_blocks_from_pdf(pdf_path)]
     finally:
         # Restore environment
         if "PDF_CHUNKER_USE_PYMUPDF4LLM" in os.environ:
@@ -50,8 +50,7 @@ def extract_with_pymupdf4llm_approach(pdf_path: str) -> List[Dict[str, Any]]:
     # Enable PyMuPDF4LLM for enhanced extraction
     os.environ["PDF_CHUNKER_USE_PYMUPDF4LLM"] = "true"
     try:
-        blocks = extract_text_blocks_from_pdf(pdf_path)
-        return blocks
+        return [asdict(b) for b in extract_text_blocks_from_pdf(pdf_path)]
     finally:
         # Restore environment
         if "PDF_CHUNKER_USE_PYMUPDF4LLM" in os.environ:
