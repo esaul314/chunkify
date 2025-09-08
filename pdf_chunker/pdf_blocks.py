@@ -14,7 +14,7 @@ from .text_cleaning import (
     insert_numbered_list_newlines,
 )
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
-from .extraction_fallbacks import default_language
+from .language import default_language
 from .list_detection import (
     BULLET_CHARS,
     BULLET_CHARS_ESC,

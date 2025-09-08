@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup, Tag
 from typing import Dict, List, TypedDict, cast
 from .text_cleaning import clean_paragraph
 from .heading_detection import _detect_heading_fallback
-from .extraction_fallbacks import default_language
+from .language import default_language
 
 
 class TextBlock(TypedDict):
