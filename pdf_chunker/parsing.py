@@ -9,8 +9,9 @@
 # - Reduces complexity compared to complex hybrid approaches
 
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
-from typing import Optional, cast
+from typing import Optional
 
 from .epub_parsing import TextBlock, extract_text_blocks_from_epub
 from .pdf_parsing import extract_text_blocks_from_pdf
@@ -19,10 +20,10 @@ Extractor = Callable[[Path, Optional[str]], list[TextBlock]]
 
 
 def _pdf_extractor(path: Path, exclude: Optional[str]) -> list[TextBlock]:
-    return cast(
-        list[TextBlock],
-        extract_text_blocks_from_pdf(str(path), exclude_pages=exclude),
-    )
+    return [
+        asdict(b)
+        for b in extract_text_blocks_from_pdf(str(path), exclude_pages=exclude)
+    ]
 
 
 def _epub_extractor(path: Path, exclude: Optional[str]) -> list[TextBlock]:

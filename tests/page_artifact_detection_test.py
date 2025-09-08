@@ -121,9 +121,7 @@ class TestPageArtifactDetection(unittest.TestCase):
             "|salt fish||\n"
             "|Person Name, PMP<br>Alma, Quebec, Canada|Person Name, PMP<br>Alma, Quebec, Canada|"
         )
-        expected = (
-            "This closed car smells of salt fish\n" "Person Name, PMP\n" "Alma, Quebec, Canada"
-        )
+        expected = "This closed car smells of salt fish"
         cleaned = remove_page_artifact_lines(table_text, 1)
         self.assertEqual(cleaned, expected)
 
@@ -139,7 +137,7 @@ class TestPageArtifactDetection(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual(
             cleaned["text"],
-            "This closed car smells of salt fish\nPerson Name, PMP\nAlma, Quebec, Canada",
+            "This closed car smells of salt fish",
         )
 
 

@@ -21,12 +21,16 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 ### Environment Setup
 - `pip install -e .[dev]`
 - `pip install nox`  # not preinstalled in some environments
+- `apt-get install -y poppler-utils`  # provides `pdftotext`
 
 ### Quick Usage
 - Convert PDF via library CLI:
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
   ```
+- After conversion, verify the output contains the sentinel phrase
+  "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
+  ensure pages near the end are not truncated.
 - Or use the script wrapper:
   ```bash
   python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
@@ -77,7 +81,8 @@ pdf_chunker/
 │   ├── core.py                    # Orchestrates the three-pass pipeline
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
-│   ├── extraction_fallbacks.py    # Fallback strategies (pdftotext, pdfminer)
+│   ├── fallbacks.py              # Quality assessment and extraction fallbacks
+│   ├── language.py               # Default language utilities
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── list_detection.py          # Bullet and numbered list detection helpers
 │   ├── page_artifacts.py          # Header/footer detection helpers
@@ -192,7 +197,7 @@ All Python modules, scripts, and tests must be formatted with **Black**, linted 
 
 The project implements a robust **Three-Pass Pipeline**:
 
-1. **Structural Pass** (`parsing.py`, `heading_detection.py`, `extraction_fallbacks.py`)
+1. **Structural Pass** (`parsing.py`, `heading_detection.py`, `fallbacks.py`)
 
    * Extracts typographic and layout structure from PDF/EPUB
    * Hybrid approach: font-size and style heuristics + PyMuPDF4LLM cleaning
@@ -326,6 +331,13 @@ All CLI scripts follow these conventions:
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts
+
+### Streaming Extraction
+
+* `pdf_chunker.pdf_parsing.extract_text_blocks_from_pdf` now yields an iterator
+  of `Block` dataclasses for streaming consumption.
+* Use `extract_text_blocks_from_pdf_list` for the deprecated list-of-dicts
+  behaviour when eager materialisation is required.
 
 ---
 

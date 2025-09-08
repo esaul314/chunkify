@@ -1,10 +1,10 @@
-from pdf_chunker.pdf_parsing import is_artifact_block
+from pdf_chunker.pdf_blocks import _filter_margin_artifacts
 
 
-def test_is_artifact_block_numeric_only():
+def test_filter_margin_artifacts_numeric_only() -> None:
     page_height = 1000
     numeric_block = (0, 950, 100, 970, "123")
-    assert is_artifact_block(numeric_block, page_height)
-
     mixed_block = (0, 10, 100, 30, "Section 1")
-    assert not is_artifact_block(mixed_block, page_height)
+    filtered = _filter_margin_artifacts([numeric_block, mixed_block], page_height)
+    assert filtered == [mixed_block]
+

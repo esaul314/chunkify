@@ -1,10 +1,11 @@
-from pdf_chunker import pdf_parsing as mod
+import pdf_chunker.fallbacks as mod
+from pdf_chunker.pdf_blocks import Block
 
 
 def test_single_block_fallback_rejected(monkeypatch):
     original = [
-        {"text": "ok", "source": {"page": 1}},
-        {"text": "more", "source": {"page": 2}},
+        Block(text="ok", source={"page": 1}),
+        Block(text="more", source={"page": 2}),
     ]
 
     def fake_assess(text: str) -> dict[str, float]:
@@ -17,14 +18,14 @@ def test_single_block_fallback_rejected(monkeypatch):
     monkeypatch.setattr(mod, "_extract_with_pdftotext", fake_extractor)
     monkeypatch.setattr(mod, "_extract_with_pdfminer", fake_extractor)
 
-    result = mod._assess_and_maybe_fallback("dummy.pdf", None, original, 0.1)
-    assert result == original
+    result = mod.apply_fallbacks(original, "dummy.pdf", set())
+    assert list(result) == original
 
 
 def test_page_truncating_fallback_rejected(monkeypatch):
     original = [
-        {"text": "a", "source": {"page": 1}},
-        {"text": "b", "source": {"page": 2}},
+        Block(text="a", source={"page": 1}),
+        Block(text="b", source={"page": 2}),
     ]
     fallback = [
         {"text": "f1", "source": {"page": 1}},
@@ -41,5 +42,5 @@ def test_page_truncating_fallback_rejected(monkeypatch):
     monkeypatch.setattr(mod, "_extract_with_pdftotext", fake_extractor)
     monkeypatch.setattr(mod, "_extract_with_pdfminer", fake_extractor)
 
-    result = mod._assess_and_maybe_fallback("dummy.pdf", None, original, 0.1)
-    assert result == original
+    result = mod.apply_fallbacks(original, "dummy.pdf", set())
+    assert list(result) == original

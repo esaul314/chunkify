@@ -1,6 +1,7 @@
 import sys
 import re
 import pytest
+from dataclasses import asdict
 
 sys.path.insert(0, ".")
 
@@ -12,7 +13,7 @@ from pdf_chunker.text_cleaning import (
 
 
 def test_numbered_list_preservation():
-    blocks = extract_text_blocks_from_pdf("sample_book0-1.pdf")
+    blocks = [asdict(b) for b in extract_text_blocks_from_pdf("sample_book0-1.pdf")]
     blob = "\n\n".join(b["text"] for b in blocks)
     items = [line.strip() for line in blob.splitlines() if re.match(r"\d+\.", line.strip())]
     assert len(items) == 4

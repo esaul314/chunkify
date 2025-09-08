@@ -1,8 +1,12 @@
 import logging
 import re
+from dataclasses import replace
 from functools import reduce
 from itertools import takewhile
-from typing import Optional
+from typing import Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .pdf_blocks import Block
 
 
 ROMAN_RE = r"[ivxlcdm]+"
@@ -462,3 +466,13 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
         cleaned_lines[0] = first[0].upper() + first[1:]
     cleaned_lines = _drop_trailing_bullet_footers(cleaned_lines)
     return "\n".join(cleaned_lines)
+
+
+def strip_artifacts(blocks: Iterable["Block"], config=None) -> Iterable["Block"]:
+    """Yield blocks with header and footer artifacts stripped."""
+
+    for blk in blocks:
+        page = blk.source.get("page")
+        cleaned = remove_page_artifact_lines(blk.text, page)
+        if cleaned and not is_page_artifact_text(cleaned, page):
+            yield replace(blk, text=cleaned)

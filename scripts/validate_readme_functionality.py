@@ -138,8 +138,8 @@ class READMEValidator:
             from pdf_chunker.pdf_parsing import (
                 extract_text_blocks_from_pdf,
                 extract_blocks_from_page,
-                merge_continuation_blocks,
             )
+            from pdf_chunker.pdf_blocks import merge_continuation_blocks
 
             # Check function signatures and callability
             functions = [
