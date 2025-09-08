@@ -41,3 +41,32 @@ def test_emit_jsonl_merges_tail_fragment():
     assert len(rows) == 1
     assert rows[0]["text"].startswith("All prior context")
     assert rows[0]["text"].endswith("ends properly.")
+
+
+def test_emit_jsonl_drops_incoherent_tail():
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": (
+                    "This opening sentence is intentionally long to satisfy the"
+                    " coherence heuristic and ends properly."
+                )
+            },
+            {
+                "text": (
+                    "and lacks terminal punctuation while being sufficiently long to"
+                    " trigger validation logic"
+                )
+            },
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert rows == [
+        {
+            "text": (
+                "This opening sentence is intentionally long to satisfy the coherence"
+                " heuristic and ends properly."
+            )
+        }
+    ]

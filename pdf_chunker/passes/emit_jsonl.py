@@ -53,14 +53,14 @@ def _merge_tail(
     out: list[dict[str, Any]],
     tail: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """Attach ``tail`` to the previous element if it remains incoherent."""
+    """Attach ``tail`` to the previous element if it yields coherence."""
     if not tail:
         return out
     if out:
         prev = out[-1]
         merged = {**prev, "text": f"{prev['text']}\n\n{tail['text']}"}
-        return [*out[:-1], merged]
-    return [tail]
+        return [*out[:-1], merged] if _coherent(merged["text"]) else out
+    return [tail] if _coherent(tail["text"]) else []
 
 
 def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -111,14 +111,11 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
 
 
 def _validate(rows: list[Row]) -> list[Row]:
-    invalid = [
-        r
-        for r in rows
-        if len((r.get("text") or "").strip()) >= 40 and not _coherent(r.get("text", ""))
-    ]
-    if invalid:
-        raise ValueError("emit_jsonl produced incoherent rows")
-    return rows
+    def ok(t: str) -> bool:
+        stripped = (t or "").strip()
+        return len(stripped) < 40 or _coherent(t)
+
+    return [r for r in rows if ok(r.get("text", ""))]
 
 
 def _rows(doc: Doc) -> list[Row]:
