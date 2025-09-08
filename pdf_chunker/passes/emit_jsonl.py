@@ -12,6 +12,14 @@ Row = dict[str, Any]
 Doc = dict[str, Any]
 
 
+def _min_words() -> int:
+    return int(os.getenv("PDF_CHUNKER_JSONL_MIN_WORDS", "50"))
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b\w+\b", text))
+
+
 def _metadata_key() -> str:
     return os.getenv("PDF_CHUNKER_JSONL_META_KEY", "metadata")
 
@@ -84,12 +92,16 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         if acc:
             prev = acc[-1]
             text = _trim_overlap(prev["text"], text)
-            if not _coherent(prev["text"]):
-                merged = f"{prev['text']}\n\n{text}"
-                acc[-1] = {**prev, "text": merged}
-                return acc
-            if _starts_mid_sentence(text):
-                merged = f"{prev['text']}\n\n{text}"
+            prev_words = _word_count(prev["text"])
+            curr_words = _word_count(text)
+            should_merge = (
+                prev_words < _min_words()
+                or curr_words < _min_words()
+                or not _coherent(prev["text"])
+                or _starts_mid_sentence(text)
+            )
+            if should_merge:
+                merged = f"{prev['text']}\n\n{text}".strip()
                 if _coherent(merged):
                     acc[-1] = {**prev, "text": merged}
                 return acc
@@ -116,6 +128,7 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
 
     def build(idx_piece: tuple[int, str]) -> Row:
         idx, piece = idx_piece
+        piece = piece.lstrip()
         if meta and len(pieces) > 1:
             meta_part = {meta_key: {**meta, "chunk_part": idx}}
         else:
