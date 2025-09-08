@@ -27,3 +27,17 @@ def test_emit_jsonl_merges_incomplete_sentences():
     assert len(rows) == 1
     assert rows[0]["text"].startswith("This is the beginning of a sentence")
     assert rows[0]["text"].endswith("rules.")
+
+
+def test_emit_jsonl_merges_tail_fragment():
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": "All prior context resolves a sentence."},
+            {"text": "continues the thought and ends properly."},
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert len(rows) == 1
+    assert rows[0]["text"].startswith("All prior context")
+    assert rows[0]["text"].endswith("ends properly.")

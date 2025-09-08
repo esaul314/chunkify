@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import json
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.utils import _truncate_chunk
@@ -49,9 +49,24 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
-def _coalesce(items: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+def _merge_tail(
+    out: list[dict[str, Any]],
+    tail: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Attach ``tail`` to the previous element if it remains incoherent."""
+    if not tail:
+        return out
+    if out:
+        prev = out[-1]
+        merged = {**prev, "text": f"{prev['text']}\n\n{tail['text']}"}
+        return [*out[:-1], merged]
+    return [tail]
+
+
+def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge consecutive items until their text forms a coherent sentence."""
     buf: dict[str, Any] | None = None
+    out: list[dict[str, Any]] = []
 
     for item in items:
         text = (item.get("text") or "").strip()
@@ -59,13 +74,12 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
             continue
         merged = {**item, "text": f"{buf['text']}\n\n{text}" if buf else text}
         if _coherent(merged["text"]):
+            out.append(merged)
             buf = None
-            yield merged
         else:
             buf = merged
 
-    if buf:
-        yield buf
+    return _merge_tail(out, buf)
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
@@ -96,9 +110,21 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     return [build(x) for x in enumerate(pieces)]
 
 
+def _validate(rows: list[Row]) -> list[Row]:
+    invalid = [
+        r
+        for r in rows
+        if len((r.get("text") or "").strip()) >= 40 and not _coherent(r.get("text", ""))
+    ]
+    if invalid:
+        raise ValueError("emit_jsonl produced incoherent rows")
+    return rows
+
+
 def _rows(doc: Doc) -> list[Row]:
     items = _coalesce(doc.get("items", []))
-    return [r for i in items for r in _rows_from_item(i)]
+    rows = [r for i in items for r in _rows_from_item(i)]
+    return _validate(rows)
 
 
 def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
