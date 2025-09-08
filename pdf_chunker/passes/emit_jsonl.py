@@ -3,13 +3,21 @@ from __future__ import annotations
 import os
 import re
 import json
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
 Doc = dict[str, Any]
+
+
+def _min_words() -> int:
+    return int(os.getenv("PDF_CHUNKER_JSONL_MIN_WORDS", "50"))
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b\w+\b", text))
 
 
 def _metadata_key() -> str:
@@ -49,23 +57,61 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
-def _coalesce(items: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
-    """Merge consecutive items until their text forms a coherent sentence."""
-    buf: dict[str, Any] | None = None
+def _trim_overlap(prev: str, curr: str, max_len: int = 80) -> str:
+    """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
-    for item in items:
-        text = (item.get("text") or "").strip()
-        if not text:
-            continue
-        merged = {**item, "text": f"{buf['text']}\n\n{text}" if buf else text}
-        if _coherent(merged["text"]):
-            buf = None
-            yield merged
-        else:
-            buf = merged
+    prev_lower, curr_lower = prev.lower(), curr.lower()
+    length = min(len(prev_lower), len(curr_lower), max_len)
+    overlap = next(
+        (i for i in range(length, 0, -1) if prev_lower.endswith(curr_lower[:i])),
+        0,
+    )
+    if overlap:
+        return curr[overlap:].lstrip()
 
-    if buf:
-        yield buf
+    prefix = curr_lower.split("\n\n", 1)[0]
+    if prefix and prefix in prev_lower:
+        return curr[len(prefix) :].lstrip()
+
+    return curr
+
+
+def _starts_mid_sentence(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
+
+
+def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize item boundaries, trimming overlap and merging fragments."""
+
+    cleaned = [{**i, "text": (i.get("text") or "").strip()} for i in items]
+    cleaned = [i for i in cleaned if i["text"]]
+
+    def step(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+        text = item["text"]
+        if acc:
+            prev = acc[-1]
+            text = _trim_overlap(prev["text"], text)
+            prev_words = _word_count(prev["text"])
+            curr_words = _word_count(text)
+            should_merge = (
+                prev_words < _min_words()
+                or curr_words < _min_words()
+                or not _coherent(prev["text"])
+                or _starts_mid_sentence(text)
+            )
+            if should_merge:
+                merged = f"{prev['text']}\n\n{text}".strip()
+                if _coherent(merged):
+                    acc[-1] = {**prev, "text": merged}
+                return acc
+        return [*acc, {**item, "text": text}]
+
+    merged: list[dict[str, Any]] = []
+    for i in cleaned:
+        merged = step(merged, i)
+
+    return [m for m in merged if _coherent(m["text"])]
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
@@ -82,6 +128,7 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
 
     def build(idx_piece: tuple[int, str]) -> Row:
         idx, piece = idx_piece
+        piece = piece.lstrip()
         if meta and len(pieces) > 1:
             meta_part = {meta_key: {**meta, "chunk_part": idx}}
         else:
