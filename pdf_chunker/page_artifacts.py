@@ -335,7 +335,7 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
 
 
 FOOTNOTE_LINE_RE = re.compile(
-    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}[.)]?|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.(?:\s*|$)\n?"
+    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}[.)]?|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.\s*$"
 )
 
 
