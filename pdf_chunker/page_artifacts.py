@@ -334,20 +334,26 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
     return text
 
 
-FOOTNOTE_LINE_RE = re.compile(
-    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}[.)]?|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.\s*$"
-)
+FOOTNOTE_PREFIX_RE = re.compile(rf"^\s*(?:[0-9{_SUP_DIGITS_ESC}]+[.)]?|[\*\u2020])\s+")
+
+
+def is_probable_footnote(line: str, idx: int, total: int) -> bool:
+    """Return ``True`` for short numbered lines near page edges."""
+
+    edge_band = 2
+    return (
+        (idx < edge_band or idx >= total - edge_band)
+        and len(line.split()) <= 4
+        and bool(FOOTNOTE_PREFIX_RE.match(line))
+    )
 
 
 def _strip_footnote_lines(text: str) -> str:
     """Remove short footnote lines while preserving real list items."""
 
     lines = text.splitlines()
-    kept = [
-        ln
-        for ln in lines
-        if not (FOOTNOTE_LINE_RE.match(ln) and len(ln.split()) <= 8)
-    ]
+    total = len(lines)
+    kept = (ln for idx, ln in enumerate(lines) if not is_probable_footnote(ln, idx, total))
     return "\n".join(kept)
 
 
