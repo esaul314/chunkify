@@ -1,5 +1,6 @@
 import os
 import pytest
+from pdf_chunker.pdf_blocks import Block
 
 pytest.importorskip("fitz")
 
@@ -23,7 +24,7 @@ def test_use_pymupdf4llm_env(monkeypatch):
 
     def fake_extract(path, exclude):
         captured["env"] = os.getenv("PDF_CHUNKER_USE_PYMUPDF4LLM")
-        return [{"source": {"page": 1, "index": 0}}]
+        yield Block(text="", source={"page": 1, "index": 0})
 
     monkeypatch.setenv("PDF_CHUNKER_USE_PYMUPDF4LLM", "0")
     target = "pdf_chunker.pdf_parsing.extract_text_blocks_from_pdf"

@@ -332,6 +332,13 @@ All CLI scripts follow these conventions:
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts
 
+### Streaming Extraction
+
+* `pdf_chunker.pdf_parsing.extract_text_blocks_from_pdf` now yields an iterator
+  of `Block` dataclasses for streaming consumption.
+* Use `extract_text_blocks_from_pdf_list` for the deprecated list-of-dicts
+  behaviour when eager materialisation is required.
+
 ---
 
 ## Testing Requirements for OpenAI Codex

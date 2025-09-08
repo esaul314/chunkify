@@ -1,5 +1,6 @@
 import re
 import sys
+from dataclasses import asdict
 
 sys.path.insert(0, ".")
 
@@ -7,7 +8,7 @@ from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 
 
 def test_sample_local_pdf_lists_have_newlines():
-    blocks = extract_text_blocks_from_pdf("sample-local-pdf.pdf")
+    blocks = [asdict(b) for b in extract_text_blocks_from_pdf("sample-local-pdf.pdf")]
     blob = "\n\n".join(b["text"] for b in blocks)
 
     assert ":\n\n1. First numbered item" in blob

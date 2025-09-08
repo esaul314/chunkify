@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 from tests.utils.materialize import materialize_base64
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,8 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
         if line.strip()
     ]
     assert rows
+    # Exercise streaming extraction without relying on chunk counts
+    assert sum(1 for _ in extract_text_blocks_from_pdf(str(pdf_path))) > 0
     report = json.loads((tmp_path / "run_report.json").read_text())
     assert {"timings", "metrics", "warnings"} <= report.keys()
     assert report["metrics"]["page_count"] == 3

@@ -211,9 +211,12 @@ def extract_with_traditional_approach(pdf_file: str, **kwargs) -> List[Dict[str,
         pymupdf4llm_module.PYMUPDF4LLM_AVAILABLE = False
 
         # Use the PDF parsing function which will now use traditional methods
-        blocks = extract_text_blocks_from_pdf(pdf_file, exclude_pages=kwargs.get("exclude_pages"))
-
-        return blocks
+        return [
+            asdict(b)
+            for b in extract_text_blocks_from_pdf(
+                pdf_file, exclude_pages=kwargs.get("exclude_pages")
+            )
+        ]
 
     finally:
         # Restore original PyMuPDF4LLM availability

@@ -1,4 +1,4 @@
-"""High-level PDF block extraction orchestrator."""
+"""High-level PDF block extraction orchestrator with streaming support."""
 
 from __future__ import annotations
 
@@ -26,27 +26,47 @@ def _excluded_pages(filepath: str, exclude: Optional[str]) -> set[int]:
     )
 
 
-def extract_text_blocks_from_pdf(
-    filepath: str, exclude_pages: Optional[str] = None
-) -> list[dict]:
-    """Extract text blocks from ``filepath`` respecting ``exclude_pages``."""
+def _block_pipeline(filepath: str, excluded: set[int]) -> list[Block]:
+    """Return merged blocks for ``filepath`` respecting ``excluded`` pages."""
 
-    excluded = _excluded_pages(filepath, exclude_pages)
-    pipeline = merge_continuation_blocks(
-        apply_fallbacks(
-            strip_artifacts(
-                (
-                    blk
-                    for page in read_pages(filepath, excluded)
-                    for blk in page.blocks
+    return list(
+        merge_continuation_blocks(
+            apply_fallbacks(
+                strip_artifacts(
+                    (
+                        blk
+                        for page in read_pages(filepath, excluded)
+                        for blk in page.blocks
+                    ),
+                    None,
                 ),
-                None,
-            ),
-            filepath,
-            excluded,
+                filepath,
+                excluded,
+            )
         )
     )
-    return [asdict(b) for b in pipeline]
+
+
+def extract_text_blocks_from_pdf(
+    filepath: str, exclude_pages: Optional[str] = None
+) -> Iterable[Block]:
+    """Yield ``Block`` objects from ``filepath`` respecting ``exclude_pages``.
+
+    A list-based wrapper is available via :func:`extract_text_blocks_from_pdf_list`
+    for consumers that require materialised dictionaries. The iterator form
+    enables streaming consumption and reduces peak memory usage.
+    """
+
+    excluded = _excluded_pages(filepath, exclude_pages)
+    return iter(_block_pipeline(filepath, excluded))
+
+
+def extract_text_blocks_from_pdf_list(
+    filepath: str, exclude_pages: Optional[str] = None
+) -> list[dict]:
+    """Deprecated shim returning a materialised list of block dictionaries."""
+
+    return [asdict(b) for b in _block_pipeline(filepath, _excluded_pages(filepath, exclude_pages))]
 
 
 def _legacy_extract_text_blocks_from_pdf(
@@ -54,4 +74,4 @@ def _legacy_extract_text_blocks_from_pdf(
 ) -> list[dict]:
     """Backward-compatible shim for older imports."""
 
-    return extract_text_blocks_from_pdf(filepath, exclude_pages)
+    return extract_text_blocks_from_pdf_list(filepath, exclude_pages)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Sequence
+from dataclasses import asdict
 from contextlib import contextmanager
 from itertools import groupby
 from pathlib import Path
@@ -93,7 +94,7 @@ def _primary_blocks(
     with _env("PDF_CHUNKER_USE_PYMUPDF4LLM", "1" if use_pymupdf4llm else "0"):
         from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 
-        return extract_text_blocks_from_pdf(path, exclude)
+        return [asdict(b) for b in extract_text_blocks_from_pdf(path, exclude)]
 
 
 def _fallback_blocks(
