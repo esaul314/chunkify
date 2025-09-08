@@ -94,3 +94,14 @@ def test_lowercase_chapter_followed_by_next_number() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "chapter. 3." not in cleaned
     assert "chapter.\n3." in cleaned
+
+
+def test_multiline_numbered_item_continuation() -> None:
+    text = (
+        "2. The shortage, combined with people cobbling together their own\n"
+        "Terraform all over the company, often led leadership to centralize the work across multiple teams"
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "own\n\nTerraform" not in cleaned
+    assert "own Terraform" in cleaned
