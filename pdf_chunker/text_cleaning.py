@@ -87,7 +87,6 @@ SMART_QUOTES = {
 }
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
-
     # ensure space before an opening quote stuck to previous text (letters only)
     (re.compile(r'(?<=[A-Za-z])"(?=\w)'), r' "'),
     # ensure space after a closing quote stuck to a word character
@@ -175,8 +174,10 @@ INLINE_FOOTNOTE_RE = re.compile(rf"(?<!\d)\.([0-9{_SUP_DIGITS_ESC}]+)(\s|$)")
 
 # Hyphenated word joiners (compiled with constants above)
 _HYPHEN_BULLET_OPT = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
-HYPHEN_BREAK_RE = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s*\n\s*{_HYPHEN_BULLET_OPT}([A-Za-z]+)")
-HYPHEN_SPACE_RE = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}([A-Za-z]+)")
+HYPHEN_BREAK_RE = re.compile(
+    rf"([A-Za-z]+)[{HYPHEN_CHARS_ESC}]\s*\n\s*{_HYPHEN_BULLET_OPT}([A-Za-z]+)"
+)
+HYPHEN_SPACE_RE = re.compile(rf"([A-Za-z]+)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}([A-Za-z]+)")
 
 
 # ---------------------------------------------------------------------------
@@ -184,13 +185,27 @@ HYPHEN_SPACE_RE = re.compile(rf"(\w)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}(
 # ---------------------------------------------------------------------------
 
 
+def _choose_hyphenation(head: str, tail: str) -> str:
+    """Return the most plausible join of ``head`` and ``tail``.
+
+    Prefers the hyphenated form when its corpus frequency is at least as high
+    as the unhyphenated join. This preserves legitimate hyphenated compounds
+    while still repairing line-break hyphenation artifacts.
+    """
+
+    joined = head + tail
+    hyphenated = f"{head}-{tail}"
+    joined_freq = zipf_frequency(joined, "en")
+    hyphen_freq = zipf_frequency(hyphenated, "en")
+    return hyphenated if hyphen_freq >= joined_freq else joined
+
+
 def _join_hyphenated_words(text: str) -> str:
     """Merge words broken with hyphenation across line breaks."""
 
     def repl(match: Match[str]) -> str:
         head, tail = match.group(1), match.group(2)
-        tail = tail[1:] if tail and tail[0].lower() == head.lower() else tail
-        return f"{head}{tail}"
+        return _choose_hyphenation(head, tail)
 
     return HYPHEN_SPACE_RE.sub(repl, HYPHEN_BREAK_RE.sub(repl, text))
 
