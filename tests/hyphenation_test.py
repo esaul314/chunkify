@@ -15,7 +15,14 @@ def test_hyphenation_fix_with_pymupdf4llm(force_pymupdf4llm):
     sample = "a con-\n tainer and special-\n ists in man-\n agement"
     cleaned = clean_text(sample)
     assert all(word in cleaned for word in ("container", "specialists", "management"))
-    assert all(broken not in cleaned for broken in ("con- tainer", "special- ists", "man- agement"))
+    assert all(
+        broken not in cleaned
+        for broken in (
+            "con- tainer",
+            "special- ists",
+            "man- agement",
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -50,3 +57,13 @@ def test_bullet_hyphen_continuation():
     cleaned = clean_text(text)
     assert "ambiguous" in cleaned
     assert cleaned.count("*") == 1
+
+
+def test_join_preserves_double_letters():
+    text = "bal-\n loon"
+    assert clean_text(text) == "balloon"
+
+
+def test_crossline_hyphen_preserved():
+    text = "business-\ncritical systems"
+    assert "business-critical systems" in clean_text(text)

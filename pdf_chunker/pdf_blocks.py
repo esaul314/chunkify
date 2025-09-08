@@ -31,6 +31,7 @@ from .list_detection import (
 
 # -- Data models -------------------------------------------------------------------------
 
+
 @dataclass
 class Block:
     text: str
@@ -47,6 +48,7 @@ class PagePayload:
 
 
 # -- Page extraction --------------------------------------------------------------------
+
 
 def _filter_margin_artifacts(blocks, page_height: float) -> list:
     numeric_pattern = r"^[0-9ivxlcdm]+$"
@@ -194,7 +196,7 @@ def _is_indented_continuation(curr: Block, nxt: Block) -> bool:
 
 def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     if (
-        curr_text.endswith(('."', '.\'', '!"', "!'", '?"', "?'") )
+        curr_text.endswith(('."', ".'", '!"', "!'", '?"', "?'"))
         and next_text
         and next_text[0].isupper()
     ):
@@ -408,9 +410,7 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
                 elif reason == "sentence_continuation":
                     merged_text = current_text + " " + next_text
                 elif reason.startswith("bullet_"):
-                    merged_text, remainder = _merge_bullet_text(
-                        reason, current_text, next_text
-                    )
+                    merged_text, remainder = _merge_bullet_text(reason, current_text, next_text)
                     current = replace(current, text=merged_text)
                     current_text = merged_text
                     merged_any = True
@@ -427,10 +427,12 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
                     processed = insert_numbered_list_newlines(next_text)
                     merged_text = current_text + " " + processed
                 elif reason == "numbered_suffix":
-                    marker = re.search(r"\n(\d+[.)])\s*$", current_text).group(1)
+                    marker_match = re.search(r"\n(\d+[.)])\s*$", current_text)
                     base = re.sub(r"\n\d+[.)]\s*$", "", current_text)
                     processed = insert_numbered_list_newlines(next_text)
-                    merged_text = f"{base}\n{marker} {processed}".strip()
+                    marker = marker_match.group(1) if marker_match else ""
+                    prefix = f"{marker} " if marker else ""
+                    merged_text = f"{base}\n{prefix}{processed}".strip()
                 elif reason == "indented_continuation":
                     merged_text = current_text + "\n" + next_text
                 elif reason == "author_attribution":
@@ -447,4 +449,3 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
         merged.append(current)
         i = j if merged_any else i + 1
     return merged
-
