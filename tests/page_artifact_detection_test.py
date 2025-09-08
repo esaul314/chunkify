@@ -140,6 +140,16 @@ class TestPageArtifactDetection(unittest.TestCase):
             "This closed car smells of salt fish",
         )
 
+    def test_numbered_list_item_not_removed(self):
+        text = (
+            "1. Most engineers don\u2019t want to learn a whole new toolset for infrequent tasks.\n"
+            "1.\n"
+            "Infrastructure setup and provisioning are not an everyday core focus."
+        )
+        cleaned = remove_page_artifact_lines(text, 20)
+        self.assertIn("Most engineers", cleaned)
+        self.assertIn("Infrastructure setup", cleaned)
+
 
 if __name__ == "__main__":
     unittest.main()

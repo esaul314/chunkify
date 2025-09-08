@@ -335,14 +335,20 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
 
 
 FOOTNOTE_LINE_RE = re.compile(
-    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.(?:\s*|$)\n?"
+    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}[.)]?|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.(?:\s*|$)\n?"
 )
 
 
 def _strip_footnote_lines(text: str) -> str:
-    """Remove footnote lines merged into surrounding text."""
+    """Remove short footnote lines while preserving real list items."""
 
-    return FOOTNOTE_LINE_RE.sub("", text)
+    lines = text.splitlines()
+    kept = [
+        ln
+        for ln in lines
+        if not (FOOTNOTE_LINE_RE.match(ln) and len(ln.split()) <= 8)
+    ]
+    return "\n".join(kept)
 
 
 FOOTNOTE_MARKER_RE = re.compile(rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+")
