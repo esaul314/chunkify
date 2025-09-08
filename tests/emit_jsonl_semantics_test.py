@@ -43,9 +43,9 @@ def test_emit_jsonl_merges_tail_fragment():
     assert rows[0]["text"].endswith("ends properly.")
 
 
-def test_emit_jsonl_trims_overlap():
+def test_emit_jsonl_trims_overlap_without_merging():
     first = "An act of parallel evolution, in about 2004 Google moved away."
-    second = "act of parallel\n\nCaused a lot of excitement."
+    second = "Act of parallel\n\nCaused a lot of excitement across the team."
     doc = {
         "type": "chunks",
         "items": [
@@ -55,12 +55,8 @@ def test_emit_jsonl_trims_overlap():
     }
     rows = emit_jsonl(Artifact(payload=doc)).payload
     assert rows == [
-        {
-            "text": (
-                "An act of parallel evolution, in about 2004 Google moved away."
-                "\n\nCaused a lot of excitement."
-            )
-        }
+        {"text": first},
+        {"text": "Caused a lot of excitement across the team."},
     ]
 
 

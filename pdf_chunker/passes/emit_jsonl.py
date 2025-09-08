@@ -49,51 +49,57 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
-def _merge_overlap(prev: str, curr: str, max_len: int = 80) -> str:
-    """Merge ``curr`` into ``prev`` removing duplicated prefix."""
+def _trim_overlap(prev: str, curr: str, max_len: int = 80) -> str:
+    """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
-    length = min(len(prev), len(curr), max_len)
-    overlap = next((i for i in range(length, 0, -1) if prev.endswith(curr[:i])), 0)
+    prev_lower, curr_lower = prev.lower(), curr.lower()
+    length = min(len(prev_lower), len(curr_lower), max_len)
+    overlap = next(
+        (i for i in range(length, 0, -1) if prev_lower.endswith(curr_lower[:i])),
+        0,
+    )
     if overlap:
-        trimmed = curr[overlap:].lstrip()
-        return f"{prev}\n\n{trimmed}" if trimmed else prev
+        return curr[overlap:].lstrip()
 
-    prefix = curr.split("\n\n", 1)[0]
-    if prefix and prefix in prev:
-        trimmed = curr[len(prefix) :].lstrip()
-        return f"{prev}\n\n{trimmed}" if trimmed else prev
+    prefix = curr_lower.split("\n\n", 1)[0]
+    if prefix and prefix in prev_lower:
+        return curr[len(prefix) :].lstrip()
 
-    return f"{prev}\n\n{curr}"
+    return curr
+
+
+def _starts_mid_sentence(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
 
 
 def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Merge neighboring items while preserving semantic coherence."""
-    buf: dict[str, Any] | None = None
-    out: list[dict[str, Any]] = []
+    """Normalize item boundaries, trimming overlap and merging fragments."""
 
-    for item in items:
-        text = (item.get("text") or "").strip()
-        if not text:
-            continue
-        current = {**item, "text": text}
-        if _coherent(text):
-            if buf:
-                merged = {**current, "text": f"{buf['text']}\n\n{text}"}
-                out.append(merged if _coherent(merged["text"]) else current)
-                buf = None
-            else:
-                out.append(current)
-        elif out:
-            prev = out[-1]
-            merged_text = _merge_overlap(prev["text"], text)
-            if _coherent(merged_text):
-                out[-1] = {**prev, "text": merged_text}
-        else:
-            buf = current if not buf else {**buf, "text": f"{buf['text']}\n\n{text}"}
+    cleaned = [{**i, "text": (i.get("text") or "").strip()} for i in items]
+    cleaned = [i for i in cleaned if i["text"]]
 
-    if buf and _coherent(buf["text"]):
-        out.append(buf)
-    return out
+    def step(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+        text = item["text"]
+        if acc:
+            prev = acc[-1]
+            text = _trim_overlap(prev["text"], text)
+            if not _coherent(prev["text"]):
+                merged = f"{prev['text']}\n\n{text}"
+                acc[-1] = {**prev, "text": merged}
+                return acc
+            if _starts_mid_sentence(text):
+                merged = f"{prev['text']}\n\n{text}"
+                if _coherent(merged):
+                    acc[-1] = {**prev, "text": merged}
+                return acc
+        return [*acc, {**item, "text": text}]
+
+    merged: list[dict[str, Any]] = []
+    for i in cleaned:
+        merged = step(merged, i)
+
+    return [m for m in merged if _coherent(m["text"])]
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
