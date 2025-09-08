@@ -102,7 +102,7 @@ def _fallback_blocks(
 ) -> list[dict[str, Any]]:
     """Invoke subprocess-based fallback extraction strategies."""
 
-    from pdf_chunker.extraction_fallbacks import execute_fallback_extraction
+    from pdf_chunker.fallbacks import execute_fallback_extraction
 
     return execute_fallback_extraction(
         path,

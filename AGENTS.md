@@ -81,7 +81,8 @@ pdf_chunker/
 │   ├── core.py                    # Orchestrates the three-pass pipeline
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
-│   ├── extraction_fallbacks.py    # Fallback strategies (pdftotext, pdfminer)
+│   ├── fallbacks.py              # Quality assessment and extraction fallbacks
+│   ├── language.py               # Default language utilities
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── list_detection.py          # Bullet and numbered list detection helpers
 │   ├── page_artifacts.py          # Header/footer detection helpers
@@ -196,7 +197,7 @@ All Python modules, scripts, and tests must be formatted with **Black**, linted 
 
 The project implements a robust **Three-Pass Pipeline**:
 
-1. **Structural Pass** (`parsing.py`, `heading_detection.py`, `extraction_fallbacks.py`)
+1. **Structural Pass** (`parsing.py`, `heading_detection.py`, `fallbacks.py`)
 
    * Extracts typographic and layout structure from PDF/EPUB
    * Hybrid approach: font-size and style heuristics + PyMuPDF4LLM cleaning

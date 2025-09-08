@@ -11,7 +11,8 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `parsing.py`: Structural block extraction.
 - `text_cleaning.py`: Ligature repair, quote normalization, control-character removal.
 - `heading_detection.py`: Infers heading hierarchy.
-- `extraction_fallbacks.py`: Fallback strategies with scoring.
+- `fallbacks.py`: Quality assessment and block-level extraction fallbacks.
+- `language.py`: Default language utilities.
 - `page_utils.py`: Page range parsing/filtering.
 - `epub_parsing.py`: Spine discovery and exclusion.
 - `splitter.py`: Enforces chunk boundaries and semantic cohesion.
