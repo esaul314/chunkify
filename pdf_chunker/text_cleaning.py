@@ -130,7 +130,7 @@ NUMBERED_INLINE_CANDIDATE_RE = re.compile(
     r"(\d{1,3}[.)](?:[^\n]|\n(?!\n|\d))*?)\s+(?=(\d{1,3}[.)]))"
 )
 NUMBERED_END_RE = re.compile(
-    rf"(\d{{1,3}}[.)][^\n]+?)"
+    rf"(\d{{1,3}}[.)][^\n]*[{re.escape(END_PUNCT)}])"
     rf"(?<![{re.escape(END_PUNCT)}]\")"
     rf"(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b(?!\s+\d)|$))"
 )
@@ -350,9 +350,12 @@ def _apply_inline_numbered(text: str) -> str:
 
 def insert_numbered_list_newlines(text: str) -> str:
     """Insert newlines around numbered list items and terminate the list with a paragraph break."""
-    text = NUMBERED_AFTER_COLON_RE.sub(r":\n\1", text)
-    text = _apply_inline_numbered(text)
-    return NUMBERED_END_RE.sub(r"\1\n\n", text)
+    return pipe(
+        text,
+        lambda t: NUMBERED_AFTER_COLON_RE.sub(r":\n\1", t),
+        _apply_inline_numbered,
+        lambda t: NUMBERED_END_RE.sub(r"\1\n\n", t),
+    )
 
 
 def _preserve_list_newlines(text: str) -> str:
