@@ -49,22 +49,25 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
-def _merge_tail(
-    out: list[dict[str, Any]],
-    tail: dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    """Attach ``tail`` to the previous element if it yields coherence."""
-    if not tail:
-        return out
-    if out:
-        prev = out[-1]
-        merged = {**prev, "text": f"{prev['text']}\n\n{tail['text']}"}
-        return [*out[:-1], merged] if _coherent(merged["text"]) else out
-    return [tail] if _coherent(tail["text"]) else []
+def _merge_overlap(prev: str, curr: str, max_len: int = 80) -> str:
+    """Merge ``curr`` into ``prev`` removing duplicated prefix."""
+
+    length = min(len(prev), len(curr), max_len)
+    overlap = next((i for i in range(length, 0, -1) if prev.endswith(curr[:i])), 0)
+    if overlap:
+        trimmed = curr[overlap:].lstrip()
+        return f"{prev}\n\n{trimmed}" if trimmed else prev
+
+    prefix = curr.split("\n\n", 1)[0]
+    if prefix and prefix in prev:
+        trimmed = curr[len(prefix) :].lstrip()
+        return f"{prev}\n\n{trimmed}" if trimmed else prev
+
+    return f"{prev}\n\n{curr}"
 
 
 def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Merge consecutive items until their text forms a coherent sentence."""
+    """Merge neighboring items while preserving semantic coherence."""
     buf: dict[str, Any] | None = None
     out: list[dict[str, Any]] = []
 
@@ -72,14 +75,25 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         text = (item.get("text") or "").strip()
         if not text:
             continue
-        merged = {**item, "text": f"{buf['text']}\n\n{text}" if buf else text}
-        if _coherent(merged["text"]):
-            out.append(merged)
-            buf = None
+        current = {**item, "text": text}
+        if _coherent(text):
+            if buf:
+                merged = {**current, "text": f"{buf['text']}\n\n{text}"}
+                out.append(merged if _coherent(merged["text"]) else current)
+                buf = None
+            else:
+                out.append(current)
+        elif out:
+            prev = out[-1]
+            merged_text = _merge_overlap(prev["text"], text)
+            if _coherent(merged_text):
+                out[-1] = {**prev, "text": merged_text}
         else:
-            buf = merged
+            buf = current if not buf else {**buf, "text": f"{buf['text']}\n\n{text}"}
 
-    return _merge_tail(out, buf)
+    if buf and _coherent(buf["text"]):
+        out.append(buf)
+    return out
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
@@ -110,18 +124,9 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     return [build(x) for x in enumerate(pieces)]
 
 
-def _validate(rows: list[Row]) -> list[Row]:
-    def ok(t: str) -> bool:
-        stripped = (t or "").strip()
-        return len(stripped) < 40 or _coherent(t)
-
-    return [r for r in rows if ok(r.get("text", ""))]
-
-
 def _rows(doc: Doc) -> list[Row]:
     items = _coalesce(doc.get("items", []))
-    rows = [r for i in items for r in _rows_from_item(i)]
-    return _validate(rows)
+    return [r for i in items for r in _rows_from_item(i)]
 
 
 def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:

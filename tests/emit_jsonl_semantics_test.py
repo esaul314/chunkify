@@ -43,6 +43,27 @@ def test_emit_jsonl_merges_tail_fragment():
     assert rows[0]["text"].endswith("ends properly.")
 
 
+def test_emit_jsonl_trims_overlap():
+    first = "An act of parallel evolution, in about 2004 Google moved away."
+    second = "act of parallel\n\nCaused a lot of excitement."
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": first},
+            {"text": second},
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert rows == [
+        {
+            "text": (
+                "An act of parallel evolution, in about 2004 Google moved away."
+                "\n\nCaused a lot of excitement."
+            )
+        }
+    ]
+
+
 def test_emit_jsonl_drops_incoherent_tail():
     doc = {
         "type": "chunks",
