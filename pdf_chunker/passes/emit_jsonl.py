@@ -125,6 +125,8 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     base_meta = {meta_key: meta} if meta else {}
     overhead = len(json.dumps({"text": "", **base_meta}, ensure_ascii=False)) - 2
     avail = max(max_chars - overhead, 0)
+    if avail <= 0:
+        return []
     pieces = _split(item.get("text", ""), avail)
 
     def build(idx_piece: tuple[int, str]) -> Row:
@@ -137,6 +139,9 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
         row = {"text": piece, **meta_part}
         while len(json.dumps(row, ensure_ascii=False)) > max_chars:
             allowed = avail - (len(json.dumps(row, ensure_ascii=False)) - max_chars)
+            allowed = min(allowed, len(piece) - 1)
+            if allowed <= 0:
+                return {"text": "", **meta_part}
             piece = _truncate_chunk(piece[:allowed], allowed)
             row = {"text": piece, **meta_part}
         return row
