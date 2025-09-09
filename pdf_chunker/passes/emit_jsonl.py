@@ -58,23 +58,29 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
+def _contains(haystack: str, needle: str) -> bool:
+    return bool(needle and needle in haystack)
+
+
+def _overlap_len(prev_lower: str, curr_lower: str) -> int:
+    length = min(len(prev_lower), len(curr_lower))
+    return next(
+        (i for i in range(length, 0, -1) if prev_lower.endswith(curr_lower[:i])),
+        0,
+    )
+
+
 def _trim_overlap(prev: str, curr: str) -> str:
     """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
     prev_lower, curr_lower = prev.lower(), curr.lower()
-    length = min(len(prev_lower), len(curr_lower))
-    overlap = next(
-        (i for i in range(length, 0, -1) if prev_lower.endswith(curr_lower[:i])),
-        0,
-    )
+    if _contains(prev_lower, curr_lower):
+        return ""
+    overlap = _overlap_len(prev_lower, curr_lower)
     if overlap:
         return curr[overlap:].lstrip()
-
     prefix = curr_lower.split("\n\n", 1)[0]
-    if prefix and prefix in prev_lower:
-        return curr[len(prefix) :].lstrip()
-
-    return curr
+    return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
 
 
 def _starts_mid_sentence(text: str) -> bool:
