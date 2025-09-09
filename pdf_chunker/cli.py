@@ -64,6 +64,7 @@ def _run_convert(
     no_metadata: bool,
     spec: str,
     verbose: bool,
+    trace: str | None,
 ) -> None:
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
@@ -78,7 +79,7 @@ def _run_convert(
         ),
     )
     s = _enrich_spec(s) if enrich else s
-    _, timings = run_convert(_input_artifact(str(input_path), s), s)
+    _, timings = run_convert(_input_artifact(str(input_path), s), s, trace=trace)
     if verbose:
         print(_format_timings(timings))
     print("convert: OK")
@@ -204,6 +205,7 @@ if typer:
         no_metadata: bool = typer.Option(False, "--no-metadata"),
         spec: str = typer.Option("pipeline.yaml", "--spec"),
         verbose: bool = typer.Option(False, "--verbose"),
+        trace: str | None = typer.Option(None, "--trace"),
     ) -> None:
         _safe(
             lambda: _run_convert(
@@ -216,6 +218,7 @@ if typer:
                 no_metadata,
                 spec,
                 verbose,
+                trace,
             )
         )
 
@@ -240,6 +243,7 @@ else:
         conv.add_argument("--no-metadata", action="store_true")
         conv.add_argument("--spec", default="pipeline.yaml")
         conv.add_argument("--verbose", action="store_true")
+        conv.add_argument("--trace")
         conv.set_defaults(
             enrich=False,
             func=lambda ns: _safe(
@@ -253,6 +257,7 @@ else:
                     ns.no_metadata,
                     ns.spec,
                     ns.verbose,
+                    ns.trace,
                 )
             ),
         )
