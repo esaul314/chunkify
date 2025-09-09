@@ -149,9 +149,11 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-def _match_common_patterns(text_lower: str) -> bool:
-    """Return True if text matches common header/footer patterns."""
-    patterns = [
+def _match_common_patterns(text: str) -> bool:
+    """Return ``True`` if text matches common header/footer patterns."""
+
+    text_lower = text.lower().strip()
+    patterns = (
         r"^\d+$",
         r"^page\s+\d+",
         r"^\d+\s*$",
@@ -161,14 +163,15 @@ def _match_common_patterns(text_lower: str) -> bool:
         rf"^\w+\s*\|\s*{ROMAN_RE}$",
         r"^\d+\s*\|\s*[\w\s:]+$",
         rf"^{ROMAN_RE}$",
-        r"^[0-9]{1,3}[.)]?\s+[A-Z]",
         r"^table\s+of\s+contents",
         r"^bibliography",
         r"^index$",
         r"^appendix\s+[a-z]$",
         r"^[a-z][^|]{0,60}\|$",
-    ]
-    return any(re.match(p, text_lower) for p in patterns)
+    )
+    if any(re.match(p, text_lower) for p in patterns):
+        return True
+    return bool(re.match(r"^[0-9]{1,3}[.)]?\s+[A-Z]", text) and len(text.split()) <= 8)
 
 
 def _normalize_page_num(page_num: Optional[int]) -> int:
@@ -237,7 +240,7 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
     if not text_lower:
         return True
 
-    if _match_common_patterns(text_lower):
+    if _match_common_patterns(text):
         logger.info(f"is_page_artifact_text() pattern match: {text[:30]}…")
         return True
 
@@ -348,12 +351,22 @@ def is_probable_footnote(line: str, idx: int, total: int) -> bool:
     )
 
 
+def _is_number_marker(line: str) -> bool:
+    """Return ``True`` for standalone numeric markers like ``"1."``."""
+
+    return bool(re.match(r"^\s*\d+[.)]?\s*$", line))
+
+
 def _strip_footnote_lines(text: str) -> str:
-    """Remove short footnote lines while preserving real list items."""
+    """Remove short footnote lines and stray numeric markers."""
 
     lines = text.splitlines()
     total = len(lines)
-    kept = (ln for idx, ln in enumerate(lines) if not is_probable_footnote(ln, idx, total))
+    kept = (
+        ln
+        for idx, ln in enumerate(lines)
+        if not is_probable_footnote(ln, idx, total) and not _is_number_marker(ln)
+    )
     return "\n".join(kept)
 
 

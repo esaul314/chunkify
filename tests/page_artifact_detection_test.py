@@ -160,6 +160,7 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = next(strip_artifacts([blk])).text
         self.assertIn("Most engineers", cleaned)
         self.assertIn("Infrastructure setup", cleaned)
+        self.assertNotIn("\n1.\n", cleaned)
 
 
 if __name__ == "__main__":
