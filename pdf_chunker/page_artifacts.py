@@ -149,9 +149,11 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
-def _match_common_patterns(text_lower: str) -> bool:
-    """Return True if text matches common header/footer patterns."""
-    patterns = [
+def _match_common_patterns(text: str) -> bool:
+    """Return ``True`` if text matches common header/footer patterns."""
+
+    text_lower = text.lower().strip()
+    patterns = (
         r"^\d+$",
         r"^page\s+\d+",
         r"^\d+\s*$",
@@ -161,14 +163,15 @@ def _match_common_patterns(text_lower: str) -> bool:
         rf"^\w+\s*\|\s*{ROMAN_RE}$",
         r"^\d+\s*\|\s*[\w\s:]+$",
         rf"^{ROMAN_RE}$",
-        r"^[0-9]{1,3}[.)]?\s+[A-Z]",
         r"^table\s+of\s+contents",
         r"^bibliography",
         r"^index$",
         r"^appendix\s+[a-z]$",
         r"^[a-z][^|]{0,60}\|$",
-    ]
-    return any(re.match(p, text_lower) for p in patterns)
+    )
+    if any(re.match(p, text_lower) for p in patterns):
+        return True
+    return bool(re.match(r"^[0-9]{1,3}[.)]?\s+[A-Z]", text) and len(text.split()) <= 8)
 
 
 def _normalize_page_num(page_num: Optional[int]) -> int:
@@ -237,7 +240,7 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
     if not text_lower:
         return True
 
-    if _match_common_patterns(text_lower):
+    if _match_common_patterns(text):
         logger.info(f"is_page_artifact_text() pattern match: {text[:30]}…")
         return True
 
@@ -334,20 +337,36 @@ def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
     return text
 
 
-FOOTNOTE_LINE_RE = re.compile(
-    rf"(?m)^\s*(?:[0-9{_SUP_DIGITS_ESC}]{{1,3}}[.)]?|[\*\u2020])\s+[A-Z][^.]{{0,120}}\.\s*$"
-)
+FOOTNOTE_PREFIX_RE = re.compile(rf"^\s*(?:[0-9{_SUP_DIGITS_ESC}]+[.)]?|[\*\u2020])\s+")
+
+
+def is_probable_footnote(line: str, idx: int, total: int) -> bool:
+    """Return ``True`` for short numbered lines near page edges."""
+
+    edge_band = 2
+    return (
+        (idx < edge_band or idx >= total - edge_band)
+        and len(line.split()) <= 4
+        and bool(FOOTNOTE_PREFIX_RE.match(line))
+    )
+
+
+def _is_number_marker(line: str) -> bool:
+    """Return ``True`` for standalone numeric markers like ``"1."``."""
+
+    return bool(re.match(r"^\s*\d+[.)]?\s*$", line))
 
 
 def _strip_footnote_lines(text: str) -> str:
-    """Remove short footnote lines while preserving real list items."""
+    """Remove short footnote lines and stray numeric markers."""
 
     lines = text.splitlines()
-    kept = [
+    total = len(lines)
+    kept = (
         ln
-        for ln in lines
-        if not (FOOTNOTE_LINE_RE.match(ln) and len(ln.split()) <= 8)
-    ]
+        for idx, ln in enumerate(lines)
+        if not is_probable_footnote(ln, idx, total) and not _is_number_marker(ln)
+    )
     return "\n".join(kept)
 
 
