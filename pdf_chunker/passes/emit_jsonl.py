@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import re
 import json
-from typing import Any, Iterable
+from functools import reduce
+from typing import Any, Iterable, cast
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.utils import _truncate_chunk
@@ -85,36 +86,33 @@ def _starts_mid_sentence(text: str) -> bool:
     return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
 
 
+def _merge_items(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+    text = item["text"]
+    if acc:
+        prev = acc[-1]
+        text = _trim_overlap(prev["text"], text)
+        prev_words, curr_words = _word_count(prev["text"]), _word_count(text)
+        should_merge = (
+            prev_words < _min_words()
+            or curr_words < _min_words()
+            or not _coherent(prev["text"])
+            or _starts_mid_sentence(text)
+        )
+        if should_merge:
+            merged = f"{prev['text']}\n\n{text}".strip()
+            if _coherent(merged) or _is_numbered_line(text):
+                return [*acc[:-1], {**prev, "text": merged}]
+            return [*acc, {**item, "text": text}]
+    return [*acc, {**item, "text": text}]
+
+
 def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize item boundaries, trimming overlap and merging fragments."""
 
     cleaned = [{**i, "text": (i.get("text") or "").strip()} for i in items]
     cleaned = [i for i in cleaned if i["text"]]
-
-    def step(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
-        text = item["text"]
-        if acc:
-            prev = acc[-1]
-            text = _trim_overlap(prev["text"], text)
-            prev_words = _word_count(prev["text"])
-            curr_words = _word_count(text)
-            should_merge = (
-                prev_words < _min_words()
-                or curr_words < _min_words()
-                or not _coherent(prev["text"])
-                or _starts_mid_sentence(text)
-            )
-            if should_merge:
-                merged = f"{prev['text']}\n\n{text}".strip()
-                if _coherent(merged):
-                    acc[-1] = {**prev, "text": merged}
-                return acc
-        return [*acc, {**item, "text": text}]
-
-    merged: list[dict[str, Any]] = []
-    for i in cleaned:
-        merged = step(merged, i)
-    return [m for m in merged if _coherent(m["text"]) or _is_numbered_line(m["text"]) ]
+    merged = reduce(_merge_items, cleaned, cast(list[dict[str, Any]], []))
+    return [m for m in merged if _coherent(m["text"]) or _is_numbered_line(m["text"])]
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
