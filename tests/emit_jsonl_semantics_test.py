@@ -104,3 +104,45 @@ def test_emit_jsonl_merges_short_items():
     rows = emit_jsonl(Artifact(payload=doc)).payload
     assert len(rows) == 1
     assert len(rows[0]["text"].split()) >= 50
+
+
+def test_emit_jsonl_retains_numbered_punctuated_item(monkeypatch):
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": (
+                    "1. First item has enough words to be considered coherent and ends."
+                )
+            },
+            {
+                "text": (
+                    "2. Second item has enough words to be coherent as well."
+                )
+            },
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert rows[1]["text"].startswith("2. Second item")
+
+
+def test_emit_jsonl_retains_numbered_tail_without_punctuation(monkeypatch):
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": (
+                    "1. First item has enough words to be considered coherent and ends."
+                )
+            },
+            {
+                "text": (
+                    "2. Second item continues with sufficient words but lacks punctuation"
+                )
+            },
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert rows[1]["text"].startswith("2. Second item continues")

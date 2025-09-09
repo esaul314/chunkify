@@ -57,6 +57,10 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
+def _is_numbered_line(text: str) -> bool:
+    return re.search(r"^\s*\d+[.)]\s", text, re.MULTILINE) is not None
+
+
 def _trim_overlap(prev: str, curr: str, max_len: int = 80) -> str:
     """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
@@ -110,8 +114,7 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     for i in cleaned:
         merged = step(merged, i)
-
-    return [m for m in merged if _coherent(m["text"])]
+    return [m for m in merged if _coherent(m["text"]) or _is_numbered_line(m["text"]) ]
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
