@@ -86,6 +86,10 @@ def _starts_mid_sentence(text: str) -> bool:
     return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
 
 
+def _merge_text(prev: str, curr: str) -> str:
+    return f"{prev}\n\n{curr}".strip()
+
+
 def _merge_items(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
     text = item["text"]
     if acc:
@@ -99,10 +103,8 @@ def _merge_items(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[s
             or _starts_mid_sentence(text)
         )
         if should_merge:
-            merged = f"{prev['text']}\n\n{text}".strip()
-            if _coherent(merged) or _is_numbered_line(text):
-                return [*acc[:-1], {**prev, "text": merged}]
-            return [*acc, {**item, "text": text}]
+            merged = _merge_text(prev["text"], text)
+            return [*acc[:-1], {**prev, "text": merged}]
     return [*acc, {**item, "text": text}]
 
 
@@ -112,7 +114,7 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     cleaned = [{**i, "text": (i.get("text") or "").strip()} for i in items]
     cleaned = [i for i in cleaned if i["text"]]
     merged = reduce(_merge_items, cleaned, cast(list[dict[str, Any]], []))
-    return [m for m in merged if _coherent(m["text"]) or _is_numbered_line(m["text"])]
+    return merged
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
