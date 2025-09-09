@@ -32,3 +32,4 @@ def test_numbered_item_preserved(tmp_path: Path) -> None:
     )
     text = out.read_text()
     assert text.count(TARGET) == 1
+    assert TARGET + "\n\nInfrastructure" not in text

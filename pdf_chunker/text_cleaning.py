@@ -131,8 +131,9 @@ NUMBERED_INLINE_CANDIDATE_RE = re.compile(
 NUMBERED_END_RE = re.compile(
     rf"(\d{{1,3}}[.)][^\n]*[{re.escape(END_PUNCT)}])"
     rf"(?<![{re.escape(END_PUNCT)}]\")"
-    rf"(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b(?!\s+\d)|$))"
+    rf"(?=\n(?:\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)])|\n|$))"
 )
+NUMBERED_CONTINUATION_RE = re.compile(rf"(\d{{1,3}}[.)][^\n]*[{re.escape(END_PUNCT)}])\n(?=[^\n])")
 
 # List break preservation
 LIST_BREAK_RE = re.compile(rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]|.*\.\.))")
@@ -370,6 +371,7 @@ def insert_numbered_list_newlines(text: str) -> str:
         lambda t: NUMBERED_AFTER_COLON_RE.sub(r":\n\1", t),
         _apply_inline_numbered,
         lambda t: NUMBERED_END_RE.sub(r"\1\n\n", t),
+        lambda t: NUMBERED_CONTINUATION_RE.sub(r"\1[[LIST_BREAK]]", t),
     )
 
 
