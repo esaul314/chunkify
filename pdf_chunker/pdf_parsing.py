@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import logging
 from dataclasses import asdict
-from typing import Iterable, Optional
+from typing import Iterable
 
 import fitz
 
@@ -16,7 +16,7 @@ from .fallbacks import apply_fallbacks
 
 logger = logging.getLogger(__name__)
 
-def _excluded_pages(filepath: str, exclude: Optional[str]) -> set[int]:
+def _excluded_pages(filepath: str, exclude: str | None) -> set[int]:
     if not exclude:
         return set()
     with fitz.open(filepath) as doc:
@@ -48,7 +48,7 @@ def _block_pipeline(filepath: str, excluded: set[int]) -> list[Block]:
 
 
 def extract_text_blocks_from_pdf(
-    filepath: str, exclude_pages: Optional[str] = None
+    filepath: str, exclude_pages: str | None = None
 ) -> Iterable[Block]:
     """Yield ``Block`` objects from ``filepath`` respecting ``exclude_pages``.
 
@@ -62,7 +62,7 @@ def extract_text_blocks_from_pdf(
 
 
 def extract_text_blocks_from_pdf_list(
-    filepath: str, exclude_pages: Optional[str] = None
+    filepath: str, exclude_pages: str | None = None
 ) -> list[dict]:
     """Deprecated shim returning a materialised list of block dictionaries."""
 
@@ -70,7 +70,7 @@ def extract_text_blocks_from_pdf_list(
 
 
 def _legacy_extract_text_blocks_from_pdf(
-    filepath: str, exclude_pages: Optional[str] = None
+    filepath: str, exclude_pages: str | None = None
 ) -> list[dict]:
     """Backward-compatible shim for older imports."""
 
