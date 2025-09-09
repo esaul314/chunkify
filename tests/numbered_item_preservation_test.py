@@ -30,4 +30,5 @@ def test_numbered_item_preserved(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
-    assert TARGET in out.read_text()
+    text = out.read_text()
+    assert text.count(TARGET) == 1

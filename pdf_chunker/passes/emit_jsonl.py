@@ -58,15 +58,11 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
-def _is_numbered_line(text: str) -> bool:
-    return re.search(r"^\s*\d+[.)]\s", text, re.MULTILINE) is not None
-
-
-def _trim_overlap(prev: str, curr: str, max_len: int = 80) -> str:
+def _trim_overlap(prev: str, curr: str) -> str:
     """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
     prev_lower, curr_lower = prev.lower(), curr.lower()
-    length = min(len(prev_lower), len(curr_lower), max_len)
+    length = min(len(prev_lower), len(curr_lower))
     overlap = next(
         (i for i in range(length, 0, -1) if prev_lower.endswith(curr_lower[:i])),
         0,
