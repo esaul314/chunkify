@@ -119,6 +119,24 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
+def _dedupe(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove items whose text already appears in prior items."""
+
+    def step(
+        state: tuple[list[dict[str, Any]], str], item: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], str]:
+        acc, acc_text = state
+        text = item["text"]
+        return (
+            state
+            if _contains(acc_text.lower(), text.lower())
+            else (acc + [item], _merge_text(acc_text, text) if acc_text else text)
+        )
+
+    initial: tuple[list[dict[str, Any]], str] = ([], "")
+    return reduce(step, items, initial)[0]
+
+
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     meta_key = _metadata_key()
     max_chars = _max_chars()
@@ -154,7 +172,7 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
 
 
 def _rows(doc: Doc) -> list[Row]:
-    items = _coalesce(doc.get("items", []))
+    items = _dedupe(_coalesce(doc.get("items", [])))
     return [r for i in items for r in _rows_from_item(i)]
 
 
