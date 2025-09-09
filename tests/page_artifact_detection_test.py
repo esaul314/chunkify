@@ -1,10 +1,13 @@
 import unittest
+from pathlib import Path
 
 from pdf_chunker.page_artifacts import (
     is_page_artifact_text,
     strip_page_artifact_suffix,
     remove_page_artifact_lines,
+    strip_artifacts,
 )
+from pdf_chunker.pdf_blocks import Block
 from pdf_chunker.pymupdf4llm_integration import _clean_pymupdf4llm_block
 
 
@@ -139,6 +142,25 @@ class TestPageArtifactDetection(unittest.TestCase):
             cleaned["text"],
             "This closed car smells of salt fish",
         )
+
+    def test_numbered_list_item_not_removed(self):
+        text = (
+            "1. Most engineers don\u2019t want to learn a whole new toolset for infrequent tasks.\n"
+            "1.\n"
+            "Infrastructure setup and provisioning are not an everyday core focus."
+        )
+        cleaned = remove_page_artifact_lines(text, 20)
+        self.assertIn("Most engineers", cleaned)
+        self.assertIn("Infrastructure setup", cleaned)
+
+    def test_strip_artifacts_preserves_numbered_paragraph(self):
+        page = Path(__file__).resolve().parent.parent / "test_data/platform-eng-excerpt/page20.txt"
+        text = page.read_text()
+        blk = Block(text=text, source={"page": 20})
+        cleaned = next(strip_artifacts([blk])).text
+        self.assertIn("Most engineers", cleaned)
+        self.assertIn("Infrastructure setup", cleaned)
+        self.assertNotIn("\n1.\n", cleaned)
 
 
 if __name__ == "__main__":
