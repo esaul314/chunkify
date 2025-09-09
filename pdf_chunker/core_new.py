@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from pdf_chunker.adapters import emit_jsonl
+import pdf_chunker.adapters.emit_trace as emit_trace
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, Pass, registry
 
@@ -151,6 +152,32 @@ def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
         if isinstance(payload, list)
         else payload.get("items", []) if isinstance(payload, Mapping) else []
     )
+
+
+def _match(text: str, needle: str) -> bool:
+    """Case-insensitive substring test."""
+    return needle.lower() in text.lower()
+
+
+def _filter_pages(pages: Iterable[Mapping[str, Any]], needle: str) -> list[dict[str, Any]]:
+    """Return pages with blocks whose ``text`` contains ``needle``."""
+    return [
+        {**p, "blocks": bs}
+        for p in pages
+        if (bs := [b for b in p.get("blocks", []) if _match(b.get("text", ""), needle)])
+    ]
+
+
+def _trace_view(payload: Any, needle: str) -> Any:
+    """Slice ``payload`` to elements matching ``needle``."""
+    if isinstance(payload, Mapping):
+        if "pages" in payload:
+            return {**payload, "pages": _filter_pages(payload.get("pages", []), needle)}
+        if "items" in payload:
+            return [c for c in payload.get("items", []) if _match(c.get("text", ""), needle)]
+    if isinstance(payload, list):
+        return [c for c in payload if _match(c.get("text", ""), needle)]
+    return payload
 
 
 def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
@@ -296,7 +323,9 @@ def _meta_with_warnings(
     return {**(a.meta or {}), "options": opts, "warnings": warnings}
 
 
-def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, float]]:
+def run_convert(
+    a: Artifact, spec: PipelineSpec, *, trace: str | None = None
+) -> tuple[Artifact, dict[str, float]]:
     """Run declared passes, emit outputs, and persist a run report."""
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
@@ -309,6 +338,8 @@ def run_convert(a: Artifact, spec: PipelineSpec) -> tuple[Artifact, dict[str, fl
             configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline
         ):
             a = _timed(p, a, timings)
+            if trace:
+                emit_trace.write_snapshot(p.name, _trace_view(a.payload, trace))
     except Exception as exc:
         meta = _meta_with_warnings(a, spec, opts)
         report = assemble_report(timings, {**meta, "error": str(exc)})
