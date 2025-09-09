@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from subprocess import TimeoutExpired
-from typing import Callable, Iterable, Optional, Sequence, Tuple
+from typing import Callable, Iterable, Sequence, Tuple
 
 from .adapters.io_pdf import run_pdftotext
 from .language import default_language
@@ -61,7 +61,7 @@ def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
 
 
 def _extract_with_pdftotext(
-    filepath: str, exclude_pages: Optional[str] = None
+    filepath: str, exclude_pages: str | None = None
 ) -> list[dict]:
     try:
         excluded = parse_page_ranges(exclude_pages) if exclude_pages else set()
@@ -95,7 +95,7 @@ def _extract_with_pdftotext(
 
 
 def _extract_with_pdfminer(
-    filepath: str, exclude_pages: Optional[str] = None
+    filepath: str, exclude_pages: str | None = None
 ) -> list[dict]:
     if not PDFMINER_AVAILABLE:
         return []
@@ -114,8 +114,8 @@ def _extract_with_pdfminer(
 
 def execute_fallback_extraction(
     filepath: str,
-    exclude_pages: Optional[str] = None,
-    fallback_reason: Optional[str] = None,
+    exclude_pages: str | None = None,
+    fallback_reason: str | None = None,
 ) -> list[dict]:
     blocks = _extract_with_pdftotext(filepath, exclude_pages)
     if blocks:
@@ -137,7 +137,7 @@ def apply_fallbacks(
     if quality >= 0.7:
         return primary
 
-    candidates: Sequence[Tuple[str, Callable[[str, Optional[str]], list[dict]]]] = (
+    candidates: Sequence[Tuple[str, Callable[[str, str | None], list[dict]]]] = (
         ("pdftotext", _extract_with_pdftotext),
         ("pdfminer", _extract_with_pdfminer if PDFMINER_AVAILABLE else (lambda *_: [])),
     )

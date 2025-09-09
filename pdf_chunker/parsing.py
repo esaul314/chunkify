@@ -11,22 +11,21 @@
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
 
 from .epub_parsing import TextBlock, extract_text_blocks_from_epub
 from .pdf_parsing import extract_text_blocks_from_pdf
 
-Extractor = Callable[[Path, Optional[str]], list[TextBlock]]
+Extractor = Callable[[Path, str | None], list[TextBlock]]
 
 
-def _pdf_extractor(path: Path, exclude: Optional[str]) -> list[TextBlock]:
+def _pdf_extractor(path: Path, exclude: str | None) -> list[TextBlock]:
     return [
         asdict(b)
         for b in extract_text_blocks_from_pdf(str(path), exclude_pages=exclude)
     ]
 
 
-def _epub_extractor(path: Path, exclude: Optional[str]) -> list[TextBlock]:
+def _epub_extractor(path: Path, exclude: str | None) -> list[TextBlock]:
     return extract_text_blocks_from_epub(str(path), exclude_spines=exclude)
 
 
@@ -37,7 +36,7 @@ DISPATCH: dict[str, Extractor] = {
 
 
 def extract_structured_text(
-    path: Path | str, exclude_pages: Optional[str] = None
+    path: Path | str, exclude_pages: str | None = None
 ) -> list[TextBlock]:
     """Return text blocks from a PDF or EPUB file.
 

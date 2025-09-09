@@ -18,7 +18,7 @@ import statistics
 import sys
 import os
 import traceback
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -53,7 +53,7 @@ class ExtractionMetrics:
     heading_count: int
     avg_chunk_size: float
     quality_score: float
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -452,7 +452,7 @@ def run_benchmark(
     iterations: int = 3,
     chunk_size: int = 8000,
     overlap: int = 200,
-    exclude_pages: Optional[str] = None,
+    exclude_pages: str | None = None,
 ) -> BenchmarkResults:
     """
     Run complete benchmark comparing hybrid vs traditional extraction.
