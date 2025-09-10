@@ -97,3 +97,4 @@ def test_split_does_not_duplicate(tmp_path: Path) -> None:
     matches = text.count("Most engineers")
     assert matches == 1, proc.stderr
     assert "Infrastructure setup" in text
+    assert "dedupe dropped" in proc.stderr

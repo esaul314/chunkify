@@ -184,10 +184,11 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
 def _rows(doc: Doc) -> list[Row]:
     debug_log: list[str] | None = [] if os.getenv("PDF_CHUNKER_DEDUP_DEBUG") else None
     items = _dedupe(_coalesce(doc.get("items", [])), log=debug_log)
-    if debug_log:
+    if debug_log is not None:
         logger = logging.getLogger(__name__)
+        logger.warning("dedupe dropped %d duplicates", len(debug_log))
         for dup in debug_log:
-            logger.debug("dedupe dropped: %s", dup[:80])
+            logger.warning("dedupe dropped: %s", dup[:80])
     return [r for i in items for r in _rows_from_item(i)]
 
 
