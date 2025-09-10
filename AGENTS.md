@@ -3,6 +3,7 @@
 This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other AI agents working across this modular Python library for processing large PDF and EPUB documents. The goal is to generate high-quality, semantically coherent document chunks enriched with rich metadata for downstream local LLM workflows, particularly Retrieval-Augmented Generation (RAG).
 
 > **Remember**: keep this file and its siblings in sync with the codebase. Update instructions whenever workflows, dependencies, or project structure change.
+> **Reminder**: whenever application functionality evolves, update all relevant `AGENTS.md` files with usage examples so agents stay in sync.
 
 ---
 
@@ -35,6 +36,11 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
   ```
+- Trace a specific phrase through the pipeline to debug loss or duplication:
+  ```bash
+  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
+  ```
+  Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
 
 ## Pass Responsibilities
 
@@ -328,6 +334,7 @@ All CLI scripts follow these conventions:
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.
 * **Comma continuation fix**: same-page blocks ending with commas merge with following blocks even if the next starts with an uppercase word.
 * **Split-word merging guarded**: only joins across newlines or double spaces when the combined form is more common than its parts, avoiding merges like "no longer"→"nolonger".
+* **JSONL deduplication**: repeated sentences are trimmed during emission; run conversions with `--trace <phrase>` to verify expected lines survive.
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts
