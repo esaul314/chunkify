@@ -1,3 +1,7 @@
+import os
+import subprocess
+from pathlib import Path
+
 from pdf_chunker.passes.emit_jsonl import _rows
 
 
@@ -43,13 +47,15 @@ def test_non_adjacent_duplicate_sentence_trimmed():
             {"text": "Intro."},
             {
                 "text": (
-                    "Most engineers don't want to learn a whole new toolset for infrequent tasks."
+                    "Most engineers don't want to learn a whole new toolset for "
+                    "infrequent tasks."
                 )
             },
             {"text": "Filler paragraph in between."},
             {
                 "text": (
-                    "Most engineers don't want to learn a whole new toolset for infrequent tasks."
+                    "Most engineers don't want to learn a whole new toolset for "
+                    "infrequent tasks."
                     " Another sentence follows."
                 )
             },
@@ -59,14 +65,33 @@ def test_non_adjacent_duplicate_sentence_trimmed():
     assert sum("Most engineers don't want to learn" in r["text"] for r in rows) == 1
 
 
-def test_split_does_not_duplicate(monkeypatch):
-    text = (
-        "Most engineers don't want to learn a whole new toolset for infrequent tasks. "
-        "Infrastructure setup is painful."
+def test_split_does_not_duplicate(tmp_path: Path) -> None:
+    pdf = Path("platform-eng-excerpt.pdf").resolve()
+    spec = Path("pipeline.yaml").resolve()
+    out = tmp_path / "out.jsonl"
+    env = {
+        **os.environ,
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+    }
+    subprocess.run(
+        [
+            "python",
+            "-m",
+            "pdf_chunker.cli",
+            "convert",
+            str(pdf),
+            "--spec",
+            str(spec),
+            "--out",
+            str(out),
+            "--no-enrich",
+        ],
+        check=True,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
-    doc = {"type": "chunks", "items": [{"text": text}]}
-    monkeypatch.setenv("PDF_CHUNKER_JSONL_MAX_CHARS", "80")
-    rows = _rows(doc)
-    joined = "".join(r["text"] for r in rows)
-    assert joined.count("Most engineers") == 1
-    assert "Infrastructure setup" in joined
+    text = out.read_text()
+    assert text.count("Most engineers") == 1
+    assert "Infrastructure setup" in text
