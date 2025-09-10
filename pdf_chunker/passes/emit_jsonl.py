@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import logging
 from functools import reduce
 from typing import Any, Iterable, cast
 
@@ -120,19 +121,27 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
-def _dedupe(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Remove items whose text already appears in prior items."""
+def _dedupe(
+    items: Iterable[dict[str, Any]], *, log: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Remove items whose text already appears in prior items.
+
+    When ``log`` is provided, dropped duplicate snippets are appended to it for
+    debug inspection. The function itself remains pure; callers decide whether
+    to record diagnostics.
+    """
 
     def step(
         state: tuple[list[dict[str, Any]], str], item: dict[str, Any]
     ) -> tuple[list[dict[str, Any]], str]:
         acc, acc_text = state
         text = item["text"]
-        return (
-            state
-            if _contains(acc_text.lower(), text.lower())
-            else (acc + [item], _merge_text(acc_text, text) if acc_text else text)
-        )
+        if _contains(acc_text.lower(), text.lower()):
+            if log is not None:
+                log.append(text)
+            return state
+        new_text = _merge_text(acc_text, text) if acc_text else text
+        return (acc + [item], new_text)
 
     initial: tuple[list[dict[str, Any]], str] = ([], "")
     return reduce(step, items, initial)[0]
@@ -173,7 +182,12 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
 
 
 def _rows(doc: Doc) -> list[Row]:
-    items = _dedupe(_coalesce(doc.get("items", [])))
+    debug_log: list[str] | None = [] if os.getenv("PDF_CHUNKER_DEDUP_DEBUG") else None
+    items = _dedupe(_coalesce(doc.get("items", [])), log=debug_log)
+    if debug_log:
+        logger = logging.getLogger(__name__)
+        for dup in debug_log:
+            logger.debug("dedupe dropped: %s", dup[:80])
     return [r for i in items for r in _rows_from_item(i)]
 
 

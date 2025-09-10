@@ -72,8 +72,9 @@ def test_split_does_not_duplicate(tmp_path: Path) -> None:
     env = {
         **os.environ,
         "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+        "PDF_CHUNKER_DEDUP_DEBUG": "1",
     }
-    subprocess.run(
+    proc = subprocess.run(
         [
             "python",
             "-m",
@@ -93,5 +94,6 @@ def test_split_does_not_duplicate(tmp_path: Path) -> None:
         text=True,
     )
     text = out.read_text()
-    assert text.count("Most engineers") == 1
+    matches = text.count("Most engineers")
+    assert matches == 1, proc.stderr
     assert "Infrastructure setup" in text
