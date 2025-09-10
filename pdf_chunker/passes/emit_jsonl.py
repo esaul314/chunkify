@@ -72,6 +72,17 @@ def _overlap_len(prev_lower: str, curr_lower: str) -> int:
     )
 
 
+def _prefix_contained_len(haystack: str, needle: str) -> int:
+    return next(
+        (
+            i
+            for i in range(len(needle), 0, -1)
+            if needle[:i] in haystack and (i == len(needle) or needle[i].isspace())
+        ),
+        0,
+    )
+
+
 def _trim_overlap(prev: str, curr: str) -> str:
     """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
@@ -136,12 +147,23 @@ def _dedupe(
     ) -> tuple[list[dict[str, Any]], str]:
         acc, acc_text = state
         text = item["text"]
-        if _contains(acc_text.lower(), text.lower()):
+        acc_lower, text_lower = acc_text.lower(), text.lower()
+        if _contains(acc_lower, text_lower):
             if log is not None:
                 log.append(text)
             return state
+        overlap = _overlap_len(acc_lower, text_lower)
+        if not overlap:
+            overlap = _prefix_contained_len(acc_lower, text_lower)
+        if overlap:
+            if log is not None:
+                log.append(text[:overlap])
+            text = text[overlap:].lstrip()
+            if not text:
+                return state
+            text_lower = text.lower()
         new_text = _merge_text(acc_text, text) if acc_text else text
-        return (acc + [item], new_text)
+        return (acc + [{**item, "text": text}], new_text)
 
     initial: tuple[list[dict[str, Any]], str] = ([], "")
     return reduce(step, items, initial)[0]

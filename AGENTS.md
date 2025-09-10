@@ -334,7 +334,7 @@ All CLI scripts follow these conventions:
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.
 * **Comma continuation fix**: same-page blocks ending with commas merge with following blocks even if the next starts with an uppercase word.
 * **Split-word merging guarded**: only joins across newlines or double spaces when the combined form is more common than its parts, avoiding merges like "no longer"→"nolonger".
-* **JSONL deduplication**: repeated sentences are trimmed during emission; run conversions with `--trace <phrase>` to verify expected lines survive.
+* **JSONL deduplication**: repeated sentences are trimmed during emission, even when the duplicate is followed by new material; run conversions with `--trace <phrase>` to verify expected lines survive.
 * **Dedup debug**: set `PDF_CHUNKER_DEDUP_DEBUG=1` to emit a warning for each dropped duplicate and a summary count, useful when chasing repeat fragments.
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning

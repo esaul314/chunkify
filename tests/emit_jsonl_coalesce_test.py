@@ -65,6 +65,27 @@ def test_non_adjacent_duplicate_sentence_trimmed():
     assert sum("Most engineers don't want to learn" in r["text"] for r in rows) == 1
 
 
+def test_prefix_overlap_trimmed():
+    sent = " ".join(
+        [
+            "Most engineers don't want to learn a whole new toolset for",
+            "infrequent tasks.",
+        ]
+    )
+    filler1 = " ".join(f"alpha{i}" for i in range(55))
+    filler2 = " ".join(f"beta{i}" for i in range(55))
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": f"{filler1} {sent}"},
+            {"text": f"{sent} {filler2}"},
+        ],
+    }
+    rows = _rows(doc)
+    combined = " ".join(r["text"] for r in rows)
+    assert combined.count(sent) == 1
+
+
 def test_split_does_not_duplicate(tmp_path: Path) -> None:
     pdf = Path("platform-eng-excerpt.pdf").resolve()
     spec = Path("pipeline.yaml").resolve()
