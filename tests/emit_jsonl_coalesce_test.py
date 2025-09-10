@@ -57,3 +57,16 @@ def test_non_adjacent_duplicate_sentence_trimmed():
     }
     rows = _rows(doc)
     assert sum("Most engineers don't want to learn" in r["text"] for r in rows) == 1
+
+
+def test_split_does_not_duplicate(monkeypatch):
+    text = (
+        "Most engineers don't want to learn a whole new toolset for infrequent tasks. "
+        "Infrastructure setup is painful."
+    )
+    doc = {"type": "chunks", "items": [{"text": text}]}
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MAX_CHARS", "80")
+    rows = _rows(doc)
+    joined = "".join(r["text"] for r in rows)
+    assert joined.count("Most engineers") == 1
+    assert "Infrastructure setup" in joined

@@ -40,13 +40,14 @@ def _max_chars() -> int:
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
-    def parts(t: str) -> Iterable[str]:
-        while t:
-            chunk = _truncate_chunk(t, limit)
-            yield chunk
-            t = t[len(chunk) :].lstrip()
-
-    return list(parts(text))
+    pieces: list[str] = []
+    t = text
+    while t:
+        raw = _truncate_chunk(t, limit)
+        trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
+        pieces = [*pieces, trimmed] if trimmed else pieces
+        t = t[len(raw) :].lstrip()
+    return pieces
 
 
 def _coherent(text: str, min_chars: int = 40) -> bool:
