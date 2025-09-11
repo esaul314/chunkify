@@ -60,6 +60,10 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
 def _contains(haystack: str, needle: str) -> bool:
     return bool(needle and needle in haystack)
 
@@ -143,30 +147,53 @@ def _dedupe(
     """
 
     def step(
-        state: tuple[list[dict[str, Any]], str], item: dict[str, Any]
-    ) -> tuple[list[dict[str, Any]], str]:
-        acc, acc_text = state
+        state: tuple[list[dict[str, Any]], str, str], item: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], str, str]:
+        acc, acc_text, acc_norm = state
         text = item["text"]
-        acc_lower, text_lower = acc_text.lower(), text.lower()
-        if _contains(acc_lower, text_lower):
+        text_norm = _normalize(text)
+        if _contains(acc_norm, text_norm):
             if log is not None:
                 log.append(text)
             return state
-        overlap = _overlap_len(acc_lower, text_lower)
+        overlap = _overlap_len(acc_norm, text_norm)
         if not overlap:
-            overlap = _prefix_contained_len(acc_lower, text_lower)
+            overlap = _prefix_contained_len(acc_norm, text_norm)
         if overlap:
             if log is not None:
                 log.append(text[:overlap])
             text = text[overlap:].lstrip()
             if not text:
                 return state
-            text_lower = text.lower()
+            text_norm = _normalize(text)
         new_text = _merge_text(acc_text, text) if acc_text else text
-        return (acc + [{**item, "text": text}], new_text)
+        return (
+            acc + [{**item, "text": text}],
+            new_text,
+            acc_norm + text_norm,
+        )
 
-    initial: tuple[list[dict[str, Any]], str] = ([], "")
+    initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")
     return reduce(step, items, initial)[0]
+
+
+def _flag_potential_duplicates(
+    items: Iterable[dict[str, Any]], *, min_words: int = 10
+) -> list[str]:
+    """Return sentences appearing more than once after dedupe."""
+
+    seen: set[str] = set()
+    flagged: list[str] = []
+    for sent in (s for item in items for s in re.split(r"(?<=[.!?])\s+", item["text"])):
+        words = re.findall(r"\w+", sent.lower())
+        if len(words) < min_words:
+            continue
+        key = " ".join(words)
+        if key in seen:
+            flagged.append(sent.strip())
+        else:
+            seen.add(key)
+    return flagged
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
@@ -211,6 +238,8 @@ def _rows(doc: Doc) -> list[Row]:
         logger.warning("dedupe dropped %d duplicates", len(debug_log))
         for dup in debug_log:
             logger.warning("dedupe dropped: %s", dup[:80])
+        for dup in _flag_potential_duplicates(items):
+            logger.warning("possible duplicate retained: %s", dup[:80])
     return [r for i in items for r in _rows_from_item(i)]
 
 

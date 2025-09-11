@@ -2,7 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from pdf_chunker.passes.emit_jsonl import _rows
+from pdf_chunker.passes.emit_jsonl import _rows, _flag_potential_duplicates
 
 
 def test_leading_fragment_not_dropped():
@@ -33,6 +33,22 @@ def test_duplicate_sentence_trimmed():
                     "Developers are picky about the way they work. "
                     "Many want nothing to do with the interface."
                 )
+            },
+        ],
+    }
+    rows = _rows(doc)
+    assert sum("Developers are picky" in r["text"] for r in rows) == 1
+
+
+def test_duplicate_sentence_with_whitespace_trimmed():
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": "Alpha. Developers are picky about the way they work.",
+            },
+            {
+                "text": "Developers are  picky   about the way they work.  ",
             },
         ],
     }
@@ -84,6 +100,14 @@ def test_prefix_overlap_trimmed():
     rows = _rows(doc)
     combined = " ".join(r["text"] for r in rows)
     assert combined.count(sent) == 1
+
+
+def test_flag_potential_duplicates():
+    items = [
+        {"text": " ".join(["word"] * 11) + "."},
+        {"text": " ".join(["word"] * 11) + "."},
+    ]
+    assert _flag_potential_duplicates(items)
 
 
 def test_split_does_not_duplicate(tmp_path: Path) -> None:
