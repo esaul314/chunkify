@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import time
+import platform
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass, replace
 from functools import reduce
@@ -285,6 +287,21 @@ def _legacy_counts(metrics: Mapping[str, Any]) -> dict[str, int]:
     return {k: v for k, v in pairs if v is not None}
 
 
+def _env_snapshot() -> dict[str, Any]:
+    names = ("fitz", "pypdf", "regex", "rapidfuzz")
+    def version(n: str) -> Any:
+        try:
+            return getattr(import_module(n), "__version__", None)
+        except Exception:
+            return None
+    return {
+        "sys_version": sys.version,
+        "platform": platform.platform(),
+        "dependencies": {n: version(n) for n in names},
+    }
+
+
+
 def assemble_report(
     timings: Mapping[str, float],
     meta: Mapping[str, Any],
@@ -292,11 +309,13 @@ def assemble_report(
     """Purely assemble run report data without performing IO."""
     metrics = dict(meta.get("metrics") or {})
     counts = _legacy_counts(metrics)
+    env = _env_snapshot()
     return {
         "timings": dict(timings),
-        "metrics": {**counts, **metrics},
+        "metrics": {**counts, **metrics, "env": env},
         "warnings": list(meta.get("warnings") or []),
     }
+
 
 
 def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
@@ -335,11 +354,15 @@ def run_convert(
     timings: dict[str, float] = {}
     try:
         for p in (
-            configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline
+            configure_pass(registry()[s], spec.options.get(s, {}))
+            for s in run_spec.pipeline
         ):
+            if trace:
+                emit_trace.record_call(p.name)
             a = _timed(p, a, timings)
             if trace:
                 emit_trace.write_snapshot(p.name, _trace_view(a.payload, trace))
+                emit_trace.write_dups(p.name, a.payload)
     except Exception as exc:
         meta = _meta_with_warnings(a, spec, opts)
         report = assemble_report(timings, {**meta, "error": str(exc)})
