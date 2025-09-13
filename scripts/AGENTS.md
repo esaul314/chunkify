@@ -36,16 +36,19 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
     --from pdf_parse --spec pipeline.yaml \
     --out /tmp/replay.jsonl --check-dups
   ```
+
   Flags:
   - `--snapshot PATH`: snapshot JSON file to seed replay.
   - `--from STEP`: pass name matching the snapshot.
   - `--spec FILE`: pipeline specification (default `pipeline.yaml`).
   - `--out PATH`: destination for the replayed JSONL.
   - `--check-dups`: enable duplicate detection and write `<final_pass>_dups.json`.
+
 - Locate the first pass that introduces duplicates using a trace bundle:
   ```bash
   python scripts/bisect_dups.py --dir artifacts/trace/<run_id> --spec pipeline.yaml
   ```
+
   Flags:
   - `--dir PATH`: directory containing per-pass snapshots.
   - `--spec FILE`: pipeline specification (default `pipeline.yaml`).
