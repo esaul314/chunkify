@@ -74,3 +74,14 @@ def test_comma_same_page_continuation():
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 1
     assert "teaser, However" in merged[0].text
+
+
+def test_three_page_sentence_splits_after_second_page():
+    blocks = [
+        Block(text="Part one", source={"page": 1}),
+        Block(text="continues on page two", source={"page": 2}),
+        Block(text="and finally ends", source={"page": 3}),
+    ]
+    merged = list(merge_continuation_blocks(blocks))
+    assert len(merged) == 2
+    assert merged[0].source.get("page_range") == (1, 2)
