@@ -22,36 +22,37 @@ def _group(items: Sequence[Mapping[str, Any]], pos_fn):
     return groups
 
 
+def _subset_record(i: int, j: int, items, fps, pos_fn):
+    a, b = (i, j) if len(fps[i]) <= len(fps[j]) else (j, i)
+    short_item = items[a]
+    return {
+        "fp": fps[a],
+        "text": short_item.get("text", "")[:80],
+        "count": 2,
+        "first": pos_fn(short_item, a),
+        "second": pos_fn(items[b], b),
+    }
+
+
 def _subset_dups(items: Sequence[Mapping[str, Any]], pos_fn):
-    fps: list[str] = []
+    fps = [_fingerprint(str(it.get("text", ""))) for it in items]
     token_map: dict[str, set[int]] = defaultdict(set)
-    seen: set[tuple[int, int]] = set()
-    records: list[Mapping[str, Any]] = []
-    for idx, item in enumerate(items):
-        fp = _fingerprint(str(item.get("text", "")))
-        tokens = fp.split()
-        candidates = {i for t in tokens for i in token_map.get(t, set())}
-        for j in candidates:
-            other = fps[j]
-            pair = (j, idx) if j < idx else (idx, j)
-            if fp and other and fp != other and (fp in other or other in fp) and pair not in seen:
-                short_fp, short_item = (fp, item) if len(fp) <= len(other) else (other, items[j])
-                records.append(
-                    {
-                        "fp": short_fp,
-                        "text": short_item.get("text", "")[:80],
-                        "count": 2,
-                        "first": pos_fn(items[j], j) if len(fp) > len(other) else pos_fn(item, idx),
-                        "second": pos_fn(item, idx)
-                        if len(fp) > len(other)
-                        else pos_fn(items[j], j),
-                    }
-                )
-                seen.add(pair)
-        fps.append(fp)
-        for t in set(tokens):
+    for idx, fp in enumerate(fps):
+        for t in set(fp.split()):
             token_map[t].add(idx)
-    return records
+
+    pairs = {
+        (i, j)
+        for idxs in token_map.values()
+        for i, j in combinations(sorted(idxs), 2)
+        if fps[i] and fps[j]
+    }
+
+    return [
+        _subset_record(i, j, items, fps, pos_fn)
+        for i, j in pairs
+        if fps[i] != fps[j] and (fps[i] in fps[j] or fps[j] in fps[i])
+    ]
 
 
 def _format(items: Sequence[Mapping[str, Any]], groups: Mapping[str, list[Mapping[str, Any]]]):
