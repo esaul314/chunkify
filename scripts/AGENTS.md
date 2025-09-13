@@ -10,6 +10,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - ```chunk_pdf.py`: Full pipeline runner.
 - `validate_chunks.sh`: Semantic and size checks.
 - `detect_duplicates.py`: Overlap/duplicate analysis.
+- `bisect_dups.py`: Locate first pass introducing duplicates via snapshot replay.
 - `_apply.sh`: Batch orchestration.
 - `parity.py`: Run legacy and new pipelines for comparison.
 - `epoche_platform_eng.py`: Trace harness verifying duplicate and pass execution counts.
