@@ -36,7 +36,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
     --from pdf_parse --spec pipeline.yaml \
     --out /tmp/replay.jsonl --check-dups
   ```
-  
+
   Flags:
   - `--snapshot PATH`: snapshot JSON file to seed replay.
   - `--from STEP`: pass name matching the snapshot.
@@ -48,7 +48,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   ```bash
   python scripts/bisect_dups.py --dir artifacts/trace/<run_id> --spec pipeline.yaml
   ```
-  
+
   Flags:
   - `--dir PATH`: directory containing per-pass snapshots.
   - `--spec FILE`: pipeline specification (default `pipeline.yaml`).

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from itertools import combinations
 from typing import Any, Mapping, Sequence
 import re
 
@@ -21,6 +22,32 @@ def _group(items: Sequence[Mapping[str, Any]], pos_fn):
     return groups
 
 
+def _subset_dups(items: Sequence[Mapping[str, Any]], pos_fn):
+    fps = [_fingerprint(str(i.get("text", ""))) for i in items]
+    pairs = [
+        (i, j)
+        for i, j in combinations(range(len(fps)), 2)
+        if fps[i]
+        and fps[j]
+        and (fps[i] in fps[j] or fps[j] in fps[i])
+        and fps[i] != fps[j]
+    ]
+    return [
+        {
+            "fp": fps[i] if len(fps[i]) <= len(fps[j]) else fps[j],
+            "text": (
+                items[i].get("text", "")
+                if len(fps[i]) <= len(fps[j])
+                else items[j].get("text", "")
+            )[:80],
+            "count": 2,
+            "first": pos_fn(items[i], i),
+            "second": pos_fn(items[j], j),
+        }
+        for i, j in pairs
+    ]
+
+
 def _format(items: Sequence[Mapping[str, Any]], groups: Mapping[str, list[Mapping[str, Any]]]):
     return [
         {
@@ -37,27 +64,23 @@ def _format(items: Sequence[Mapping[str, Any]], groups: Mapping[str, list[Mappin
 
 def find_dups_pageblocks(blocks: Sequence[Mapping[str, Any]]):
     """Return duplicate page blocks based on normalized text."""
-    groups = _group(
-        blocks,
-        lambda b, i: {
-            "index": i,
-            **{k: b.get(k) for k in ("page", "bbox") if b.get(k) is not None},
-        },
-    )
-    return _format(blocks, groups)
+    pos = lambda b, i: {
+        "index": i,
+        **{k: b.get(k) for k in ("page", "bbox") if b.get(k) is not None},
+    }
+    groups = _group(blocks, pos)
+    return _format(blocks, groups) + _subset_dups(blocks, pos)
 
 
 def find_dups_chunks(chunks: Sequence[Mapping[str, Any]]):
     """Return duplicate chunks based on normalized text."""
-    groups = _group(
-        chunks,
-        lambda c, i: {
-            "index": i,
-            **(
-                {"chunk_id": c.get("metadata", {}).get("chunk_id")}
-                if c.get("metadata", {}).get("chunk_id")
-                else {}
-            ),
-        },
-    )
-    return _format(chunks, groups)
+    pos = lambda c, i: {
+        "index": i,
+        **(
+            {"chunk_id": c.get("metadata", {}).get("chunk_id")}
+            if c.get("metadata", {}).get("chunk_id")
+            else {}
+        )
+    }
+    groups = _group(chunks, pos)
+    return _format(chunks, groups) + _subset_dups(chunks, pos)
