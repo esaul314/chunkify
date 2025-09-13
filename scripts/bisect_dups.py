@@ -22,7 +22,13 @@ from pdf_chunker.diagnostics.dups import find_dups_chunks, find_dups_pageblocks
 from pdf_chunker.framework import Artifact, registry
 
 
-STEPS = ("pdf_parse", "text_clean", "heading_detect", "split_semantic")
+STEPS = (
+    "pdf_parse",
+    "text_clean",
+    "heading_detect",
+    "list_detect",
+    "split_semantic",
+)
 
 
 def _read_json(path: Path) -> Any:
@@ -38,7 +44,9 @@ def _rows(payload: Any) -> Iterable[Mapping[str, Any]]:
     return (
         payload
         if isinstance(payload, list)
-        else payload.get("items", []) if isinstance(payload, Mapping) else []
+        else payload.get("items", [])
+        if isinstance(payload, Mapping)
+        else []
     )
 
 
@@ -52,11 +60,7 @@ def _passes_after(spec: PipelineSpec, start: str) -> list[str]:
 
 def _run_passes(spec: PipelineSpec, art: Artifact, names: Sequence[str]) -> Artifact:
     regs = registry()
-    configured = (
-        configure_pass(regs[n], spec.options.get(n, {}))
-        for n in names
-        if n in regs
-    )
+    configured = (configure_pass(regs[n], spec.options.get(n, {})) for n in names if n in regs)
     return reduce(lambda acc, p: p(acc), configured, art)
 
 
