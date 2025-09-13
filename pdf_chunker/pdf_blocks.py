@@ -224,7 +224,7 @@ def _is_cross_page_continuation(
 ) -> bool:
     if not (curr_text and next_text):
         return False
-    if curr_page is not None and next_page is not None and curr_page == next_page:
+    if curr_page is None or next_page is None or next_page != curr_page + 1:
         return False
     if curr_text.endswith((".", "!", "?")):
         return False
@@ -246,7 +246,7 @@ def _is_cross_page_continuation(
 def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
     curr_page = curr.source.get("page")
     next_page = nxt.source.get("page")
-    if curr_page is None or next_page is None or curr_page == next_page:
+    if curr_page is None or next_page is None or next_page != curr_page + 1:
         return False
     curr_bbox = curr.bbox
     next_bbox = nxt.bbox

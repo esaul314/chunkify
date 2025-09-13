@@ -57,6 +57,15 @@ def test_cross_page_does_not_merge_entire_document():
     assert merged[1].text.startswith("New paragraph")
 
 
+def test_non_consecutive_pages_do_not_merge():
+    blocks = [
+        Block(text="Ends without punctuation", source={"page": 1}),
+        Block(text="Resume after gap", source={"page": 3}),
+    ]
+    merged = list(merge_continuation_blocks(blocks))
+    assert len(merged) == 2
+
+
 def test_comma_same_page_continuation():
     blocks = [
         Block(text="Chapters may end with a teaser,", source={"page": 1}),

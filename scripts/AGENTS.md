@@ -10,7 +10,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - ```chunk_pdf.py`: Full pipeline runner.
 - `validate_chunks.sh`: Semantic and size checks.
 - `detect_duplicates.py`: Overlap/duplicate analysis.
-- `bisect_dups.py`: Locate first pass introducing duplicates via snapshot replay.
+- `bisect_dups.py`: Locate first pass introducing duplicates via snapshot replay (checks `pdf_parse`→`text_clean`→`heading_detect`→`list_detect`→`split_semantic`).
 - `_apply.sh`: Batch orchestration.
 - `parity.py`: Run legacy and new pipelines for comparison.
 - `epoche_platform_eng.py`: Trace harness verifying duplicate and pass execution counts.
@@ -29,6 +29,26 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   ```bash
   python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
   ```
+- Replay remaining passes from a snapshot and optionally check for duplicates:
+  ```bash
+  python scripts/replay_from_snapshot.py \
+    --snapshot artifacts/trace/<run_id>/pdf_parse.json \
+    --from pdf_parse --spec pipeline.yaml \
+    --out /tmp/replay.jsonl --check-dups
+  ```
+  Flags:
+  - `--snapshot PATH`: snapshot JSON file to seed replay.
+  - `--from STEP`: pass name matching the snapshot.
+  - `--spec FILE`: pipeline specification (default `pipeline.yaml`).
+  - `--out PATH`: destination for the replayed JSONL.
+  - `--check-dups`: enable duplicate detection and write `<final_pass>_dups.json`.
+- Locate the first pass that introduces duplicates using a trace bundle:
+  ```bash
+  python scripts/bisect_dups.py --dir artifacts/trace/<run_id> --spec pipeline.yaml
+  ```
+  Flags:
+  - `--dir PATH`: directory containing per-pass snapshots.
+  - `--spec FILE`: pipeline specification (default `pipeline.yaml`).
 
 ## Known Issues
 - Command-line help may be outdated.
