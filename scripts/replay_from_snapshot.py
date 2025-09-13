@@ -39,11 +39,7 @@ def passes_after(spec: PipelineSpec, start: str) -> list[str]:
 
 def _configured(spec: PipelineSpec, names: Sequence[str]):
     regs = registry()
-    return [
-        configure_pass(regs[n], spec.options.get(n, {}))
-        for n in names
-        if n in regs
-    ]
+    return [configure_pass(regs[n], spec.options.get(n, {})) for n in names if n in regs]
 
 
 def run_passes(spec: PipelineSpec, a: Artifact, names: Sequence[str]) -> Artifact:
@@ -56,7 +52,9 @@ def _rows(payload: Any) -> Iterable[Mapping[str, Any]]:
     return (
         payload
         if isinstance(payload, list)
-        else payload.get("items", []) if isinstance(payload, Mapping) else []
+        else payload.get("items", [])
+        if isinstance(payload, Mapping)
+        else []
     )
 
 
@@ -75,16 +73,18 @@ def replay(
     rows = list(_rows(result.payload))
     emit_jsonl.write(rows, out)
     if check_dups:
-        finder = (
-            find_dups_pageblocks if rows and "bbox" in rows[0] else find_dups_chunks
-        )
+        finder = find_dups_pageblocks if rows and "bbox" in rows[0] else find_dups_chunks
         dups = finder(rows)
-        dups_path = Path(snapshot).parent / f"{steps[-1]}_dups.json"
-        dups_path.write_text(
+        samples = "; ".join(d["text"] for d in dups[:3]) if dups else ""
+        Path(snapshot).parent.joinpath(f"{steps[-1]}_dups.json").write_text(
             json.dumps({"total": len(rows), "dups": dups}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        logging.info("duplicate_rows=%d", len(dups))
+        logging.info(
+            "duplicate_rows=%d%s",
+            len(dups),
+            f" sample={samples}" if samples else "",
+        )
     return result
 
 
