@@ -29,6 +29,17 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   ```bash
   python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
   ```
+- Replay remaining passes from a snapshot and optionally check for duplicates:
+  ```bash
+  python scripts/replay_from_snapshot.py \
+    --snapshot artifacts/trace/<run_id>/pdf_parse.json \
+    --from pdf_parse --spec pipeline.yaml \
+    --out /tmp/replay.jsonl --check-dups
+  ```
+- Locate the first pass that introduces duplicates using a trace bundle:
+  ```bash
+  python scripts/bisect_dups.py --dir artifacts/trace/<run_id> --spec pipeline.yaml
+  ```
 
 ## Known Issues
 - Command-line help may be outdated.
