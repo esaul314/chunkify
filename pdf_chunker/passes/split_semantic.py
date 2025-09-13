@@ -67,7 +67,7 @@ def _get_split_fn(
     soft_hits = 0
 
     try:
-        from pdf_chunker.splitter import semantic_chunker
+        from pdf_chunker.splitter import iter_word_chunks, semantic_chunker
 
         semantic = partial(
             semantic_chunker,
@@ -80,7 +80,12 @@ def _get_split_fn(
             nonlocal soft_hits
             raw = semantic(text)
             soft_hits += sum(len(c) > SOFT_LIMIT for c in raw)
-            return [seg for c in raw for seg in _soft_segments(c)]
+            return [
+                seg
+                for c in raw
+                for sub in iter_word_chunks(c, chunk_size)
+                for seg in _soft_segments(sub)
+            ]
 
     except Exception:  # pragma: no cover - safety fallback
 

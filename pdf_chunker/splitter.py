@@ -2,7 +2,7 @@ import logging
 from collections import Counter
 import re
 from functools import reduce
-from typing import Any, Dict, Iterable, List, Match, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Match, Optional, Tuple
 
 from .text_cleaning import _is_probable_heading
 from .list_detection import starts_with_bullet
@@ -484,6 +484,17 @@ def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
     joined = joined.replace(NEWLINE_TOKEN, "\n").replace(NBSP_TOKEN, NBSP)
     joined = re.sub(rf" ?{NBSP} ?", NBSP, joined)
     return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
+
+
+def iter_word_chunks(text: str, max_words: int) -> Iterator[str]:
+    """Yield ``text`` split into sequential chunks of at most ``max_words`` words."""
+    words = text.split()
+    if len(words) <= max_words * 5:
+        return iter([text])
+    return (
+        " ".join(words[i : i + max_words])
+        for i in range(0, len(words), max_words)
+    )
 
 
 def _split_short_text(text: str) -> List[str]:
