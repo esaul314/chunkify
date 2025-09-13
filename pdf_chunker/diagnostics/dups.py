@@ -87,7 +87,7 @@ def find_dups_chunks(chunks: Sequence[Mapping[str, Any]]):
             {"chunk_id": c.get("metadata", {}).get("chunk_id")}
             if c.get("metadata", {}).get("chunk_id")
             else {}
-        ),
+        )
     }
     groups = _group(chunks, pos)
     return _format(chunks, groups) + _subset_dups(chunks, pos)
