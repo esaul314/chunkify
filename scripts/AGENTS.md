@@ -42,7 +42,7 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   - `--spec FILE`: pipeline specification (default `pipeline.yaml`).
   - `--out PATH`: destination for the replayed JSONL.
   - `--check-dups`: enable duplicate detection and write `<final_pass>_dups.json`.
-  - 
+
 - Locate the first pass that introduces duplicates using a trace bundle:
   ```bash
   python scripts/bisect_dups.py --dir artifacts/trace/<run_id> --spec pipeline.yaml
