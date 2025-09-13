@@ -2,7 +2,7 @@ import json
 
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import assemble_report, run_convert, write_run_report
-from pdf_chunker.framework import Artifact
+from pdf_chunker.framework import Artifact, registry
 
 
 def test_run_convert_writes_jsonl(tmp_path):
@@ -16,7 +16,8 @@ def test_run_convert_writes_jsonl(tmp_path):
     doc = {"type": "chunks", "items": [{"text": "a"}, {"text": "b"}]}
     artifact = Artifact(payload=doc, meta={"metrics": {}, "input": "doc.pdf"})
     artifact, timings = run_convert(artifact, spec)
-    report = assemble_report(timings, artifact.meta or {})
+    passes = [registry()[s] for s in spec.pipeline]
+    report = assemble_report(timings, artifact.meta or {}, passes)
     write_run_report(spec, report)
 
     out_file = tmp_path / "out.jsonl"
