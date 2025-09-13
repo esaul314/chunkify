@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from pdf_chunker.adapters import emit_jsonl
-import pdf_chunker.adapters.emit_trace as emit_trace
+from pdf_chunker.diagnostics.dups import (
+    find_dups_chunks,
+    find_dups_pageblocks,
+)
 from pdf_chunker.config import PipelineSpec, load_spec
 from pdf_chunker.core_new import configure_pass
 from pdf_chunker.framework import Artifact, registry
@@ -72,8 +75,16 @@ def replay(
     rows = list(_rows(result.payload))
     emit_jsonl.write(rows, out)
     if check_dups:
-        info = emit_trace.summarize_duplicates(rows)
-        logging.info("duplicate_rows=%d", len(info.get("dups", [])))
+        finder = (
+            find_dups_pageblocks if rows and "bbox" in rows[0] else find_dups_chunks
+        )
+        dups = finder(rows)
+        dups_path = Path(snapshot).parent / f"{steps[-1]}_dups.json"
+        dups_path.write_text(
+            json.dumps({"total": len(rows), "dups": dups}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        logging.info("duplicate_rows=%d", len(dups))
     return result
 
 
