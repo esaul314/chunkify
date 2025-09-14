@@ -14,3 +14,10 @@ def test_split_preserves_lists(items, limit):
     text = "Intro\n" + "\n".join(items) + "\nTail"
     expected = ["Intro", "\n".join(items) + "\nTail"]
     assert _split(text, limit) == expected
+
+
+def test_split_numbered_list_with_blank_line():
+    text = "Intro\n1. one\n\n2. two\n3. three\nTail"
+    limit = len("Intro\n1. one\n")
+    expected = ["Intro", "1. one\n\n2. two\n3. three\nTail"]
+    assert _split(text, limit) == expected
