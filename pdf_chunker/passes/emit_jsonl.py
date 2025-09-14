@@ -53,7 +53,6 @@ def _first_non_empty_line(text: str) -> str:
 def _trim_trailing_empty(lines: list[str]) -> list[str]:
     return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
-
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
