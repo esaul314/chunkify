@@ -109,6 +109,44 @@ def _merge_text(prev: str, curr: str) -> str:
     return f"{prev}\n\n{curr}".strip()
 
 
+def _merge_sentence_pieces(pieces: Iterable[str]) -> list[str]:
+    def step(acc: list[str], piece: str) -> list[str]:
+        if acc and _starts_mid_sentence(piece):
+            merged = f"{acc[-1].rstrip()} {piece}".strip()
+            return [*acc[:-1], merged]
+        return [*acc, piece]
+
+    return reduce(step, pieces, [])
+
+
+def _merge_if_fragment(
+    acc: list[dict[str, Any]],
+    acc_text: str,
+    acc_norm: str,
+    item: dict[str, Any],
+    text: str,
+    text_norm: str,
+) -> tuple[list[dict[str, Any]], str, str]:
+    """Merge ``text`` into ``acc`` if it begins mid-sentence."""
+
+    if _starts_mid_sentence(text) and acc:
+        prev = acc[-1]
+        merged_text = f"{prev['text'].rstrip()} {text}".strip()
+        merged_item = {**prev, "text": merged_text}
+        merged_acc = f"{acc_text.rstrip()} {text}".strip()
+        return (
+            [*acc[:-1], merged_item],
+            merged_acc,
+            acc_norm + text_norm,
+        )
+    new_text = _merge_text(acc_text, text) if acc_text else text
+    return (
+        [*acc, {**item, "text": text}],
+        new_text,
+        acc_norm + text_norm,
+    )
+
+
 def _merge_items(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
     text = item["text"]
     if acc:
@@ -156,9 +194,7 @@ def _dedupe(
             if log is not None:
                 log.append(text)
             return state
-        overlap = _overlap_len(acc_norm, text_norm)
-        if not overlap:
-            overlap = _prefix_contained_len(acc_norm, text_norm)
+        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(acc_norm, text_norm)
         if overlap:
             if log is not None:
                 log.append(text[:overlap])
@@ -166,12 +202,7 @@ def _dedupe(
             if not text:
                 return state
             text_norm = _normalize(text)
-        new_text = _merge_text(acc_text, text) if acc_text else text
-        return (
-            acc + [{**item, "text": text}],
-            new_text,
-            acc_norm + text_norm,
-        )
+        return _merge_if_fragment(acc, acc_text, acc_norm, item, text, text_norm)
 
     initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")
     return reduce(step, items, initial)[0]
@@ -208,7 +239,7 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     avail = max(max_chars - overhead, 0)
     if avail <= 0:
         return []
-    pieces = _split(item.get("text", ""), avail)
+    pieces = _merge_sentence_pieces(_split(item.get("text", ""), avail))
 
     def build(idx_piece: tuple[int, str]) -> Row:
         idx, piece = idx_piece

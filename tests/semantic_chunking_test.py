@@ -1,4 +1,5 @@
 from pdf_chunker.framework import Artifact
+from pdf_chunker.passes.emit_jsonl import _dedupe
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
 import re
 
@@ -68,3 +69,13 @@ def test_blocks_merge_into_sentence() -> None:
     art = _SplitSemanticPass()(Artifact(payload=doc))
     texts = [c["text"] for c in art.payload["items"]]
     assert texts == ["Cloud development envs are new."]
+
+
+def test_dedupe_preserves_sentence_start() -> None:
+    """Dedupe merges fragments so outputs don't start mid-sentence."""
+    items = [
+        {"text": "Prime numbers are tricky"},
+        {"text": "are tricky to reason about."},
+    ]
+    texts = [r["text"] for r in _dedupe(items)]
+    assert texts == ["Prime numbers are tricky to reason about."]
