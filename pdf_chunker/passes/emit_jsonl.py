@@ -244,6 +244,7 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     avail = max(max_chars - overhead, 0)
     if avail <= 0:
         return []
+
     pieces = _merge_sentence_pieces(_split(item.get("text", ""), avail), avail)
 
     def build(idx_piece: tuple[int, str]) -> Row:

@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
 from itertools import chain
+import re
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
