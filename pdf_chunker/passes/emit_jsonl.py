@@ -53,6 +53,32 @@ def _first_non_empty_line(text: str) -> str:
 def _trim_trailing_empty(lines: list[str]) -> list[str]:
     return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
+
+def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
+    """Shift trailing list block from ``raw`` into ``rest`` when appropriate."""
+
+    if not rest or not _is_list_line(_first_non_empty_line(rest)):
+        return raw, rest
+
+    lines = _trim_trailing_empty(raw.splitlines())
+    # fmt: off
+    candidates = [
+        i
+        for i, ln in enumerate(reversed(lines))
+        if ln.strip() and not _is_list_line(ln)
+    ]
+    # fmt: on
+    idx = candidates[0] if candidates else len(lines)
+    start = len(lines) - idx
+    block = lines[start:]
+    if not any(_is_list_line(ln) for ln in block):
+        return raw, rest
+
+    moved = "\n".join(block).lstrip("\n")
+    kept = "\n".join(lines[:start]).rstrip()
+    return kept, f"{moved}\n{rest.lstrip()}"
+
+
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
@@ -61,24 +87,7 @@ def _split(text: str, limit: int) -> list[str]:
     while t:
         raw = _truncate_chunk(t, limit)
         rest = t[len(raw) :]
-        if rest:
-            head = _first_non_empty_line(rest)
-            if head and _is_list_line(head):
-                lines = _trim_trailing_empty(raw.splitlines())
-                if lines and _is_list_line(lines[-1]):
-                    idx = next(
-                        (
-                            i
-                            for i, ln in enumerate(reversed(lines))
-                            if ln.strip() and not _is_list_line(ln)
-                        ),
-                        len(lines),
-                    )
-                    start = len(lines) - idx
-                    if 0 < start < len(lines):
-                        moved = "\n".join(lines[start:])
-                        raw = "\n".join(lines[:start]).rstrip()
-                        rest = f"{moved}\n{rest.lstrip()}"
+        raw, rest = _rebalance_lists(raw, rest)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
         if trimmed:
             pieces.append(trimmed)
