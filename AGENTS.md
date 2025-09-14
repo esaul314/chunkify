@@ -38,9 +38,15 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```
 - Trace a specific phrase through the pipeline to debug loss or duplication:
   ```bash
-  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
-  ```
-  Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
+    pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
+    ```
+    Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
+
+### Debugging Directions
+- When JSONL lines begin mid-sentence or phrases like "Most engineers" repeat, inspect the `split_semantic` pass before focusing on downstream emission or deduplication.
+- Ensure `_get_split_fn` pipes `semantic_chunker` through `merge_conversational_chunks` prior to `iter_word_chunks` and `_soft_segments`; skipping this step truncates or duplicates sentences.
+- Use `pdf_chunker convert ... --trace <phrase>` or run `tests/emit_jsonl_coalesce_test.py::test_split_does_not_duplicate` to pinpoint which pass introduces the anomaly.
+- `emit_jsonl` deduplication can mask upstream defects, so validate semantic split outputs first to avoid chasing the wrong component.
 
 ## Pass Responsibilities
 
