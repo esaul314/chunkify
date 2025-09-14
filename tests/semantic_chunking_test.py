@@ -1,5 +1,6 @@
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
+import re
 
 
 def _doc(text: str) -> dict:
@@ -38,3 +39,13 @@ def test_parameter_propagation() -> None:
     counts = [len(t.split()) for t in texts]
     assert counts == [5, 5, 5, 5, 4]
     assert texts[1].split()[0] == "w4"
+
+
+def test_no_chunk_starts_mid_sentence() -> None:
+    """Chunks begin at sentence boundaries."""
+    end_re = re.compile(r"[.?!][\"')\]]*$")
+    long_sentence = " ".join(f"w{i}" for i in range(120)) + "."
+    text = f"{long_sentence} Next one."
+    art = _SplitSemanticPass(chunk_size=10, overlap=0)(Artifact(payload=_doc(text)))
+    chunks = [c["text"] for c in art.payload["items"]]
+    assert all(end_re.search(prev.rstrip()) for prev in chunks[:-1])

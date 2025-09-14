@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from functools import partial
+from functools import partial, reduce
 from itertools import chain
+import re
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
@@ -36,6 +37,22 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
         yield from _split(tail)
 
     return list(_split(text))
+
+
+_ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
+
+
+def _merge_sentence_fragments(chunks: Iterable[str]) -> list[str]:
+    """Merge sequential ``chunks`` so each ends at a sentence boundary."""
+
+    def _merge(acc: list[str], chunk: str) -> list[str]:
+        return (
+            acc[:-1] + [f"{acc[-1]} {chunk}".strip()]
+            if acc and not _ENDS_SENTENCE.search(acc[-1].rstrip())
+            else acc + [chunk]
+        )
+
+    return reduce(_merge, chunks, [])
 
 
 Doc = dict[str, Any]
@@ -67,7 +84,11 @@ def _get_split_fn(
     soft_hits = 0
 
     try:
-        from pdf_chunker.splitter import iter_word_chunks, semantic_chunker
+        from pdf_chunker.splitter import (
+            iter_word_chunks,
+            merge_conversational_chunks,
+            semantic_chunker,
+        )
 
         semantic = partial(
             semantic_chunker,
@@ -78,22 +99,25 @@ def _get_split_fn(
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
-            raw = semantic(text)
-            soft_hits += sum(len(c) > SOFT_LIMIT for c in raw)
-            return [
+            merged, _ = merge_conversational_chunks(semantic(text), min_chunk_size)
+            raw = [
                 seg
-                for c in raw
+                for c in merged
                 for sub in iter_word_chunks(c, chunk_size)
                 for seg in _soft_segments(sub)
             ]
+            final = _merge_sentence_fragments(raw)
+            soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
+            return final
 
     except Exception:  # pragma: no cover - safety fallback
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
             raw = _soft_segments(text)
-            soft_hits += sum(len(seg) > SOFT_LIMIT for seg in raw)
-            return raw
+            final = _merge_sentence_fragments(raw)
+            soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
+            return final
 
     def metrics() -> dict[str, int]:
         return {"soft_limit_hits": soft_hits}
