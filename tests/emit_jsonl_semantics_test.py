@@ -80,14 +80,13 @@ def test_emit_jsonl_drops_incoherent_tail():
         ],
     }
     rows = emit_jsonl(Artifact(payload=doc)).payload
-    assert rows == [
-        {
-            "text": (
-                "This opening sentence is intentionally long to satisfy the coherence"
-                " heuristic and ends properly."
-            )
-        }
-    ]
+    expected = "\n\n".join(
+        (
+            "This opening sentence is intentionally long to satisfy the coherence heuristic and ends properly.",
+            "and lacks terminal punctuation while being sufficiently long to trigger validation logic",
+        )
+    )
+    assert rows == [{"text": expected}]
 
 
 def test_emit_jsonl_strips_leading_newline():
