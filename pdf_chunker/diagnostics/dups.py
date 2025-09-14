@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from itertools import combinations
 from typing import Any, Mapping, Sequence
 import re
 
-__all__ = ["find_dups_pageblocks", "find_dups_chunks"]
+__all__ = ["find_dups_pageblocks", "find_dups_chunks", "overlap_dups"]
 
 
 def _fingerprint(text: str) -> str:
@@ -22,36 +21,31 @@ def _group(items: Sequence[Mapping[str, Any]], pos_fn):
     return groups
 
 
-def _subset_record(i: int, j: int, items, fps, pos_fn):
-    a, b = (i, j) if len(fps[i]) <= len(fps[j]) else (j, i)
-    short_item = items[a]
+def _ngram_fps(text: str, size: int = 5) -> set[str]:
+    tokens = _fingerprint(text).split()
     return {
-        "fp": fps[a],
-        "text": short_item.get("text", "")[:80],
-        "count": 2,
-        "first": pos_fn(short_item, a),
-        "second": pos_fn(items[b], b),
+        " ".join(tokens[i : i + size])
+        for i in range(len(tokens) - size + 1)
     }
 
 
-def _subset_dups(items: Sequence[Mapping[str, Any]], pos_fn):
-    fps = [_fingerprint(str(it.get("text", ""))) for it in items]
-    token_map: dict[str, set[int]] = defaultdict(set)
-    for idx, fp in enumerate(fps):
-        for t in set(fp.split()):
-            token_map[t].add(idx)
-
-    pairs = {
-        (i, j)
-        for idxs in token_map.values()
-        for i, j in combinations(sorted(idxs), 2)
-        if fps[i] and fps[j]
-    }
-
+def overlap_dups(
+    items: Sequence[Mapping[str, Any]], pos_fn, size: int = 5
+):
+    fps = [_ngram_fps(str(it.get("text", "")), size) for it in items]
     return [
-        _subset_record(i, j, items, fps, pos_fn)
-        for i, j in pairs
-        if fps[i] != fps[j] and (fps[i] in fps[j] or fps[j] in fps[i])
+        {
+            "fp": next(iter(overlap)),
+            "text": items[min(i, j, key=lambda k: len(str(items[k].get("text", ""))))].get(
+                "text", ""
+            )[:80],
+            "count": 2,
+            "first": pos_fn(items[i], i),
+            "second": pos_fn(items[j], j),
+        }
+        for i in range(len(items))
+        for j in range(i + 1, len(items))
+        if (overlap := fps[i] & fps[j])
     ]
 
 
@@ -76,7 +70,7 @@ def find_dups_pageblocks(blocks: Sequence[Mapping[str, Any]]):
         **{k: b.get(k) for k in ("page", "bbox") if b.get(k) is not None},
     }
     groups = _group(blocks, pos)
-    return _format(blocks, groups) + _subset_dups(blocks, pos)
+    return _format(blocks, groups) + overlap_dups(blocks, pos)
 
 
 def find_dups_chunks(chunks: Sequence[Mapping[str, Any]]):
@@ -90,4 +84,4 @@ def find_dups_chunks(chunks: Sequence[Mapping[str, Any]]):
         )
     }
     groups = _group(chunks, pos)
-    return _format(chunks, groups) + _subset_dups(chunks, pos)
+    return _format(chunks, groups) + overlap_dups(chunks, pos)
