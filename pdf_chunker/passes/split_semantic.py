@@ -67,7 +67,11 @@ def _get_split_fn(
     soft_hits = 0
 
     try:
-        from pdf_chunker.splitter import iter_word_chunks, semantic_chunker
+        from pdf_chunker.splitter import (
+            iter_word_chunks,
+            merge_conversational_chunks,
+            semantic_chunker,
+        )
 
         semantic = partial(
             semantic_chunker,
@@ -78,11 +82,11 @@ def _get_split_fn(
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
-            raw = semantic(text)
-            soft_hits += sum(len(c) > SOFT_LIMIT for c in raw)
+            merged, _ = merge_conversational_chunks(semantic(text), min_chunk_size)
+            soft_hits += sum(len(c) > SOFT_LIMIT for c in merged)
             return [
                 seg
-                for c in raw
+                for c in merged
                 for sub in iter_word_chunks(c, chunk_size)
                 for seg in _soft_segments(sub)
             ]
