@@ -53,7 +53,6 @@ def _first_non_empty_line(text: str) -> str:
 def _last_non_empty_line(text: str) -> str:
     return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
 
-
 def _trim_trailing_empty(lines: list[str]) -> list[str]:
     return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
@@ -63,7 +62,6 @@ _LIST_GAP_RE = re.compile(r"\n{2,}(?=(?:\s*(?:[-\*\u2022]|\d+\.)))")
 
 def _collapse_list_gaps(text: str) -> str:
     return _LIST_GAP_RE.sub("\n", text)
-
 
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     """Shift trailing list block from ``raw`` into ``rest`` when appropriate."""
