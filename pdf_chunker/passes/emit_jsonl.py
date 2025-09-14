@@ -9,6 +9,7 @@ from functools import reduce
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -39,6 +40,11 @@ def _max_chars() -> int:
     return int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000"))
 
 
+def _is_list_line(line: str) -> bool:
+    stripped = line.lstrip()
+    return starts_with_bullet(stripped) or starts_with_number(stripped)
+
+
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
@@ -46,9 +52,21 @@ def _split(text: str, limit: int) -> list[str]:
     t = text
     while t:
         raw = _truncate_chunk(t, limit)
+        rest = t[len(raw) :]
+        if rest:
+            next_lines = rest.lstrip().splitlines()
+            if next_lines and _is_list_line(next_lines[0]):
+                lines = raw.rstrip().splitlines()
+                if lines and all(_is_list_line(ln) for ln in lines):
+                    raw, rest = t, ""
+                else:
+                    while lines and _is_list_line(lines[-1]):
+                        rest = f"{lines.pop()}\n{rest.lstrip()}"
+                    raw = "\n".join(lines)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
-        pieces = [*pieces, trimmed] if trimmed else pieces
-        t = t[len(raw) :].lstrip()
+        if trimmed:
+            pieces.append(trimmed)
+        t = rest.lstrip()
     return pieces
 
 
