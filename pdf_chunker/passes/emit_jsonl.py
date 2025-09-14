@@ -50,9 +50,18 @@ def _first_non_empty_line(text: str) -> str:
     return next((ln for ln in text.splitlines() if ln.strip()), "")
 
 
+def _last_non_empty_line(text: str) -> str:
+    return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
+
 def _trim_trailing_empty(lines: list[str]) -> list[str]:
     return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
+
+_LIST_GAP_RE = re.compile(r"\n{2,}(?=(?:\s*(?:[-\*\u2022]|\d+\.)))")
+
+
+def _collapse_list_gaps(text: str) -> str:
+    return _LIST_GAP_RE.sub("\n", text)
 
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     """Shift trailing list block from ``raw`` into ``rest`` when appropriate."""
@@ -74,9 +83,9 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     if not any(_is_list_line(ln) for ln in block):
         return raw, rest
 
-    moved = "\n".join(block).lstrip("\n")
+    moved = "\n".join(block).strip()
     kept = "\n".join(lines[:start]).rstrip()
-    return kept, f"{moved}\n{rest.lstrip()}"
+    return kept, f"{moved}\n{rest.lstrip()}".strip("\n")
 
 
 def _split(text: str, limit: int) -> list[str]:
@@ -88,9 +97,17 @@ def _split(text: str, limit: int) -> list[str]:
         raw = _truncate_chunk(t, limit)
         rest = t[len(raw) :]
         raw, rest = _rebalance_lists(raw, rest)
+        raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
         if trimmed:
-            pieces.append(trimmed)
+            if pieces and _is_list_line(_first_non_empty_line(trimmed)):
+                merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
+                if len(merged) <= limit:
+                    pieces[-1] = merged
+                else:
+                    pieces.append(trimmed)
+            else:
+                pieces.append(trimmed)
         t = rest.lstrip()
     return pieces
 
@@ -150,7 +167,11 @@ def _starts_mid_sentence(text: str) -> bool:
 
 
 def _merge_text(prev: str, curr: str) -> str:
-    return f"{prev}\n\n{curr}".strip()
+    last = _last_non_empty_line(prev)
+    first = _first_non_empty_line(curr)
+    cond = _is_list_line(last) and _is_list_line(first)
+    sep = "\n" if cond else "\n\n"
+    return f"{prev.rstrip()}{sep}{curr}".strip()
 
 
 def _merge_sentence_pieces(
