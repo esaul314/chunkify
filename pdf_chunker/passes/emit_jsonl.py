@@ -6,9 +6,11 @@ import os
 import re
 from collections.abc import Iterable
 from functools import reduce
+from itertools import dropwhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -39,6 +41,19 @@ def _max_chars() -> int:
     return int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000"))
 
 
+def _is_list_line(line: str) -> bool:
+    stripped = line.lstrip()
+    return starts_with_bullet(stripped) or starts_with_number(stripped)
+
+
+def _first_non_empty_line(text: str) -> str:
+    return next((ln for ln in text.splitlines() if ln.strip()), "")
+
+
+def _trim_trailing_empty(lines: list[str]) -> list[str]:
+    return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
+
+
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
@@ -46,9 +61,21 @@ def _split(text: str, limit: int) -> list[str]:
     t = text
     while t:
         raw = _truncate_chunk(t, limit)
+        rest = t[len(raw) :]
+        if rest:
+            head = _first_non_empty_line(rest)
+            if head and _is_list_line(head):
+                lines = _trim_trailing_empty(raw.splitlines())
+                if not all(_is_list_line(ln) for ln in lines):
+                    while lines and _is_list_line(lines[-1]):
+                        rest = f"{lines.pop()}\n{rest.lstrip()}"
+                    raw = "\n".join(lines)
+                else:
+                    raw, rest = t, ""
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
-        pieces = [*pieces, trimmed] if trimmed else pieces
-        t = t[len(raw) :].lstrip()
+        if trimmed:
+            pieces.append(trimmed)
+        t = rest.lstrip()
     return pieces
 
 
@@ -110,7 +137,10 @@ def _merge_text(prev: str, curr: str) -> str:
     return f"{prev}\n\n{curr}".strip()
 
 
-def _merge_sentence_pieces(pieces: Iterable[str], limit: int | None = None) -> list[str]:
+def _merge_sentence_pieces(
+    pieces: Iterable[str],
+    limit: int | None = None,
+) -> list[str]:
     def step(acc: list[str], piece: str) -> list[str]:
         if (
             acc
@@ -152,7 +182,10 @@ def _merge_if_fragment(
     )
 
 
-def _merge_items(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+def _merge_items(
+    acc: list[dict[str, Any]],
+    item: dict[str, Any],
+) -> list[dict[str, Any]]:
     text = item["text"]
     if acc:
         prev = acc[-1]
@@ -199,7 +232,10 @@ def _dedupe(
             if log is not None:
                 log.append(text)
             return state
-        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(acc_norm, text_norm)
+        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(
+            acc_norm,
+            text_norm,
+        )
         if overlap:
             if log is not None:
                 log.append(text[:overlap])
