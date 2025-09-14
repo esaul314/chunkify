@@ -188,8 +188,11 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
     the logic side‑effect free.
     """
 
-    def _combine(first: str, second: str) -> str:
-        return f"{first.rstrip()} {second.lstrip()}".strip()
+    def _combine(first: str, second: str, newline: bool) -> str:
+        first_part, second_part = first.rstrip(), second.lstrip()
+        sep = "\n" if newline else " "
+        combined = f"{first_part}{sep}{second_part}"
+        return re.sub(r"\n{2,}", "\n", combined) if newline else combined
 
     merged: List[str] = []
     idx = 0
@@ -200,16 +203,16 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
             curr_last = _last_number(current)
             nxt_first = _starting_number(nxt)
             if curr_last is not None and nxt_first is not None and nxt_first == curr_last + 1:
-                merged.append(_combine(current, nxt))
+                merged.append(_combine(current, nxt, True))
                 idx += 2
                 continue
             if _starting_number(current) is not None and nxt_first is None:
-                merged.append(_combine(current, nxt))
+                merged.append(_combine(current, nxt, False))
                 idx += 2
                 continue
             last_line = current.rsplit("\n", 1)[-1]
             if NUMBERED_ITEM_ANYWHERE.search(last_line) and nxt_first is None:
-                merged.append(_combine(current, nxt))
+                merged.append(_combine(current, nxt, False))
                 idx += 2
                 continue
         merged.append(current)
@@ -491,10 +494,7 @@ def iter_word_chunks(text: str, max_words: int) -> Iterator[str]:
     words = text.split()
     if len(words) <= max_words * 5:
         return iter([text])
-    return (
-        " ".join(words[i : i + max_words])
-        for i in range(0, len(words), max_words)
-    )
+    return (" ".join(words[i : i + max_words]) for i in range(0, len(words), max_words))
 
 
 def _split_short_text(text: str) -> List[str]:
