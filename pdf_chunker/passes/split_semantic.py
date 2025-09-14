@@ -136,14 +136,30 @@ def _iter_blocks(doc: Doc) -> Iterable[tuple[int, Block]]:
 
 
 def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]]:
-    """Yield ``(page, block, text)`` triples from a document."""
+    """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
-    return (
-        (page, block, text)
-        for page, block in _iter_blocks(doc)
-        for text in split_fn(block.get("text", ""))
-        if text
+    def _merge(
+        acc: list[tuple[int, Block, str]],
+        cur: tuple[int, Block, str],
+    ) -> list[tuple[int, Block, str]]:
+        page, block, text = cur
+        if acc and (not _ENDS_SENTENCE.search(acc[-1][2].rstrip()) or cur[2][:1].islower()):
+            prev_page, prev_block, prev_text = acc[-1]
+            acc[-1] = (
+                prev_page,
+                prev_block,
+                f"{prev_text} {text}".strip(),
+            )
+            return acc
+        return acc + [cur]
+
+    merged: list[tuple[int, Block, str]] = reduce(
+        _merge,
+        ((p, b, b.get("text", "")) for p, b in _iter_blocks(doc)),
+        cast(list[tuple[int, Block, str]], []),
     )
+
+    return ((page, block, text) for page, block, raw in merged for text in split_fn(raw) if text)
 
 
 def _is_heading(block: Block) -> bool:
