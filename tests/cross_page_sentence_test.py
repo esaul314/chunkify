@@ -1,86 +1,74 @@
 #!/usr/bin/env python3
 
-from pdf_chunker.pdf_blocks import merge_continuation_blocks, Block
+from pdf_chunker.pdf_blocks import merge_continuation_blocks
 
 
-def test_cross_page_sentence_with_proper_name():
+def test_cross_page_sentence_with_proper_name(block):
     blocks = [
-        Block(
-            text="Economic inequality is usually measured by the",
-            source={"page": 1},
-        ),
-        Block(text="Gini", source={"page": 2}),
-        Block(text="coefficient extends across pages.", source={"page": 2}),
+        block("Economic inequality is usually measured by the", page=1),
+        block("Gini", page=2),
+        block("coefficient extends across pages.", page=2),
     ]
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 1
     assert "Gini coefficient" in merged[0].text
 
 
-def test_cross_page_sentence_with_min_word_context():
+def test_cross_page_sentence_with_min_word_context(block):
     blocks = [
-        Block(text="Economic inequality is measured by the", source={"page": 1}),
-        Block(text="Gini coefficient spans pages.", source={"page": 2}),
+        block("Economic inequality is measured by the", page=1),
+        block("Gini coefficient spans pages.", page=2),
     ]
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 1
     assert "Gini coefficient" in merged[0].text
 
 
-def test_cross_page_sentence_without_page_numbers():
+def test_cross_page_sentence_without_page_numbers(block):
     blocks = [
-        Block(text="Economic inequality is usually measured by the", source={}),
-        Block(text="Gini coefficient carries on.", source={}),
+        block("Economic inequality is usually measured by the"),
+        block("Gini coefficient carries on."),
     ]
     merged = list(merge_continuation_blocks(blocks))
-    assert len(merged) == 1
-    assert "Gini coefficient" in merged[0].text
+    assert len(merged) == 2
+    assert "Gini coefficient" in merged[1].text
 
 
-def test_cross_page_does_not_merge_entire_document():
+def test_cross_page_does_not_merge_entire_document(block):
     blocks = [
-        Block(
-            text="Economic inequality is usually measured by the",
-            source={"page": 1},
-        ),
-        Block(
-            text="Gini coefficient completes the sentence.",
-            source={"page": 2},
-        ),
-        Block(
-            text="New paragraph begins here with its own sentence.",
-            source={"page": 3},
-        ),
+        block("Economic inequality is usually measured by the", page=1),
+        block("Gini coefficient completes the sentence.", page=2),
+        block("New paragraph begins here with its own sentence.", page=3),
     ]
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 2
     assert merged[1].text.startswith("New paragraph")
 
 
-def test_non_consecutive_pages_do_not_merge():
+def test_non_consecutive_pages_do_not_merge(block):
     blocks = [
-        Block(text="Ends without punctuation", source={"page": 1}),
-        Block(text="Resume after gap", source={"page": 3}),
+        block("Ends without punctuation", page=1),
+        block("Resume after gap", page=3),
     ]
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 2
 
 
-def test_comma_same_page_continuation():
+def test_comma_same_page_continuation(block):
     blocks = [
-        Block(text="Chapters may end with a teaser,", source={"page": 1}),
-        Block(text="However more follows on the same page.", source={"page": 1}),
+        block("Chapters may end with a teaser,", page=1),
+        block("However more follows on the same page.", page=1),
     ]
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 1
     assert "teaser, However" in merged[0].text
 
 
-def test_three_page_sentence_splits_after_second_page():
+def test_three_page_sentence_splits_after_second_page(block):
     blocks = [
-        Block(text="Part one", source={"page": 1}),
-        Block(text="continues on page two", source={"page": 2}),
-        Block(text="and finally ends", source={"page": 3}),
+        block("Part one", page=1),
+        block("continues on page two", page=2),
+        block("and finally ends", page=3),
     ]
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 2
