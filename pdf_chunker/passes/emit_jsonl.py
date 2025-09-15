@@ -6,9 +6,11 @@ import os
 import re
 from collections.abc import Iterable
 from functools import reduce
+from itertools import dropwhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -39,6 +41,65 @@ def _max_chars() -> int:
     return int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000"))
 
 
+def _is_list_line(line: str) -> bool:
+    stripped = line.lstrip()
+    return starts_with_bullet(stripped) or starts_with_number(stripped)
+
+
+def _first_non_empty_line(text: str) -> str:
+    return next((ln for ln in text.splitlines() if ln.strip()), "")
+
+
+def _last_non_empty_line(text: str) -> str:
+    return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
+
+
+def _trim_trailing_empty(lines: list[str]) -> list[str]:
+    return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
+
+
+_LIST_GAP_RE = re.compile(r"\n{2,}(?=(?:\s*(?:[-\*\u2022]|\d+\.)))")
+
+
+def _collapse_list_gaps(text: str) -> str:
+    return _LIST_GAP_RE.sub("\n", text)
+
+
+def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
+    """Shift trailing context or list block into ``rest`` when it starts with a list."""
+
+    if not rest or not _is_list_line(_first_non_empty_line(rest)):
+        return raw, rest
+
+    lines = _trim_trailing_empty(raw.splitlines())
+    has_list = any(_is_list_line(ln) for ln in lines)
+
+    # Determine split point: last non-list line if ``raw`` already contains list items,
+    # otherwise the preceding blank line so that list introductions move with the list.
+    # fmt: off
+    idx = next(
+        (
+            i
+            for i, ln in enumerate(reversed(lines))
+            if (
+                (ln.strip() and not _is_list_line(ln))
+                if has_list
+                else not ln.strip()
+            )
+        ),
+        len(lines),
+    )
+    # fmt: on
+    start = len(lines) - idx
+    block = lines[start:]
+    if not block:
+        return raw, rest
+
+    moved = "\n".join(block).strip()
+    kept = "\n".join(lines[:start]).rstrip()
+    return kept, f"{moved}\n{rest.lstrip()}".strip("\n")
+
+
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
@@ -46,9 +107,20 @@ def _split(text: str, limit: int) -> list[str]:
     t = text
     while t:
         raw = _truncate_chunk(t, limit)
+        rest = t[len(raw) :]
+        raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
+        raw, rest = _rebalance_lists(raw, rest)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
-        pieces = [*pieces, trimmed] if trimmed else pieces
-        t = t[len(raw) :].lstrip()
+        if trimmed:
+            if pieces and _is_list_line(_first_non_empty_line(trimmed)):
+                merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
+                if len(merged) <= limit:
+                    pieces[-1] = merged
+                else:
+                    pieces.append(trimmed)
+            else:
+                pieces.append(trimmed)
+        t = rest.lstrip()
     return pieces
 
 
@@ -107,10 +179,17 @@ def _starts_mid_sentence(text: str) -> bool:
 
 
 def _merge_text(prev: str, curr: str) -> str:
-    return f"{prev}\n\n{curr}".strip()
+    last = _last_non_empty_line(prev)
+    first = _first_non_empty_line(curr)
+    cond = _is_list_line(last) and _is_list_line(first)
+    sep = "\n" if cond else "\n\n"
+    return f"{prev.rstrip()}{sep}{curr}".strip()
 
 
-def _merge_sentence_pieces(pieces: Iterable[str], limit: int | None = None) -> list[str]:
+def _merge_sentence_pieces(
+    pieces: Iterable[str],
+    limit: int | None = None,
+) -> list[str]:
     def step(acc: list[str], piece: str) -> list[str]:
         if (
             acc
@@ -152,7 +231,10 @@ def _merge_if_fragment(
     )
 
 
-def _merge_items(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+def _merge_items(
+    acc: list[dict[str, Any]],
+    item: dict[str, Any],
+) -> list[dict[str, Any]]:
     text = item["text"]
     if acc:
         prev = acc[-1]
@@ -199,7 +281,10 @@ def _dedupe(
             if log is not None:
                 log.append(text)
             return state
-        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(acc_norm, text_norm)
+        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(
+            acc_norm,
+            text_norm,
+        )
         if overlap:
             if log is not None:
                 log.append(text[:overlap])
