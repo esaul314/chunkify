@@ -91,7 +91,6 @@ def _split_inline_list_start(line: str) -> tuple[str, str] | None:
                     return line[:idx].rstrip(), tail
     return None
 
-
 def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
     text = _collapse_list_gaps(text)
     lines = text.splitlines()
