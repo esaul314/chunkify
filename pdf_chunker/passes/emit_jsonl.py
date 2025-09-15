@@ -70,42 +70,64 @@ def _collapse_list_gaps(text: str) -> str:
     return _LIST_GAP_RE.sub(repl, text)
 
 
+def _split_inline_list_start(line: str) -> tuple[str, str] | None:
+    for idx, char in enumerate(line):
+        if char in "-\u2022*" and (idx == 0 or line[idx - 1].isspace()):
+            tail = line[idx:].lstrip()
+            if _is_list_line(tail):
+                return line[:idx].rstrip(), tail
+        if char.isdigit() and (idx == 0 or line[idx - 1].isspace()):
+            end = idx
+            while end < len(line) and line[end].isdigit():
+                end += 1
+            if (
+                end < len(line)
+                and line[end] == "."
+                and end + 1 < len(line)
+                and line[end + 1].isspace()
+            ):
+                tail = line[idx:].lstrip()
+                if _is_list_line(tail):
+                    return line[:idx].rstrip(), tail
+    return None
+
 def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
     text = _collapse_list_gaps(text)
     lines = text.splitlines()
     idx = next((i for i, ln in enumerate(lines) if _is_list_line(ln)), len(lines))
     pre, tail = lines[:idx], lines[idx:]
+    if pre:
+        inline = _split_inline_list_start(pre[-1])
+        if inline:
+            head, start = inline
+            pre = [*pre[:-1], head] if head else pre[:-1]
+            tail = [start, *tail]
     if tail and _is_list_line(tail[0]):
         block = list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail))
         pre_text = "\n".join(pre)
-        block_len = len("\n".join(block))
-        if len(pre_text) + block_len > limit:
+        block_text = "\n".join(block)
+        if len(pre_text) + len(block_text) > limit:
             pre_len = len(pre_text)
-            if pre_len >= limit:
-                return text, ""
+            rest_after = tail[len(block) :]
             if pre_len == 0:
-                return "\n".join(block), "\n".join(tail[len(block) :]).strip("\n")
-            if pre_len < limit:
-                rest_after = tail[len(block) :]
-                if rest_after:
-                    return pre_text.rstrip(), "\n".join(block + rest_after).strip("\n")
-                joined_block = "\n".join(block)
-                return (f"{pre_text.rstrip()}\n{joined_block}".strip("\n"), "")
-            needed = pre_len - limit
+                return block_text, "\n".join(rest_after).strip("\n")
             if pre_len >= limit:
-                needed = max(needed, 1)
-            if needed > 0:
+                needed = max(pre_len - limit, 1)
                 lens = list(accumulate(len(ln) + 1 for ln in reversed(pre)))
                 idx = next(
                     (i + 1 for i, ln_len in enumerate(lens) if ln_len >= needed),
                     len(pre),
                 )
                 keep = pre[: len(pre) - idx]
+                if not keep:
+                    return text, ""
                 shifted = pre[len(pre) - idx :]
                 reserve = "\n".join(keep).rstrip()
                 rest_lines = shifted + tail
                 return reserve, "\n".join(rest_lines).strip("\n")
-            return pre_text.rstrip(), "\n".join(tail).strip("\n")
+            if rest_after:
+                return pre_text.rstrip(), "\n".join(block + rest_after).strip("\n")
+            return (f"{pre_text.rstrip()}\n{block_text}".strip("\n"), "")
         if pre_text:
             return pre_text.rstrip(), "\n".join(tail).strip("\n")
         return "\n".join(tail), ""
