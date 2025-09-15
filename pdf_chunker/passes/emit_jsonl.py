@@ -53,6 +53,7 @@ def _first_non_empty_line(text: str) -> str:
 def _last_non_empty_line(text: str) -> str:
     return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
 
+  
 def _trim_trailing_empty(lines: list[str]) -> list[str]:
     return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
@@ -63,24 +64,36 @@ _LIST_GAP_RE = re.compile(r"\n{2,}(?=(?:\s*(?:[-\*\u2022]|\d+\.)))")
 def _collapse_list_gaps(text: str) -> str:
     return _LIST_GAP_RE.sub("\n", text)
 
+
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
-    """Shift trailing list block from ``raw`` into ``rest`` when appropriate."""
+    """Shift trailing context or list block into ``rest`` when it starts with a list."""
 
     if not rest or not _is_list_line(_first_non_empty_line(rest)):
         return raw, rest
 
     lines = _trim_trailing_empty(raw.splitlines())
+    has_list = any(_is_list_line(ln) for ln in lines)
+
+    # Determine split point: last non-list line if ``raw`` already contains list items,
+    # otherwise the preceding blank line so that list introductions move with the list.
     # fmt: off
-    candidates = [
-        i
-        for i, ln in enumerate(reversed(lines))
-        if ln.strip() and not _is_list_line(ln)
-    ]
+    idx = next(
+        (
+            i
+            for i, ln in enumerate(reversed(lines))
+            if (
+                (ln.strip() and not _is_list_line(ln))
+                if has_list
+                else not ln.strip()
+            )
+        ),
+        len(lines),
+    )
     # fmt: on
-    idx = candidates[0] if candidates else len(lines)
     start = len(lines) - idx
     block = lines[start:]
-    if not any(_is_list_line(ln) for ln in block):
+    if not block:
+
         return raw, rest
 
     moved = "\n".join(block).strip()
@@ -96,8 +109,8 @@ def _split(text: str, limit: int) -> list[str]:
     while t:
         raw = _truncate_chunk(t, limit)
         rest = t[len(raw) :]
-        raw, rest = _rebalance_lists(raw, rest)
         raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
+        raw, rest = _rebalance_lists(raw, rest)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
         if trimmed:
             if pieces and _is_list_line(_first_non_empty_line(trimmed)):
