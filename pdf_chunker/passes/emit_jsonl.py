@@ -53,7 +53,7 @@ def _first_non_empty_line(text: str) -> str:
 def _last_non_empty_line(text: str) -> str:
     return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
 
-
+  
 def _trim_trailing_empty(lines: list[str]) -> list[str]:
     return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
@@ -93,6 +93,7 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     start = len(lines) - idx
     block = lines[start:]
     if not block:
+
         return raw, rest
 
     moved = "\n".join(block).strip()
