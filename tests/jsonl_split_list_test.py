@@ -28,3 +28,8 @@ def test_split_bullet_list_with_blank_line():
     limit = len("Intro\n- a\n")
     expected = ["Intro", "- a\n\n- b\n- c\nTail"]
     assert _split(text, limit) == expected
+
+
+def test_split_numbered_list_small_limit():
+    text = "Intro\n1. one\n2. two"
+    assert _split(text, 5) == ["Intro", "1. one\n2. two"]
