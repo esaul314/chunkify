@@ -81,6 +81,8 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
         block_len = len("\n".join(block))
         if len(pre_text) + block_len > limit:
             pre_len = len(pre_text)
+            if pre_len >= limit:
+                return text, ""
             if pre_len == 0:
                 return "\n".join(block), "\n".join(tail[len(block) :]).strip("\n")
             if pre_len < limit:
@@ -104,36 +106,10 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
                 rest_lines = shifted + tail
                 return reserve, "\n".join(rest_lines).strip("\n")
             return pre_text.rstrip(), "\n".join(tail).strip("\n")
+        if pre_text:
+            return pre_text.rstrip(), "\n".join(tail).strip("\n")
+        return "\n".join(tail), ""
     return text, ""
-
-
-def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
-    raw = _truncate_chunk(text, limit)
-    rest = text[len(raw) :]
-    raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
-    lines = rest.splitlines()
-    pre = list(takewhile(lambda ln: ln.strip() and not _is_list_line(ln), lines))
-    tail = lines[len(pre) :]
-    if tail and _is_list_line(tail[0]):
-        block = pre + list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail))
-        block_len = len("\n".join(block))
-        if len(raw) + block_len > limit:
-            needed = len(raw) + block_len - limit
-            raw_lines = raw.splitlines()
-            lens = list(accumulate(len(ln) + 1 for ln in reversed(raw_lines)))
-            idx = next(
-                (i + 1 for i, ln_len in enumerate(lens) if ln_len > needed),
-                len(raw_lines),
-            )
-            keep = raw_lines[: len(raw_lines) - idx]
-            shifted = raw_lines[len(raw_lines) - idx :]
-            raw = "\n".join(keep).rstrip()
-            rest = "\n".join(shifted + lines).strip("\n")
-        else:
-            rest = "\n".join(lines).strip("\n")
-    else:
-        rest = "\n".join(lines).strip("\n")
-    return raw, rest
 
 
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
@@ -184,13 +160,16 @@ def _split(text: str, limit: int) -> list[str]:
         candidate, rem = _reserve_for_list(t, limit)
         first = _first_non_empty_line(candidate)
         second = candidate.splitlines()[1] if "\n" in candidate else ""
-        is_list = _is_list_line(first) or _is_list_line(second)
+        is_list = _is_list_line(first) or (_is_list_line(second) and len(first) < limit)
         if is_list and len(candidate) > limit:
             suffix = f"\n{rem}" if rem else ""
             raw = f"{candidate}{suffix}"
             rest = ""
         else:
-            raw = _truncate_chunk(candidate, limit)
+            if limit < 100 or len(candidate) - limit < 100:
+                raw = candidate[:limit].rstrip()
+            else:
+                raw = _truncate_chunk(candidate, limit)
             remaining = candidate[len(raw) :]
             suffix = f"\n{rem}" if rem else ""
             rest = f"{remaining}{suffix}"
