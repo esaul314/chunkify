@@ -107,6 +107,35 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
     return text, ""
 
 
+def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
+    raw = _truncate_chunk(text, limit)
+    rest = text[len(raw) :]
+    raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
+    lines = rest.splitlines()
+    pre = list(takewhile(lambda ln: ln.strip() and not _is_list_line(ln), lines))
+    tail = lines[len(pre) :]
+    if tail and _is_list_line(tail[0]):
+        block = pre + list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail))
+        block_len = len("\n".join(block))
+        if len(raw) + block_len > limit:
+            needed = len(raw) + block_len - limit
+            raw_lines = raw.splitlines()
+            lens = list(accumulate(len(ln) + 1 for ln in reversed(raw_lines)))
+            idx = next(
+                (i + 1 for i, ln_len in enumerate(lens) if ln_len > needed),
+                len(raw_lines),
+            )
+            keep = raw_lines[: len(raw_lines) - idx]
+            shifted = raw_lines[len(raw_lines) - idx :]
+            raw = "\n".join(keep).rstrip()
+            rest = "\n".join(shifted + lines).strip("\n")
+        else:
+            rest = "\n".join(lines).strip("\n")
+    else:
+        rest = "\n".join(lines).strip("\n")
+    return raw, rest
+
+
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     """Shift trailing context or list block into ``rest`` when it starts with a list."""
 
