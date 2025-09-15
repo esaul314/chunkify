@@ -6,7 +6,7 @@ import os
 import re
 from collections.abc import Iterable
 from functools import reduce
-from itertools import dropwhile
+from itertools import accumulate, dropwhile, repeat, takewhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
@@ -53,7 +53,7 @@ def _first_non_empty_line(text: str) -> str:
 def _last_non_empty_line(text: str) -> str:
     return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
 
-  
+
 def _trim_trailing_empty(lines: list[str]) -> list[str]:
     return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
@@ -63,6 +63,35 @@ _LIST_GAP_RE = re.compile(r"\n{2,}(?=(?:\s*(?:[-\*\u2022]|\d+\.)))")
 
 def _collapse_list_gaps(text: str) -> str:
     return _LIST_GAP_RE.sub("\n", text)
+
+
+def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
+    raw = _truncate_chunk(text, limit)
+    rest = text[len(raw) :]
+    raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
+    lines = rest.splitlines()
+    pre = list(takewhile(lambda ln: ln.strip() and not _is_list_line(ln), lines))
+    tail = lines[len(pre) :]
+    if tail and _is_list_line(tail[0]):
+        block = pre + list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail))
+        block_len = len("\n".join(block))
+        if len(raw) + block_len > limit:
+            needed = len(raw) + block_len - limit
+            raw_lines = raw.splitlines()
+            lens = list(accumulate(len(ln) + 1 for ln in reversed(raw_lines)))
+            idx = next(
+                (i + 1 for i, ln_len in enumerate(lens) if ln_len > needed),
+                len(raw_lines),
+            )
+            keep = raw_lines[: len(raw_lines) - idx]
+            shifted = raw_lines[len(raw_lines) - idx :]
+            raw = "\n".join(keep).rstrip()
+            rest = "\n".join(shifted + lines).strip("\n")
+        else:
+            rest = "\n".join(lines).strip("\n")
+    else:
+        rest = "\n".join(lines).strip("\n")
+    return raw, rest
 
 
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
@@ -104,25 +133,27 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
-    pieces: list[str] = []
-    t = text
-    while t:
-        raw = _truncate_chunk(t, limit)
-        rest = t[len(raw) :]
-        raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
+    def step(state: tuple[list[str], str], _: object) -> tuple[list[str], str]:
+        pieces, t = state
+        if not t:
+            return state
+        raw, rest = _reserve_for_list(t, limit)
         raw, rest = _rebalance_lists(raw, rest)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
         if trimmed:
             if pieces and _is_list_line(_first_non_empty_line(trimmed)):
                 merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
-                if len(merged) <= limit:
-                    pieces[-1] = merged
-                else:
-                    pieces.append(trimmed)
+                pieces = [*pieces[:-1], merged] if len(merged) <= limit else [*pieces, trimmed]
             else:
-                pieces.append(trimmed)
-        t = rest.lstrip()
-    return pieces
+                pieces = [*pieces, trimmed]
+        return pieces, rest.lstrip()
+
+    states: Iterable[tuple[list[str], str]] = accumulate(
+        repeat(None),
+        step,
+        initial=([], text),
+    )
+    return next(p for p, r in states if not r)
 
 
 def _coherent(text: str, min_chars: int = 40) -> bool:
