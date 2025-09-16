@@ -265,7 +265,6 @@ def _split(text: str, limit: int) -> list[str]:
             raw, leftover = _truncate_with_remainder(source, limit)
             suffix = f"\n{rem}" if rem else ""
             rest = f"{leftover}{suffix}"
-
         raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
         raw, rest = _rebalance_lists(raw, rest)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw

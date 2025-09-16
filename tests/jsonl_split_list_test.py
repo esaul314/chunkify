@@ -33,7 +33,7 @@ def test_split_bullet_list_with_blank_line():
 def test_split_numbered_list_small_limit():
     text = "Intro\n1. one\n2. two"
     assert _split(text, 5) == ["Intro", "1. one\n2. two"]
-
+    
 
 def test_split_keeps_intro_with_list_and_no_empty_chunks():
     prefix = "Lead paragraph describing the upcoming bullets."
