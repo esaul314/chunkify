@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -24,6 +25,10 @@ def test_run_report_written_on_success(tmp_path):
     report = _report(tmp_path / "r.json")
     assert "pdf_parse" in report["timings"]
     assert report["metrics"]["page_count"] >= 1
+    env = report["metrics"]["env"]
+    assert {"sys_version", "platform", "passes"} <= env.keys()
+    digest = env["passes"].get("pdf_parse", "")
+    assert re.fullmatch(r"[0-9a-f]{32}", digest)
     assert isinstance(report["warnings"], list)
 
 
@@ -50,3 +55,5 @@ def test_run_report_written_on_failure(tmp_path, monkeypatch):
     report = _report(tmp_path / "r.json")
     assert set(report["timings"]) >= {"pdf_parse", "boom"}
     assert report["warnings"] == []
+    env = report["metrics"]["env"]
+    assert "pdf_parse" in env.get("passes", {})

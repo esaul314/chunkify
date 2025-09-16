@@ -3,6 +3,7 @@
 This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other AI agents working across this modular Python library for processing large PDF and EPUB documents. The goal is to generate high-quality, semantically coherent document chunks enriched with rich metadata for downstream local LLM workflows, particularly Retrieval-Augmented Generation (RAG).
 
 > **Remember**: keep this file and its siblings in sync with the codebase. Update instructions whenever workflows, dependencies, or project structure change.
+> **Reminder**: whenever application functionality evolves, update all relevant `AGENTS.md` files with usage examples so agents stay in sync.
 
 ---
 
@@ -35,6 +36,17 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
   ```
+- Trace a specific phrase through the pipeline to debug loss or duplication:
+  ```bash
+    pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
+    ```
+    Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
+
+### Debugging Directions
+- When JSONL lines begin mid-sentence or phrases like "Most engineers" repeat, inspect the `split_semantic` pass before focusing on downstream emission or deduplication.
+- Ensure `_get_split_fn` pipes `semantic_chunker` through `merge_conversational_chunks` prior to `iter_word_chunks` and `_soft_segments`; skipping this step truncates or duplicates sentences.
+- Use `pdf_chunker convert ... --trace <phrase>` or run `tests/emit_jsonl_coalesce_test.py::test_split_does_not_duplicate` to pinpoint which pass introduces the anomaly.
+- `emit_jsonl` deduplication can mask upstream defects, so validate semantic split outputs first to avoid chasing the wrong component.
 
 ## Pass Responsibilities
 
@@ -328,6 +340,8 @@ All CLI scripts follow these conventions:
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.
 * **Comma continuation fix**: same-page blocks ending with commas merge with following blocks even if the next starts with an uppercase word.
 * **Split-word merging guarded**: only joins across newlines or double spaces when the combined form is more common than its parts, avoiding merges like "no longer"→"nolonger".
+* **JSONL deduplication**: repeated sentences are trimmed during emission, even when the duplicate is followed by new material; run conversions with `--trace <phrase>` to verify expected lines survive.
+* **Dedup debug**: set `PDF_CHUNKER_DEDUP_DEBUG=1` to emit a warning for each dropped duplicate, a summary count, and a notice for any long sentences that still appear more than once after dedupe.
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts

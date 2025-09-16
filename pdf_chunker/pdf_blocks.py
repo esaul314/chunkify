@@ -224,7 +224,7 @@ def _is_cross_page_continuation(
 ) -> bool:
     if not (curr_text and next_text):
         return False
-    if curr_page is not None and next_page is not None and curr_page == next_page:
+    if curr_page is None or next_page is None or next_page != curr_page + 1:
         return False
     if curr_text.endswith((".", "!", "?")):
         return False
@@ -246,7 +246,7 @@ def _is_cross_page_continuation(
 def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
     curr_page = curr.source.get("page")
     next_page = nxt.source.get("page")
-    if curr_page is None or next_page is None or curr_page == next_page:
+    if curr_page is None or next_page is None or next_page != curr_page + 1:
         return False
     curr_bbox = curr.bbox
     next_bbox = nxt.bbox
@@ -388,6 +388,12 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
     return False, "no_merge"
 
 
+def within_page_span(pages: Iterable[Optional[int]], limit: int = 1) -> bool:
+    """Return True if pages stay within ``limit`` span."""
+    nums = [p for p in pages if p is not None]
+    return not nums or max(nums) - min(nums) <= limit
+
+
 def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
     items = list(blocks)
     if not items:
@@ -398,12 +404,21 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
     while i < len(items):
         current = items[i]
         current_text = current.text.strip()
+        pages = [current.source.get("page")]
         j = i + 1
         merged_any = False
         while j < len(items):
             nxt = items[j]
             next_text = nxt.text.strip()
-            should_merge, reason = _should_merge_blocks(current, nxt)
+            next_page = nxt.source.get("page")
+            candidate_pages = [*pages, next_page]
+            if any(
+                b is not None and a is not None and b - a > 1
+                for a, b in zip(candidate_pages, candidate_pages[1:])
+            ) or not within_page_span(candidate_pages):
+                break
+            curr_for_merge = replace(current, source={**current.source, "page": pages[-1]})
+            should_merge, reason = _should_merge_blocks(curr_for_merge, nxt)
             if should_merge:
                 if reason == "hyphenated_continuation":
                     merged_text = re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + next_text
@@ -416,8 +431,10 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
                     merged_any = True
                     if remainder:
                         items[j] = replace(nxt, text=remainder.lstrip())
+                        pages.append(next_page)
                         break
                     j += 1
+                    pages.append(next_page)
                     continue
                 elif reason == "numbered_list":
                     merged_text = current_text + "\n" + next_text
@@ -444,8 +461,19 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
                 current_text = merged_text
                 merged_any = True
                 j += 1
+                pages.append(next_page)
             else:
                 break
+        if within_page_span(pages) and len(pages) > 1:
+            page_nums = [p for p in pages if p is not None]
+            if page_nums:
+                current = replace(
+                    current,
+                    source={
+                        **current.source,
+                        "page_range": (min(page_nums), max(page_nums)),
+                    },
+                )
         merged.append(current)
         i = j if merged_any else i + 1
     return merged

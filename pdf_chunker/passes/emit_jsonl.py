@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 import re
-import json
-from typing import Any, Iterable
+from collections.abc import Iterable
+from functools import reduce
+from itertools import accumulate, dropwhile, repeat, takewhile
+from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -36,16 +41,250 @@ def _max_chars() -> int:
     return int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000"))
 
 
+def _is_list_line(line: str) -> bool:
+    stripped = line.lstrip()
+    return starts_with_bullet(stripped) or starts_with_number(stripped)
+
+
+def _first_non_empty_line(text: str) -> str:
+    return next((ln for ln in text.splitlines() if ln.strip()), "")
+
+
+def _last_non_empty_line(text: str) -> str:
+    return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
+
+
+def _trim_trailing_empty(lines: list[str]) -> list[str]:
+    return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
+
+
+def _partition_preamble(lines: list[str]) -> tuple[list[str], list[str]]:
+    if not lines:
+        return [], []
+
+    idx = len(lines)
+    while idx > 0 and lines[idx - 1].strip():
+        idx -= 1
+    while idx > 0 and not lines[idx - 1].strip():
+        idx -= 1
+
+    if idx == 0:
+        return lines, []
+    return lines[:idx], lines[idx:]
+
+
+_LIST_GAP_RE = re.compile(r"\n{2,}(?=\s*(?:[-\*\u2022]|\d+\.))")
+
+
+def _collapse_list_gaps(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        prior = text[: match.start()]
+        prev_line = prior.splitlines()[-1] if "\n" in prior else prior
+        return "\n" if not _is_list_line(prev_line) else match.group(0)
+
+    return _LIST_GAP_RE.sub(repl, text)
+
+
+def _split_inline_list_start(line: str) -> tuple[str, str] | None:
+    for idx, char in enumerate(line):
+        if char in "-\u2022*" and (idx == 0 or line[idx - 1].isspace()):
+            tail = line[idx:].lstrip()
+            if _is_list_line(tail):
+                return line[:idx].rstrip(), tail
+        if char.isdigit() and (idx == 0 or line[idx - 1].isspace()):
+            end = idx
+            while end < len(line) and line[end].isdigit():
+                end += 1
+            if (
+                end < len(line)
+                and line[end] == "."
+                and end + 1 < len(line)
+                and line[end + 1].isspace()
+            ):
+                tail = line[idx:].lstrip()
+                if _is_list_line(tail):
+                    return line[:idx].rstrip(), tail
+    return None
+
+
+def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
+    collapsed = _collapse_list_gaps(text)
+    lines = collapsed.splitlines()
+
+    inline = next(
+        (
+            (idx, result)
+            for idx, line in enumerate(lines)
+            if (result := _split_inline_list_start(line))
+        ),
+        None,
+    )
+    list_idx = next((i for i, ln in enumerate(lines) if _is_list_line(ln)), len(lines))
+
+    if inline and inline[0] <= list_idx:
+        idx, (head, tail) = inline
+        pre_lines = [*lines[:idx], head] if head else lines[:idx]
+        tail_lines = [tail, *lines[idx + 1 :]]
+    elif list_idx < len(lines):
+        pre_lines = lines[:list_idx]
+        tail_lines = lines[list_idx:]
+    else:
+        return collapsed, ""
+
+    if not pre_lines:
+        return collapsed, ""
+
+    block_lines = list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail_lines))
+    if not block_lines:
+        return collapsed, ""
+
+    rest_lines = tail_lines[len(block_lines) :]
+    trimmed_pre = _trim_trailing_empty(pre_lines)
+    trailing_gaps = pre_lines[len(trimmed_pre) :]
+
+    if not trimmed_pre:
+        return collapsed, ""
+
+    pre_text = "\n".join(trimmed_pre)
+    block_text = "\n".join(block_lines)
+    combined_len = len(pre_text) + (1 if pre_text and block_text else 0) + len(block_text)
+    if combined_len <= limit:
+        return collapsed, ""
+
+    keep_lines, intro_lines = _partition_preamble(trimmed_pre)
+    if not keep_lines:
+        return collapsed, ""
+
+    chunk_text = "\n".join(keep_lines)
+    remainder_parts = [
+        *intro_lines,
+        *trailing_gaps,
+        *block_lines,
+        *rest_lines,
+    ]
+    remainder = "\n".join(remainder_parts).lstrip("\n")
+    return chunk_text, remainder
+
+
+def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
+    """Shift trailing context or list block into ``rest`` when it starts with a list."""
+
+    if not rest or not _is_list_line(_first_non_empty_line(rest)):
+        return raw, rest
+
+    lines = _trim_trailing_empty(raw.splitlines())
+    has_list = any(_is_list_line(ln) for ln in lines)
+
+    # Determine split point: last non-list line if ``raw`` already contains list items,
+    # otherwise the preceding blank line so that list introductions move with the list.
+    # fmt: off
+    idx = next(
+        (
+            i
+            for i, ln in enumerate(reversed(lines))
+            if (
+                (ln.strip() and not _is_list_line(ln))
+                if has_list
+                else not ln.strip()
+            )
+        ),
+        len(lines),
+    )
+    # fmt: on
+    start = len(lines) - idx
+    if not has_list and start == 0:
+        return raw, rest
+    block = lines[start:]
+    if not block:
+
+        return raw, rest
+
+    moved = "\n".join(block).strip()
+    kept = "\n".join(lines[:start]).rstrip()
+    return kept, f"{moved}\n{rest.lstrip()}".strip("\n")
+
+
+def _truncate_with_remainder(text: str, limit: int) -> tuple[str, str]:
+    if len(text) <= limit or limit <= 0:
+        return text, ""
+
+    if limit <= 100:
+        prefix = text[:limit]
+        chunk = prefix.rstrip() or prefix
+        return chunk, text[len(chunk) :]
+
+    truncate_point = limit - 100
+    sentence_endings = (". ", ".\n", "! ", "!\n", "? ", "?\n")
+    best_sentence = max(
+        (
+            pos
+            for ending in sentence_endings
+            if (pos := text.rfind(ending, 0, truncate_point)) > truncate_point * 0.7
+        ),
+        default=-1,
+    )
+    sentence_idx: int | None = best_sentence + 1 if best_sentence > 0 else None
+
+    paragraph_idx_raw = text.rfind("\n\n", 0, truncate_point)
+    paragraph_idx: int | None = (
+        paragraph_idx_raw if paragraph_idx_raw > truncate_point * 0.7 else None
+    )
+
+    word_idx_raw = text.rfind(" ", 0, truncate_point)
+    word_idx: int | None = word_idx_raw if word_idx_raw > truncate_point * 0.8 else None
+
+    for idx in (sentence_idx, paragraph_idx, word_idx):
+        if idx:
+            chunk = text[:idx].rstrip()
+            if chunk:
+                return chunk, text[idx:]
+
+    fallback = text[:truncate_point]
+    chunk = fallback.rstrip() or fallback
+    return chunk, text[len(chunk) :]
+
+
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
-    def parts(t: str) -> Iterable[str]:
-        while t:
-            chunk = _truncate_chunk(t, limit)
-            yield chunk
-            t = t[len(chunk) :].lstrip()
+    def step(state: tuple[list[str], str], _: object) -> tuple[list[str], str]:
+        pieces, remaining = state
+        if not remaining:
+            return state
 
-    return list(parts(text))
+        candidate, rem = _reserve_for_list(remaining, limit)
+        source = candidate or remaining
+        first = _first_non_empty_line(source)
+        second = source.splitlines()[1] if "\n" in source else ""
+        is_list = _is_list_line(first) or (_is_list_line(second) and len(first) < limit)
+
+        if is_list and len(source) > limit:
+            suffix = f"\n{rem}" if rem else ""
+            raw, rest = f"{source}{suffix}", ""
+        else:
+            raw, leftover = _truncate_with_remainder(source, limit)
+            suffix = f"\n{rem}" if rem else ""
+            rest = f"{leftover}{suffix}"
+        raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
+        raw, rest = _rebalance_lists(raw, rest)
+        trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
+        if trimmed and trimmed.strip():
+            if pieces and _is_list_line(_first_non_empty_line(trimmed)):
+                merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
+                if len(merged) <= limit:  # noqa: SIM108
+                    pieces = [*pieces[:-1], merged]
+                else:
+                    pieces = [*pieces, trimmed]
+            else:
+                pieces = [*pieces, trimmed]
+        return pieces, rest.lstrip()
+
+    states: Iterable[tuple[list[str], str]] = accumulate(
+        repeat(None),
+        step,
+        initial=([], text),
+    )
+    return next(p for p, r in states if not r)
 
 
 def _coherent(text: str, min_chars: int = 40) -> bool:
@@ -57,27 +296,44 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     )
 
 
-def _is_numbered_line(text: str) -> bool:
-    return re.search(r"^\s*\d+[.)]\s", text, re.MULTILINE) is not None
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def _trim_overlap(prev: str, curr: str, max_len: int = 80) -> str:
-    """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
+def _contains(haystack: str, needle: str) -> bool:
+    return bool(needle and needle in haystack)
 
-    prev_lower, curr_lower = prev.lower(), curr.lower()
-    length = min(len(prev_lower), len(curr_lower), max_len)
-    overlap = next(
+
+def _overlap_len(prev_lower: str, curr_lower: str) -> int:
+    length = min(len(prev_lower), len(curr_lower))
+    return next(
         (i for i in range(length, 0, -1) if prev_lower.endswith(curr_lower[:i])),
         0,
     )
-    if overlap:
+
+
+def _prefix_contained_len(haystack: str, needle: str) -> int:
+    return next(
+        (
+            i
+            for i in range(len(needle), 0, -1)
+            if needle[:i] in haystack and (i == len(needle) or needle[i].isspace())
+        ),
+        0,
+    )
+
+
+def _trim_overlap(prev: str, curr: str) -> str:
+    """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
+
+    prev_lower, curr_lower = prev.lower(), curr.lower()
+    if _contains(prev_lower, curr_lower):
+        return ""
+    overlap = _overlap_len(prev_lower, curr_lower)
+    if overlap and overlap < len(curr) * 0.9:
         return curr[overlap:].lstrip()
-
     prefix = curr_lower.split("\n\n", 1)[0]
-    if prefix and prefix in prev_lower:
-        return curr[len(prefix) :].lstrip()
-
-    return curr
+    return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
 
 
 def _starts_mid_sentence(text: str) -> bool:
@@ -85,36 +341,143 @@ def _starts_mid_sentence(text: str) -> bool:
     return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
 
 
+def _merge_text(prev: str, curr: str) -> str:
+    last = _last_non_empty_line(prev)
+    first = _first_non_empty_line(curr)
+    cond = _is_list_line(last) and _is_list_line(first)
+    sep = "\n" if cond else "\n\n"
+    return f"{prev.rstrip()}{sep}{curr}".strip()
+
+
+def _merge_sentence_pieces(
+    pieces: Iterable[str],
+    limit: int | None = None,
+) -> list[str]:
+    def step(acc: list[str], piece: str) -> list[str]:
+        if (
+            acc
+            and _starts_mid_sentence(piece)
+            and (limit is None or len(acc[-1]) + 1 + len(piece) <= limit)
+        ):
+            merged = f"{acc[-1].rstrip()} {piece}".strip()
+            return [*acc[:-1], merged]
+        return [*acc, piece]
+
+    return reduce(step, pieces, [])
+
+
+def _merge_if_fragment(
+    acc: list[dict[str, Any]],
+    acc_text: str,
+    acc_norm: str,
+    item: dict[str, Any],
+    text: str,
+    text_norm: str,
+) -> tuple[list[dict[str, Any]], str, str]:
+    """Merge ``text`` into ``acc`` if it begins mid-sentence."""
+
+    if _starts_mid_sentence(text) and acc:
+        prev = acc[-1]
+        merged_text = f"{prev['text'].rstrip()} {text}".strip()
+        merged_item = {**prev, "text": merged_text}
+        merged_acc = f"{acc_text.rstrip()} {text}".strip()
+        return (
+            [*acc[:-1], merged_item],
+            merged_acc,
+            acc_norm + text_norm,
+        )
+    new_text = _merge_text(acc_text, text) if acc_text else text
+    return (
+        [*acc, {**item, "text": text}],
+        new_text,
+        acc_norm + text_norm,
+    )
+
+
+def _merge_items(
+    acc: list[dict[str, Any]],
+    item: dict[str, Any],
+) -> list[dict[str, Any]]:
+    text = item["text"]
+    if acc:
+        prev = acc[-1]
+        text = _trim_overlap(prev["text"], text)
+        prev_words, curr_words = _word_count(prev["text"]), _word_count(text)
+        should_merge = (
+            prev_words < _min_words()
+            or curr_words < _min_words()
+            or not _coherent(prev["text"])
+            or _starts_mid_sentence(text)
+        )
+        if should_merge:
+            merged = _merge_text(prev["text"], text)
+            return [*acc[:-1], {**prev, "text": merged}]
+    return [*acc, {**item, "text": text}]
+
+
 def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize item boundaries, trimming overlap and merging fragments."""
 
     cleaned = [{**i, "text": (i.get("text") or "").strip()} for i in items]
     cleaned = [i for i in cleaned if i["text"]]
+    merged = reduce(_merge_items, cleaned, cast(list[dict[str, Any]], []))
+    return merged
 
-    def step(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+
+def _dedupe(
+    items: Iterable[dict[str, Any]], *, log: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """Remove items whose text already appears in prior items.
+
+    When ``log`` is provided, dropped duplicate snippets are appended to it for
+    debug inspection. The function itself remains pure; callers decide whether
+    to record diagnostics.
+    """
+
+    def step(
+        state: tuple[list[dict[str, Any]], str, str], item: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], str, str]:
+        acc, acc_text, acc_norm = state
         text = item["text"]
-        if acc:
-            prev = acc[-1]
-            text = _trim_overlap(prev["text"], text)
-            prev_words = _word_count(prev["text"])
-            curr_words = _word_count(text)
-            should_merge = (
-                prev_words < _min_words()
-                or curr_words < _min_words()
-                or not _coherent(prev["text"])
-                or _starts_mid_sentence(text)
-            )
-            if should_merge:
-                merged = f"{prev['text']}\n\n{text}".strip()
-                if _coherent(merged):
-                    acc[-1] = {**prev, "text": merged}
-                return acc
-        return [*acc, {**item, "text": text}]
+        text_norm = _normalize(text)
+        if _contains(acc_norm, text_norm):
+            if log is not None:
+                log.append(text)
+            return state
+        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(
+            acc_norm,
+            text_norm,
+        )
+        if overlap:
+            if log is not None:
+                log.append(text[:overlap])
+            text = text[overlap:].lstrip()
+            if not text:
+                return state
+            text_norm = _normalize(text)
+        return _merge_if_fragment(acc, acc_text, acc_norm, item, text, text_norm)
 
-    merged: list[dict[str, Any]] = []
-    for i in cleaned:
-        merged = step(merged, i)
-    return [m for m in merged if _coherent(m["text"]) or _is_numbered_line(m["text"]) ]
+    initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")
+    return reduce(step, items, initial)[0]
+
+
+def _flag_potential_duplicates(
+    items: Iterable[dict[str, Any]], *, min_words: int = 10
+) -> list[str]:
+    """Return sentences appearing more than once after dedupe."""
+
+    seen: set[str] = set()
+    flagged: list[str] = []
+    for sent in (s for item in items for s in re.split(r"(?<=[.!?])\s+", item["text"])):
+        words = re.findall(r"\w+", sent.lower())
+        if len(words) < min_words:
+            continue
+        key = " ".join(words)
+        if key in seen:
+            flagged.append(sent.strip())
+        else:
+            seen.add(key)
+    return flagged
 
 
 def _rows_from_item(item: dict[str, Any]) -> list[Row]:
@@ -127,7 +490,14 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     base_meta = {meta_key: meta} if meta else {}
     overhead = len(json.dumps({"text": "", **base_meta}, ensure_ascii=False)) - 2
     avail = max(max_chars - overhead, 0)
-    pieces = _split(item.get("text", ""), avail)
+    if avail <= 0:
+        return []
+
+    pieces = [
+        piece
+        for piece in _merge_sentence_pieces(_split(item.get("text", ""), avail), avail)
+        if piece.strip()
+    ]
 
     def build(idx_piece: tuple[int, str]) -> Row:
         idx, piece = idx_piece
@@ -139,15 +509,26 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
         row = {"text": piece, **meta_part}
         while len(json.dumps(row, ensure_ascii=False)) > max_chars:
             allowed = avail - (len(json.dumps(row, ensure_ascii=False)) - max_chars)
+            allowed = min(allowed, len(piece) - 1)
+            if allowed <= 0:
+                return {"text": "", **meta_part}
             piece = _truncate_chunk(piece[:allowed], allowed)
             row = {"text": piece, **meta_part}
         return row
 
-    return [build(x) for x in enumerate(pieces)]
+    return [row for row in (build(x) for x in enumerate(pieces)) if row["text"].strip()]
 
 
 def _rows(doc: Doc) -> list[Row]:
-    items = _coalesce(doc.get("items", []))
+    debug_log: list[str] | None = [] if os.getenv("PDF_CHUNKER_DEDUP_DEBUG") else None
+    items = _dedupe(_coalesce(doc.get("items", [])), log=debug_log)
+    if debug_log is not None:
+        logger = logging.getLogger(__name__)
+        logger.warning("dedupe dropped %d duplicates", len(debug_log))
+        for dup in debug_log:
+            logger.warning("dedupe dropped: %s", dup[:80])
+        for dup in _flag_potential_duplicates(items):
+            logger.warning("possible duplicate retained: %s", dup[:80])
     return [r for i in items for r in _rows_from_item(i)]
 
 

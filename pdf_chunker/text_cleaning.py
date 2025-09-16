@@ -131,8 +131,9 @@ NUMBERED_INLINE_CANDIDATE_RE = re.compile(
 NUMBERED_END_RE = re.compile(
     rf"(\d{{1,3}}[.)][^\n]*[{re.escape(END_PUNCT)}])"
     rf"(?<![{re.escape(END_PUNCT)}]\")"
-    rf"(?=\s+(?:[{BULLET_CHARS_ESC}]|[A-Z][a-z]+\b(?!\s+\d)|$))"
+    rf"(?=\n(?:\s*(?:[{BULLET_CHARS_ESC}]|\d+[.)])|\n|$))"
 )
+NUMBERED_CONTINUATION_RE = re.compile(rf"(\d{{1,3}}[.)][^\n]*[{re.escape(END_PUNCT)}])\n(?=[^\n])")
 
 # List break preservation
 LIST_BREAK_RE = re.compile(rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]|.*\.\.))")
@@ -197,7 +198,7 @@ def _choose_hyphenation(head: str, tail: str) -> str:
     hyphenated = f"{head}-{tail}"
     joined_freq = zipf_frequency(joined, "en")
     hyphen_freq = zipf_frequency(hyphenated, "en")
-    return hyphenated if hyphen_freq >= joined_freq else joined
+    return hyphenated if hyphen_freq > joined_freq else joined
 
 
 def _join_hyphenated_words(text: str) -> str:
@@ -205,7 +206,8 @@ def _join_hyphenated_words(text: str) -> str:
 
     def repl(match: Match[str]) -> str:
         head, tail = match.group(1), match.group(2)
-        return _choose_hyphenation(head, tail)
+        token = match.group(0)
+        return head + tail if '\n' in token else _choose_hyphenation(head, tail)
 
     return HYPHEN_SPACE_RE.sub(repl, HYPHEN_BREAK_RE.sub(repl, text))
 
@@ -370,6 +372,7 @@ def insert_numbered_list_newlines(text: str) -> str:
         lambda t: NUMBERED_AFTER_COLON_RE.sub(r":\n\1", t),
         _apply_inline_numbered,
         lambda t: NUMBERED_END_RE.sub(r"\1\n\n", t),
+        lambda t: NUMBERED_CONTINUATION_RE.sub(r"\1[[LIST_BREAK]]", t),
     )
 
 

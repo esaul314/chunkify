@@ -8,16 +8,16 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from functools import partial
+from functools import partial, reduce
 from itertools import chain
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
-from pdf_chunker.utils import _build_metadata
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
-
+from pdf_chunker.utils import _build_metadata
 
 SOFT_LIMIT = 8_000
 
@@ -36,6 +36,44 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
         yield from _split(tail)
 
     return list(_split(text))
+
+
+_ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
+
+
+def _merge_sentence_fragments(chunks: Iterable[str], *, max_words: int = 80) -> list[str]:
+    """Merge trailing fragments until a sentence boundary or limits reached."""
+
+    def _should_merge(previous: str, current: str) -> bool:
+        """Return ``True`` when ``previous`` and ``current`` should coalesce."""
+
+        if not previous:
+            return False
+        if _ENDS_SENTENCE.search(previous.rstrip()):
+            return False
+        lead = current.lstrip()
+        if not lead:
+            return False
+        prev_words = previous.split()
+        first_word = lead.split()[0] if lead.split() else ""
+        if prev_words and prev_words[-1] == first_word:
+            return False
+        head = lead[0]
+        continuation_chars = ",.;:)]\"'"
+        if not (head.islower() or head in continuation_chars):
+            return False
+        combined = len(previous) + 1 + len(current)
+        if len(previous) >= SOFT_LIMIT or len(current) >= SOFT_LIMIT:
+            return False
+        return combined <= SOFT_LIMIT
+
+    def _merge(acc: list[str], chunk: str) -> list[str]:
+        if acc and _should_merge(acc[-1], chunk):
+            acc[-1] = f"{acc[-1]} {chunk}".strip()
+            return acc
+        return acc + [chunk]
+
+    return reduce(_merge, chunks, [])
 
 
 Doc = dict[str, Any]
@@ -67,7 +105,10 @@ def _get_split_fn(
     soft_hits = 0
 
     try:
-        from pdf_chunker.splitter import semantic_chunker
+        from pdf_chunker.splitter import (
+            iter_word_chunks,
+            semantic_chunker,
+        )
 
         semantic = partial(
             semantic_chunker,
@@ -77,18 +118,37 @@ def _get_split_fn(
         )
 
         def split(text: str) -> list[str]:
+            """Split ``text`` while guarding against truncation."""
+
             nonlocal soft_hits
-            raw = semantic(text)
-            soft_hits += sum(len(c) > SOFT_LIMIT for c in raw)
-            return [seg for c in raw for seg in _soft_segments(c)]
+            pieces = semantic(text)
+            merged = pieces if sum(len(p.split()) for p in pieces) >= len(text.split()) else [text]
+
+            def _soften(segment: str) -> list[str]:
+                nonlocal soft_hits
+                splits = _soft_segments(segment)
+                if len(splits) > 1:
+                    soft_hits += 1
+                return splits
+
+            raw = [
+                seg
+                for c in merged
+                for sub in iter_word_chunks(c, chunk_size)
+                for seg in _soften(sub)
+            ]
+            final = _merge_sentence_fragments(raw)
+            soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
+            return final
 
     except Exception:  # pragma: no cover - safety fallback
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
             raw = _soft_segments(text)
-            soft_hits += sum(len(seg) > SOFT_LIMIT for seg in raw)
-            return raw
+            final = _merge_sentence_fragments(raw)
+            soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
+            return final
 
     def metrics() -> dict[str, int]:
         return {"soft_limit_hits": soft_hits}
@@ -107,14 +167,36 @@ def _iter_blocks(doc: Doc) -> Iterable[tuple[int, Block]]:
 
 
 def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]]:
-    """Yield ``(page, block, text)`` triples from a document."""
+    """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
-    return (
-        (page, block, text)
-        for page, block in _iter_blocks(doc)
-        for text in split_fn(block.get("text", ""))
-        if text
+    def _merge(
+        acc: list[tuple[int, Block, str]],
+        cur: tuple[int, Block, str],
+    ) -> list[tuple[int, Block, str]]:
+        page, block, text = cur
+        if not acc:
+            return acc + [cur]
+        prev_page, prev_block, prev_text = acc[-1]
+        if prev_page != page:
+            return acc + [cur]
+        if _is_heading(prev_block) or _is_heading(block):
+            return acc + [cur]
+        if not _ENDS_SENTENCE.search(prev_text.rstrip()) or text[:1].islower():
+            acc[-1] = (
+                prev_page,
+                prev_block,
+                f"{prev_text} {text}".strip(),
+            )
+            return acc
+        return acc + [cur]
+
+    merged: list[tuple[int, Block, str]] = reduce(
+        _merge,
+        ((p, b, b.get("text", "")) for p, b in _iter_blocks(doc)),
+        cast(list[tuple[int, Block, str]], []),
     )
+
+    return ((page, block, text) for page, block, raw in merged for text in split_fn(raw) if text)
 
 
 def _is_heading(block: Block) -> bool:

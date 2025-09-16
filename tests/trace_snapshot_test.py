@@ -32,11 +32,23 @@ def test_trace_snapshots(tmp_path, monkeypatch) -> None:
 
     trace_root = Path("artifacts/trace")
     run_dir = next(trace_root.iterdir())
-    steps = {p.stem for p in run_dir.iterdir()}
-    assert steps == {"text_clean", "split_semantic"}
+    files = {p.name for p in run_dir.iterdir()}
+    assert files == {
+        "text_clean.json",
+        "split_semantic.json",
+        "text_clean_dups.json",
+        "split_semantic_dups.json",
+        "calls.json",
+    }
 
     clean = json.loads((run_dir / "text_clean.json").read_text())
     assert clean["pages"][0]["blocks"] == [{"text": "foo one"}]
 
+    clean_dups = json.loads((run_dir / "text_clean_dups.json").read_text())
+    assert clean_dups["dups"] == []
+
     chunks = json.loads((run_dir / "split_semantic.json").read_text())
     assert chunks and all("foo" in c["text"] for c in chunks)
+
+    calls = json.loads((run_dir / "calls.json").read_text())
+    assert calls["calls"] == ["text_clean", "split_semantic"]
