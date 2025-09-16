@@ -1,6 +1,12 @@
 import pytest
 
-from pdf_chunker.passes.emit_jsonl import _merge_text, _rebalance_lists, _split
+from pdf_chunker.passes.emit_jsonl import (
+    _first_non_empty_line,
+    _is_list_line,
+    _merge_text,
+    _rebalance_lists,
+    _split,
+)
 
 
 @pytest.mark.parametrize(
@@ -40,3 +46,11 @@ def test_split_reserves_intro_for_list():
     text = "Lead\n\nIntro\n- a\n- b"
     limit = len("Lead\n\nIntro")
     assert _split(text, limit) == ["Lead", "Intro\n- a\n- b"]
+
+
+def test_split_moves_list_after_long_prefix():
+    prefix = "x" * 8000
+    text = f"{prefix}\nIntro\n- a\n- b"
+    chunks = _split(text, 8000)
+    assert chunks == [prefix, "Intro\n- a\n- b"]
+    assert not _is_list_line(_first_non_empty_line(chunks[1]))
