@@ -1,4 +1,4 @@
-from typing import Callable, Dict
+from typing import Any, Callable, Dict
 from pathlib import Path
 import sys
 import base64
@@ -34,6 +34,7 @@ from pdf_chunker.text_cleaning import (
     normalize_ligatures,
     remove_underscore_emphasis,
 )
+from pdf_chunker.pdf_blocks import Block
 
 _COLOR_CODES: Dict[str, str] = {
     "red": "31",
@@ -57,6 +58,11 @@ def color() -> Callable[[str, str], str]:
     return lambda text, shade: (
         _colorize(text, _COLOR_CODES.get(shade, "")) if shade in _COLOR_CODES else text
     )
+
+
+@pytest.fixture
+def block() -> Callable[[str, Dict[str, Any]], Block]:
+    return lambda text, **source: Block(text=text, source=source)
 
 
 @pytest.fixture

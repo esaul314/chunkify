@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import inspect
 import json
+import platform
 import re
+import sys
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass, replace
@@ -10,6 +13,8 @@ from importlib import import_module
 from itertools import chain
 from pathlib import Path
 from typing import Any, Final
+
+from hashlib import md5
 
 from pdf_chunker.adapters import emit_jsonl
 import pdf_chunker.adapters.emit_trace as emit_trace
@@ -80,7 +85,11 @@ def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
     if not valid:
         return pass_obj
 
-    if "chunk_size" in valid and "min_chunk_size" not in valid and hasattr(pass_obj, "min_chunk_size"):
+    if (
+        "chunk_size" in valid
+        and "min_chunk_size" not in valid
+        and hasattr(pass_obj, "min_chunk_size")
+    ):
         valid["min_chunk_size"] = None
 
     new_pass = replace(pass_obj, **valid)
@@ -285,18 +294,61 @@ def _legacy_counts(metrics: Mapping[str, Any]) -> dict[str, int]:
     return {k: v for k, v in pairs if v is not None}
 
 
+# --- run report helpers ----------------------------------------------------
+
+
+def _dependency_versions() -> dict[str, Any]:
+    names = ("fitz", "pypdf", "regex", "rapidfuzz")
+
+    def version(n: str) -> Any:
+        try:
+            return getattr(import_module(n), "__version__", None)
+        except Exception:
+            return None
+
+    return {n: version(n) for n in names}
+
+
+def _pass_hash(p: Pass) -> tuple[str, str]:
+    try:
+        path = inspect.getsourcefile(p.__class__)
+        data = Path(path).read_bytes() if path else b""
+        digest = md5(data).hexdigest() if data else ""
+    except Exception:
+        digest = ""
+    return p.name, digest
+
+
+def _pass_hashes(passes: Iterable[Pass]) -> dict[str, str]:
+    return {name: h for name, h in (_pass_hash(p) for p in passes) if h}
+
+
+def _env_snapshot(passes: Iterable[Pass]) -> dict[str, Any]:
+    return {
+        "sys_version": sys.version,
+        "platform": platform.platform(),
+        "dependencies": _dependency_versions(),
+        "passes": _pass_hashes(passes),
+    }
+
+
 def assemble_report(
     timings: Mapping[str, float],
     meta: Mapping[str, Any],
+    passes: Iterable[Pass],
 ) -> dict[str, Any]:
     """Purely assemble run report data without performing IO."""
     metrics = dict(meta.get("metrics") or {})
     counts = _legacy_counts(metrics)
+    env = _env_snapshot(passes)
     return {
         "timings": dict(timings),
-        "metrics": {**counts, **metrics},
+        "metrics": {**counts, **metrics, "env": env},
         "warnings": list(meta.get("warnings") or []),
     }
+
+
+# replaced below
 
 
 def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
@@ -332,22 +384,24 @@ def run_convert(
     existing = (a.meta or {}).get("options") or {}
     opts = {**existing, **spec.options}
     a = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
+    passes = [configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline]
     timings: dict[str, float] = {}
     try:
-        for p in (
-            configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline
-        ):
+        for p in passes:
+            if trace:
+                emit_trace.record_call(p.name)
             a = _timed(p, a, timings)
             if trace:
                 emit_trace.write_snapshot(p.name, _trace_view(a.payload, trace))
+                emit_trace.write_dups(p.name, a.payload)
     except Exception as exc:
         meta = _meta_with_warnings(a, spec, opts)
-        report = assemble_report(timings, {**meta, "error": str(exc)})
+        report = assemble_report(timings, {**meta, "error": str(exc)}, passes)
         write_run_report(spec, report)
         raise
     _maybe_emit_jsonl(a, spec, timings)
     meta = _meta_with_warnings(a, spec, opts)
-    report = assemble_report(timings, meta)
+    report = assemble_report(timings, meta, passes)
     write_run_report(spec, report)
     return Artifact(payload=a.payload, meta=dict(meta)), timings
 
