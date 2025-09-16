@@ -42,16 +42,36 @@ _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
 
 
 def _merge_sentence_fragments(chunks: Iterable[str], *, max_words: int = 80) -> list[str]:
-    """Merge trailing fragments until a sentence boundary or ``max_words`` reached."""
+    """Merge trailing fragments until a sentence boundary or limits reached."""
+
+    def _should_merge(previous: str, current: str) -> bool:
+        """Return ``True`` when ``previous`` and ``current`` should coalesce."""
+
+        if not previous:
+            return False
+        if _ENDS_SENTENCE.search(previous.rstrip()):
+            return False
+        lead = current.lstrip()
+        if not lead:
+            return False
+        prev_words = previous.split()
+        first_word = lead.split()[0] if lead.split() else ""
+        if prev_words and prev_words[-1] == first_word:
+            return False
+        head = lead[0]
+        continuation_chars = ",.;:)]\"'"
+        if not (head.islower() or head in continuation_chars):
+            return False
+        combined = len(previous) + 1 + len(current)
+        if len(previous) >= SOFT_LIMIT or len(current) >= SOFT_LIMIT:
+            return False
+        return combined <= SOFT_LIMIT
 
     def _merge(acc: list[str], chunk: str) -> list[str]:
-        return (
-            acc[:-1] + [f"{acc[-1]} {chunk}".strip()]
-            if acc
-            and not _ENDS_SENTENCE.search(acc[-1].rstrip())
-            and len(acc[-1].split()) < max_words
-            else acc + [chunk]
-        )
+        if acc and _should_merge(acc[-1], chunk):
+            acc[-1] = f"{acc[-1]} {chunk}".strip()
+            return acc
+        return acc + [chunk]
 
     return reduce(_merge, chunks, [])
 
@@ -87,7 +107,6 @@ def _get_split_fn(
     try:
         from pdf_chunker.splitter import (
             iter_word_chunks,
-            merge_conversational_chunks,
             semantic_chunker,
         )
 
@@ -102,13 +121,21 @@ def _get_split_fn(
             """Split ``text`` while guarding against truncation."""
 
             nonlocal soft_hits
-            pieces, _ = merge_conversational_chunks(semantic(text), min_chunk_size)
+            pieces = semantic(text)
             merged = pieces if sum(len(p.split()) for p in pieces) >= len(text.split()) else [text]
+
+            def _soften(segment: str) -> list[str]:
+                nonlocal soft_hits
+                splits = _soft_segments(segment)
+                if len(splits) > 1:
+                    soft_hits += 1
+                return splits
+
             raw = [
                 seg
                 for c in merged
                 for sub in iter_word_chunks(c, chunk_size)
-                for seg in _soft_segments(sub)
+                for seg in _soften(sub)
             ]
             final = _merge_sentence_fragments(raw)
             soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
@@ -147,8 +174,14 @@ def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]
         cur: tuple[int, Block, str],
     ) -> list[tuple[int, Block, str]]:
         page, block, text = cur
-        if acc and (not _ENDS_SENTENCE.search(acc[-1][2].rstrip()) or cur[2][:1].islower()):
-            prev_page, prev_block, prev_text = acc[-1]
+        if not acc:
+            return acc + [cur]
+        prev_page, prev_block, prev_text = acc[-1]
+        if prev_page != page:
+            return acc + [cur]
+        if _is_heading(prev_block) or _is_heading(block):
+            return acc + [cur]
+        if not _ENDS_SENTENCE.search(prev_text.rstrip()) or text[:1].islower():
             acc[-1] = (
                 prev_page,
                 prev_block,

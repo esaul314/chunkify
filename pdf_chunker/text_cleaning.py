@@ -198,7 +198,7 @@ def _choose_hyphenation(head: str, tail: str) -> str:
     hyphenated = f"{head}-{tail}"
     joined_freq = zipf_frequency(joined, "en")
     hyphen_freq = zipf_frequency(hyphenated, "en")
-    return hyphenated if hyphen_freq >= joined_freq else joined
+    return hyphenated if hyphen_freq > joined_freq else joined
 
 
 def _join_hyphenated_words(text: str) -> str:
@@ -206,7 +206,8 @@ def _join_hyphenated_words(text: str) -> str:
 
     def repl(match: Match[str]) -> str:
         head, tail = match.group(1), match.group(2)
-        return _choose_hyphenation(head, tail)
+        token = match.group(0)
+        return head + tail if '\n' in token else _choose_hyphenation(head, tail)
 
     return HYPHEN_SPACE_RE.sub(repl, HYPHEN_BREAK_RE.sub(repl, text))
 
