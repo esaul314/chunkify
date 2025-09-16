@@ -2,16 +2,34 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
 from pdf_chunker.framework import Artifact
 
 
+_EMPTY_ROWS: tuple[dict[str, Any], ...] = ()
+
+
+def _rows_from_items(items: Any) -> Iterable[dict[str, Any]]:
+    """Return iterable rows when ``items`` already yields dictionaries."""
+
+    if isinstance(items, list):
+        return items
+    if isinstance(items, Iterable) and not isinstance(items, (str, bytes)):
+        return items
+    return _EMPTY_ROWS
+
+
 def _rows(payload: Any) -> Iterable[dict[str, Any]]:
-    """Yield rows when payload is a list of dictionaries."""
-    return payload if isinstance(payload, list) else []
+    """Yield rows when payload is a list or mapping exposing ``items``."""
+
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, Mapping):
+        return _rows_from_items(payload.get("items"))
+    return _EMPTY_ROWS
 
 
 def _copy_meta(meta: dict[str, Any]) -> dict[str, Any]:
