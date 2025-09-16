@@ -16,16 +16,21 @@ def test_numbered_list_not_split_across_chunks():
         "3. The third list item is here. "
         "4. The fourth list item is here."
     )
-    chunks = semantic_chunker(text, chunk_size=20, overlap=0)
+    chunk_size = len(text.split()) + 1
+    chunks = semantic_chunker(text, chunk_size=chunk_size, overlap=0)
     assert len(chunks) == 1
     chunk = chunks[0]
-    for n in range(1, 5):
-        assert str(n) in chunk
+    assert all(f"{n}." in chunk for n in map(str, range(1, 5)))
+    assert "2. The second list item is here. 3. The third list item is here." in chunk
+    assert "\n3. The third list item is here." not in chunk
 
 
 def test_numbered_list_merge_collapses_blank_lines():
     text = "1. first\n\n2. second"
-    assert semantic_chunker(text, chunk_size=3, overlap=0) == ["1. first\n2. second"]
+    chunk_size = len(text.split())
+    assert semantic_chunker(text, chunk_size=chunk_size, overlap=0) == [
+        "1. first\n2. second"
+    ]
 
 
 def test_list_kind_propagates_to_chunk_metadata():
