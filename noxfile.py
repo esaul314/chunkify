@@ -4,7 +4,13 @@ from pathlib import Path
 
 import nox
 
-PY_TARGETS = ["pdf_chunker/__init__.py", "noxfile.py", "tests/bootstrap"]
+PY_TARGETS = [
+    "pdf_chunker/__init__.py",
+    "pdf_chunker/passes/emit_jsonl.py",
+    "pdf_chunker/passes/split_semantic.py",
+    "noxfile.py",
+    "tests/bootstrap",
+]
 
 
 @nox.session
@@ -17,7 +23,15 @@ def lint(session):
 @nox.session
 def typecheck(session):
     session.install("-e", ".[dev]")
-    targets = [t for t in ["pdf_chunker/__init__.py"] if Path(t).exists()]
+    targets = [
+        t
+        for t in [
+            "pdf_chunker/__init__.py",
+            "pdf_chunker/passes/emit_jsonl.py",
+            "pdf_chunker/passes/split_semantic.py",
+        ]
+        if Path(t).exists()
+    ]
     if targets:
         session.run("mypy", "--allow-untyped-globals", *targets)
     else:

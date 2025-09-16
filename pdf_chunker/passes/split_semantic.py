@@ -8,17 +8,16 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
 from itertools import chain
-import re
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
-from pdf_chunker.utils import _build_metadata
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
-
+from pdf_chunker.utils import _build_metadata
 
 SOFT_LIMIT = 8_000
 
@@ -42,13 +41,15 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
 
 
-def _merge_sentence_fragments(chunks: Iterable[str]) -> list[str]:
-    """Merge sequential ``chunks`` so each ends at a sentence boundary."""
+def _merge_sentence_fragments(chunks: Iterable[str], *, max_words: int = 80) -> list[str]:
+    """Merge trailing fragments until a sentence boundary or ``max_words`` reached."""
 
     def _merge(acc: list[str], chunk: str) -> list[str]:
         return (
             acc[:-1] + [f"{acc[-1]} {chunk}".strip()]
-            if acc and not _ENDS_SENTENCE.search(acc[-1].rstrip())
+            if acc
+            and not _ENDS_SENTENCE.search(acc[-1].rstrip())
+            and len(acc[-1].split()) < max_words
             else acc + [chunk]
         )
 
@@ -98,8 +99,11 @@ def _get_split_fn(
         )
 
         def split(text: str) -> list[str]:
+            """Split ``text`` while guarding against truncation."""
+
             nonlocal soft_hits
-            merged, _ = merge_conversational_chunks(semantic(text), min_chunk_size)
+            pieces, _ = merge_conversational_chunks(semantic(text), min_chunk_size)
+            merged = pieces if sum(len(p.split()) for p in pieces) >= len(text.split()) else [text]
             raw = [
                 seg
                 for c in merged

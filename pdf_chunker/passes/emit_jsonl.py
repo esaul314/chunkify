@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import os
-import re
 import json
 import logging
+import os
+import re
+from collections.abc import Iterable
 from functools import reduce
-from typing import Any, Iterable, cast
+from itertools import accumulate, dropwhile, repeat, takewhile
+from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -38,17 +41,250 @@ def _max_chars() -> int:
     return int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000"))
 
 
+def _is_list_line(line: str) -> bool:
+    stripped = line.lstrip()
+    return starts_with_bullet(stripped) or starts_with_number(stripped)
+
+
+def _first_non_empty_line(text: str) -> str:
+    return next((ln for ln in text.splitlines() if ln.strip()), "")
+
+
+def _last_non_empty_line(text: str) -> str:
+    return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
+
+
+def _trim_trailing_empty(lines: list[str]) -> list[str]:
+    return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
+
+
+def _partition_preamble(lines: list[str]) -> tuple[list[str], list[str]]:
+    if not lines:
+        return [], []
+
+    idx = len(lines)
+    while idx > 0 and lines[idx - 1].strip():
+        idx -= 1
+    while idx > 0 and not lines[idx - 1].strip():
+        idx -= 1
+
+    if idx == 0:
+        return lines, []
+    return lines[:idx], lines[idx:]
+
+
+_LIST_GAP_RE = re.compile(r"\n{2,}(?=\s*(?:[-\*\u2022]|\d+\.))")
+
+
+def _collapse_list_gaps(text: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        prior = text[: match.start()]
+        prev_line = prior.splitlines()[-1] if "\n" in prior else prior
+        return "\n" if not _is_list_line(prev_line) else match.group(0)
+
+    return _LIST_GAP_RE.sub(repl, text)
+
+
+def _split_inline_list_start(line: str) -> tuple[str, str] | None:
+    for idx, char in enumerate(line):
+        if char in "-\u2022*" and (idx == 0 or line[idx - 1].isspace()):
+            tail = line[idx:].lstrip()
+            if _is_list_line(tail):
+                return line[:idx].rstrip(), tail
+        if char.isdigit() and (idx == 0 or line[idx - 1].isspace()):
+            end = idx
+            while end < len(line) and line[end].isdigit():
+                end += 1
+            if (
+                end < len(line)
+                and line[end] == "."
+                and end + 1 < len(line)
+                and line[end + 1].isspace()
+            ):
+                tail = line[idx:].lstrip()
+                if _is_list_line(tail):
+                    return line[:idx].rstrip(), tail
+    return None
+
+
+def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
+    collapsed = _collapse_list_gaps(text)
+    lines = collapsed.splitlines()
+
+    inline = next(
+        (
+            (idx, result)
+            for idx, line in enumerate(lines)
+            if (result := _split_inline_list_start(line))
+        ),
+        None,
+    )
+    list_idx = next((i for i, ln in enumerate(lines) if _is_list_line(ln)), len(lines))
+
+    if inline and inline[0] <= list_idx:
+        idx, (head, tail) = inline
+        pre_lines = [*lines[:idx], head] if head else lines[:idx]
+        tail_lines = [tail, *lines[idx + 1 :]]
+    elif list_idx < len(lines):
+        pre_lines = lines[:list_idx]
+        tail_lines = lines[list_idx:]
+    else:
+        return collapsed, ""
+
+    if not pre_lines:
+        return collapsed, ""
+
+    block_lines = list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail_lines))
+    if not block_lines:
+        return collapsed, ""
+
+    rest_lines = tail_lines[len(block_lines) :]
+    trimmed_pre = _trim_trailing_empty(pre_lines)
+    trailing_gaps = pre_lines[len(trimmed_pre) :]
+
+    if not trimmed_pre:
+        return collapsed, ""
+
+    pre_text = "\n".join(trimmed_pre)
+    block_text = "\n".join(block_lines)
+    combined_len = len(pre_text) + (1 if pre_text and block_text else 0) + len(block_text)
+    if combined_len <= limit:
+        return collapsed, ""
+
+    keep_lines, intro_lines = _partition_preamble(trimmed_pre)
+    if not keep_lines:
+        return collapsed, ""
+
+    chunk_text = "\n".join(keep_lines)
+    remainder_parts = [
+        *intro_lines,
+        *trailing_gaps,
+        *block_lines,
+        *rest_lines,
+    ]
+    remainder = "\n".join(remainder_parts).lstrip("\n")
+    return chunk_text, remainder
+
+
+def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
+    """Shift trailing context or list block into ``rest`` when it starts with a list."""
+
+    if not rest or not _is_list_line(_first_non_empty_line(rest)):
+        return raw, rest
+
+    lines = _trim_trailing_empty(raw.splitlines())
+    has_list = any(_is_list_line(ln) for ln in lines)
+
+    # Determine split point: last non-list line if ``raw`` already contains list items,
+    # otherwise the preceding blank line so that list introductions move with the list.
+    # fmt: off
+    idx = next(
+        (
+            i
+            for i, ln in enumerate(reversed(lines))
+            if (
+                (ln.strip() and not _is_list_line(ln))
+                if has_list
+                else not ln.strip()
+            )
+        ),
+        len(lines),
+    )
+    # fmt: on
+    start = len(lines) - idx
+    if not has_list and start == 0:
+        return raw, rest
+    block = lines[start:]
+    if not block:
+
+        return raw, rest
+
+    moved = "\n".join(block).strip()
+    kept = "\n".join(lines[:start]).rstrip()
+    return kept, f"{moved}\n{rest.lstrip()}".strip("\n")
+
+
+def _truncate_with_remainder(text: str, limit: int) -> tuple[str, str]:
+    if len(text) <= limit or limit <= 0:
+        return text, ""
+
+    if limit <= 100:
+        prefix = text[:limit]
+        chunk = prefix.rstrip() or prefix
+        return chunk, text[len(chunk) :]
+
+    truncate_point = limit - 100
+    sentence_endings = (". ", ".\n", "! ", "!\n", "? ", "?\n")
+    best_sentence = max(
+        (
+            pos
+            for ending in sentence_endings
+            if (pos := text.rfind(ending, 0, truncate_point)) > truncate_point * 0.7
+        ),
+        default=-1,
+    )
+    sentence_idx: int | None = best_sentence + 1 if best_sentence > 0 else None
+
+    paragraph_idx_raw = text.rfind("\n\n", 0, truncate_point)
+    paragraph_idx: int | None = (
+        paragraph_idx_raw if paragraph_idx_raw > truncate_point * 0.7 else None
+    )
+
+    word_idx_raw = text.rfind(" ", 0, truncate_point)
+    word_idx: int | None = word_idx_raw if word_idx_raw > truncate_point * 0.8 else None
+
+    for idx in (sentence_idx, paragraph_idx, word_idx):
+        if idx:
+            chunk = text[:idx].rstrip()
+            if chunk:
+                return chunk, text[idx:]
+
+    fallback = text[:truncate_point]
+    chunk = fallback.rstrip() or fallback
+    return chunk, text[len(chunk) :]
+
+
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
-    pieces: list[str] = []
-    t = text
-    while t:
-        raw = _truncate_chunk(t, limit)
+    def step(state: tuple[list[str], str], _: object) -> tuple[list[str], str]:
+        pieces, remaining = state
+        if not remaining:
+            return state
+
+        candidate, rem = _reserve_for_list(remaining, limit)
+        source = candidate or remaining
+        first = _first_non_empty_line(source)
+        second = source.splitlines()[1] if "\n" in source else ""
+        is_list = _is_list_line(first) or (_is_list_line(second) and len(first) < limit)
+
+        if is_list and len(source) > limit:
+            suffix = f"\n{rem}" if rem else ""
+            raw, rest = f"{source}{suffix}", ""
+        else:
+            raw, leftover = _truncate_with_remainder(source, limit)
+            suffix = f"\n{rem}" if rem else ""
+            rest = f"{leftover}{suffix}"
+        raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
+        raw, rest = _rebalance_lists(raw, rest)
         trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
-        pieces = [*pieces, trimmed] if trimmed else pieces
-        t = t[len(raw) :].lstrip()
-    return pieces
+        if trimmed and trimmed.strip():
+            if pieces and _is_list_line(_first_non_empty_line(trimmed)):
+                merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
+                if len(merged) <= limit:  # noqa: SIM108
+                    pieces = [*pieces[:-1], merged]
+                else:
+                    pieces = [*pieces, trimmed]
+            else:
+                pieces = [*pieces, trimmed]
+        return pieces, rest.lstrip()
+
+    states: Iterable[tuple[list[str], str]] = accumulate(
+        repeat(None),
+        step,
+        initial=([], text),
+    )
+    return next(p for p, r in states if not r)
 
 
 def _coherent(text: str, min_chars: int = 40) -> bool:
@@ -94,7 +330,7 @@ def _trim_overlap(prev: str, curr: str) -> str:
     if _contains(prev_lower, curr_lower):
         return ""
     overlap = _overlap_len(prev_lower, curr_lower)
-    if overlap:
+    if overlap and overlap < len(curr) * 0.9:
         return curr[overlap:].lstrip()
     prefix = curr_lower.split("\n\n", 1)[0]
     return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
@@ -106,12 +342,23 @@ def _starts_mid_sentence(text: str) -> bool:
 
 
 def _merge_text(prev: str, curr: str) -> str:
-    return f"{prev}\n\n{curr}".strip()
+    last = _last_non_empty_line(prev)
+    first = _first_non_empty_line(curr)
+    cond = _is_list_line(last) and _is_list_line(first)
+    sep = "\n" if cond else "\n\n"
+    return f"{prev.rstrip()}{sep}{curr}".strip()
 
 
-def _merge_sentence_pieces(pieces: Iterable[str]) -> list[str]:
+def _merge_sentence_pieces(
+    pieces: Iterable[str],
+    limit: int | None = None,
+) -> list[str]:
     def step(acc: list[str], piece: str) -> list[str]:
-        if acc and _starts_mid_sentence(piece):
+        if (
+            acc
+            and _starts_mid_sentence(piece)
+            and (limit is None or len(acc[-1]) + 1 + len(piece) <= limit)
+        ):
             merged = f"{acc[-1].rstrip()} {piece}".strip()
             return [*acc[:-1], merged]
         return [*acc, piece]
@@ -147,7 +394,10 @@ def _merge_if_fragment(
     )
 
 
-def _merge_items(acc: list[dict[str, Any]], item: dict[str, Any]) -> list[dict[str, Any]]:
+def _merge_items(
+    acc: list[dict[str, Any]],
+    item: dict[str, Any],
+) -> list[dict[str, Any]]:
     text = item["text"]
     if acc:
         prev = acc[-1]
@@ -194,7 +444,10 @@ def _dedupe(
             if log is not None:
                 log.append(text)
             return state
-        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(acc_norm, text_norm)
+        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(
+            acc_norm,
+            text_norm,
+        )
         if overlap:
             if log is not None:
                 log.append(text[:overlap])
@@ -239,7 +492,12 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     avail = max(max_chars - overhead, 0)
     if avail <= 0:
         return []
-    pieces = _merge_sentence_pieces(_split(item.get("text", ""), avail))
+
+    pieces = [
+        piece
+        for piece in _merge_sentence_pieces(_split(item.get("text", ""), avail), avail)
+        if piece.strip()
+    ]
 
     def build(idx_piece: tuple[int, str]) -> Row:
         idx, piece = idx_piece
@@ -258,7 +516,7 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
             row = {"text": piece, **meta_part}
         return row
 
-    return [build(x) for x in enumerate(pieces)]
+    return [row for row in (build(x) for x in enumerate(pieces)) if row["text"].strip()]
 
 
 def _rows(doc: Doc) -> list[Row]:
