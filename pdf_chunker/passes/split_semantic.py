@@ -116,6 +116,7 @@ def _get_split_fn(
     """Return a semantic splitter enforcing size limits and collecting metrics."""
 
     soft_hits = 0
+    conversational_merges = 0
 
     try:
         from pdf_chunker.splitter import (
@@ -134,28 +135,21 @@ def _get_split_fn(
         def split(text: str) -> list[str]:
             """Split ``text`` while guarding against truncation."""
 
-            nonlocal soft_hits
-            base_chunks = semantic(text)
+            nonlocal soft_hits, conversational_merges
+            base_chunks = [chunk.strip() for chunk in semantic(text) if chunk and chunk.strip()]
             soft_hits += sum(len(chunk) > SOFT_LIMIT for chunk in base_chunks)
-            should_merge = any(_ENDS_SENTENCE.search(chunk.rstrip()) for chunk in base_chunks)
-            merged_chunks, stats = (
-                merge_conversational_chunks(base_chunks, min_chunk_size)
-                if should_merge
-                else (base_chunks, {"merges_performed": 0})
+            merged_chunks, stats = merge_conversational_chunks(
+                base_chunks,
+                min_chunk_size,
             )
-            candidate = merged_chunks if stats.get("merges_performed", 0) else base_chunks
-            merged = (
-                candidate
-                if sum(len(part.split()) for part in candidate) >= len(text.split())
-                else base_chunks
-            )
-            raw = [
-                seg
-                for chunk in merged
+            conversational_merges += int(stats.get("merges_performed", 0) or 0)
+            segments = (
+                segment
+                for chunk in merged_chunks
                 for sub in iter_word_chunks(chunk, chunk_size)
-                for seg in _soft_segments(sub)
-            ]
-            return _merge_sentence_fragments(raw, chunk_size=chunk_size)
+                for segment in _soft_segments(sub)
+            )
+            return _merge_sentence_fragments(segments, chunk_size=chunk_size)
 
     except Exception:  # pragma: no cover - safety fallback
 
@@ -166,7 +160,10 @@ def _get_split_fn(
             return _merge_sentence_fragments(base_chunks, chunk_size=chunk_size)
 
     def metrics() -> dict[str, int]:
-        return {"soft_limit_hits": soft_hits}
+        data = {"soft_limit_hits": soft_hits}
+        if conversational_merges:
+            data["conversational_merges"] = conversational_merges
+        return data
 
     return split, metrics
 

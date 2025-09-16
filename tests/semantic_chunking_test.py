@@ -1,7 +1,10 @@
+import re
+import sys
+import types
+
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import _dedupe
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
-import re
 
 
 def _doc(text: str) -> dict:
@@ -69,6 +72,57 @@ def test_blocks_merge_into_sentence() -> None:
     art = _SplitSemanticPass()(Artifact(payload=doc))
     texts = [c["text"] for c in art.payload["items"]]
     assert texts == ["Cloud development envs are new."]
+
+
+def test_semantic_splitter_merges_conversation(monkeypatch) -> None:
+    """Semantic splitting uses conversational merges before word segmentation."""
+
+    base_chunks = [
+        "Hello there",
+        "and welcome to the platform?",
+        "Closing statement.",
+    ]
+    merged_chunks = [
+        "Hello there ⧉ and welcome to the platform?",
+        "Closing statement.",
+    ]
+
+    def fake_semantic_chunker(
+        text: str,
+        *,
+        chunk_size: int,
+        overlap: int,
+        min_chunk_size: int,
+    ) -> list[str]:
+        return list(base_chunks)
+
+    def fake_merge(
+        chunks: list[str],
+        min_chunk_size: int,
+    ) -> tuple[list[str], dict[str, int]]:
+        assert list(chunks) == base_chunks
+        return list(merged_chunks), {"merges_performed": 1}
+
+    def fake_iter_word_chunks(chunk: str, max_words: int) -> list[str]:
+        assert chunk in merged_chunks
+        return [chunk]
+
+    stub = types.SimpleNamespace(
+        semantic_chunker=fake_semantic_chunker,
+        merge_conversational_chunks=fake_merge,
+        iter_word_chunks=fake_iter_word_chunks,
+    )
+    monkeypatch.setitem(sys.modules, "pdf_chunker.splitter", stub)
+
+    art = _SplitSemanticPass(chunk_size=1_024, overlap=0)(
+        Artifact(payload=_doc("Placeholder text."))
+    )
+    texts = [c["text"] for c in art.payload["items"]]
+    metrics = art.meta["metrics"]["split_semantic"]
+
+    assert texts == merged_chunks
+    assert metrics.get("conversational_merges") == 1
+    assert all(text and not text.lstrip()[0].islower() for text in texts)
 
 
 def test_dedupe_preserves_sentence_start() -> None:
