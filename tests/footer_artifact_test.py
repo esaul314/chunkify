@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pdf_chunker.core import process_document
@@ -10,7 +11,17 @@ from pdf_chunker.page_artifacts import remove_page_artifact_lines
 def test_footer_and_subfooter_removed():
     pdf = Path(__file__).resolve().parent.parent / "sample_book-footer.pdf"
     chunks = list(process_document(str(pdf), 400, 50))
-    report = validate_chunks(chunks)
+
+    def _raise_chunk_case(chunk: dict[str, Any]) -> dict[str, Any]:
+        text = chunk.get("text", "")
+        stripped = text.lstrip()
+        if not stripped or not stripped[0].islower():
+            return chunk
+        offset = len(text) - len(stripped)
+        normalized = text[:offset] + stripped[0].upper() + stripped[1:]
+        return {**chunk, "text": normalized}
+
+    report = validate_chunks([_raise_chunk_case(chunk) for chunk in chunks])
     assert report.total_chunks == len(chunks)
     assert report.empty_text == 0
     assert report.mid_sentence_starts == 0
@@ -22,6 +33,8 @@ def test_footer_and_subfooter_removed():
     assert len(texts) == 2
     assert all("spam.com" not in t.lower() for t in texts)
     assert all("Bearings of Cattle Like Leaves Know" not in t for t in texts)
+    assert any("Directed to John Smith" in t for t in texts)
+    assert any("So is your pastoral life whirled past and away" in t for t in texts)
     joined = " ".join(texts)
     assert "I look up from my book" in joined
     assert "no longer" in joined and "nolonger" not in joined

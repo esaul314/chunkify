@@ -96,6 +96,8 @@ class TestPageArtifactDetection(unittest.TestCase):
         )
         cleaned = remove_page_artifact_lines(text, 115)
         self.assertEqual(cleaned, "First part of sentence\nThe sentence continues here.")
+        self.assertIn("First part of sentence", cleaned)
+        self.assertTrue(cleaned.endswith("The sentence continues here."))
 
     def test_header_inserted_mid_sentence(self):
         text = (
@@ -161,6 +163,12 @@ class TestPageArtifactDetection(unittest.TestCase):
         self.assertIn("Most engineers", cleaned)
         self.assertIn("Infrastructure setup", cleaned)
         self.assertNotIn("\n1.\n", cleaned)
+
+    def test_trailing_bullet_without_footer_context_preserved(self):
+        text = "Paragraph lead\n\n• Keep me"
+        cleaned = remove_page_artifact_lines(text, 0)
+        self.assertTrue(cleaned.endswith("Keep me"))
+        self.assertIn("Paragraph lead", cleaned)
 
 
 if __name__ == "__main__":
