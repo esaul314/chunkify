@@ -45,6 +45,10 @@ def test_clean_block_hyphen_fix(block, expected):
             "We sell business-critical, off-the-shelf solutions.",
             ("business-critical", "off-the-shelf"),
         ),
+        (
+            "The release schedule is business-\u00adcritical.",
+            ("business-critical",),
+        ),
     ],
 )
 def test_preserve_existing_hyphens(text, expected):
@@ -64,6 +68,12 @@ def test_join_preserves_double_letters():
     assert clean_text(text) == "balloon"
 
 
-def test_crossline_hyphen_preserved():
-    text = "business-\ncritical systems"
-    assert "business-critical systems" in clean_text(text)
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("business-\ncritical systems", "business-critical systems"),
+        ("business\u00ad\ncritical systems", "businesscritical systems"),
+    ],
+)
+def test_crossline_hyphen_preserved(text, expected):
+    assert clean_text(text) == expected

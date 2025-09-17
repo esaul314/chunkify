@@ -204,12 +204,26 @@ def _choose_hyphenation(head: str, tail: str) -> str:
 def _join_hyphenated_words(text: str) -> str:
     """Merge words broken with hyphenation across line breaks."""
 
-    def repl(match: Match[str]) -> str:
-        head, tail = match.group(1), match.group(2)
-        token = match.group(0)
-        return head + tail if '\n' in token else _choose_hyphenation(head, tail)
+    def _hyphen_from_token(token: str) -> str:
+        return next((char for char in token if char in _HYPHEN_CHARS), "-")
 
-    return HYPHEN_SPACE_RE.sub(repl, HYPHEN_BREAK_RE.sub(repl, text))
+    def _replace_with_original(joined: str, hyphen: str) -> str:
+        return joined.replace("-", hyphen, 1) if "-" in joined else joined
+
+    def choose_for_break(match: Match[str]) -> str:
+        head, tail = match.group(1), match.group(2)
+        hyphen = _hyphen_from_token(match.group(0))
+        return _replace_with_original(_choose_hyphenation(head, tail), hyphen)
+
+    def choose_hyphenation(match: Match[str]) -> str:
+        head, tail = match.group(1), match.group(2)
+        return _choose_hyphenation(head, tail)
+
+    return pipe(
+        text,
+        lambda value: HYPHEN_BREAK_RE.sub(choose_for_break, value),
+        lambda value: HYPHEN_SPACE_RE.sub(choose_hyphenation, value),
+    )
 
 
 def _remove_soft_hyphens(text: str) -> str:
