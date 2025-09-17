@@ -3,6 +3,7 @@ from typing import Callable, TypeVar
 
 from hypothesis import given, strategies as st
 from pdf_chunker import splitter
+from pdf_chunker.page_artifacts import remove_page_artifact_lines
 from pdf_chunker.text_cleaning import clean_text
 
 
@@ -41,3 +42,10 @@ def test_split_roundtrip_cleaning(sample: str) -> None:
         clean_text,
     )
     assert pipeline(sample) == clean_text(sample)
+
+
+def test_inline_footnote_continuation_preserved() -> None:
+    sample = "Lead in.\n3 Footnote text. The continuation survives."
+    cleaned = remove_page_artifact_lines(sample, 3)
+    assert cleaned.endswith("The continuation survives.")
+    assert "Lead in." in cleaned

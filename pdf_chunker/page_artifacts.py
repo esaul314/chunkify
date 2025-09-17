@@ -47,6 +47,7 @@ def _looks_like_footnote(text: str) -> bool:
 
 
 _BULLET_CHARS = ("\u2022", "*", "-")
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 
 
 def _starts_with_bullet(line: str) -> bool:
@@ -63,6 +64,21 @@ def _looks_like_bullet_footer(text: str) -> bool:
     return _starts_with_bullet(stripped) and "?" in stripped and len(words) <= 2
 
 
+def _looks_like_footer_context(text: str) -> bool:
+    """Return ``True`` when ``text`` resembles footer boilerplate."""
+
+    if not text:
+        return False
+    lowered = text.lower()
+    return (
+        _contains_domain(text)
+        or "http" in lowered
+        or "www." in lowered
+        or lowered.strip(" -\u2022*").isdigit()
+        or lowered.rstrip().endswith("page")
+    )
+
+
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
 
@@ -71,13 +87,23 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         return _starts_with_bullet(stripped) and len(stripped.split()) <= 2
 
     trailing = list(takewhile(_bulletish, reversed(lines)))
-    if len(trailing) == 1:
-        logger.debug(
-            "remove_page_artifact_lines dropped trailing bullet footer: %s",
-            trailing[0][:30],
-        )
-        return lines[:-1]
-    return lines
+    if len(trailing) != 1:
+        return lines
+
+    bullet = trailing[0].lstrip()
+    body = bullet.lstrip("".join(_BULLET_CHARS)).strip(" -\u2022*.")
+    prior = next((ln.strip() for ln in reversed(lines[:-1]) if ln.strip()), "")
+    if not any(
+        _looks_like_footer_context(candidate)
+        for candidate in filter(None, (body, prior))
+    ):
+        return lines
+
+    logger.debug(
+        "remove_page_artifact_lines dropped trailing bullet footer: %s",
+        trailing[0][:30],
+    )
+    return lines[:-1]
 
 
 def _strip_spurious_number_prefix(text: str) -> str:
@@ -373,6 +399,29 @@ def _strip_footnote_lines(text: str) -> str:
 FOOTNOTE_MARKER_RE = re.compile(rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+")
 
 
+def _remove_inline_footnote_prefix(line: str) -> tuple[str, bool]:
+    """Strip numeric footnote prefixes while keeping continuation sentences."""
+
+    if not _looks_like_footnote(line):
+        return line, False
+
+    stripped = line.lstrip()
+    match = FOOTNOTE_PREFIX_RE.match(stripped)
+    if not match:
+        return line, False
+
+    remainder = stripped[match.end() :].lstrip()
+    if not remainder:
+        return "", True
+
+    segments = _SENTENCE_BOUNDARY_RE.split(remainder, maxsplit=1)
+    if len(segments) == 2:
+        continuation = segments[1].strip()
+        if continuation:
+            return continuation, True
+    return "", True
+
+
 def _normalize_footnote_markers(text: str) -> str:
     """Replace trailing footnote numbers with bracketed form.
 
@@ -477,6 +526,19 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
 
     def _clean_line(ln: str) -> Optional[str]:
         normalized = ln if _starts_with_bullet(ln) else _strip_page_header_prefix(ln)
+        normalized, removed_inline = _remove_inline_footnote_prefix(normalized)
+        if not normalized:
+            if removed_inline:
+                logger.debug(
+                    "remove_page_artifact_lines dropped inline footnote: %s",
+                    ln[:30],
+                )
+            return None
+        if removed_inline:
+            logger.debug(
+                "remove_page_artifact_lines preserved inline continuation: %s",
+                normalized[:30],
+            )
         if is_page_artifact_text(normalized, page_num) or _looks_like_bullet_footer(normalized):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
