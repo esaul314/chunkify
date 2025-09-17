@@ -77,3 +77,14 @@ def test_join_preserves_double_letters():
 )
 def test_crossline_hyphen_preserved(text, expected):
     assert clean_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("provision-\ning", "provisioning"),
+        ("through-\nOut", "throughout"),
+    ],
+)
+def test_crossline_spurious_hyphen_removed(text, expected):
+    assert clean_text(text) == expected
