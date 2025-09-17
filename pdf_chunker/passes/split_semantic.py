@@ -76,56 +76,66 @@ def _merge_sentence_fragments(
             return False
         return combined <= SOFT_LIMIT
 
-    def _actual_overlap(prev_words: list[str], current_words: list[str]) -> int:
+      
+    def _actual_overlap(
+        prev_words: tuple[str, ...],
+        current_words: tuple[str, ...],
+    ) -> int:
         if not allowed_overlap or not prev_words or not current_words:
             return 0
         window = min(allowed_overlap, len(prev_words), len(current_words))
-        if window == 0:
-            return 0
-        return window if prev_words[-window:] == current_words[:window] else 0
+        return window if window and prev_words[-window:] == current_words[:window] else 0
 
-    def _trim_leading_overlap(
-        prev_words: list[str],
-        words: list[str],
-    ) -> list[str]:
+    def _dedupe_overlap(
+        prev_words: tuple[str, ...],
+        words: tuple[str, ...],
+    ) -> tuple[str, tuple[str, ...]]:
+        if not words:
+            return "", words
         overlap_words = _actual_overlap(prev_words, words)
-        return words[overlap_words:] if overlap_words else words
+        trimmed_words = words[overlap_words:] if overlap_words else words
+        return " ".join(trimmed_words), trimmed_words
 
     def _append(
-        acc: list[tuple[str, int]],
+        acc: list[tuple[str, tuple[str, ...]]],
         text: str,
-        count: int,
-    ) -> list[tuple[str, int]]:
-        return [*acc, (text, count)]
+        words: tuple[str, ...],
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        return [*acc, (text, words)]
 
     def _merge(
-        acc: list[tuple[str, int]],
+        acc: list[tuple[str, tuple[str, ...]]],
         chunk: str,
-    ) -> list[tuple[str, int]]:
-        words = chunk.split()
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        words = tuple(chunk.split())
         if not words:
             return acc
+
         if not acc:
-            return _append(acc, chunk, len(words))
+            return _append(acc, chunk, words)
 
-        previous, count = acc[-1]
-        prev_words = previous.split()
-        trimmed_words = _trim_leading_overlap(prev_words, words)
+        prev_text, prev_words = acc[-1]
+        trimmed_text, trimmed_words = _dedupe_overlap(prev_words, words)
         if not trimmed_words:
-            return acc
+            return _append(acc, chunk, words)
 
-        trimmed = " ".join(trimmed_words)
-        if not _should_merge(previous, trimmed, prev_words):
-            return _append(acc, chunk, len(words))
+        if not _should_merge(prev_text, trimmed_text, list(prev_words)):
+            return _append(acc, chunk, words)
 
-        projected = count + len(trimmed_words)
+        projected = len(prev_words) + len(trimmed_words)
         if limit is not None and projected > limit:
-            return _append(acc, chunk, len(words))
+            return _append(acc, chunk, words)
 
-        merged_text = f"{previous} {trimmed}".strip()
-        return [*acc[:-1], (merged_text, projected)]
+        merged_text = f"{prev_text} {trimmed_text}".strip()
+        merged_words = (*prev_words, *trimmed_words)
+        return [*acc[:-1], (merged_text, merged_words)]
 
-    merged: list[tuple[str, int]] = reduce(_merge, chunks, [])
+    merged: list[tuple[str, tuple[str, ...]]] = reduce(
+        _merge,
+        chunks,
+        [],
+    )
+
     return [text for text, _ in merged]
 
 
