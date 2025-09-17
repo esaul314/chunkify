@@ -41,10 +41,19 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
 
 
-def _merge_sentence_fragments(chunks: Iterable[str], *, max_words: int = 80) -> list[str]:
+def _merge_sentence_fragments(
+    chunks: Iterable[str],
+    *,
+    max_words: int = 80,
+    chunk_size: int | None = None,
+    overlap: int = 0,
+) -> list[str]:
     """Merge trailing fragments until a sentence boundary or limits reached."""
 
-    def _should_merge(previous: str, current: str) -> bool:
+    allowed_overlap = max(overlap, 0)
+    limit = max(chunk_size - allowed_overlap, 0) if chunk_size and chunk_size > 0 else None
+
+    def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
         """Return ``True`` when ``previous`` and ``current`` should coalesce."""
 
         if not previous:
@@ -54,8 +63,8 @@ def _merge_sentence_fragments(chunks: Iterable[str], *, max_words: int = 80) -> 
         lead = current.lstrip()
         if not lead:
             return False
-        prev_words = previous.split()
-        first_word = lead.split()[0] if lead.split() else ""
+        current_words = current.split()
+        first_word = current_words[0] if current_words else ""
         if prev_words and prev_words[-1] == first_word:
             return False
         head = lead[0]
@@ -67,13 +76,60 @@ def _merge_sentence_fragments(chunks: Iterable[str], *, max_words: int = 80) -> 
             return False
         return combined <= SOFT_LIMIT
 
-    def _merge(acc: list[str], chunk: str) -> list[str]:
-        if acc and _should_merge(acc[-1], chunk):
-            acc[-1] = f"{acc[-1]} {chunk}".strip()
-            return acc
-        return acc + [chunk]
+    def _actual_overlap(prev_words: list[str], current_words: list[str]) -> int:
+        if not allowed_overlap or not prev_words or not current_words:
+            return 0
+        window = min(allowed_overlap, len(prev_words), len(current_words))
+        if window == 0:
+            return 0
+        return window if prev_words[-window:] == current_words[:window] else 0
 
-    return reduce(_merge, chunks, [])
+    def _trim_leading_overlap(
+        prev_words: list[str],
+        words: list[str],
+    ) -> list[str]:
+        overlap_words = _actual_overlap(prev_words, words)
+        if not overlap_words:
+            return words
+        trimmed = words[overlap_words:]
+        return trimmed or words
+
+    def _append(
+        acc: list[tuple[str, int]],
+        text: str,
+        count: int,
+    ) -> list[tuple[str, int]]:
+        return [*acc, (text, count)]
+
+    def _merge(
+        acc: list[tuple[str, int]],
+        chunk: str,
+    ) -> list[tuple[str, int]]:
+        words = chunk.split()
+        if not words:
+            return acc
+        if not acc:
+            return _append(acc, chunk, len(words))
+
+        previous, count = acc[-1]
+        prev_words = previous.split()
+        trimmed_words = _trim_leading_overlap(prev_words, words)
+        if not trimmed_words:
+            return acc
+
+        trimmed = " ".join(trimmed_words)
+        if not _should_merge(previous, trimmed, prev_words):
+            return _append(acc, chunk, len(words))
+
+        projected = count + len(trimmed_words)
+        if limit is not None and projected > limit:
+            return _append(acc, chunk, len(words))
+
+        merged_text = f"{previous} {trimmed}".strip()
+        return [*acc[:-1], (merged_text, projected)]
+
+    merged: list[tuple[str, int]] = reduce(_merge, chunks, [])
+    return [text for text, _ in merged]
 
 
 Doc = dict[str, Any]
@@ -134,10 +190,10 @@ def _get_split_fn(
             raw = [
                 seg
                 for c in merged
-                for sub in iter_word_chunks(c, chunk_size)
+                for sub in iter_word_chunks(c, chunk_size, overlap)
                 for seg in _soften(sub)
             ]
-            final = _merge_sentence_fragments(raw)
+            final = _merge_sentence_fragments(raw, chunk_size=chunk_size, overlap=overlap)
             soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
             return final
 
@@ -146,7 +202,7 @@ def _get_split_fn(
         def split(text: str) -> list[str]:
             nonlocal soft_hits
             raw = _soft_segments(text)
-            final = _merge_sentence_fragments(raw)
+            final = _merge_sentence_fragments(raw, chunk_size=chunk_size, overlap=overlap)
             soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
             return final
 

@@ -489,12 +489,24 @@ def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
     return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
 
 
-def iter_word_chunks(text: str, max_words: int) -> Iterator[str]:
-    """Yield ``text`` split into sequential chunks of at most ``max_words`` words."""
+def iter_word_chunks(text: str, max_words: int, overlap: int = 0) -> Iterator[str]:
+    """Yield ``text`` split into sequential word windows respecting ``overlap``."""
+
+    if max_words <= 0:
+        if text:
+            yield text
+        return
+
     words = text.split()
-    if len(words) <= max_words * 5:
-        return iter([text])
-    return (" ".join(words[i : i + max_words]) for i in range(0, len(words), max_words))
+    if not words:
+        return
+
+    step = max(max_words - max(overlap, 0), 1)
+    for start in range(0, len(words), step):
+        chunk_words = words[start : start + max_words]
+        if not chunk_words:
+            break
+        yield " ".join(chunk_words)
 
 
 def _split_short_text(text: str) -> List[str]:
