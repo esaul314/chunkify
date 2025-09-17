@@ -89,10 +89,7 @@ def _merge_sentence_fragments(
         words: list[str],
     ) -> list[str]:
         overlap_words = _actual_overlap(prev_words, words)
-        if not overlap_words:
-            return words
-        trimmed = words[overlap_words:]
-        return trimmed or words
+        return words[overlap_words:] if overlap_words else words
 
     def _append(
         acc: list[tuple[str, int]],
