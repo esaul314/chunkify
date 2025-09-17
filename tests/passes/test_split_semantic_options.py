@@ -7,6 +7,14 @@ from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.split_semantic import split_semantic
 
 
+def _observed_overlap(first: list[str], second: list[str]) -> int:
+    limit = min(len(first), len(second))
+    return max(
+        (size for size in range(limit, -1, -1) if first[-size:] == second[:size]),
+        default=0,
+    )
+
+
 def _doc(text: str) -> dict:
     return {
         "type": "page_blocks",
@@ -22,7 +30,13 @@ def test_cli_flags_affect_split_semantic(tmp_path, monkeypatch) -> None:
         text: str, chunk_size: int, overlap: int, *, min_chunk_size: int
     ) -> list[str]:
         captured["args"] = (chunk_size, overlap, min_chunk_size)
-        return [text[:5], text[5:]]
+        words = text.split()
+        step = max(chunk_size - overlap, 1)
+        return [
+            " ".join(words[i : i + chunk_size])
+            for i in range(0, len(words), step)
+            if words[i : i + chunk_size]
+        ]
 
     monkeypatch.setattr("pdf_chunker.splitter.semantic_chunker", fake_semantic_chunker)
     overrides = _cli_overrides(
@@ -35,11 +49,16 @@ def test_cli_flags_affect_split_semantic(tmp_path, monkeypatch) -> None:
     )
     opts = {**overrides, "run_report": {"output_path": str(tmp_path / "r.json")}}
     spec = PipelineSpec(pipeline=["text_clean", "split_semantic"], options=opts)
-    art = Artifact(payload=_doc("hello world"), meta={"input": "doc.pdf"})
+    source = " ".join(f"w{i}" for i in range(7))
+    art = Artifact(payload=_doc(source), meta={"input": "doc.pdf"})
     out, _ = run_convert(art, spec)
     items = out.payload["items"]
+    words = [item["text"].split() for item in items]
+
     assert captured["args"] == (5, 0, 8)
     assert len(items) == 2 and all("meta" not in item for item in items)
+    assert len(words[0]) == 5
+    assert _observed_overlap(words[0], words[1]) == 0
 
 
 @pytest.mark.parametrize(
