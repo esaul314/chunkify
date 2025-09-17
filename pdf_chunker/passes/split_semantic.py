@@ -76,6 +76,7 @@ def _merge_sentence_fragments(
             return False
         return combined <= SOFT_LIMIT
 
+      
     def _actual_overlap(
         prev_words: tuple[str, ...],
         current_words: tuple[str, ...],
@@ -134,6 +135,7 @@ def _merge_sentence_fragments(
         chunks,
         [],
     )
+
     return [text for text, _ in merged]
 
 
