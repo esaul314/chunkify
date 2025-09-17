@@ -50,8 +50,8 @@ def _merge_sentence_fragments(
 ) -> list[str]:
     """Merge trailing fragments until a sentence boundary or limits reached."""
 
-    limit = chunk_size if chunk_size and chunk_size > 0 else None
     allowed_overlap = max(overlap, 0)
+    limit = max(chunk_size - allowed_overlap, 0) if chunk_size and chunk_size > 0 else None
 
     def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
         """Return ``True`` when ``previous`` and ``current`` should coalesce."""
@@ -84,6 +84,20 @@ def _merge_sentence_fragments(
             return 0
         return window if prev_words[-window:] == current_words[:window] else 0
 
+    def _trim_leading_overlap(
+        prev_words: list[str],
+        words: list[str],
+    ) -> list[str]:
+        overlap_words = _actual_overlap(prev_words, words)
+        return words[overlap_words:] if overlap_words else words
+
+    def _append(
+        acc: list[tuple[str, int]],
+        text: str,
+        count: int,
+    ) -> list[tuple[str, int]]:
+        return [*acc, (text, count)]
+
     def _merge(
         acc: list[tuple[str, int]],
         chunk: str,
@@ -92,20 +106,24 @@ def _merge_sentence_fragments(
         if not words:
             return acc
         if not acc:
-            return acc + [(chunk, len(words))]
+            return _append(acc, chunk, len(words))
+
         previous, count = acc[-1]
         prev_words = previous.split()
-        if not _should_merge(previous, chunk, prev_words):
-            return acc + [(chunk, len(words))]
-        overlap_words = _actual_overlap(prev_words, words)
-        if overlap_words:
-            return acc + [(chunk, len(words))]
-        projected = count + len(words)
+        trimmed_words = _trim_leading_overlap(prev_words, words)
+        if not trimmed_words:
+            return acc
+
+        trimmed = " ".join(trimmed_words)
+        if not _should_merge(previous, trimmed, prev_words):
+            return _append(acc, chunk, len(words))
+
+        projected = count + len(trimmed_words)
         if limit is not None and projected > limit:
-            return acc + [(chunk, len(words))]
-        merged_text = f"{previous} {chunk}".strip()
-        merged_count = projected
-        return [*acc[:-1], (merged_text, merged_count)]
+            return _append(acc, chunk, len(words))
+
+        merged_text = f"{previous} {trimmed}".strip()
+        return [*acc[:-1], (merged_text, projected)]
 
     merged: list[tuple[str, int]] = reduce(_merge, chunks, [])
     return [text for text, _ in merged]
