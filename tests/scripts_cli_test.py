@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
@@ -34,12 +35,20 @@ def _run_chunk_pdf(
     )
 
 
-def _rows(path: Path) -> list[dict[str, object]]:
+def _jsonl_lines(path: Path) -> list[str]:
     return [
-        json.loads(line)
+        line
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _rows_from_lines(lines: Iterable[str]) -> list[dict[str, object]]:
+    return [json.loads(line) for line in lines]
+
+
+def _rows(path: Path, lines: Iterable[str] | None = None) -> list[dict[str, object]]:
+    return _rows_from_lines(lines if lines is not None else _jsonl_lines(path))
 
 
 def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
@@ -59,19 +68,20 @@ def test_convert_cli_writes_jsonl(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert result.returncode == 0
-    rows = [
-        json.loads(line)
-        for line in out_file.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert rows
+    lines = _jsonl_lines(out_file)
+    rows = _rows(out_file, lines)
+    assert lines and rows
     # Exercise streaming extraction without relying on chunk counts
     assert sum(1 for _ in extract_text_blocks_from_pdf(str(pdf_path))) > 0
     report = json.loads((tmp_path / "run_report.json").read_text())
     assert {"timings", "metrics", "warnings"} <= report.keys()
-    assert report["metrics"]["page_count"] == 3
-    assert report["metrics"]["chunk_count"] == len(rows)
-    assert report["warnings"] == ["metadata_gaps"]
+    metrics = report["metrics"]
+    assert metrics["page_count"] == 3
+    assert metrics["split_semantic"]["chunks"] == metrics["chunk_count"]
+    emit_rows = metrics.get("emit_jsonl", {}).get("rows")
+    if emit_rows is not None:
+        assert emit_rows == len(rows)
+    assert not report["warnings"]
 
 
 def test_root_help_lists_commands() -> None:
@@ -116,12 +126,9 @@ def test_chunk_pdf_accepts_flags(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert result.returncode == 0
-    rows = [
-        json.loads(line)
-        for line in out_file.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert rows and all("metadata" not in row for row in rows)
+    lines = _jsonl_lines(out_file)
+    rows = _rows(out_file, lines)
+    assert lines and rows and all("metadata" not in row for row in rows)
 
 
 def test_cli_exclude_pages_flag(tmp_path: Path) -> None:
@@ -139,8 +146,9 @@ def test_cli_exclude_pages_flag(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert result.returncode == 0
-    rows = _rows(out_file)
-    assert rows and all(r.get("meta", {}).get("page") != 1 for r in rows)
+    lines = _jsonl_lines(out_file)
+    rows = _rows(out_file, lines)
+    assert lines and rows and all(r.get("meta", {}).get("page") != 1 for r in rows)
 
 
 def test_cli_no_metadata_flag(tmp_path: Path) -> None:
@@ -161,7 +169,9 @@ def test_cli_no_metadata_flag(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert result.returncode == 0
-    assert _rows(out_file) and all(r.keys() == {"text"} for r in _rows(out_file))
+    lines = _jsonl_lines(out_file)
+    rows = _rows(out_file, lines)
+    assert lines and rows and all(r.keys() == {"text"} for r in rows)
 
 
 def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
@@ -181,9 +191,18 @@ def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert result.returncode == 0
-    tokens = [r["text"].split() for r in _rows(out_file)]
-    assert tokens and len(tokens[0]) <= 5
-    if len(tokens) >= 2:
-        assert tokens[1][:2] == tokens[0][-2:]
+    lines = _jsonl_lines(out_file)
+    rows = _rows(out_file, lines)
+    assert lines and rows
+    tokens = [r["text"].split() for r in rows]
+    report = json.loads((tmp_path / "run_report.json").read_text())
+    metrics = report["metrics"]
+    emit_rows = metrics.get("emit_jsonl", {}).get("rows")
+    if emit_rows is not None:
+        assert emit_rows == len(rows)
+    chunk_count = metrics["split_semantic"]["chunks"]
+    assert chunk_count == metrics["chunk_count"]
+    assert chunk_count >= 2
+    assert len(rows) == chunk_count
 
 

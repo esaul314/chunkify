@@ -1,5 +1,9 @@
 from pdf_chunker.framework import Artifact
-from pdf_chunker.passes.emit_jsonl import emit_jsonl
+from pdf_chunker.passes.emit_jsonl import _rebalance_lists, emit_jsonl
+
+
+def _sentence(words: int, *, start: int = 0) -> str:
+    return " ".join(f"Word{i}" for i in range(start, start + words)) + "."
 
 
 def test_emit_jsonl_merges_heading_with_text():
@@ -105,6 +109,20 @@ def test_emit_jsonl_merges_short_items():
     assert len(rows[0]["text"].split()) >= 50
 
 
+def test_emit_jsonl_retains_coherent_short_blocks():
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": _sentence(30, start=0)},
+            {"text": _sentence(25, start=100)},
+            {"text": _sentence(28, start=200)},
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert len(rows) == 2
+    assert rows[1]["text"] == _sentence(28, start=200)
+
+
 def test_emit_jsonl_retains_numbered_punctuated_item(monkeypatch):
     monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
     doc = {
@@ -145,3 +163,16 @@ def test_emit_jsonl_retains_numbered_tail_without_punctuation(monkeypatch):
     }
     rows = emit_jsonl(Artifact(payload=doc)).payload
     assert rows[1]["text"].startswith("2. Second item continues")
+
+
+def test_rebalance_lists_moves_intro_to_list_block():
+    raw = (
+        "The platform story highlights enduring bottlenecks. "
+        "Here are the recurring causes—namely:"
+    )
+    rest = "\n\n1. Teams cannot self-service their needs.\n2. Platform scope is too broad."
+    kept, moved = _rebalance_lists(raw, rest)
+    assert kept == "The platform story highlights enduring bottlenecks."
+    lines = [ln for ln in moved.splitlines() if ln.strip()]
+    assert lines[0] == "Here are the recurring causes—namely:"
+    assert lines[1].startswith("1. Teams cannot self-service")

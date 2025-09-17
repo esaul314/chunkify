@@ -166,6 +166,44 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
     return chunk_text, remainder
 
 
+def _list_intro_start(text: str) -> int:
+    """Return the index where a trailing list introduction begins."""
+
+    return max(
+        (
+            pos + span
+            for token, span in (("\n\n", 2), (". ", 2), ("! ", 2), ("? ", 2))
+            if (pos := text.rfind(token)) != -1
+        ),
+        default=-1,
+    )
+
+
+def _peel_list_intro(text: str) -> tuple[str, str]:
+    """Split ``text`` into non-intro content and the trailing list preamble."""
+
+    stripped = text.rstrip()
+    colon_idx = max(stripped.rfind(":"), stripped.rfind("："))
+    if colon_idx == -1:
+        return text, ""
+    prefix = stripped[: colon_idx + 1]
+    start = _list_intro_start(prefix)
+    if start <= 0:
+        return text, ""
+    return prefix[:start].rstrip(), prefix[start:].lstrip()
+
+
+def _prepend_intro(intro: str, rest: str) -> str:
+    """Attach ``intro`` ahead of ``rest`` while preserving existing spacing."""
+
+    if not rest:
+        return intro
+    leading_newlines = len(rest) - len(rest.lstrip("\n"))
+    tail = rest[leading_newlines:]
+    separator = "\n" * leading_newlines if leading_newlines else "\n"
+    return f"{intro}{separator}{tail}".strip("\n")
+
+
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     """Shift trailing context or list block into ``rest`` when it starts with a list."""
 
@@ -173,7 +211,13 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
         return raw, rest
 
     lines = _trim_trailing_empty(raw.splitlines())
+    trimmed = "\n".join(lines)
     has_list = any(_is_list_line(ln) for ln in lines)
+
+    if not has_list:
+        kept, intro = _peel_list_intro(trimmed)
+        if intro:
+            return kept, _prepend_intro(intro, rest)
 
     # Determine split point: last non-list line if ``raw`` already contains list items,
     # otherwise the preceding blank line so that list introductions move with the list.
@@ -193,15 +237,14 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     # fmt: on
     start = len(lines) - idx
     if not has_list and start == 0:
-        return raw, rest
+        return trimmed, rest
     block = lines[start:]
     if not block:
-
-        return raw, rest
+        return trimmed, rest
 
     moved = "\n".join(block).strip()
     kept = "\n".join(lines[:start]).rstrip()
-    return kept, f"{moved}\n{rest.lstrip()}".strip("\n")
+    return kept, _prepend_intro(moved, rest)
 
 
 def _truncate_with_remainder(text: str, limit: int) -> tuple[str, str]:
@@ -394,6 +437,21 @@ def _merge_if_fragment(
     )
 
 
+def _should_merge(prev_text: str, curr_text: str, min_words: int) -> bool:
+    prev_words = _word_count(prev_text)
+    curr_words = _word_count(curr_text)
+    prev_coherent = _coherent(prev_text)
+    curr_coherent = _coherent(curr_text)
+    return any(
+        (
+            prev_words < min_words,
+            (curr_words < min_words and not curr_coherent),
+            not prev_coherent,
+            _starts_mid_sentence(curr_text),
+        )
+    )
+
+
 def _merge_items(
     acc: list[dict[str, Any]],
     item: dict[str, Any],
@@ -402,14 +460,7 @@ def _merge_items(
     if acc:
         prev = acc[-1]
         text = _trim_overlap(prev["text"], text)
-        prev_words, curr_words = _word_count(prev["text"]), _word_count(text)
-        should_merge = (
-            prev_words < _min_words()
-            or curr_words < _min_words()
-            or not _coherent(prev["text"])
-            or _starts_mid_sentence(text)
-        )
-        if should_merge:
+        if _should_merge(prev["text"], text, _min_words()):
             merged = _merge_text(prev["text"], text)
             return [*acc[:-1], {**prev, "text": merged}]
     return [*acc, {**item, "text": text}]
@@ -519,17 +570,27 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     return [row for row in (build(x) for x in enumerate(pieces)) if row["text"].strip()]
 
 
-def _rows(doc: Doc) -> list[Row]:
-    debug_log: list[str] | None = [] if os.getenv("PDF_CHUNKER_DEDUP_DEBUG") else None
-    items = _dedupe(_coalesce(doc.get("items", [])), log=debug_log)
+def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
+    opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
+    chunk_size = opts.get("chunk_size")
+    overlap = opts.get("overlap")
+    return chunk_size is not None or (isinstance(overlap, int | float) and overlap > 0)
+
+
+def _rows(doc: Doc, *, preserve: bool = False) -> list[Row]:
+    debug_log: list[str] | None = (
+        [] if (not preserve and os.getenv("PDF_CHUNKER_DEDUP_DEBUG")) else None
+    )
+    items = doc.get("items", [])
+    processed = items if preserve else _dedupe(_coalesce(items), log=debug_log)
     if debug_log is not None:
         logger = logging.getLogger(__name__)
         logger.warning("dedupe dropped %d duplicates", len(debug_log))
         for dup in debug_log:
             logger.warning("dedupe dropped: %s", dup[:80])
-        for dup in _flag_potential_duplicates(items):
+        for dup in _flag_potential_duplicates(processed):
             logger.warning("possible duplicate retained: %s", dup[:80])
-    return [r for i in items for r in _rows_from_item(i)]
+    return [r for i in processed for r in _rows_from_item(i)]
 
 
 def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
@@ -545,7 +606,8 @@ class _EmitJsonlPass:
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload if isinstance(a.payload, dict) else {}
-        rows = _rows(doc) if doc.get("type") == "chunks" else []
+        preserve = _preserve_chunks(a.meta)
+        rows = _rows(doc, preserve=preserve) if doc.get("type") == "chunks" else []
         meta = _update_meta(a.meta, len(rows))
         return Artifact(payload=rows, meta=meta)
 

@@ -369,6 +369,8 @@ Tests must:
 * Focus on input→output behavior
 * Use fixtures and shared utilities in ```tests/utils/common.sh`
 
+> **Note**: Some legacy regressions are still being worked through, but any tests that currently pass (e.g., numbered list preservation) are authoritative. Do **not** introduce new failures—rerun the relevant specs after modifying chunking or emission logic.
+
 ---
 
 ## Pull Request Guidelines for OpenAI Codex
