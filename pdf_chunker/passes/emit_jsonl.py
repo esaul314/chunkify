@@ -166,6 +166,44 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
     return chunk_text, remainder
 
 
+def _list_intro_start(text: str) -> int:
+    """Return the index where a trailing list introduction begins."""
+
+    return max(
+        (
+            pos + span
+            for token, span in (("\n\n", 2), (". ", 2), ("! ", 2), ("? ", 2))
+            if (pos := text.rfind(token)) != -1
+        ),
+        default=-1,
+    )
+
+
+def _peel_list_intro(text: str) -> tuple[str, str]:
+    """Split ``text`` into non-intro content and the trailing list preamble."""
+
+    stripped = text.rstrip()
+    colon_idx = max(stripped.rfind(":"), stripped.rfind("："))
+    if colon_idx == -1:
+        return text, ""
+    prefix = stripped[: colon_idx + 1]
+    start = _list_intro_start(prefix)
+    if start <= 0:
+        return text, ""
+    return prefix[:start].rstrip(), prefix[start:].lstrip()
+
+
+def _prepend_intro(intro: str, rest: str) -> str:
+    """Attach ``intro`` ahead of ``rest`` while preserving existing spacing."""
+
+    if not rest:
+        return intro
+    leading_newlines = len(rest) - len(rest.lstrip("\n"))
+    tail = rest[leading_newlines:]
+    separator = "\n" * leading_newlines if leading_newlines else "\n"
+    return f"{intro}{separator}{tail}".strip("\n")
+
+
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     """Shift trailing context or list block into ``rest`` when it starts with a list."""
 
@@ -173,7 +211,13 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
         return raw, rest
 
     lines = _trim_trailing_empty(raw.splitlines())
+    trimmed = "\n".join(lines)
     has_list = any(_is_list_line(ln) for ln in lines)
+
+    if not has_list:
+        kept, intro = _peel_list_intro(trimmed)
+        if intro:
+            return kept, _prepend_intro(intro, rest)
 
     # Determine split point: last non-list line if ``raw`` already contains list items,
     # otherwise the preceding blank line so that list introductions move with the list.
@@ -193,15 +237,14 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
     # fmt: on
     start = len(lines) - idx
     if not has_list and start == 0:
-        return raw, rest
+        return trimmed, rest
     block = lines[start:]
     if not block:
-
-        return raw, rest
+        return trimmed, rest
 
     moved = "\n".join(block).strip()
     kept = "\n".join(lines[:start]).rstrip()
-    return kept, f"{moved}\n{rest.lstrip()}".strip("\n")
+    return kept, _prepend_intro(moved, rest)
 
 
 def _truncate_with_remainder(text: str, limit: int) -> tuple[str, str]:
