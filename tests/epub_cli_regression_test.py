@@ -85,6 +85,25 @@ def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, objec
     conclusion_suffix = (
         "The EPUB format allows for rich HTML content, and this test document exercises various elements to ensure comprehensive text extraction and processing."
     )
+    expected_scaffolding = {
+        "sample.epub_p0_c0": (intro_prefix, intro_suffix),
+        "sample.epub_p2_c4": (list_prefix, conclusion_suffix),
+    }
+    actual_scaffolding = [
+        (
+            chunk_id,
+            text[: len(prefix)],
+            text[-len(suffix):] if suffix else "",
+        )
+        for chunk_id, text in (
+            (row["metadata"]["chunk_id"], row["text"]) for row in epub_cli_rows
+        )
+        for prefix, suffix in (expected_scaffolding[chunk_id],)
+    ]
+    assert actual_scaffolding == [
+        (chunk_id, prefix, suffix)
+        for chunk_id, (prefix, suffix) in expected_scaffolding.items()
+    ]
     assert second_text.startswith(list_prefix)
     assert second_text.endswith(conclusion_suffix)
     assert "\nChapter 3: Conclusion" in second_text
