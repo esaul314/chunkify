@@ -74,12 +74,15 @@ def validate_page_exclusions(
         )
 
     # Check if all pages would be excluded
-    if len(valid_exclusions) >= total_pages:
+    covers_all = total_pages > 0 and all(
+        page in valid_exclusions for page in range(1, total_pages + 1)
+    )
+    if covers_all:
         print(
-            "Warning: Page exclusions would exclude all pages in "
-            f"'{filename}'. Processing will continue with no exclusions.",
+            "Warning: Page exclusions remove all pages in "
+            f"'{filename}'. Proceeding without emitting page blocks.",
             file=sys.stderr,
         )
-        return set()
+        return valid_exclusions
 
     return valid_exclusions
