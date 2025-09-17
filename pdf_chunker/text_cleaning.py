@@ -180,10 +180,60 @@ HYPHEN_BREAK_RE = re.compile(
 )
 HYPHEN_SPACE_RE = re.compile(rf"([A-Za-z]+)[{HYPHEN_CHARS_ESC}]\s+{_HYPHEN_BULLET_OPT}([A-Za-z]+)")
 
+_LINEBREAK_HYPHEN_MARGIN = 1.5
+_LINEBREAK_LOWER_SUFFIXES = frozenset(
+    {
+        "ing",
+        "ings",
+        "ed",
+        "er",
+        "ers",
+        "est",
+        "ly",
+        "ally",
+        "ment",
+        "ments",
+        "ness",
+        "less",
+        "ful",
+        "ity",
+        "ities",
+        "ous",
+        "ive",
+        "tion",
+        "tions",
+        "sion",
+        "sions",
+        "able",
+        "ible",
+        "ance",
+        "ances",
+        "ence",
+        "ences",
+        "ism",
+        "ist",
+        "ists",
+        "ship",
+        "ships",
+        "hood",
+        "out",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Hyphenation and word glue fixes
 # ---------------------------------------------------------------------------
+
+
+def _hyphenation_scores(head: str, tail: str) -> Tuple[str, str, float, float]:
+    """Return join candidates and their corpus frequencies."""
+
+    joined = head + tail
+    hyphenated = f"{head}-{tail}"
+    joined_freq = zipf_frequency(joined.lower(), "en")
+    hyphen_freq = zipf_frequency(hyphenated.lower(), "en")
+    return joined, hyphenated, joined_freq, hyphen_freq
 
 
 def _choose_hyphenation(head: str, tail: str) -> str:
@@ -194,22 +244,66 @@ def _choose_hyphenation(head: str, tail: str) -> str:
     while still repairing line-break hyphenation artifacts.
     """
 
-    joined = head + tail
-    hyphenated = f"{head}-{tail}"
-    joined_freq = zipf_frequency(joined, "en")
-    hyphen_freq = zipf_frequency(hyphenated, "en")
+    joined, hyphenated, joined_freq, hyphen_freq = _hyphenation_scores(head, tail)
     return hyphenated if hyphen_freq > joined_freq else joined
+
+
+def _should_keep_linebreak_hyphen(
+    head: str, tail: str, joined_freq: float, hyphen_freq: float
+) -> bool:
+    """Decide whether a newline-spanning hyphen should be preserved."""
+
+    if joined_freq <= 0:
+        return True
+    if len(head) <= 2 or len(tail) <= 2:
+        return hyphen_freq > joined_freq
+    return hyphen_freq - joined_freq >= _LINEBREAK_HYPHEN_MARGIN
+
+
+def _normalize_linebreak_join_case(head: str, tail: str, joined: str) -> str:
+    """Lower-case obvious continuations after dropping a hyphen."""
+
+    if not tail or not tail.isalpha():
+        return joined
+    if tail == tail.lower():
+        return joined
+    tail_lower = tail.lower()
+    prefix = joined[: -len(tail)] if len(tail) < len(joined) else ""
+    if head.islower():
+        return prefix + tail_lower
+    if tail_lower in _LINEBREAK_LOWER_SUFFIXES:
+        return prefix + tail_lower
+    return joined
 
 
 def _join_hyphenated_words(text: str) -> str:
     """Merge words broken with hyphenation across line breaks."""
 
-    def repl(match: Match[str]) -> str:
-        head, tail = match.group(1), match.group(2)
-        token = match.group(0)
-        return head + tail if '\n' in token else _choose_hyphenation(head, tail)
+    def _hyphen_from_token(token: str) -> str:
+        return next((char for char in token if char in _HYPHEN_CHARS), "-")
 
-    return HYPHEN_SPACE_RE.sub(repl, HYPHEN_BREAK_RE.sub(repl, text))
+    def _replace_with_original(joined: str, hyphen: str) -> str:
+        return joined.replace("-", hyphen, 1) if "-" in joined else joined
+
+    def choose_for_break(match: Match[str]) -> str:
+        head, tail = match.group(1), match.group(2)
+        hyphen = _hyphen_from_token(match.group(0))
+        joined, hyphenated, joined_freq, hyphen_freq = _hyphenation_scores(head, tail)
+        if hyphen_freq > joined_freq and _should_keep_linebreak_hyphen(
+            head, tail, joined_freq, hyphen_freq
+        ):
+            return _replace_with_original(hyphenated, hyphen)
+        return _normalize_linebreak_join_case(head, tail, joined)
+
+    def choose_hyphenation(match: Match[str]) -> str:
+        head, tail = match.group(1), match.group(2)
+        return _choose_hyphenation(head, tail)
+
+    return pipe(
+        text,
+        lambda value: HYPHEN_BREAK_RE.sub(choose_for_break, value),
+        lambda value: HYPHEN_SPACE_RE.sub(choose_hyphenation, value),
+    )
 
 
 def _remove_soft_hyphens(text: str) -> str:
