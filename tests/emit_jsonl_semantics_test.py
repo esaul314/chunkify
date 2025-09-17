@@ -2,6 +2,10 @@ from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import emit_jsonl
 
 
+def _sentence(words: int, *, start: int = 0) -> str:
+    return " ".join(f"Word{i}" for i in range(start, start + words)) + "."
+
+
 def test_emit_jsonl_merges_heading_with_text():
     doc = {
         "type": "chunks",
@@ -103,6 +107,20 @@ def test_emit_jsonl_merges_short_items():
     rows = emit_jsonl(Artifact(payload=doc)).payload
     assert len(rows) == 1
     assert len(rows[0]["text"].split()) >= 50
+
+
+def test_emit_jsonl_retains_coherent_short_blocks():
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": _sentence(30, start=0)},
+            {"text": _sentence(25, start=100)},
+            {"text": _sentence(28, start=200)},
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert len(rows) == 2
+    assert rows[1]["text"] == _sentence(28, start=200)
 
 
 def test_emit_jsonl_retains_numbered_punctuated_item(monkeypatch):

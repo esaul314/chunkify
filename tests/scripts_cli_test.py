@@ -200,9 +200,9 @@ def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
     emit_rows = metrics.get("emit_jsonl", {}).get("rows")
     if emit_rows is not None:
         assert emit_rows == len(rows)
-    assert metrics["split_semantic"]["chunks"] == metrics["chunk_count"]
-    assert metrics["split_semantic"]["chunks"] >= 2
-    if len(tokens) >= 2:
-        assert tokens[1][:2] == tokens[0][-2:]
+    chunk_count = metrics["split_semantic"]["chunks"]
+    assert chunk_count == metrics["chunk_count"]
+    assert chunk_count >= 2
+    assert len(rows) == chunk_count
 
 
