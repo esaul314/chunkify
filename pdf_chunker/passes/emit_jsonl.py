@@ -107,7 +107,7 @@ def _split_inline_list_start(line: str) -> tuple[str, str] | None:
     return None
 
 
-def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
+def _reserve_for_list(text: str, limit: int) -> tuple[str, str, str | None]:
     collapsed = _collapse_list_gaps(text)
     lines = collapsed.splitlines()
 
@@ -129,31 +129,36 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
         pre_lines = lines[:list_idx]
         tail_lines = lines[list_idx:]
     else:
-        return collapsed, ""
+        return collapsed, "", None
 
     if not pre_lines:
-        return collapsed, ""
+        return collapsed, "", None
 
     block_lines = list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail_lines))
     if not block_lines:
-        return collapsed, ""
+        return collapsed, "", None
 
     rest_lines = tail_lines[len(block_lines) :]
     trimmed_pre = _trim_trailing_empty(pre_lines)
     trailing_gaps = pre_lines[len(trimmed_pre) :]
 
     if not trimmed_pre:
-        return collapsed, ""
+        return collapsed, "", None
 
     pre_text = "\n".join(trimmed_pre)
     block_text = "\n".join(block_lines)
     combined_len = len(pre_text) + (1 if pre_text and block_text else 0) + len(block_text)
     if combined_len <= limit:
-        return collapsed, ""
+        return collapsed, "", None
 
     keep_lines, intro_lines = _partition_preamble(trimmed_pre)
+    if not intro_lines and len(keep_lines) > 1 and any(_is_list_line(ln) for ln in block_lines):
+        candidate_intro = keep_lines[-1]
+        if candidate_intro.strip() and not _is_list_line(candidate_intro):
+            keep_lines = keep_lines[:-1]
+            intro_lines = [candidate_intro, *intro_lines]
     if not keep_lines:
-        return collapsed, ""
+        return collapsed, "", None
 
     chunk_text = "\n".join(keep_lines)
     remainder_parts = [
@@ -163,7 +168,9 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str]:
         *rest_lines,
     ]
     remainder = "\n".join(remainder_parts).lstrip("\n")
-    return chunk_text, remainder
+    intro_line = _first_non_empty_line("\n".join(intro_lines)) if intro_lines else ""
+    intro_hint = intro_line if intro_line.strip() else None
+    return chunk_text, remainder, intro_hint
 
 
 def _list_intro_start(text: str) -> int:
@@ -290,12 +297,14 @@ def _truncate_with_remainder(text: str, limit: int) -> tuple[str, str]:
 def _split(text: str, limit: int) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
 
-    def step(state: tuple[list[str], str], _: object) -> tuple[list[str], str]:
-        pieces, remaining = state
+    def step(
+        state: tuple[list[str], str, str | None], _: object
+    ) -> tuple[list[str], str, str | None]:
+        pieces, remaining, intro_hint = state
         if not remaining:
             return state
 
-        candidate, rem = _reserve_for_list(remaining, limit)
+        candidate, rem, next_intro = _reserve_for_list(remaining, limit)
         source = candidate or remaining
         first = _first_non_empty_line(source)
         second = source.splitlines()[1] if "\n" in source else ""
@@ -310,7 +319,29 @@ def _split(text: str, limit: int) -> list[str]:
             rest = f"{leftover}{suffix}"
         raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
         raw, rest = _rebalance_lists(raw, rest)
-        trimmed = _trim_overlap(pieces[-1], raw) if pieces else raw
+        raw_intro_line = _first_non_empty_line(raw)
+        rest_first_line = _first_non_empty_line(rest)
+        if (
+            intro_hint
+            and intro_hint.strip()
+            and raw_intro_line.strip() == intro_hint.strip()
+            and rest_first_line
+            and _is_list_line(rest_first_line)
+        ):
+            rest_lines = rest.splitlines()
+            block_lines = list(
+                takewhile(lambda ln: not ln.strip() or _is_list_line(ln), rest_lines)
+            )
+            block_text = "\n".join(block_lines).lstrip("\n")
+            if block_text:
+                raw = f"{raw.rstrip()}\n{block_text}".strip("\n")
+                rest = "\n".join(rest_lines[len(block_lines) :])
+        raw_first_line = _first_non_empty_line(raw)
+        skip_trim = bool(pieces) and (
+            _is_list_line(raw_first_line)
+            or (intro_hint and intro_hint.strip() and raw_first_line.strip() == intro_hint.strip())
+        )
+        trimmed = raw if not pieces or skip_trim else _trim_overlap(pieces[-1], raw)
         if trimmed and trimmed.strip():
             if pieces and _is_list_line(_first_non_empty_line(trimmed)):
                 merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
@@ -320,14 +351,14 @@ def _split(text: str, limit: int) -> list[str]:
                     pieces = [*pieces, trimmed]
             else:
                 pieces = [*pieces, trimmed]
-        return pieces, rest.lstrip()
+        return pieces, rest.lstrip(), next_intro
 
-    states: Iterable[tuple[list[str], str]] = accumulate(
+    states: Iterable[tuple[list[str], str, str | None]] = accumulate(
         repeat(None),
         step,
-        initial=([], text),
+        initial=([], text, None),
     )
-    return next(p for p, r in states if not r)
+    return next(p for p, r, _ in states if not r)
 
 
 def _coherent(text: str, min_chars: int = 40) -> bool:
