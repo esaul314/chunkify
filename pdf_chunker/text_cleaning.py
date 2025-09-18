@@ -103,6 +103,22 @@ SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 # Bullets
 BULLET_CHARS_ESC = re.escape("*•")
+_ADDRESS_BULLET_PREFIXES: Tuple[str, ...] = (
+    "directed to",
+    "addressed to",
+    "ship to",
+    "shipped to",
+    "sent to",
+    "consigned to",
+)
+_ADDRESS_PREFIX_PATTERN = "|".join(map(re.escape, _ADDRESS_BULLET_PREFIXES))
+ADDRESS_BULLET_RE = re.compile(
+    rf"^[{BULLET_CHARS_ESC}]\s*(?:({_ADDRESS_PREFIX_PATTERN})\s+)?"
+    r"[A-Z0-9][\w.'-]*(?:\s+[A-Z0-9][\w.'-]*)*,\s*"
+    r"[A-Z][\w.'-]*(?:\s+[A-Za-z][\w.'-]*)*,\s*"
+    r"[A-Z][A-Za-z.'-]+$",
+    re.IGNORECASE,
+)
 BULLET_CONTINUATION_RE = re.compile(
     rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?)\n(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
 )
@@ -125,6 +141,24 @@ STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(
     rf"(?<![\n:{BULLET_CHARS_ESC}])\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])"
 )
 STRAY_BULLET_INLINE_RE = re.compile(rf"(?<=\S)[ \t][{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])")
+
+
+def _strip_address_bullet_line(line: str) -> str:
+    """Remove bullet markers from address-style lines while preserving indentation."""
+
+    stripped = line.lstrip()
+    if not stripped:
+        return line
+
+    if ADDRESS_BULLET_RE.match(stripped):
+        prefix = line[: len(line) - len(stripped)]
+        content = re.sub(rf"^[{BULLET_CHARS_ESC}]\s*", "", stripped)
+        return f"{prefix}{content}"
+    return line
+
+
+def _strip_address_bullet_lines(text: str) -> str:
+    return "\n".join(map(_strip_address_bullet_line, text.splitlines()))
 
 # Numbered list helpers
 NUMBER_SUFFIX_LINE_RE = re.compile(r"\n(\d+\.)(\s*)")
@@ -446,6 +480,7 @@ def remove_stray_bullet_lines(text: str) -> str:
         lambda t: STRAY_BULLET_SOLO_RE.sub("\n", t),
         lambda t: STRAY_BULLET_AFTER_NEWLINE_RE.sub(" ", t),
         lambda t: STRAY_BULLET_INLINE_RE.sub(" ", t),
+        _strip_address_bullet_lines,
         lambda t: re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", t),
     )
 
