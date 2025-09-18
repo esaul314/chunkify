@@ -70,6 +70,15 @@ class TestNewlineCleanup(unittest.TestCase):
         )
         self.assertEqual(clean_text(text), expected)
 
+    def test_stray_bullet_line_with_trailing_space_removed(self):
+        text = (
+            "• If we were always indeed getting our living, and regulating our lives according \n"
+            "• \n"
+            "swamp"
+        )
+        expected = "• If we were always indeed getting our living, and regulating our lives according swamp"
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -105,3 +105,14 @@ def test_multiline_numbered_item_continuation() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "own\n\nTerraform" not in cleaned
     assert "own Terraform" in cleaned
+
+
+def test_multiple_list_markers_keep_blank_lines() -> None:
+    text = (
+        "Intro paragraph.\n\n"
+        "- first item\n\n"
+        "- second item\n\n"
+        "- third item"
+    )
+    cleaned = collapse_single_newlines(text)
+    assert cleaned == text

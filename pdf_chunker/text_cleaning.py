@@ -38,7 +38,7 @@ import logging
 import os
 import re
 from functools import reduce
-from typing import Callable, List, Match, Tuple, TypeVar
+from typing import Callable, Iterator, List, Match, Tuple, TypeVar
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -115,7 +115,8 @@ UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
 DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
 
 # Stray bullet variants
-STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
+# Match stray bullet markers that occupy a full line, tolerating trailing spaces.
+STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}]\s*(?=\n|$)")
 # Guard against collapsing legitimate list items (e.g., after colons)
 STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(
     rf"(?<![\n:{BULLET_CHARS_ESC}])\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])"
@@ -137,6 +138,10 @@ NUMBERED_CONTINUATION_RE = re.compile(rf"(\d{{1,3}}[.)][^\n]*[{re.escape(END_PUN
 
 # List break preservation
 LIST_BREAK_RE = re.compile(rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]|.*\.\.))")
+LIST_BREAK_SPAN_RE = re.compile(
+    rf"(?P<break>\n{{1,}})(?=(?P<context>\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]|.*\.\.)))"
+)
+LIST_BREAK_SENTINEL_RE = re.compile(r"\[\[LIST_BREAK_(?P<idx>\d+)\]\]")
 COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 
 # Newline/split heuristics
@@ -476,22 +481,72 @@ def _preserve_list_newlines(text: str) -> str:
     return LIST_BREAK_RE.sub(placeholder, text).replace("\n", " ").replace(placeholder, "\n")
 
 
+ListBreakSentinel = Tuple[str, str, str]
+
+
+def _capture_list_break_sentinels(text: str) -> Tuple[str, Tuple[ListBreakSentinel, ...]]:
+    """Protect list breaks by swapping them for unique sentinel tuples."""
+
+    sentinels: List[ListBreakSentinel] = []
+
+    def _store(match: Match[str]) -> str:
+        token = f"[[LIST_BREAK_{len(sentinels)}]]"
+        sentinels.append((token, match.group("break"), match.group("context")))
+        return token
+
+    protected = LIST_BREAK_SPAN_RE.sub(_store, text)
+    return protected, tuple(sentinels)
+
+
+def _restore_list_breaks(text: str, sentinels: Tuple[ListBreakSentinel, ...]) -> str:
+    """Rebuild previously protected list breaks using a generator pipeline."""
+
+    if not sentinels:
+        return text
+
+    sentinel_map = {token: (break_text, context) for token, break_text, context in sentinels}
+
+    def _segments() -> Iterator[str]:
+        last = 0
+        for match in LIST_BREAK_SENTINEL_RE.finditer(text):
+            segment = text[last:match.start()]
+            token = match.group(0)
+            break_text, context = sentinel_map[token]
+            following = text[match.end():]
+            prefix = segment.rstrip() if following.startswith(context) else segment
+            yield prefix
+            yield "\n"
+            if len(break_text) == 2:
+                yield "\n"
+            last = match.end()
+        yield text[last:]
+
+    return "".join(_segments())
+
+
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {_preview(text)}")
 
-    list_break, para_break = "[[LIST_BREAK]]", "[[PARAGRAPH_BREAK]]"
+    para_break = "[[PARAGRAPH_BREAK]]"
 
-    result = pipe(
+    normalized = pipe(
         text,
         merge_number_suffix_lines,
         lambda t: COLON_BULLET_START_RE.sub(":\n", t),
-        lambda t: LIST_BREAK_RE.sub(list_break, t),
+    )
+    protected, sentinels = _capture_list_break_sentinels(normalized)
+
+    flattened = pipe(
+        protected,
         lambda t: PARAGRAPH_BREAK.sub(para_break, t),
         lambda t: t.replace("\n", " "),
-        lambda t: t.replace(para_break, "\n\n").replace(list_break, "\n"),
-        _fix_quote_spacing,
+        lambda t: t.replace(para_break, "\n\n"),
+        lambda t: t.replace("[[LIST_BREAK]]", "\n\n"),
     )
+
+    rebuilt = _restore_list_breaks(flattened, sentinels)
+    result = _fix_quote_spacing(rebuilt)
 
     logger.debug(f"Output text preview: {_preview(result)}")
     return result
