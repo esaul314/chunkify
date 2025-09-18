@@ -14,6 +14,8 @@ def test_hyphen_bullet_lists_preserved():
         "• He expects some by the next train of prime quality",
     ]
     assert bullet_lines[: len(expected)] == expected
+    assert "Directed to John Smith, Cuttingsville, Vermont" in text
+    assert "• Directed to John Smith" not in text
     assert "Vermont\n\n• Some trader" not in text
     bullet_chunks = [
         i
