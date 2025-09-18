@@ -70,6 +70,29 @@ class TestNewlineCleanup(unittest.TestCase):
         )
         self.assertEqual(clean_text(text), expected)
 
+    def test_stray_bullet_line_with_trailing_space_removed(self):
+        text = (
+            "• If we were always indeed getting our living, and regulating our lives according \n"
+            "• \n"
+            "swamp"
+        )
+        expected = "• If we were always indeed getting our living, and regulating our lives according swamp"
+        self.assertEqual(clean_text(text), expected)
+
+    def test_bullet_item_continuation_is_joined(self):
+        text = (
+            "Reminding you of the difference:\n"
+            "• With infrastructure as a service (IaaS), the vendor's APIs are used to provision a Virtualized computing environment with various other infrastructure primitives, which run an application more or less like it would be run on physical hosts.\n"
+            "• With platform as a service (PaaS), the vendor takes full ownership of operating\n"
+            "The application's infrastructure, which means rather than offering primitives, they offer higher-level abstractions so that the application runs in a scalable sandbox."
+        )
+        expected = (
+            "Reminding you of the difference:\n"
+            "• With infrastructure as a service (IaaS), the vendor's APIs are used to provision a Virtualized computing environment with various other infrastructure primitives, which run an application more or less like it would be run on physical hosts.\n"
+            "• With platform as a service (PaaS), the vendor takes full ownership of operating the application's infrastructure, which means rather than offering primitives, they offer higher-level abstractions so that the application runs in a scalable sandbox."
+        )
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

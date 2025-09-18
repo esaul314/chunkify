@@ -103,6 +103,9 @@ SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 # Bullets
 BULLET_CHARS_ESC = re.escape("*•")
+BULLET_CONTINUATION_RE = re.compile(
+    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?)\n(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
+)
 
 # Terminal punctuation for quoted sentence continuation
 END_PUNCT = ".!?…"
@@ -115,7 +118,8 @@ UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
 DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
 
 # Stray bullet variants
-STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}](?:\n+|$)")
+# Match stray bullet markers that occupy a full line, tolerating trailing spaces.
+STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}]\s*(?=\n|$)")
 # Guard against collapsing legitimate list items (e.g., after colons)
 STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(
     rf"(?<![\n:{BULLET_CHARS_ESC}])\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])"
@@ -166,6 +170,12 @@ STOPWORDS: frozenset[str] = frozenset(
         "then",
         "up",
     }
+)
+
+_BULLET_STOPWORD_TITLES = tuple(sorted({word.title() for word in STOPWORDS}))
+BULLET_STOPWORD_CASE_RE = re.compile(
+    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?[a-z]) "
+    rf"(?P<word>{'|'.join(_BULLET_STOPWORD_TITLES)})\b"
 )
 
 # Footnote handling
@@ -301,7 +311,13 @@ def _join_hyphenated_words(text: str) -> str:
 
     def choose_hyphenation(match: Match[str]) -> str:
         head, tail = match.group(1), match.group(2)
-        return _choose_hyphenation(head, tail)
+        joined, hyphenated, joined_freq, hyphen_freq = _hyphenation_scores(head, tail)
+        if hyphen_freq > joined_freq and _should_keep_linebreak_hyphen(
+            head, tail, joined_freq, hyphen_freq
+        ):
+            hyphen = _hyphen_from_token(match.group(0))
+            return hyphenated.replace("-", hyphen, 1)
+        return _normalize_linebreak_join_case(head, tail, joined)
 
     return pipe(
         text,
@@ -523,6 +539,26 @@ def _restore_list_breaks(text: str, sentinels: Tuple[ListBreakSentinel, ...]) ->
     return "".join(_segments())
 
 
+def _normalize_bullet_stopword_case(text: str) -> str:
+    """Lowercase stopwords restored mid-sentence inside bullet items."""
+
+    return BULLET_STOPWORD_CASE_RE.sub(
+        lambda match: f"{match.group(1)} {match.group('word').lower()}", text
+    )
+
+
+def _join_bullet_wrapped_lines(text: str) -> str:
+    """Collapse intra-item bullet newlines into spaces."""
+
+    return pipe(
+        text,
+        lambda value: BULLET_CONTINUATION_RE.sub(
+            lambda match: f"{match.group(1)} ", value
+        ),
+        _normalize_bullet_stopword_case,
+    )
+
+  
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {_preview(text)}")
@@ -543,6 +579,12 @@ def collapse_single_newlines(text: str) -> str:
         lambda t: t.replace(para_break, "\n\n"),
         lambda t: t.replace("[[LIST_BREAK]]", "\n\n"),
     )
+
+    rebuilt = pipe(
+        _restore_list_breaks(flattened, sentinels),
+        _join_bullet_wrapped_lines,
+    )
+    result = _fix_quote_spacing(rebuilt)
 
     rebuilt = _restore_list_breaks(flattened, sentinels)
     result = _fix_quote_spacing(rebuilt)
