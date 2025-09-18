@@ -558,7 +558,7 @@ def _join_bullet_wrapped_lines(text: str) -> str:
         _normalize_bullet_stopword_case,
     )
 
-
+  
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {_preview(text)}")
@@ -584,6 +584,9 @@ def collapse_single_newlines(text: str) -> str:
         _restore_list_breaks(flattened, sentinels),
         _join_bullet_wrapped_lines,
     )
+    result = _fix_quote_spacing(rebuilt)
+
+    rebuilt = _restore_list_breaks(flattened, sentinels)
     result = _fix_quote_spacing(rebuilt)
 
     logger.debug(f"Output text preview: {_preview(result)}")
