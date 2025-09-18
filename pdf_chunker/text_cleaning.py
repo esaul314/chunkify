@@ -172,6 +172,12 @@ STOPWORDS: frozenset[str] = frozenset(
     }
 )
 
+_BULLET_STOPWORD_TITLES = tuple(sorted({word.title() for word in STOPWORDS}))
+BULLET_STOPWORD_CASE_RE = re.compile(
+    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?[a-z]) "
+    rf"(?P<word>{'|'.join(_BULLET_STOPWORD_TITLES)})\b"
+)
+
 # Footnote handling
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
 FOOTNOTE_DOTTED_RE = re.compile(r"\.(\d+)$")
@@ -533,10 +539,24 @@ def _restore_list_breaks(text: str, sentinels: Tuple[ListBreakSentinel, ...]) ->
     return "".join(_segments())
 
 
+def _normalize_bullet_stopword_case(text: str) -> str:
+    """Lowercase stopwords restored mid-sentence inside bullet items."""
+
+    return BULLET_STOPWORD_CASE_RE.sub(
+        lambda match: f"{match.group(1)} {match.group('word').lower()}", text
+    )
+
+
 def _join_bullet_wrapped_lines(text: str) -> str:
     """Collapse intra-item bullet newlines into spaces."""
 
-    return BULLET_CONTINUATION_RE.sub(lambda match: f"{match.group(1)} ", text)
+    return pipe(
+        text,
+        lambda value: BULLET_CONTINUATION_RE.sub(
+            lambda match: f"{match.group(1)} ", value
+        ),
+        _normalize_bullet_stopword_case,
+    )
 
 
 def collapse_single_newlines(text: str) -> str:

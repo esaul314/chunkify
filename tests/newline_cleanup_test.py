@@ -89,7 +89,7 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = (
             "Reminding you of the difference:\n"
             "• With infrastructure as a service (IaaS), the vendor's APIs are used to provision a Virtualized computing environment with various other infrastructure primitives, which run an application more or less like it would be run on physical hosts.\n"
-            "• With platform as a service (PaaS), the vendor takes full ownership of operating The application's infrastructure, which means rather than offering primitives, they offer higher-level abstractions so that the application runs in a scalable sandbox."
+            "• With platform as a service (PaaS), the vendor takes full ownership of operating the application's infrastructure, which means rather than offering primitives, they offer higher-level abstractions so that the application runs in a scalable sandbox."
         )
         self.assertEqual(clean_text(text), expected)
 
