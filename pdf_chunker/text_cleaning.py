@@ -103,6 +103,9 @@ SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 # Bullets
 BULLET_CHARS_ESC = re.escape("*•")
+BULLET_CONTINUATION_RE = re.compile(
+    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?)\n(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
+)
 
 # Terminal punctuation for quoted sentence continuation
 END_PUNCT = ".!?…"
@@ -530,6 +533,12 @@ def _restore_list_breaks(text: str, sentinels: Tuple[ListBreakSentinel, ...]) ->
     return "".join(_segments())
 
 
+def _join_bullet_wrapped_lines(text: str) -> str:
+    """Collapse intra-item bullet newlines into spaces."""
+
+    return BULLET_CONTINUATION_RE.sub(lambda match: f"{match.group(1)} ", text)
+
+
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {_preview(text)}")
@@ -551,7 +560,10 @@ def collapse_single_newlines(text: str) -> str:
         lambda t: t.replace("[[LIST_BREAK]]", "\n\n"),
     )
 
-    rebuilt = _restore_list_breaks(flattened, sentinels)
+    rebuilt = pipe(
+        _restore_list_breaks(flattened, sentinels),
+        _join_bullet_wrapped_lines,
+    )
     result = _fix_quote_spacing(rebuilt)
 
     logger.debug(f"Output text preview: {_preview(result)}")
