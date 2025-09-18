@@ -17,9 +17,11 @@ from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.text_cleaning import STOPWORDS
 from pdf_chunker.utils import _build_metadata
 
 SOFT_LIMIT = 8_000
+_STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
 
 
 def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
@@ -282,6 +284,22 @@ def _tag_list(block: Block) -> Block:
     return {**block, "type": "list_item", "list_kind": kind} if kind else block
 
 
+def _normalize_bullet_tail(tail: str) -> str:
+    if not tail:
+        return ""
+    head, *rest = tail.split(" ", 1)
+    normalized = head.lower() if head in _STOPWORD_TITLES else head
+    return f"{normalized} {rest[0]}".strip() if rest and rest[0] else normalized
+
+
+def _merge_heading_texts(headings: list[str], body: str) -> str:
+    if any(starts_with_bullet(h.lstrip()) for h in headings):
+        lead = " ".join(h.rstrip() for h in headings).rstrip()
+        tail = _normalize_bullet_tail(body.lstrip()) if body else ""
+        return f"{lead} {tail}".strip()
+    return "\n".join(chain(headings, [body])).strip()
+
+
 def _merge_headings(
     seq: Iterator[tuple[int, Block, str]],
 ) -> Iterator[tuple[int, Block, str]]:
@@ -300,7 +318,7 @@ def _merge_headings(
                 pages.append(page)
                 texts.append(text)
                 continue
-            merged_text = "\n".join(chain(texts, [text])).strip()
+            merged_text = _merge_heading_texts(texts, text)
             yield pages[0], {**block}, merged_text
             break
         else:

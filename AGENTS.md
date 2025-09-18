@@ -32,6 +32,13 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 - After conversion, verify the output contains the sentinel phrase
   "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
   ensure pages near the end are not truncated.
+- Treat `platform-eng-excerpt.pdf` as the canonical smoke-test fixture:
+  - Run `python -m pdf_chunker.cli convert platform-eng-excerpt.pdf --spec pipeline.yaml --out platform-eng.jsonl --no-enrich`
+    (or the equivalent `pdf_chunker convert ... --no-metadata`) before declaring multiline list fixes complete.
+  - Open the generated JSONL and confirm that line 7 reads `ownership of operating the application's infrastructure`
+    with no embedded newline or stray capitalization.
+  - If the reproduction steps are unclear or the output disagrees with expectations, stop and request clarification
+    rather than guessing.
 - Or use the script wrapper:
   ```bash
   python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
