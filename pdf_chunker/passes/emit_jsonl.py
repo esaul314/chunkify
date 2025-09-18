@@ -6,7 +6,7 @@ import os
 import re
 from collections.abc import Iterable
 from functools import reduce
-from itertools import accumulate, dropwhile, repeat, takewhile
+from itertools import accumulate, chain, dropwhile, repeat, takewhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
@@ -200,15 +200,38 @@ def _peel_list_intro(text: str) -> tuple[str, str]:
     return prefix[:start].rstrip(), prefix[start:].lstrip()
 
 
-def _prepend_intro(intro: str, rest: str) -> str:
-    """Attach ``intro`` ahead of ``rest`` while preserving existing spacing."""
+def _compose_intro_with_chunk(intro: str, chunk: str, separators: int) -> str:
+    """Compose ``intro`` and ``chunk`` with controlled blank-line separators."""
 
+    intro_lines = intro.splitlines()
+    chunk_body = chunk.strip("\n")
+    chunk_lines = chunk_body.splitlines() if chunk_body else []
+
+    if not intro_lines:
+        return chunk_body
+    if not chunk_lines:
+        return "\n".join(intro_lines)
+
+    desired_gaps = max(separators, 1)
+    spacer = [""] * max(desired_gaps - 1, 0)
+    return "\n".join(chain(intro_lines, spacer, chunk_lines))
+
+
+def _prepend_intro(intro: str, rest: str) -> str:
+    """Attach ``intro`` ahead of ``rest`` while normalizing spacing."""
+
+    intro_core = intro.strip("\n")
     if not rest:
-        return intro
+        return intro_core
+
     leading_newlines = len(rest) - len(rest.lstrip("\n"))
     tail = rest[leading_newlines:]
-    separator = "\n" * leading_newlines if leading_newlines else "\n"
-    return f"{intro}{separator}{tail}".strip("\n")
+    if not intro_core:
+        return tail.strip("\n")
+
+    trailing_intro_newlines = len(intro) - len(intro.rstrip("\n"))
+    separators = trailing_intro_newlines + (leading_newlines or 1)
+    return _compose_intro_with_chunk(intro_core, tail, separators)
 
 
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
