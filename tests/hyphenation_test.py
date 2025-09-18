@@ -84,6 +84,7 @@ def test_crossline_hyphen_preserved(text, expected):
     [
         ("provision-\ning", "provisioning"),
         ("through-\nOut", "throughout"),
+        ("through\u2010 Out", "throughout"),
     ],
 )
 def test_crossline_spurious_hyphen_removed(text, expected):

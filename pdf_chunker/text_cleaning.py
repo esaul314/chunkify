@@ -302,7 +302,13 @@ def _join_hyphenated_words(text: str) -> str:
 
     def choose_hyphenation(match: Match[str]) -> str:
         head, tail = match.group(1), match.group(2)
-        return _choose_hyphenation(head, tail)
+        joined, hyphenated, joined_freq, hyphen_freq = _hyphenation_scores(head, tail)
+        if hyphen_freq > joined_freq and _should_keep_linebreak_hyphen(
+            head, tail, joined_freq, hyphen_freq
+        ):
+            hyphen = _hyphen_from_token(match.group(0))
+            return hyphenated.replace("-", hyphen, 1)
+        return _normalize_linebreak_join_case(head, tail, joined)
 
     return pipe(
         text,
