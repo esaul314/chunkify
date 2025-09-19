@@ -132,16 +132,8 @@ def test_emit_jsonl_retains_numbered_punctuated_item(monkeypatch):
     doc = {
         "type": "chunks",
         "items": [
-            {
-                "text": (
-                    "1. First item has enough words to be considered coherent and ends."
-                )
-            },
-            {
-                "text": (
-                    "2. Second item has enough words to be coherent as well."
-                )
-            },
+            {"text": ("1. First item has enough words to be considered coherent and ends.")},
+            {"text": ("2. Second item has enough words to be coherent as well.")},
         ],
     }
     rows = emit_jsonl(Artifact(payload=doc)).payload
@@ -153,16 +145,8 @@ def test_emit_jsonl_retains_numbered_tail_without_punctuation(monkeypatch):
     doc = {
         "type": "chunks",
         "items": [
-            {
-                "text": (
-                    "1. First item has enough words to be considered coherent and ends."
-                )
-            },
-            {
-                "text": (
-                    "2. Second item continues with sufficient words but lacks punctuation"
-                )
-            },
+            {"text": ("1. First item has enough words to be considered coherent and ends.")},
+            {"text": ("2. Second item continues with sufficient words but lacks punctuation")},
         ],
     }
     rows = emit_jsonl(Artifact(payload=doc)).payload
@@ -199,3 +183,30 @@ def test_emit_jsonl_preserves_caption_sentence_start(monkeypatch):
     first_alpha = next((ch for ch in text if ch.isalpha()), "")
     assert first_alpha.isupper()
     assert "Initially, it was hoped" in text
+
+
+def test_emit_jsonl_rebalances_sentence_after_limit(monkeypatch):
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MAX_CHARS", "400")
+    prefix = (
+        "This long introduction describes how teams collaborate across disciplines to ship reliable "
+        "software platforms while still iterating quickly on features and fixes, ultimately achieving"
+    )
+    continuation = (
+        " the expected outcomes. Another sentence follows to ensure that the remaining text still "
+        "exceeds the artificial limit so emission has to split the chunk while respecting sentence "
+        "boundaries and keeping the next sentence intact."
+    )
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": prefix},
+            {"text": continuation},
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert any(row["text"].endswith("the expected outcomes.") for row in rows)
+    target = next(row for row in rows if "Another sentence follows" in row["text"])
+    assert target["text"].lstrip().startswith("Another sentence follows")
+    first_chars = [row["text"].lstrip()[0] for row in rows if row["text"].strip()]
+    assert all(not ch.islower() for ch in first_chars)

@@ -452,6 +452,34 @@ def _starts_mid_sentence(text: str) -> bool:
     return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
 
 
+_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]*")
+
+
+def _steal_sentence_prefix(prev: str, fragment: str, limit: int | None) -> tuple[str, str] | None:
+    """Move the leading sentence from ``fragment`` onto ``prev`` when possible."""
+
+    stripped = fragment.lstrip()
+    if not stripped:
+        return None
+
+    offset = len(fragment) - len(stripped)
+    for match in _SENTENCE_END_RE.finditer(stripped):
+        end = match.end()
+        if end < len(stripped) and not stripped[end].isspace():
+            continue
+        prefix = fragment[: offset + end]
+        remainder = fragment[offset + end :]
+        candidate = f"{prev.rstrip()} {prefix.strip()}".strip()
+        if limit is not None and len(candidate) > limit:
+            return None
+        return candidate, remainder.lstrip()
+
+    candidate = f"{prev.rstrip()} {stripped}".strip()
+    if limit is not None and len(candidate) > limit:
+        return None
+    return candidate, ""
+
+
 def _merge_text(prev: str, curr: str) -> str:
     last = _last_non_empty_line(prev)
     first = _first_non_empty_line(curr)
@@ -465,13 +493,26 @@ def _merge_sentence_pieces(
     limit: int | None = None,
 ) -> list[str]:
     def step(acc: list[str], piece: str) -> list[str]:
-        if (
-            acc
-            and _starts_mid_sentence(piece)
-            and (limit is None or len(acc[-1]) + 1 + len(piece) <= limit)
-        ):
-            merged = f"{acc[-1].rstrip()} {piece}".strip()
-            return [*acc[:-1], merged]
+        if acc and _starts_mid_sentence(piece):
+            merged_prev = acc[-1]
+            remainder = piece
+            while remainder:
+                result = _steal_sentence_prefix(merged_prev, remainder, limit)
+                if result is None:
+                    break
+                merged_prev, remainder = result
+                if remainder:
+                    remainder = remainder.lstrip()
+                else:
+                    return [*acc[:-1], merged_prev]
+                if not _starts_mid_sentence(remainder):
+                    break
+            if merged_prev is not acc[-1]:
+                acc = [*acc[:-1], merged_prev]
+                piece = remainder
+            elif limit is None or len(acc[-1]) + 1 + len(piece) <= limit:
+                merged = f"{acc[-1].rstrip()} {piece}".strip()
+                return [*acc[:-1], merged]
         return [*acc, piece]
 
     return reduce(step, pieces, [])
