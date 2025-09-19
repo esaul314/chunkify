@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from itertools import chain
 from typing import Iterable, Callable, List, Optional, Tuple
 import os
 import re
@@ -160,6 +161,54 @@ COMMON_SENTENCE_STARTERS = {
     "We",
     "I",
 }
+
+SENTENCE_CONTINUATION_LOWER = frozenset(
+    chain(
+        (word.lower() for word in COMMON_SENTENCE_STARTERS if word != "I"),
+        (
+            "and",
+            "but",
+            "or",
+            "nor",
+            "so",
+            "yet",
+            "also",
+            "still",
+            "thus",
+            "hence",
+            "therefore",
+            "then",
+            "otherwise",
+            "instead",
+            "meanwhile",
+            "besides",
+            "consequently",
+            "finally",
+            "furthermore",
+            "likewise",
+            "nevertheless",
+            "nonetheless",
+            "next",
+            "overall",
+            "similarly",
+            "subsequently",
+            "ultimately",
+            "additionally",
+            "of",
+            "to",
+            "into",
+            "onto",
+            "upon",
+            "within",
+            "without",
+            "across",
+            "through",
+            "throughout",
+            "toward",
+            "towards",
+        ),
+    )
+)
 
 _CAPTION_PREFIXES = ("Figure", "Table", "Exhibit")
 _CAPTION_RE = re.compile(rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+\d")
@@ -361,6 +410,15 @@ def _leading_alpha_token(text: str) -> str:
     return ""
 
 
+_FIRST_ALPHA_RE = re.compile(r"([A-Za-z])")
+
+
+def _lower_first_alpha(token: str) -> str:
+    """Lower-case the first alphabetic character within ``token``."""
+
+    return _FIRST_ALPHA_RE.sub(lambda match: match.group(1).lower(), token, count=1)
+
+
 def _hyphen_head_word(text: str) -> str:
     """Return the word preceding a terminal hyphen in ``text``."""
 
@@ -407,15 +465,18 @@ def _normalize_sentence_tail(current_text: str, next_text: str) -> str:
     trailing = _trailing_alpha_token(current_text)
     prefix, sep, remainder = next_text.partition(" ")
     letters = re.sub(r"[^A-Za-z]", "", prefix)
+    normalized_candidate = letters.lower()
+    has_single_alpha = len(letters) == 1
     if (
         trailing
         and trailing.islower()
         and letters
         and letters[0].isupper()
-        and letters[1:].islower()
+        and (letters[1:].islower() or has_single_alpha)
+        and normalized_candidate in SENTENCE_CONTINUATION_LOWER
         and not current_text.endswith((".", "!", "?", ":", ";"))
     ):
-        lowered = prefix[0].lower() + prefix[1:]
+        lowered = _lower_first_alpha(prefix)
         return lowered + (sep + remainder if sep else "")
     return next_text
 

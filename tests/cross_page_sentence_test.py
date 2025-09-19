@@ -14,6 +14,16 @@ def test_cross_page_sentence_with_proper_name(block):
     assert "Gini coefficient" in merged[0].text
 
 
+def test_cross_page_sentence_lowercases_common_articles(block):
+    blocks = [
+        block("The analysis compared insights across the", page=1),
+        block("Of sample cohorts across regions.", page=2),
+    ]
+    merged = list(merge_continuation_blocks(blocks))
+    assert len(merged) == 1
+    assert "of sample cohorts across regions." in merged[0].text
+
+
 def test_cross_page_sentence_with_min_word_context(block):
     blocks = [
         block("Economic inequality is measured by the", page=1),
