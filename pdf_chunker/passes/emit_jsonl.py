@@ -428,6 +428,20 @@ def _trim_overlap(prev: str, curr: str) -> str:
         return ""
     overlap = _overlap_len(prev_lower, curr_lower)
     if overlap and overlap < len(curr) * 0.9:
+        prefix = curr[:overlap]
+        prev_index = len(prev) - overlap
+        prev_char = prev[prev_index - 1] if prev_index > 0 else ""
+        next_non_space = next((ch for ch in curr[overlap:] if not ch.isspace()), "")
+        stripped_prefix = prefix.strip()
+        if prev_char.isalnum():
+            return curr
+        if (
+            stripped_prefix
+            and stripped_prefix[0].isupper()
+            and stripped_prefix[1:].islower()
+            and (next_non_space.islower() or next_non_space.isdigit())
+        ):
+            return curr
         return curr[overlap:].lstrip()
     prefix = curr_lower.split("\n\n", 1)[0]
     return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
