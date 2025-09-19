@@ -180,3 +180,22 @@ def test_rebalance_lists_moves_intro_to_list_block():
     lines = [ln for ln in moved.splitlines() if ln.strip()]
     assert lines[0] == "Here are the recurring causes—namely:"
     assert lines[1].startswith("1. Teams cannot self-service")
+
+
+def test_emit_jsonl_preserves_caption_sentence_start(monkeypatch):
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    intro = "Context around prior analysis leading into Figure"
+    caption = (
+        "Figure 1-3 shows a high-level comparison of the two approaches.\n\n"
+        "Figure 1-3. Comparison of IaaS and PaaS models in terms of vendor versus customer responsibility"
+        " Initially, it was hoped that application teams would embrace fully supported PaaS offerings."
+    )
+    doc = {"type": "chunks", "items": [{"text": intro}, {"text": caption}]}
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert len(rows) == 1
+    text = rows[0]["text"]
+    assert text.count("Figure 1-3 shows") == 1
+    assert "\n1-3 shows" not in text
+    first_alpha = next((ch for ch in text if ch.isalpha()), "")
+    assert first_alpha.isupper()
+    assert "Initially, it was hoped" in text

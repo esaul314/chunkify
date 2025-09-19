@@ -161,6 +161,14 @@ COMMON_SENTENCE_STARTERS = {
     "I",
 }
 
+_CAPTION_PREFIXES = ("Figure", "Table", "Exhibit")
+_CAPTION_RE = re.compile(rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+\d")
+
+
+def _looks_like_caption(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped and _CAPTION_RE.match(stripped))
+
 
 def _word_count(text: str) -> int:
     return len(text.split())
@@ -229,6 +237,8 @@ def _is_cross_page_continuation(
     curr_page: Optional[int],
     next_page: Optional[int],
 ) -> bool:
+    if _looks_like_caption(curr_text):
+        return False
     if not (curr_text and next_text):
         return False
     if curr_page is None or next_page is None or next_page != curr_page + 1:
@@ -276,6 +286,8 @@ def _is_same_page_continuation(
     if curr_page is None or next_page is None:
         return False
     if curr_page != next_page or not next_text:
+        return False
+    if _looks_like_caption(curr_text):
         return False
     if any(b in curr_text for b in BULLET_CHARS):
         return False
