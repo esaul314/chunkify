@@ -38,7 +38,7 @@ import logging
 import os
 import re
 from functools import reduce
-from typing import Callable, Iterator, List, Match, Tuple, TypeVar
+from typing import Callable, Iterator, List, Match, Sequence, Tuple, TypeVar
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -641,53 +641,87 @@ def _starts_new_list_item(text: str) -> bool:
     return _starts_list_item(text.lstrip())
 
 
+def _split_heading_words(text: str) -> List[str]:
+    return [w for w in re.split(r"\s+", text) if w]
+
+
+def _heading_length_guard(stripped: str) -> bool:
+    return bool(stripped) and len(stripped) <= 80 and not stripped.endswith("|")
+
+
+def _has_balanced_edge_quotes(stripped: str) -> bool:
+    opens = stripped.startswith(('"', "'"))
+    closes = stripped.endswith(('"', "'"))
+    return opens == closes
+
+
+def _is_wrapped_in_quotes(stripped: str) -> bool:
+    return stripped.startswith(('"', "'")) and stripped.endswith(('"', "'"))
+
+
+def _heading_case_signal(words: Sequence[str], stripped: str) -> bool:
+    if _is_wrapped_in_quotes(stripped):
+        return False
+    alpha_words = [w for w in words if w and w[0].isalpha()]
+    return bool(alpha_words) and sum(w[0].isupper() for w in alpha_words) / len(alpha_words) >= 0.5
+
+
+def _heading_colon_signal(stripped: str, words: Sequence[str], has_terminal_punct: bool) -> bool:
+    if ":" not in stripped or has_terminal_punct:
+        return False
+    trailing = stripped.rstrip("\"'")
+    if trailing.endswith(":"):
+        return True
+    if stripped.count(":") != 1 or _is_wrapped_in_quotes(stripped):
+        return False
+    prefix, suffix = (segment.strip() for segment in stripped.split(":", 1))
+    if not prefix or not suffix:
+        return False
+    segment_word_counts = tuple(len(_split_heading_words(segment)) for segment in (prefix, suffix))
+    if not segment_word_counts:
+        return False
+    total_words = len(words)
+    return total_words <= 8 and max(segment_word_counts) <= 4
+
+
+def _is_short_title_phrase(words: Sequence[str], stripped: str, has_terminal_punct: bool) -> bool:
+    return 1 < len(words) <= 3 and stripped[0].isupper() and not has_terminal_punct
+
+
 def _is_probable_heading(text: str) -> bool:
     """Heuristically determine whether a line looks like a heading."""
     stripped = text.strip()
-    if not stripped or len(stripped) > 80:
+    if not _heading_length_guard(stripped):
         return False
 
-    words = [w for w in re.split(r"\s+", stripped) if w]
-
-    # Lines ending with a bare vertical bar are usually headers or footers.
-    if stripped.endswith("|"):
+    words = _split_heading_words(stripped)
+    if not words:
         return False
 
-    # Short phrases with at least one capitalized word are often headings.
-    if 1 < len(words) <= 3 and stripped[0].isupper() and not re.search(r"[.!?]$", stripped):
+    if not _has_balanced_edge_quotes(stripped):
+        return False
+
+    has_terminal_punct = bool(re.search(r"[.!?]$", stripped))
+    ends_with_excited = bool(re.search(r"[!?]$", stripped))
+
+    if _is_short_title_phrase(words, stripped, has_terminal_punct):
         return True
 
-    # Quoted fragments are likely part of sentences, not headings
-    opens = stripped.startswith(('"', "'"))
-    closes = stripped.endswith(('"', "'"))
-    if opens != closes:
-        return False
-
-    # Bulleted or UPPER CASE
     if re.match(r"^[\-\u2022*]\s", stripped):
         return True
     if stripped.isupper():
         return True
 
-    # Headings often contain a colon or digits without terminal punctuation
-    if ":" in stripped and not re.search(r"[.!?]$", stripped):
+    if _heading_colon_signal(stripped, words, has_terminal_punct):
         return True
 
-    # Short phrases ending with ! or ? as headings
-    if re.search(r"[!?]$", stripped):
-        word_count = len(words)
-        if 1 < word_count <= 6 and len(stripped) <= 60:
-            return True
+    if ends_with_excited and 1 < len(words) <= 6 and len(stripped) <= 60:
+        return True
 
-    if not words:
-        return False
+    if _heading_case_signal(words, stripped) and not has_terminal_punct:
+        return True
 
-    alpha_words = [w for w in words if w[0].isalpha()]
-    if not alpha_words:
-        return False
-
-    upper_ratio = sum(w[0].isupper() for w in alpha_words) / len(alpha_words)
-    return upper_ratio >= 0.5 and not re.search(r"[.!?]$", stripped)
+    return False
 
 
 def _has_unbalanced_quotes(text: str) -> bool:

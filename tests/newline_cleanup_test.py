@@ -59,6 +59,16 @@ class TestNewlineCleanup(unittest.TestCase):
         expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
         self.assertEqual(clean_text(text), expected)
 
+    def test_merge_break_in_fully_quoted_title_with_colon(self):
+        text = (
+            '"The Power of Words: Understanding Language"\n\n'
+            "continues the discussion."
+        )
+        expected = (
+            '"The Power of Words: Understanding Language" continues the discussion.'
+        )
+        self.assertEqual(clean_text(text), expected)
+
     def test_merge_quote_with_author_line(self):
         text = (
             "What recommends commerce to me is its enterprise and bravery.\n\n"
