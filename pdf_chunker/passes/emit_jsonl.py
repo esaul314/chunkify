@@ -6,7 +6,7 @@ import os
 import re
 from collections.abc import Iterable
 from functools import reduce
-from itertools import accumulate, dropwhile, repeat, takewhile
+from itertools import accumulate, chain, dropwhile, repeat, takewhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
@@ -200,15 +200,38 @@ def _peel_list_intro(text: str) -> tuple[str, str]:
     return prefix[:start].rstrip(), prefix[start:].lstrip()
 
 
-def _prepend_intro(intro: str, rest: str) -> str:
-    """Attach ``intro`` ahead of ``rest`` while preserving existing spacing."""
+def _compose_intro_with_chunk(intro: str, chunk: str, separators: int) -> str:
+    """Compose ``intro`` and ``chunk`` with controlled blank-line separators."""
 
+    intro_lines = intro.splitlines()
+    chunk_body = chunk.strip("\n")
+    chunk_lines = chunk_body.splitlines() if chunk_body else []
+
+    if not intro_lines:
+        return chunk_body
+    if not chunk_lines:
+        return "\n".join(intro_lines)
+
+    desired_gaps = max(separators, 1)
+    spacer = [""] * max(desired_gaps - 1, 0)
+    return "\n".join(chain(intro_lines, spacer, chunk_lines))
+
+
+def _prepend_intro(intro: str, rest: str) -> str:
+    """Attach ``intro`` ahead of ``rest`` while normalizing spacing."""
+
+    intro_core = intro.strip("\n")
     if not rest:
-        return intro
+        return intro_core
+
     leading_newlines = len(rest) - len(rest.lstrip("\n"))
     tail = rest[leading_newlines:]
-    separator = "\n" * leading_newlines if leading_newlines else "\n"
-    return f"{intro}{separator}{tail}".strip("\n")
+    if not intro_core:
+        return tail.strip("\n")
+
+    trailing_intro_newlines = len(intro) - len(intro.rstrip("\n"))
+    separators = trailing_intro_newlines + (leading_newlines or 1)
+    return _compose_intro_with_chunk(intro_core, tail, separators)
 
 
 def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
@@ -405,6 +428,20 @@ def _trim_overlap(prev: str, curr: str) -> str:
         return ""
     overlap = _overlap_len(prev_lower, curr_lower)
     if overlap and overlap < len(curr) * 0.9:
+        prefix = curr[:overlap]
+        prev_index = len(prev) - overlap
+        prev_char = prev[prev_index - 1] if prev_index > 0 else ""
+        next_non_space = next((ch for ch in curr[overlap:] if not ch.isspace()), "")
+        stripped_prefix = prefix.strip()
+        if prev_char.isalnum():
+            return curr
+        if (
+            stripped_prefix
+            and stripped_prefix[0].isupper()
+            and stripped_prefix[1:].islower()
+            and (next_non_space.islower() or next_non_space.isdigit())
+        ):
+            return curr
         return curr[overlap:].lstrip()
     prefix = curr_lower.split("\n\n", 1)[0]
     return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
@@ -413,6 +450,34 @@ def _trim_overlap(prev: str, curr: str) -> str:
 def _starts_mid_sentence(text: str) -> bool:
     stripped = text.strip()
     return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
+
+
+_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]*")
+
+
+def _steal_sentence_prefix(prev: str, fragment: str, limit: int | None) -> tuple[str, str] | None:
+    """Move the leading sentence from ``fragment`` onto ``prev`` when possible."""
+
+    stripped = fragment.lstrip()
+    if not stripped:
+        return None
+
+    offset = len(fragment) - len(stripped)
+    for match in _SENTENCE_END_RE.finditer(stripped):
+        end = match.end()
+        if end < len(stripped) and not stripped[end].isspace():
+            continue
+        prefix = fragment[: offset + end]
+        remainder = fragment[offset + end :]
+        candidate = f"{prev.rstrip()} {prefix.strip()}".strip()
+        if limit is not None and len(candidate) > limit:
+            return None
+        return candidate, remainder.lstrip()
+
+    candidate = f"{prev.rstrip()} {stripped}".strip()
+    if limit is not None and len(candidate) > limit:
+        return None
+    return candidate, ""
 
 
 def _merge_text(prev: str, curr: str) -> str:
@@ -428,13 +493,26 @@ def _merge_sentence_pieces(
     limit: int | None = None,
 ) -> list[str]:
     def step(acc: list[str], piece: str) -> list[str]:
-        if (
-            acc
-            and _starts_mid_sentence(piece)
-            and (limit is None or len(acc[-1]) + 1 + len(piece) <= limit)
-        ):
-            merged = f"{acc[-1].rstrip()} {piece}".strip()
-            return [*acc[:-1], merged]
+        if acc and _starts_mid_sentence(piece):
+            merged_prev = acc[-1]
+            remainder = piece
+            while remainder:
+                result = _steal_sentence_prefix(merged_prev, remainder, limit)
+                if result is None:
+                    break
+                merged_prev, remainder = result
+                if remainder:
+                    remainder = remainder.lstrip()
+                else:
+                    return [*acc[:-1], merged_prev]
+                if not _starts_mid_sentence(remainder):
+                    break
+            if merged_prev is not acc[-1]:
+                acc = [*acc[:-1], merged_prev]
+                piece = remainder
+            elif limit is None or len(acc[-1]) + 1 + len(piece) <= limit:
+                merged = f"{acc[-1].rstrip()} {piece}".strip()
+                return [*acc[:-1], merged]
         return [*acc, piece]
 
     return reduce(step, pieces, [])
