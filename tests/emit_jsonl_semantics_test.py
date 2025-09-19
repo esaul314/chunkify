@@ -182,6 +182,7 @@ def test_emit_jsonl_preserves_caption_sentence_start(monkeypatch):
     assert "\n1-3 shows" not in text
     first_alpha = next((ch for ch in text if ch.isalpha()), "")
     assert first_alpha.isupper()
+    assert "Initially, it was hoped" in text
 
 
 def test_emit_jsonl_rebalances_sentence_after_limit(monkeypatch):
