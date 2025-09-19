@@ -179,6 +179,8 @@ def _match_common_patterns(text: str) -> bool:
     """Return ``True`` if text matches common header/footer patterns."""
 
     text_lower = text.lower().strip()
+    if _looks_like_numbered_list_item(text):
+        return False
     patterns = (
         r"^\d+$",
         r"^page\s+\d+",
@@ -383,16 +385,42 @@ def _is_number_marker(line: str) -> bool:
     return bool(re.match(r"^\s*\d+[.)]?\s*$", line))
 
 
+def _looks_like_numbered_list_item(line: str) -> bool:
+    """Heuristically detect numbered list entries to avoid stripping them."""
+
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    match = FOOTNOTE_PREFIX_RE.match(stripped)
+    if not match:
+        return False
+
+    remainder = stripped[match.end() :].strip()
+    if not remainder:
+        return False
+
+    words = remainder.split()
+    if len(words) < 3:
+        return False
+
+    trailing = remainder.rstrip()
+    return not trailing.endswith((".", "!", "?", ";", ":"))
+
+
 def _strip_footnote_lines(text: str) -> str:
     """Remove short footnote lines and stray numeric markers."""
 
     lines = text.splitlines()
     total = len(lines)
-    kept = (
-        ln
-        for idx, ln in enumerate(lines)
-        if not is_probable_footnote(ln, idx, total) and not _is_number_marker(ln)
-    )
+    def _should_keep(idx: int, ln: str) -> bool:
+        if _is_number_marker(ln):
+            return False
+        if is_probable_footnote(ln, idx, total) and not _looks_like_numbered_list_item(ln):
+            return False
+        return True
+
+    kept = (ln for idx, ln in enumerate(lines) if _should_keep(idx, ln))
     return "\n".join(kept)
 
 
