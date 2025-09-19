@@ -43,6 +43,79 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
 
 
+def _should_merge(previous: str, current: str, prev_words: tuple[str, ...]) -> bool:
+    if not previous:
+        return False
+    if _ENDS_SENTENCE.search(previous.rstrip()):
+        return False
+    lead = current.lstrip()
+    if not lead:
+        return False
+    current_words = current.split()
+    first_word = current_words[0] if current_words else ""
+    if prev_words and prev_words[-1] == first_word:
+        return False
+    head = lead[0]
+    continuation_chars = ",.;:)]\"'"
+    if not (head.islower() or head in continuation_chars):
+        return False
+    combined = len(previous) + 1 + len(current)
+    if len(previous) >= SOFT_LIMIT or len(current) >= SOFT_LIMIT:
+        return False
+    return combined <= SOFT_LIMIT
+
+
+def _actual_overlap(
+    prev_words: tuple[str, ...],
+    current_words: tuple[str, ...],
+    allowed_overlap: int,
+) -> int:
+    if not allowed_overlap or not prev_words or not current_words:
+        return 0
+    window = min(allowed_overlap, len(prev_words), len(current_words))
+    return window if window and prev_words[-window:] == current_words[:window] else 0
+
+
+def _dedupe_overlap(
+    prev_words: tuple[str, ...],
+    words: tuple[str, ...],
+    allowed_overlap: int,
+) -> tuple[str, tuple[str, ...]]:
+    if not words:
+        return "", words
+    overlap_words = _actual_overlap(prev_words, words, allowed_overlap)
+    trimmed_words = words[overlap_words:] if overlap_words else words
+    return " ".join(trimmed_words), trimmed_words
+
+
+def _candidate_merges(
+    prev_text: str,
+    prev_words: tuple[str, ...],
+    words: tuple[str, ...],
+    allowed_overlap: int,
+) -> Iterator[tuple[str, tuple[str, ...]]]:
+    trimmed_text, trimmed_words = _dedupe_overlap(prev_words, words, allowed_overlap)
+    return (
+        (trimmed_text, trimmed_words)
+        for _ in (None,)
+        if trimmed_words and _should_merge(prev_text, trimmed_text, prev_words)
+    )
+
+
+def _within_size_limit(
+    prev_text: str,
+    prev_words: tuple[str, ...],
+    trimmed_words: tuple[str, ...],
+    limit: int | None,
+) -> bool:
+    if limit is None:
+        return True
+    total_words = sum(1 for _ in chain(prev_words, trimmed_words))
+    if total_words <= limit:
+        return True
+    return not _ENDS_SENTENCE.search(prev_text.rstrip())
+
+
 def _merge_sentence_fragments(
     chunks: Iterable[str],
     *,
@@ -54,48 +127,6 @@ def _merge_sentence_fragments(
 
     allowed_overlap = max(overlap, 0)
     limit = max(chunk_size - allowed_overlap, 0) if chunk_size and chunk_size > 0 else None
-
-    def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
-        """Return ``True`` when ``previous`` and ``current`` should coalesce."""
-
-        if not previous:
-            return False
-        if _ENDS_SENTENCE.search(previous.rstrip()):
-            return False
-        lead = current.lstrip()
-        if not lead:
-            return False
-        current_words = current.split()
-        first_word = current_words[0] if current_words else ""
-        if prev_words and prev_words[-1] == first_word:
-            return False
-        head = lead[0]
-        continuation_chars = ",.;:)]\"'"
-        if not (head.islower() or head in continuation_chars):
-            return False
-        combined = len(previous) + 1 + len(current)
-        if len(previous) >= SOFT_LIMIT or len(current) >= SOFT_LIMIT:
-            return False
-        return combined <= SOFT_LIMIT
-
-    def _actual_overlap(
-        prev_words: tuple[str, ...],
-        current_words: tuple[str, ...],
-    ) -> int:
-        if not allowed_overlap or not prev_words or not current_words:
-            return 0
-        window = min(allowed_overlap, len(prev_words), len(current_words))
-        return window if window and prev_words[-window:] == current_words[:window] else 0
-
-    def _dedupe_overlap(
-        prev_words: tuple[str, ...],
-        words: tuple[str, ...],
-    ) -> tuple[str, tuple[str, ...]]:
-        if not words:
-            return "", words
-        overlap_words = _actual_overlap(prev_words, words)
-        trimmed_words = words[overlap_words:] if overlap_words else words
-        return " ".join(trimmed_words), trimmed_words
 
     def _append(
         acc: list[tuple[str, tuple[str, ...]]],
@@ -116,20 +147,19 @@ def _merge_sentence_fragments(
             return _append(acc, chunk, words)
 
         prev_text, prev_words = acc[-1]
-        trimmed_text, trimmed_words = _dedupe_overlap(prev_words, words)
-        if not trimmed_words:
-            return _append(acc, chunk, words)
+        for trimmed_text, trimmed_words in _candidate_merges(
+            prev_text,
+            prev_words,
+            words,
+            allowed_overlap,
+        ):
+            if not _within_size_limit(prev_text, prev_words, trimmed_words, limit):
+                break
+            merged_text = f"{prev_text} {trimmed_text}".strip()
+            merged_words = (*prev_words, *trimmed_words)
+            return [*acc[:-1], (merged_text, merged_words)]
 
-        if not _should_merge(prev_text, trimmed_text, list(prev_words)):
-            return _append(acc, chunk, words)
-
-        projected = len(prev_words) + len(trimmed_words)
-        if limit is not None and projected > limit:
-            return _append(acc, chunk, words)
-
-        merged_text = f"{prev_text} {trimmed_text}".strip()
-        merged_words = (*prev_words, *trimmed_words)
-        return [*acc[:-1], (merged_text, merged_words)]
+        return _append(acc, chunk, words)
 
     merged: list[tuple[str, tuple[str, ...]]] = reduce(
         _merge,
