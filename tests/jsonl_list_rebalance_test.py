@@ -4,6 +4,7 @@ from pdf_chunker.passes.emit_jsonl import (
     _first_non_empty_line,
     _is_list_line,
     _merge_text,
+    _prepend_intro,
     _rebalance_lists,
     _rows_from_item,
     _split,
@@ -26,7 +27,7 @@ from pdf_chunker.passes.emit_jsonl import (
         (
             "Intro\n1. one\n",
             "\n\n2. two\nTail",
-            ("Intro", "1. one\n2. two\nTail"),
+            ("Intro", "1. one\n\n2. two\nTail"),
         ),
         (
             "Lead\n\nIntro",
@@ -41,6 +42,16 @@ def test_rebalance_lists(raw, rest, expected):
 
 def test_merge_text_collapses_list_gap():
     assert _merge_text("1. one", "2. two") == "1. one\n2. two"
+
+
+def test_prepend_intro_normalizes_numbered_list_spacing():
+    intro = "Here are the recurring causes—namely:"
+    rest = "\n\n1. Teams cannot self-service their needs.\n2. Platform scope is too broad."
+    combined = _prepend_intro(intro, rest)
+    lines = combined.splitlines()
+    assert lines[0] == intro
+    assert lines[1] == ""
+    assert lines[2].startswith("1. Teams")
 
 
 def test_split_reserves_intro_for_list():

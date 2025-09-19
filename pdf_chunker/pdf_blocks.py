@@ -161,6 +161,14 @@ COMMON_SENTENCE_STARTERS = {
     "I",
 }
 
+_CAPTION_PREFIXES = ("Figure", "Table", "Exhibit")
+_CAPTION_RE = re.compile(rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+\d")
+
+
+def _looks_like_caption(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped and _CAPTION_RE.match(stripped))
+
 
 def _word_count(text: str) -> int:
     return len(text.split())
@@ -180,6 +188,13 @@ def _is_common_sentence_starter(word: str) -> bool:
 
 def _is_comma_uppercase_continuation(curr_text: str, next_text: str) -> bool:
     return curr_text.endswith(",") and next_text[:1].isupper()
+
+
+def _is_heading_like(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return stripped.endswith(":") or _detect_heading_fallback(stripped)
 
 
 def _is_indented_continuation(curr: Block, nxt: Block) -> bool:
@@ -222,6 +237,8 @@ def _is_cross_page_continuation(
     curr_page: Optional[int],
     next_page: Optional[int],
 ) -> bool:
+    if _looks_like_caption(curr_text):
+        return False
     if not (curr_text and next_text):
         return False
     if curr_page is None or next_page is None or next_page != curr_page + 1:
@@ -270,14 +287,30 @@ def _is_same_page_continuation(
         return False
     if curr_page != next_page or not next_text:
         return False
+    if _looks_like_caption(curr_text):
+        return False
     if any(b in curr_text for b in BULLET_CHARS):
         return False
-    if curr_text.endswith((".", "!", "?", ":", ";")):
+    if _is_heading_like(next_text):
+        return False
+    first_word = next_text.split()[0]
+    if curr_text.endswith((".", "!", "?", ":", ";")) and not _is_common_sentence_starter(first_word):
         return False
     if _is_comma_uppercase_continuation(curr_text, next_text):
         return True
-    first_word = next_text.split()[0]
-    return next_text[0].islower() or _is_common_sentence_starter(first_word)
+    if next_text[0].islower() or _is_common_sentence_starter(first_word):
+        return True
+    trailing = _trailing_alpha_token(curr_text)
+    letters = re.sub(r"[^A-Za-z]", "", first_word)
+    if (
+        trailing
+        and trailing.islower()
+        and letters
+        and letters[0].isupper()
+        and letters[1:].islower()
+    ):
+        return True
+    return False
 
 
 def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
@@ -318,6 +351,75 @@ def _merge_bullet_text(reason: str, current: str, nxt: str) -> Tuple[str, Option
     return remove_stray_bullet_lines(merged), remainder
 
 
+def _leading_alpha_token(text: str) -> str:
+    """Return the first alphabetic token stripped of punctuation."""
+
+    for token in text.split():
+        letters = re.sub(r"[^A-Za-z]", "", token)
+        if letters:
+            return letters
+    return ""
+
+
+def _hyphen_head_word(text: str) -> str:
+    """Return the word preceding a terminal hyphen in ``text``."""
+
+    match = re.search(rf"([A-Za-z]+)[{HYPHEN_CHARS_ESC}]$", text)
+    return match.group(1) if match else ""
+
+
+def _trailing_alpha_token(text: str) -> str:
+    """Return the last alphabetic token stripped of punctuation."""
+
+    for token in reversed(text.split()):
+        letters = re.sub(r"[^A-Za-z]", "", token)
+        if letters:
+            return letters
+    return ""
+
+
+def _normalize_hyphenated_tail(curr_text: str, next_text: str) -> str:
+    """Lower-case the continuation when a hyphenated word crosses lines."""
+
+    head = _hyphen_head_word(curr_text)
+    if not next_text or not head:
+        return next_text
+
+    prefix, sep, remainder = next_text.partition(" ")
+    letters = re.sub(r"[^A-Za-z]", "", prefix)
+    if (
+        letters
+        and letters[0].isupper()
+        and letters[1:].islower()
+        and head.islower()
+    ):
+        lowered = prefix[0].lower() + prefix[1:]
+        return lowered + (sep + remainder if sep else "")
+    return next_text
+
+
+def _normalize_sentence_tail(current_text: str, next_text: str) -> str:
+    """Lower-case titlecased sentence continuations following soft breaks."""
+
+    if not next_text:
+        return next_text
+
+    trailing = _trailing_alpha_token(current_text)
+    prefix, sep, remainder = next_text.partition(" ")
+    letters = re.sub(r"[^A-Za-z]", "", prefix)
+    if (
+        trailing
+        and trailing.islower()
+        and letters
+        and letters[0].isupper()
+        and letters[1:].islower()
+        and not current_text.endswith((".", "!", "?", ":", ";"))
+    ):
+        lowered = prefix[0].lower() + prefix[1:]
+        return lowered + (sep + remainder if sep else "")
+    return next_text
+
+
 def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
     curr_text = curr.text.strip()
     next_text = nxt.text.strip()
@@ -351,7 +453,7 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
     if is_numbered_list_pair(curr_text, next_text):
         return True, "numbered_list"
 
-    if is_numbered_continuation(curr_text, next_text):
+    if is_numbered_continuation(curr_text, next_text) and not _is_heading_like(next_text):
         return True, "numbered_continuation"
 
     if re.fullmatch(r"\d+[.)]", curr_text) and not starts_with_number(next_text):
@@ -371,11 +473,15 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
 
     hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]$"
     double_hyphen_pattern = rf"[{HYPHEN_CHARS_ESC}]{{2,}}$"
+    tail_token = _leading_alpha_token(next_text)
+    head_word = _hyphen_head_word(curr_text)
+    tail_is_titlecase = tail_token and tail_token[0].isupper() and tail_token[1:].islower()
+    tail_is_lower = bool(next_text and next_text[0].islower())
     if (
         re.search(hyphen_pattern, curr_text)
         and not re.search(double_hyphen_pattern, curr_text)
         and next_text
-        and next_text[0].islower()
+        and (tail_is_lower or (tail_is_titlecase and head_word.islower()))
     ):
         return True, "hyphenated_continuation"
     elif _is_same_page_continuation(curr_text, next_text, curr_page, next_page):
@@ -421,9 +527,11 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
             should_merge, reason = _should_merge_blocks(curr_for_merge, nxt)
             if should_merge:
                 if reason == "hyphenated_continuation":
-                    merged_text = re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + next_text
+                    normalized_tail = _normalize_hyphenated_tail(current_text, next_text)
+                    merged_text = re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + normalized_tail
                 elif reason == "sentence_continuation":
-                    merged_text = current_text + " " + next_text
+                    normalized_sentence = _normalize_sentence_tail(current_text, next_text)
+                    merged_text = current_text + " " + normalized_sentence
                 elif reason.startswith("bullet_"):
                     merged_text, remainder = _merge_bullet_text(reason, current_text, next_text)
                     current = replace(current, text=merged_text)
