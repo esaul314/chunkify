@@ -433,14 +433,11 @@ def _trim_overlap(prev: str, curr: str) -> str:
         prev_char = prev[prev_index - 1] if prev_index > 0 else ""
         next_non_space = next((ch for ch in curr[overlap:] if not ch.isspace()), "")
         stripped_prefix = prefix.strip()
+        words = re.findall(r"\b\w+\b", stripped_prefix)
+        single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
         if prev_char.isalnum():
             return curr
-        if (
-            stripped_prefix
-            and stripped_prefix[0].isupper()
-            and stripped_prefix[1:].islower()
-            and (next_non_space.islower() or next_non_space.isdigit())
-        ):
+        if single_title and (next_non_space.islower() or next_non_space.isdigit()):
             return curr
         return curr[overlap:].lstrip()
     prefix = curr_lower.split("\n\n", 1)[0]

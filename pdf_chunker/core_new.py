@@ -76,27 +76,41 @@ def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     return _pass_steps(PipelineSpec(pipeline=steps, options=spec.options))
 
 
-def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
-    """Return a new pass with ``opts`` merged without mutating ``pass_obj``."""
-    if not opts or not is_dataclass(pass_obj):
-        return pass_obj
-    names = {f.name for f in fields(pass_obj)}
-    valid = {k: v for k, v in opts.items() if k in names}
-    if not valid:
-        return pass_obj
+def _prepare_pass(
+    pass_obj: Pass, overrides: Mapping[str, Any]
+) -> tuple[Pass, Mapping[str, Any]]:
+    """Return a configured pass and sanitized overrides for meta propagation."""
 
+    opts = dict(overrides)
+    if not opts:
+        return pass_obj, opts
+    if not is_dataclass(pass_obj):
+        return pass_obj, opts
+
+    names = {f.name for f in fields(pass_obj)}
+    updates = {k: opts[k] for k in opts if k in names}
     if (
-        "chunk_size" in valid
-        and "min_chunk_size" not in valid
+        "chunk_size" in updates
+        and "min_chunk_size" not in opts
         and hasattr(pass_obj, "min_chunk_size")
     ):
-        valid["min_chunk_size"] = None
+        updates["min_chunk_size"] = None
 
-    new_pass = replace(pass_obj, **valid)
+    if not updates:
+        return pass_obj, opts
+
+    new_pass = replace(pass_obj, **updates)
     post = getattr(new_pass, "__post_init__", None)
     if callable(post):
         post()
-    return new_pass
+    return new_pass, opts
+
+
+def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
+    """Return a new pass with ``opts`` merged without mutating ``pass_obj``."""
+
+    configured, _ = _prepare_pass(pass_obj, opts)
+    return configured
 
 
 def _time_step(
@@ -110,13 +124,42 @@ def _time_step(
     return a, {**timings, p.name: time.time() - t0}
 
 
+def _with_pass_options(
+    meta: Mapping[str, Any] | None, name: str, overrides: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Return ``meta`` with ``overrides`` recorded under ``options[name]``."""
+
+    base = {**(meta or {})}
+    existing = dict(((meta or {}).get("options") or {}))
+    if overrides:
+        existing[name] = dict(overrides)
+    if existing:
+        base["options"] = existing
+    else:
+        base.pop("options", None)
+    return base
+
+
 def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, float]]:
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
-    chain = (registry()[s] for s in spec.pipeline)
-    passes = [configure_pass(p, spec.options.get(p.name, {})) for p in chain]
-    acc: tuple[Artifact, dict[str, float]] = (a, {})
-    a, timings = reduce(_time_step, passes, acc)
-    return a, timings
+    configs = [
+        _prepare_pass(registry()[name], spec.options.get(name, {}))
+        for name in spec.pipeline
+    ]
+
+    def _apply(
+        acc: tuple[Artifact, dict[str, float]],
+        config: tuple[Pass, Mapping[str, Any]],
+    ) -> tuple[Artifact, dict[str, float]]:
+        artifact, timings = acc
+        p, overrides = config
+        seeded = Artifact(
+            payload=artifact.payload,
+            meta=_with_pass_options(artifact.meta, p.name, overrides),
+        )
+        return _time_step((seeded, timings), p)
+
+    return reduce(_apply, configs, (a, {}))
 
 
 def _adapter_for(path: str):
