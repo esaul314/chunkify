@@ -70,6 +70,18 @@ class TestNewlineCleanup(unittest.TestCase):
         )
         self.assertEqual(clean_text(text), expected)
 
+    def test_merge_footer_like_fragment_after_long_sentence(self):
+        text = (
+            "This sentence stretches beyond sixty characters to ensure punctuation"
+            " matters at the boundary.\n\n"
+            "A car-load of drovers …"
+        )
+        expected = (
+            "This sentence stretches beyond sixty characters to ensure punctuation"
+            " matters at the boundary. A car-load of drovers …"
+        )
+        self.assertEqual(clean_text(text), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
