@@ -69,6 +69,7 @@ def _preview(s: str, n: int = PREVIEW_LEN) -> str:
 # Paragraphs & control characters
 PARAGRAPH_BREAK = re.compile(r"\n{2,}")
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\u202d\u202c]")
+FOOTER_FRAGMENT_MAX_LEN = 72
 
 # Quote normalization helpers
 SMART_QUOTES = {
@@ -464,6 +465,23 @@ def remove_underscore_emphasis(text: str) -> str:
 # Paragraph merge logic
 # ---------------------------------------------------------------------------
 
+def _is_footer_like_fragment(fragment: str) -> bool:
+    stripped = fragment.lstrip()
+    if not stripped or len(stripped) > FOOTER_FRAGMENT_MAX_LEN:
+        return False
+    first_char = stripped[0]
+    lowercase = sum(char.islower() for char in stripped)
+    uppercase = sum(char.isupper() for char in stripped)
+    majority_lowercase = lowercase > 0 and (
+        uppercase == 0 or lowercase >= uppercase * 2
+    )
+    return (
+        first_char.islower()
+        or not first_char.isalpha()
+        or majority_lowercase
+    )
+
+
 def merge_spurious_paragraph_breaks(text: str) -> str:
     parts = [p for p in PARAGRAPH_BREAK.split(text) if p.strip()]
     merged: List[str] = []
@@ -490,7 +508,11 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
                     merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
                     continue
-                if len(prev) < 60 or not prev.rstrip().endswith((".", "?", "!")):
+                if (
+                    len(prev) < 60
+                    or not prev.rstrip().endswith((".", "?", "!"))
+                    or _is_footer_like_fragment(author_line)
+                ):
                     merged[-1] = f"{prev.rstrip()} {part.lstrip()}"
                     continue
         merged.append(part)

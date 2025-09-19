@@ -22,3 +22,15 @@ def test_cli_invocation(script, args, code, keyword):
     assert result.returncode == code
     output = (result.stdout + result.stderr).lower()
     assert keyword in output
+
+
+def test_package_cli_help():
+    result = subprocess.run(
+        ["python", "-m", "pdf_chunker.cli", "--help"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": "."},
+    )
+    assert result.returncode == 0
+    output = (result.stdout + result.stderr).lower()
+    assert "usage" in output
