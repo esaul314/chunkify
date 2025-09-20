@@ -201,16 +201,14 @@ STOPWORDS: frozenset[str] = frozenset(
         "on",
         "as",
         "by",
+        "when",
         "then",
         "up",
     }
 )
 
 _BULLET_STOPWORD_TITLES = tuple(sorted({word.title() for word in STOPWORDS}))
-BULLET_STOPWORD_CASE_RE = re.compile(
-    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?[a-z]) "
-    rf"(?P<word>{'|'.join(_BULLET_STOPWORD_TITLES)})\b"
-)
+_BULLET_STOPWORD_PATTERN = re.compile(rf"\b({'|'.join(_BULLET_STOPWORD_TITLES)})\b")
 
 # Footnote handling
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
@@ -577,9 +575,30 @@ def _restore_list_breaks(text: str, sentinels: Tuple[ListBreakSentinel, ...]) ->
 def _normalize_bullet_stopword_case(text: str) -> str:
     """Lowercase stopwords restored mid-sentence inside bullet items."""
 
-    return BULLET_STOPWORD_CASE_RE.sub(
-        lambda match: f"{match.group(1)} {match.group('word').lower()}", text
-    )
+    def _normalize_line(line: str) -> str:
+        stripped = line.lstrip()
+        if not stripped or not re.match(
+            rf"(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])", stripped
+        ):
+            return line
+
+        def _replace(match: Match[str]) -> str:
+            prefix = line[: match.start()]
+            trimmed = prefix.rstrip()
+            if not trimmed:
+                return match.group(0)
+            prev = trimmed[-1]
+            return match.group(0).lower() if prev.islower() or prev in ",;:'\"-" else match.group(0)
+
+        return _BULLET_STOPWORD_PATTERN.sub(_replace, line)
+
+    return "\n".join(_normalize_line(line) for line in text.splitlines())
+
+
+def normalize_bullet_stopwords(text: str) -> str:
+    """Public helper wrapping bullet stopword normalization."""
+
+    return _normalize_bullet_stopword_case(text)
 
 
 def _join_bullet_wrapped_lines(text: str) -> str:
@@ -609,8 +628,13 @@ def collapse_single_newlines(text: str) -> str:
     )
     protected, sentinels = _capture_list_break_sentinels(normalized)
 
-    flattened = pipe(
+    bullet_joined = pipe(
         protected,
+        _join_bullet_wrapped_lines,
+    )
+
+    flattened = pipe(
+        bullet_joined,
         lambda t: PARAGRAPH_BREAK.sub(para_break, t),
         lambda t: t.replace("\n", " "),
         lambda t: t.replace(para_break, "\n\n"),
@@ -1043,6 +1067,7 @@ __all__ = [
     "remove_underscore_emphasis",
     "strip_underscore_wrapping",
     "remove_dangling_underscores",
+    "normalize_bullet_stopwords",
     "normalize_newlines",
     "remove_control_characters",
     "consolidate_whitespace",
