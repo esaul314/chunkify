@@ -130,8 +130,9 @@ END_PUNCT = ".!?…"
 # Avoid collapsing list markers like "2.\n3." by skipping digits after the break
 COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(?!\d)(\w)")
 PIPE_RE = re.compile(r"\|")
-UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
+UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^\s_](?:[^_]*[^\s_])?)_{1,2}")
 DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
+_UNDERSCORE_SENTINEL = "\u2063"
 
 # Stray bullet variants
 # Match stray bullet markers that occupy a full line, tolerating trailing spaces.
@@ -296,13 +297,21 @@ def _choose_hyphenation(head: str, tail: str) -> str:
     return hyphenated if hyphen_freq > joined_freq else joined
 
 
+def _prefers_linebreak_join(head: str, tail: str) -> bool:
+    """Return ``True`` when casing hints that the hyphen was a soft wrap."""
+
+    return tail.islower() and (head.islower() or len(head) <= 3)
+
+
 def _should_keep_linebreak_hyphen(
     head: str, tail: str, joined_freq: float, hyphen_freq: float
 ) -> bool:
     """Decide whether a newline-spanning hyphen should be preserved."""
 
+    if _prefers_linebreak_join(head, tail):
+        return False
     if joined_freq <= 0:
-        return True
+        return hyphen_freq > joined_freq
     if len(head) <= 2 or len(tail) <= 2:
         return hyphen_freq > joined_freq
     return hyphen_freq - joined_freq >= _LINEBREAK_HYPHEN_MARGIN
@@ -792,7 +801,14 @@ def replace_pipes(text: str) -> str:
 
 def remove_underscore_emphasis(text: str) -> str:
     """Remove single/double underscore emphasis markers."""
-    return UNDERSCORE_WRAP_RE.sub(r"\1", text)
+    def _strip(match: Match[str]) -> str:
+        inner = match.group(1)
+        if any(ch.isspace() for ch in inner):
+            return f"{_UNDERSCORE_SENTINEL}{inner}{_UNDERSCORE_SENTINEL}"
+        return inner
+
+    processed = UNDERSCORE_WRAP_RE.sub(_strip, text)
+    return remove_dangling_underscores(processed)
 
 
 def strip_underscore_wrapping(text: str) -> str:
@@ -802,7 +818,18 @@ def strip_underscore_wrapping(text: str) -> str:
 
 def remove_dangling_underscores(text: str) -> str:
     """Remove underscores that don't join word characters."""
-    return DANGLING_UNDERSCORE_RE.sub("", text)
+    def _prune(match: Match[str]) -> str:
+        start, end = match.span()
+        prev_char = text[start - 1] if start else ""
+        next_char = text[end] if end < len(text) else ""
+        if next_char.isalpha() and next_char.isupper():
+            return match.group(0)
+        if prev_char.isalpha() and prev_char.isupper():
+            return match.group(0)
+        return ""
+
+    cleaned = DANGLING_UNDERSCORE_RE.sub(_prune, text)
+    return cleaned.replace(_UNDERSCORE_SENTINEL, "_")
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +937,6 @@ def clean_paragraph(paragraph: str) -> str:
         remove_control_characters,
         normalize_ligatures,
         remove_underscore_emphasis,
-        remove_dangling_underscores,
         consolidate_whitespace,
     )
 
