@@ -74,6 +74,7 @@ def _partition_preamble(lines: list[str]) -> tuple[list[str], list[str]]:
 
 
 _LIST_GAP_RE = re.compile(r"\n{2,}(?=\s*(?:[-\*\u2022]|\d+\.))")
+_NUMBERED_ITEM_RE = re.compile(r"^\s*(?P<num>\d+)[.)]\s+")
 
 
 def _collapse_list_gaps(text: str) -> str:
@@ -444,6 +445,23 @@ def _trim_overlap(prev: str, curr: str) -> str:
     return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
 
 
+def _trim_duplicate_numbered_item(prev: str, curr: str) -> str:
+    """Drop a repeated numbered-item prefix when it already exists in ``prev``."""
+
+    first_line = _first_non_empty_line(curr)
+    match = _NUMBERED_ITEM_RE.match(first_line)
+    if not match or match.group("num") == "1":
+        return curr
+    normalized_line = _normalize(first_line)
+    if not normalized_line:
+        return curr
+    prev_norm = _normalize(prev)
+    if normalized_line not in prev_norm:
+        return curr
+    _, _, suffix = curr.partition(first_line)
+    return suffix.lstrip()
+
+
 def _starts_mid_sentence(text: str) -> bool:
     stripped = text.strip()
     return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
@@ -566,6 +584,9 @@ def _merge_items(
     if acc:
         prev = acc[-1]
         text = _trim_overlap(prev["text"], text)
+        text = _trim_duplicate_numbered_item(prev["text"], text)
+        if not text:
+            return acc
         if _should_merge(prev["text"], text, _min_words()):
             merged = _merge_text(prev["text"], text)
             return [*acc[:-1], {**prev, "text": merged}]

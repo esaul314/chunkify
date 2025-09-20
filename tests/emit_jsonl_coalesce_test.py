@@ -125,6 +125,31 @@ def test_flag_potential_duplicates():
     assert _flag_potential_duplicates(items)
 
 
+def test_numbered_item_fragment_merges_with_parent():
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": (
+                    "This progression:\n"
+                    "1. Most engineers don't want to learn a whole new toolset.\n"
+                    "2. The shortage, combined with people cobbling together their own Terraform, led to chaos."
+                )
+            },
+            {
+                "text": (
+                    "2. The shortage, combined with people cobbling together their own Terraform, led to chaos.\n"
+                    "and forced teams to centralize their efforts."
+                )
+            },
+        ],
+    }
+    rows = _rows(doc)
+    combined = " ".join(row["text"] for row in rows)
+    assert combined.count("2. The shortage") == 1
+    assert "and forced teams to centralize their efforts." in combined
+
+
 def test_split_does_not_duplicate(tmp_path: Path) -> None:
     pdf = Path("platform-eng-excerpt.pdf").resolve()
     spec = Path("pipeline.yaml").resolve()
