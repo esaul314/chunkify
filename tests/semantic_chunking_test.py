@@ -71,6 +71,29 @@ def test_blocks_merge_into_sentence() -> None:
     assert texts == ["Cloud development envs are new."]
 
 
+def test_long_sentence_merges_past_limit() -> None:
+    """Fragments continue merging past the nominal limit until punctuation appears."""
+
+    first = " ".join(f"w{i}" for i in range(12))
+    second = " ".join(f"w{i}" for i in range(12, 24)) + "."
+    doc = {
+        "type": "page_blocks",
+        "pages": [
+            {
+                "page": 1,
+                "blocks": [
+                    {"text": first},
+                    {"text": second},
+                ],
+            }
+        ],
+    }
+
+    art = _SplitSemanticPass(chunk_size=12, overlap=0)(Artifact(payload=doc))
+    texts = [c["text"] for c in art.payload["items"]]
+    assert texts == [f"{first} {second}"]
+
+
 def test_dedupe_preserves_sentence_start() -> None:
     """Dedupe merges fragments so outputs don't start mid-sentence."""
     items = [
