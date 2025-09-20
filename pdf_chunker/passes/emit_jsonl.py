@@ -601,17 +601,29 @@ def _dedupe(
             if log is not None:
                 log.append(text)
             return state
-        overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(
-            acc_norm,
-            text_norm,
+        overlap_len = _overlap_len(acc_norm, text_norm)
+        prefix_len = (
+            0
+            if overlap_len
+            else _prefix_contained_len(
+                acc_norm,
+                text_norm,
+            )
         )
+        overlap = overlap_len or prefix_len
         if overlap:
-            if log is not None:
-                log.append(text[:overlap])
-            text = text[overlap:].lstrip()
-            if not text:
+            trimmed = text[overlap:].lstrip()
+            if not trimmed:
+                if log is not None:
+                    log.append(text[:overlap])
                 return state
-            text_norm = _normalize(text)
+            if prefix_len and not _starts_mid_sentence(text) and _starts_mid_sentence(trimmed):
+                overlap = 0
+            else:
+                if log is not None:
+                    log.append(text[:overlap])
+                text = trimmed
+                text_norm = _normalize(text)
         return _merge_if_fragment(acc, acc_text, acc_norm, item, text, text_norm)
 
     initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")

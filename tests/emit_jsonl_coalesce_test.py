@@ -2,7 +2,11 @@ import os
 import subprocess
 from pathlib import Path
 
-from pdf_chunker.passes.emit_jsonl import _rows, _flag_potential_duplicates
+from pdf_chunker.passes.emit_jsonl import (
+    _dedupe,
+    _flag_potential_duplicates,
+    _rows,
+)
 
 
 def test_leading_fragment_not_dropped():
@@ -100,6 +104,16 @@ def test_prefix_overlap_trimmed():
     rows = _rows(doc)
     combined = " ".join(r["text"] for r in rows)
     assert combined.count(sent) == 1
+
+
+def test_prefix_overlap_preserves_sentence_start():
+    items = [
+        {"text": "Intro when application engineering matters."},
+        {"text": "When application engineering teams succeed."},
+    ]
+    deduped = _dedupe(items)
+    assert len(deduped) == 2
+    assert deduped[1]["text"].startswith("When application engineering")
 
 
 def test_flag_potential_duplicates():
