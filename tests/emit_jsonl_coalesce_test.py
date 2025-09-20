@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -153,6 +154,12 @@ def test_split_does_not_duplicate(tmp_path: Path) -> None:
         text=True,
     )
     text = out.read_text()
+    rows = [json.loads(line)["text"] for line in text.splitlines() if line.strip()]
+    shortage_hits = [i for i, chunk in enumerate(rows) if "2. The shortage" in chunk]
+    assert len(shortage_hits) == 1, shortage_hits
+    shortage_chunk = rows[shortage_hits[0]]
+    assert shortage_chunk.count("2. The shortage") == 1
+    assert not shortage_chunk.lstrip().startswith("2. The shortage")
     matches = text.count("Most engineers")
     assert matches == 1, proc.stderr
     assert "Infrastructure setup" in text

@@ -42,6 +42,21 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
 
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
 _HAS_SENTENCE_END = re.compile(r"[.?!…]")
+_SENTENCE_PREFIX_RE = re.compile(r"(?P<prefix>.+?[.?!][\"')\]]*)(?P<rest>\s+.*|$)")
+
+
+def _peel_sentence_prefix(text: str) -> tuple[str, str]:
+    """Split ``text`` into a leading sentence and the remaining suffix."""
+
+    stripped = text.lstrip()
+    if not stripped:
+        return "", ""
+    match = _SENTENCE_PREFIX_RE.match(stripped)
+    if not match:
+        return "", stripped
+    prefix = match.group("prefix").strip()
+    remainder = match.group("rest") or ""
+    return prefix, remainder.lstrip()
 
 
 def _merge_sentence_fragments(
@@ -54,7 +69,7 @@ def _merge_sentence_fragments(
     """Merge trailing fragments until a sentence boundary or limits reached."""
 
     allowed_overlap = max(overlap, 0)
-    limit = max(chunk_size - allowed_overlap, 0) if chunk_size and chunk_size > 0 else None
+    limit = chunk_size + allowed_overlap if chunk_size is not None and chunk_size > 0 else None
 
     def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
         """Return ``True`` when ``previous`` and ``current`` should coalesce."""
@@ -126,6 +141,20 @@ def _merge_sentence_fragments(
 
         projected = len(prev_words) + len(trimmed_words)
         if limit is not None and projected > limit:
+            prefix, remainder = _peel_sentence_prefix(trimmed_text)
+            if prefix:
+                prefix_words = tuple(prefix.split())
+                candidate = len(prev_words) + len(prefix_words)
+                if candidate <= limit:
+                    merged_text = f"{prev_text} {prefix}".strip()
+                    merged_words = (*prev_words, *prefix_words)
+                    updated = [*acc[:-1], (merged_text, merged_words)]
+                    tail = remainder.strip()
+                    if tail:
+                        tail_words = tuple(tail.split())
+                        if tail_words:
+                            updated.append((tail, tail_words))
+                    return updated
             return _append(acc, chunk, words)
 
         merged_text = f"{prev_text} {trimmed_text}".strip()
@@ -213,7 +242,7 @@ def _get_split_fn(
             final = list(
                 _merge_sentence_fragments(
                     softened,
-                    chunk_size=None if has_sentence_end else chunk_size,
+                    chunk_size=chunk_size if has_sentence_end else None,
                     overlap=overlap,
                 )
             )
@@ -228,7 +257,7 @@ def _get_split_fn(
             raw = _soft_segments(text)
             final = _merge_sentence_fragments(
                 raw,
-                chunk_size=None if has_sentence_end else chunk_size,
+                chunk_size=chunk_size if has_sentence_end else None,
                 overlap=overlap,
             )
             soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
