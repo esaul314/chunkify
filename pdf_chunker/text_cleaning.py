@@ -585,11 +585,13 @@ def _normalize_bullet_stopword_case(text: str) -> str:
 def _join_bullet_wrapped_lines(text: str) -> str:
     """Collapse intra-item bullet newlines into spaces."""
 
+    def _replace(match: Match[str]) -> str:
+        follower = match.string[match.end()] if match.end() < len(match.string) else ""
+        return match.group(0) if follower == "\n" else f"{match.group(1)} "
+
     return pipe(
         text,
-        lambda value: BULLET_CONTINUATION_RE.sub(
-            lambda match: f"{match.group(1)} ", value
-        ),
+        lambda value: BULLET_CONTINUATION_RE.sub(_replace, value),
         _normalize_bullet_stopword_case,
     )
 
@@ -615,14 +617,12 @@ def collapse_single_newlines(text: str) -> str:
         lambda t: t.replace("[[LIST_BREAK]]", "\n\n"),
     )
 
-    rebuilt = pipe(
-        _restore_list_breaks(flattened, sentinels),
+    result = pipe(
+        flattened,
+        lambda value: _restore_list_breaks(value, sentinels),
         _join_bullet_wrapped_lines,
+        _fix_quote_spacing,
     )
-    result = _fix_quote_spacing(rebuilt)
-
-    rebuilt = _restore_list_breaks(flattened, sentinels)
-    result = _fix_quote_spacing(rebuilt)
 
     logger.debug(f"Output text preview: {_preview(result)}")
     return result
