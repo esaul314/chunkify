@@ -11,6 +11,7 @@ from typing import Any, cast
 from . import parsing
 from .ai_enrichment import classify_chunk_utterance
 from .splitter import semantic_chunker
+from .text_cleaning import merge_bullet_block_continuations
 from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,7 @@ def chunk_text(
 ) -> list[str]:
     """Chunk blocks of text into semantic units."""
     full_text = "\n\n".join(block.get("text", "") for block in blocks if block.get("text", ""))
+    full_text = merge_bullet_block_continuations(full_text)
     chunks = semantic_chunker(
         full_text,
         chunk_size,

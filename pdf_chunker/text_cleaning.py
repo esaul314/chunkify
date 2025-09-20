@@ -120,7 +120,7 @@ ADDRESS_BULLET_RE = re.compile(
     re.IGNORECASE,
 )
 BULLET_CONTINUATION_RE = re.compile(
-    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?)\n(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
+    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?)\n+(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
 )
 
 # Terminal punctuation for quoted sentence continuation
@@ -130,8 +130,11 @@ END_PUNCT = ".!?…"
 # Avoid collapsing list markers like "2.\n3." by skipping digits after the break
 COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(?!\d)(\w)")
 PIPE_RE = re.compile(r"\|")
-UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
+UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_\s]+?)_{1,2}")
+MULTIWORD_UNDERSCORE_RE = re.compile(r"_{1,2}[^_\n]*\s[^_\n]*_{1,2}")
+LEADING_MULTIWORD_UNDERSCORE_RE = re.compile(r"(?:(?<=^)|(?<=\s))_(?=[^_\n]*\s)")
 DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
+UNDERSCORE_SENTINEL_RE = re.compile(r"\[\[UNDERSCORE_SENTINEL_(?P<idx>\d+)\]\]")
 
 # Stray bullet variants
 # Match stray bullet markers that occupy a full line, tolerating trailing spaces.
@@ -201,6 +204,7 @@ STOPWORDS: frozenset[str] = frozenset(
         "on",
         "as",
         "by",
+        "when",
         "then",
         "up",
     }
@@ -208,9 +212,12 @@ STOPWORDS: frozenset[str] = frozenset(
 
 _BULLET_STOPWORD_TITLES = tuple(sorted({word.title() for word in STOPWORDS}))
 BULLET_STOPWORD_CASE_RE = re.compile(
-    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?[a-z]) "
+    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?) "
     rf"(?P<word>{'|'.join(_BULLET_STOPWORD_TITLES)})\b"
 )
+
+_BULLET_CLOSING_CHARS = frozenset("\"'»”’›)]}")
+_BULLET_CONTINUATION_PUNCT = frozenset(",;:-\u2013\u2014")
 
 # Footnote handling
 FOOTNOTE_BRACKETED_RE = re.compile(rf"\[\d+\](?:[{re.escape(END_PUNCT)}])?$")
@@ -301,6 +308,8 @@ def _should_keep_linebreak_hyphen(
 ) -> bool:
     """Decide whether a newline-spanning hyphen should be preserved."""
 
+    if head.istitle() and tail.islower():
+        return False
     if joined_freq <= 0:
         return True
     if len(head) <= 2 or len(tail) <= 2:
@@ -577,9 +586,40 @@ def _restore_list_breaks(text: str, sentinels: Tuple[ListBreakSentinel, ...]) ->
 def _normalize_bullet_stopword_case(text: str) -> str:
     """Lowercase stopwords restored mid-sentence inside bullet items."""
 
-    return BULLET_STOPWORD_CASE_RE.sub(
-        lambda match: f"{match.group(1)} {match.group('word').lower()}", text
-    )
+    def _previous_char(prefix: str) -> str | None:
+        significant = prefix.rstrip()
+        for char in reversed(significant):
+            if char in _BULLET_CLOSING_CHARS:
+                continue
+            return char
+        return None
+
+    def _should_lower(prefix: str) -> bool:
+        previous = _previous_char(prefix)
+        if previous is None:
+            return False
+        if previous.islower():
+            return True
+        if previous in _BULLET_CONTINUATION_PUNCT:
+            return True
+        return False
+
+    def _replace(match: Match[str]) -> str:
+        prefix = match.group(1)
+        word = match.group("word")
+        return (
+            f"{prefix} {word.lower()}"
+            if _should_lower(prefix)
+            else match.group(0)
+        )
+
+    return BULLET_STOPWORD_CASE_RE.sub(_replace, text)
+
+
+def normalize_bullet_stopwords(text: str) -> str:
+    """Public helper wrapping bullet stopword normalization."""
+
+    return _normalize_bullet_stopword_case(text)
 
 
 def _join_bullet_wrapped_lines(text: str) -> str:
@@ -595,7 +635,13 @@ def _join_bullet_wrapped_lines(text: str) -> str:
         _normalize_bullet_stopword_case,
     )
 
-  
+
+def merge_bullet_block_continuations(text: str) -> str:
+    """Public helper that joins bullet continuations across block boundaries."""
+
+    return _join_bullet_wrapped_lines(text)
+
+
 def collapse_single_newlines(text: str) -> str:
     logger.debug(f"collapse_single_newlines called with {len(text)} chars")
     logger.debug(f"Input text preview: {_preview(text)}")
@@ -609,8 +655,13 @@ def collapse_single_newlines(text: str) -> str:
     )
     protected, sentinels = _capture_list_break_sentinels(normalized)
 
-    flattened = pipe(
+    bullet_joined = pipe(
         protected,
+        _join_bullet_wrapped_lines,
+    )
+
+    flattened = pipe(
+        bullet_joined,
         lambda t: PARAGRAPH_BREAK.sub(para_break, t),
         lambda t: t.replace("\n", " "),
         lambda t: t.replace(para_break, "\n\n"),
@@ -802,7 +853,31 @@ def strip_underscore_wrapping(text: str) -> str:
 
 def remove_dangling_underscores(text: str) -> str:
     """Remove underscores that don't join word characters."""
-    return DANGLING_UNDERSCORE_RE.sub("", text)
+
+    sentinels: list[str] = []
+
+    def _protect(match: Match[str]) -> str:
+        token = f"[[UNDERSCORE_SENTINEL_{len(sentinels)}]]"
+        sentinels.append(match.group(0))
+        return token
+
+    protected = MULTIWORD_UNDERSCORE_RE.sub(_protect, text)
+
+    def _protect_leading(match: Match[str]) -> str:
+        token = f"[[UNDERSCORE_SENTINEL_{len(sentinels)}]]"
+        sentinels.append(match.group(0))
+        return token
+
+    protected = LEADING_MULTIWORD_UNDERSCORE_RE.sub(_protect_leading, protected)
+    stripped = DANGLING_UNDERSCORE_RE.sub("", protected)
+
+    if not sentinels:
+        return stripped
+
+    def _restore(match: Match[str]) -> str:
+        return sentinels[int(match.group("idx"))]
+
+    return UNDERSCORE_SENTINEL_RE.sub(_restore, stripped)
 
 
 # ---------------------------------------------------------------------------
@@ -1043,6 +1118,8 @@ __all__ = [
     "remove_underscore_emphasis",
     "strip_underscore_wrapping",
     "remove_dangling_underscores",
+    "merge_bullet_block_continuations",
+    "normalize_bullet_stopwords",
     "normalize_newlines",
     "remove_control_characters",
     "consolidate_whitespace",

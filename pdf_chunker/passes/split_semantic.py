@@ -41,6 +41,7 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
 
 
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
+_HAS_SENTENCE_END = re.compile(r"[.?!…]")
 
 
 def _merge_sentence_fragments(
@@ -185,8 +186,6 @@ def _get_split_fn(
             """Split ``text`` while guarding against truncation."""
 
             nonlocal soft_hits
-            pieces = semantic(text)
-            merged = pieces if sum(len(p.split()) for p in pieces) >= len(text.split()) else [text]
 
             def _soften(segment: str) -> list[str]:
                 nonlocal soft_hits
@@ -195,22 +194,43 @@ def _get_split_fn(
                     soft_hits += 1
                 return splits
 
-            raw = [
-                seg
-                for c in merged
-                for sub in iter_word_chunks(c, chunk_size, overlap)
-                for seg in _soften(sub)
-            ]
-            final = _merge_sentence_fragments(raw, chunk_size=chunk_size, overlap=overlap)
-            soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
+            def _enforce_word_limit(chunk: str) -> Iterator[str]:
+                if chunk_size <= 0:
+                    yield chunk
+                    return
+                words = chunk.split()
+                if len(words) <= chunk_size:
+                    yield chunk
+                    return
+                yield from iter_word_chunks(chunk, chunk_size, overlap)
+
+            pieces = semantic(text)
+            word_total = len(text.split())
+            merged = pieces if sum(len(piece.split()) for piece in pieces) >= word_total else [text]
+            has_sentence_end = bool(_HAS_SENTENCE_END.search(text))
+            limited = chain.from_iterable(_enforce_word_limit(chunk) for chunk in merged)
+            softened = chain.from_iterable(_soften(segment) for segment in limited)
+            final = list(
+                _merge_sentence_fragments(
+                    softened,
+                    chunk_size=None if has_sentence_end else chunk_size,
+                    overlap=overlap,
+                )
+            )
+            soft_hits += sum(len(chunk) > SOFT_LIMIT for chunk in final)
             return final
 
     except Exception:  # pragma: no cover - safety fallback
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
+            has_sentence_end = bool(_HAS_SENTENCE_END.search(text))
             raw = _soft_segments(text)
-            final = _merge_sentence_fragments(raw, chunk_size=chunk_size, overlap=overlap)
+            final = _merge_sentence_fragments(
+                raw,
+                chunk_size=None if has_sentence_end else chunk_size,
+                overlap=overlap,
+            )
             soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
             return final
 
