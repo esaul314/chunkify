@@ -145,7 +145,7 @@ def test_split_does_not_duplicate(tmp_path: Path) -> None:
             str(spec),
             "--out",
             str(out),
-            "--no-enrich",
+            "--no-metadata",
         ],
         check=True,
         cwd=tmp_path,
@@ -153,14 +153,24 @@ def test_split_does_not_duplicate(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
-    text = out.read_text()
-    rows = [json.loads(line)["text"] for line in text.splitlines() if line.strip()]
-    shortage_hits = [i for i, chunk in enumerate(rows) if "2. The shortage" in chunk]
+    text_lines = [line for line in out.read_text().splitlines() if line.strip()]
+    rows = [json.loads(line)["text"] for line in text_lines]
+    assert rows, "conversion produced no rows"
+    shortage_hits = [i for i, chunk in enumerate(rows, 1) if "2. The shortage" in chunk]
     assert len(shortage_hits) == 1, shortage_hits
-    shortage_chunk = rows[shortage_hits[0]]
+    shortage_chunk = rows[shortage_hits[0] - 1]
     assert shortage_chunk.count("2. The shortage") == 1
     assert not shortage_chunk.lstrip().startswith("2. The shortage")
-    matches = text.count("Most engineers")
+    mid_list_prefixes = tuple(f"{n}. " for n in range(2, 10))
+    mid_list_starts = [
+        (idx, chunk[:60])
+        for idx, chunk in enumerate(rows, 1)
+        if chunk.lstrip().startswith(mid_list_prefixes)
+    ]
+    assert not mid_list_starts, mid_list_starts
+    word_counts = [len(chunk.split()) for chunk in rows]
+    assert sum(count >= 100 for count in word_counts) / len(word_counts) >= 0.75
+    matches = sum(chunk.count("Most engineers") for chunk in rows)
     assert matches == 1, proc.stderr
-    assert "Infrastructure setup" in text
+    assert any("Infrastructure setup" in chunk for chunk in rows)
     assert "dedupe dropped" in proc.stderr

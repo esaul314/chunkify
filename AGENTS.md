@@ -375,6 +375,7 @@ Tests must:
 * Be stateless and idempotent
 * Focus on input→output behavior
 * Use fixtures and shared utilities in ```tests/utils/common.sh`
+* Preserve the existing green test surface unless a failing test is proven invalid and updated in the same change
 
 > **Note**: Some legacy regressions are still being worked through, but any tests that currently pass (e.g., numbered list preservation) are authoritative. Do **not** introduce new failures—rerun the relevant specs after modifying chunking or emission logic.
 
