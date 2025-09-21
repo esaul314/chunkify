@@ -150,7 +150,7 @@ def _strip_page_header_prefix(text: str) -> str:
             idx += 1
             continue
         break
-    if idx == 0 or (not comma_seen and title_count < 3):
+    if idx == 0 or idx >= len(tokens) or (not comma_seen and title_count < 3):
         return text
     remainder = " ".join(t.strip(",") for t in tokens[idx:])
     if remainder and remainder[0].islower():

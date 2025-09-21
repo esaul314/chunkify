@@ -200,6 +200,49 @@ def _peel_list_intro(text: str) -> tuple[str, str]:
     return prefix[:start].rstrip(), prefix[start:].lstrip()
 
 
+_CONTINUATION_LEADS = frozenset(
+    word.lower()
+    for word in (
+        "And",
+        "But",
+        "So",
+        "However",
+        "Therefore",
+        "Yet",
+        "Still",
+        "Also",
+        "Meanwhile",
+        "Additionally",
+        "Then",
+        "Thus",
+        "Instead",
+        "Nevertheless",
+        "Nonetheless",
+        "Consequently",
+        "Moreover",
+    )
+)
+_LEAD_WORD = re.compile(r"[\w']+")
+_LAST_SENTENCE_RE = re.compile(r"([^.?!]+[.?!][\"')\]]*)\s*$", re.DOTALL)
+
+
+def _leading_word(text: str) -> str:
+    match = _LEAD_WORD.match(text)
+    return match.group(0).lower() if match else ""
+
+
+def _starts_with_continuation(text: str) -> bool:
+    return _leading_word(text.lstrip()) in _CONTINUATION_LEADS
+
+
+def _last_sentence(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    match = _LAST_SENTENCE_RE.search(stripped)
+    return match.group(1).strip() if match else stripped
+
+
 def _compose_intro_with_chunk(intro: str, chunk: str, separators: int) -> str:
     """Compose ``intro`` and ``chunk`` with controlled blank-line separators."""
 
@@ -409,15 +452,34 @@ def _overlap_len(prev_lower: str, curr_lower: str) -> int:
     )
 
 
+_SENTENCE_TERMINATORS = ".?!"
+_CLOSING_PUNCTUATION = "\"')]}"
+
+
+def _has_sentence_ending(text: str) -> bool:
+    stripped = text.rstrip()
+    trimmed = stripped.rstrip(_CLOSING_PUNCTUATION)
+    return bool(trimmed) and trimmed[-1] in _SENTENCE_TERMINATORS
+
+
 def _prefix_contained_len(haystack: str, needle: str) -> int:
-    return next(
-        (
-            i
-            for i in range(len(needle), 0, -1)
-            if needle[:i] in haystack and (i == len(needle) or needle[i].isspace())
-        ),
-        0,
-    )
+    length = len(needle)
+
+    def _match(index: int) -> bool:
+        segment = needle[:index]
+        if not segment.strip():
+            return False
+        if index < length and not needle[index].isspace():
+            return False
+        if not _has_sentence_ending(segment):
+            return False
+        position = haystack.find(segment)
+        if position == -1:
+            return False
+        preceding = haystack[position - 1] if position else ""
+        return not preceding.isalnum()
+
+    return next((idx for idx in range(length, 0, -1) if _match(idx)), 0)
 
 
 def _trim_overlap(prev: str, curr: str) -> str:
@@ -676,6 +738,32 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     return [row for row in (build(x) for x in enumerate(pieces)) if row["text"].strip()]
 
 
+def _enrich_rows_with_context(rows: list[Row]) -> list[Row]:
+    enriched: list[Row] = []
+    prev_text: str | None = None
+    meta_key = _metadata_key()
+    for row in rows:
+        text = row.get("text", "")
+        lead = text.lstrip()
+        meta = row.get(meta_key, {})
+        chunk_part = int(meta.get("chunk_part", 0))
+        if (
+            prev_text
+            and lead
+            and _starts_with_continuation(lead)
+            and (chunk_part > 0 or not prev_text.rstrip().endswith(":"))
+        ):
+            context = _last_sentence(prev_text)
+            if context and not lead.startswith(context):
+                merged = f"{context} {text}".strip()
+                enriched.append({**row, "text": merged})
+                prev_text = merged
+                continue
+        enriched.append(row)
+        prev_text = text
+    return enriched
+
+
 def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
     opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
     chunk_size = opts.get("chunk_size")
@@ -696,7 +784,8 @@ def _rows(doc: Doc, *, preserve: bool = False) -> list[Row]:
             logger.warning("dedupe dropped: %s", dup[:80])
         for dup in _flag_potential_duplicates(processed):
             logger.warning("possible duplicate retained: %s", dup[:80])
-    return [r for i in processed for r in _rows_from_item(i)]
+    rows = [r for i in processed for r in _rows_from_item(i)]
+    return _enrich_rows_with_context(rows)
 
 
 def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
