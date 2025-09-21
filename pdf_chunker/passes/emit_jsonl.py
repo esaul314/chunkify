@@ -446,20 +446,25 @@ def _trim_overlap(prev: str, curr: str) -> str:
 
 
 def _trim_duplicate_numbered_item(prev: str, curr: str) -> str:
-    """Drop a repeated numbered-item prefix when it already exists in ``prev``."""
+    """Remove numbered-item lines that already appeared in ``prev``."""
 
-    first_line = _first_non_empty_line(curr)
-    match = _NUMBERED_ITEM_RE.match(first_line)
-    if not match or match.group("num") == "1":
-        return curr
-    normalized_line = _normalize(first_line)
-    if not normalized_line:
-        return curr
     prev_norm = _normalize(prev)
-    if normalized_line not in prev_norm:
+    if not prev_norm:
         return curr
-    _, _, suffix = curr.partition(first_line)
-    return suffix.lstrip()
+
+    def keep(line: str) -> bool:
+        stripped = line.lstrip()
+        match = _NUMBERED_ITEM_RE.match(stripped)
+        if not match or match.group("num") == "1":
+            return True
+        normalized = _normalize(stripped)
+        return bool(normalized and normalized not in prev_norm)
+
+    lines = curr.splitlines(True)
+    kept = [line for line in lines if keep(line)]
+    if len(kept) == len(lines):
+        return curr
+    return "".join(kept).lstrip()
 
 
 def _starts_mid_sentence(text: str) -> bool:

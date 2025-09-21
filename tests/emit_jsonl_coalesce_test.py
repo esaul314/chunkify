@@ -150,6 +150,32 @@ def test_numbered_item_fragment_merges_with_parent():
     assert "and forced teams to centralize their efforts." in combined
 
 
+def test_numbered_item_duplicate_lines_pruned():
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": (
+                    "This progression:\n"
+                    "1. Most engineers don't want to learn a whole new toolset.\n"
+                    "2. The shortage, combined with people cobbling together their own Terraform, led to chaos.\n"
+                    "3. These centralized Terraform-writing teams became trapped in a feature shop."
+                )
+            },
+            {
+                "text": (
+                    "\n2. The shortage, combined with people cobbling together their own Terraform, led to chaos.\n"
+                    "3. These centralized Terraform-writing teams became trapped in a feature shop.\n"
+                    "A better path is to realize that you need to do something more coherent."
+                )
+            },
+        ],
+    }
+    rows = _rows(doc)
+    assert rows and rows[0]["text"].count("2. The shortage") == 1
+    assert "A better path is to realize that you need to do something more coherent." in rows[0]["text"]
+
+
 def test_split_does_not_duplicate(tmp_path: Path) -> None:
     pdf = Path("platform-eng-excerpt.pdf").resolve()
     spec = Path("pipeline.yaml").resolve()
