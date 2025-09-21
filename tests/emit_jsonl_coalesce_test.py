@@ -175,3 +175,16 @@ def test_platform_eng_sentence_boundary(tmp_path: Path) -> None:
         and row["metadata"].get("chunk_part", 0) == 0
     )
     assert intro["text"].rstrip().endswith(":")
+
+
+def test_platform_eng_heading_preserved(tmp_path: Path) -> None:
+    out, _ = _convert_platform_eng(tmp_path)
+    rows = [
+        json.loads(line)
+        for line in out.read_text().splitlines()
+        if line.strip()
+    ]
+    heading = "How Platform Engineering Clears the Swamp"
+    target = next(row for row in rows if "Clears the Swamp" in row["text"])
+    assert heading in target["text"]
+    assert target["text"].lstrip().startswith(heading)

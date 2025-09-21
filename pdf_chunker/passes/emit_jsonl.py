@@ -409,15 +409,34 @@ def _overlap_len(prev_lower: str, curr_lower: str) -> int:
     )
 
 
+_SENTENCE_TERMINATORS = ".?!"
+_CLOSING_PUNCTUATION = "\"')]}"
+
+
+def _has_sentence_ending(text: str) -> bool:
+    stripped = text.rstrip()
+    trimmed = stripped.rstrip(_CLOSING_PUNCTUATION)
+    return bool(trimmed) and trimmed[-1] in _SENTENCE_TERMINATORS
+
+
 def _prefix_contained_len(haystack: str, needle: str) -> int:
-    return next(
-        (
-            i
-            for i in range(len(needle), 0, -1)
-            if needle[:i] in haystack and (i == len(needle) or needle[i].isspace())
-        ),
-        0,
-    )
+    length = len(needle)
+
+    def _match(index: int) -> bool:
+        segment = needle[:index]
+        if not segment.strip():
+            return False
+        if index < length and not needle[index].isspace():
+            return False
+        if not _has_sentence_ending(segment):
+            return False
+        position = haystack.find(segment)
+        if position == -1:
+            return False
+        preceding = haystack[position - 1] if position else ""
+        return not preceding.isalnum()
+
+    return next((idx for idx in range(length, 0, -1) if _match(idx)), 0)
 
 
 def _trim_overlap(prev: str, curr: str) -> str:
