@@ -1,8 +1,41 @@
+import json
 import os
 import subprocess
 from pathlib import Path
 
 from pdf_chunker.passes.emit_jsonl import _rows, _flag_potential_duplicates
+
+
+def _convert_platform_eng(tmp_path: Path, *, extra_env: dict[str, str] | None = None) -> tuple[Path, subprocess.CompletedProcess[str]]:
+    pdf = Path("platform-eng-excerpt.pdf").resolve()
+    spec = Path("pipeline.yaml").resolve()
+    out = tmp_path / "out.jsonl"
+    base_env = {
+        **os.environ,
+        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+    }
+    if extra_env:
+        base_env = {**base_env, **extra_env}
+    proc = subprocess.run(
+        [
+            "python",
+            "-m",
+            "pdf_chunker.cli",
+            "convert",
+            str(pdf),
+            "--spec",
+            str(spec),
+            "--out",
+            str(out),
+            "--no-enrich",
+        ],
+        check=True,
+        cwd=tmp_path,
+        env=base_env,
+        capture_output=True,
+        text=True,
+    )
+    return out, proc
 
 
 def test_leading_fragment_not_dropped():
@@ -111,35 +144,34 @@ def test_flag_potential_duplicates():
 
 
 def test_split_does_not_duplicate(tmp_path: Path) -> None:
-    pdf = Path("platform-eng-excerpt.pdf").resolve()
-    spec = Path("pipeline.yaml").resolve()
-    out = tmp_path / "out.jsonl"
-    env = {
-        **os.environ,
-        "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
-        "PDF_CHUNKER_DEDUP_DEBUG": "1",
-    }
-    proc = subprocess.run(
-        [
-            "python",
-            "-m",
-            "pdf_chunker.cli",
-            "convert",
-            str(pdf),
-            "--spec",
-            str(spec),
-            "--out",
-            str(out),
-            "--no-enrich",
-        ],
-        check=True,
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
+    out, proc = _convert_platform_eng(
+        tmp_path, extra_env={"PDF_CHUNKER_DEDUP_DEBUG": "1"}
     )
     text = out.read_text()
     matches = text.count("Most engineers")
     assert matches == 1, proc.stderr
     assert "Infrastructure setup" in text
     assert "dedupe dropped" in proc.stderr
+
+
+def test_platform_eng_sentence_boundary(tmp_path: Path) -> None:
+    out, _ = _convert_platform_eng(tmp_path)
+    rows = [
+        json.loads(line)
+        for line in out.read_text().splitlines()
+        if line.strip()
+    ]
+    phrase = "It only works because you have one person"
+    chunk = next(row for row in rows if phrase in row["text"])
+    position = chunk["text"].find(phrase)
+    assert position > 0
+    prefix = chunk["text"][:position].rstrip()
+    assert prefix and prefix[-1] in ".!?:;"
+    chunk_id = chunk["metadata"]["chunk_id"]
+    intro = next(
+        row
+        for row in rows
+        if row["metadata"].get("chunk_id") == chunk_id
+        and row["metadata"].get("chunk_part", 0) == 0
+    )
+    assert intro["text"].rstrip().endswith(":")

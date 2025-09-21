@@ -41,6 +41,7 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
 
 
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
+_SENTENCE_BOUNDARY = re.compile(r"[.?!][\"')\]]*\s+")
 
 
 def _merge_sentence_fragments(
@@ -131,7 +132,15 @@ def _merge_sentence_fragments(
             return _append(acc, chunk, words)
 
         if limit is not None and len(prev_words) + len(trimmed_words) > limit:
-            return _append(acc, chunk, words)
+            adjusted = _rebalance_overflow(prev_text, prev_words, trimmed_text, limit)
+            if adjusted is not None:
+                prev_text, prev_words, trimmed_text = adjusted
+                trimmed_words = tuple(trimmed_text.split())
+                if trimmed_words:
+                    acc = [*acc[:-1], (prev_text, prev_words)]
+            if not trimmed_words:
+                return _append(acc, chunk, words)
+            return _append(acc, trimmed_text, trimmed_words)
 
         merged_text = f"{prev_text} {trimmed_text}".strip()
         merged_words = (*prev_words, *trimmed_words)
@@ -144,6 +153,57 @@ def _merge_sentence_fragments(
     )
 
     return [text for text, _ in merged]
+
+
+def _rebalance_overflow(
+    prev_text: str,
+    prev_words: tuple[str, ...],
+    next_text: str,
+    limit: int | None,
+) -> tuple[str, tuple[str, ...], str] | None:
+    if limit is None or len(prev_words) <= limit:
+        return None
+    boundaries = [
+        match.end()
+        for match in _SENTENCE_BOUNDARY.finditer(prev_text)
+        if match.end() < len(prev_text)
+    ]
+    if not boundaries:
+        return None
+    for pos in reversed(boundaries):
+        head = prev_text[:pos].rstrip()
+        tail = prev_text[pos:].lstrip()
+        if not head or not tail:
+            continue
+        head_words = tuple(head.split())
+        if len(head_words) > limit:
+            continue
+        merged = _merge_tail_with_next(tail, next_text)
+        merged_words = tuple(merged.split())
+        if not merged_words:
+            continue
+        return head, head_words, merged
+    return None
+
+
+def _merge_tail_with_next(tail: str, current: str) -> str:
+    core = tail.rstrip()
+    trailing = tail[len(core) :]
+    if not core:
+        return current.lstrip()
+    current_core = current.lstrip()
+    if not current_core:
+        return core
+    max_overlap = min(len(core), len(current_core))
+    overlap = next(
+        (size for size in range(max_overlap, 0, -1) if core.endswith(current_core[:size])),
+        0,
+    )
+    remainder = current_core[overlap:].lstrip()
+    if not remainder:
+        return core
+    glue = trailing if trailing else ("" if core.endswith((" ", "\n", "\t")) else " ")
+    return f"{core}{glue}{remainder}"
 
 
 Doc = dict[str, Any]
