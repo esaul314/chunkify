@@ -62,6 +62,27 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
     return list(_split(text))
 
 
+def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
+    if overlap <= 0:
+        return chunks
+    restored: list[str] = []
+    previous: tuple[str, ...] = ()
+
+    for chunk in chunks:
+        words = tuple(chunk.split())
+        if previous:
+            window = min(overlap, len(previous))
+            prefix = words[:window]
+            overlap_words = previous[-window:]
+            if overlap_words and tuple(prefix) != overlap_words:
+                words = (*overlap_words, *words)
+                chunk = " ".join(words)
+        restored.append(chunk)
+        previous = words
+
+    return restored
+
+
 def _stitch_block_continuations(
     seq: Iterable[tuple[int, Block, str]], limit: int | None
 ) -> list[tuple[int, Block, str]]:
@@ -142,7 +163,7 @@ def _get_split_fn(
                 min_chunk_size=min_chunk_size,
             )
             soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
-            return final
+            return _restore_overlap_words(final, overlap)
 
     except Exception:  # pragma: no cover - safety fallback
 
@@ -156,7 +177,7 @@ def _get_split_fn(
                 min_chunk_size=min_chunk_size,
             )
             soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
-            return final
+            return _restore_overlap_words(final, overlap)
 
     def metrics() -> dict[str, int]:
         return {"soft_limit_hits": soft_hits}
