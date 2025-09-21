@@ -8,14 +8,19 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
 from itertools import chain
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 from pdf_chunker.framework import Artifact, Pass, register
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.passes.chunk_options import (
+    SplitMetrics,
+    SplitOptions,
+    derive_min_chunk_size,
+)
 from pdf_chunker.passes.chunk_pipeline import (
     attach_headings as pipeline_attach_headings,
 )
@@ -31,7 +36,6 @@ from pdf_chunker.passes.chunk_pipeline import (
 from pdf_chunker.passes.sentence_fusion import (
     _ENDS_SENTENCE,
     SOFT_LIMIT,
-    _compute_limit,
     _is_continuation_lead,
     _last_sentence,
     _merge_sentence_fragments,
@@ -91,16 +95,10 @@ SplitFn = Callable[[str], list[str]]
 MetricFn = Callable[[], dict[str, int | bool]]
 
 
-class _SplitOpts(TypedDict, total=False):
+class _OverrideOpts(TypedDict, total=False):
     chunk_size: int
     overlap: int
     generate_metadata: bool
-    min_chunk_size: int
-
-
-def _derive_min_chunk_size(chunk_size: int, min_size: int | None) -> int:
-    """Return ``min_size`` or derive it as a fraction of ``chunk_size``."""
-    return min_size if min_size is not None else max(8, chunk_size // 10)
 
 
 def _get_split_fn(
@@ -338,39 +336,6 @@ def _inject_continuation_context(items: list[Chunk], limit: int | None) -> list[
     return items
 
 
-def _update_meta(
-    meta: dict[str, Any] | None, count: int, extra: dict[str, int | bool]
-) -> dict[str, Any]:
-    metrics = {**{"chunks": count}, **extra}
-    existing = ((meta or {}).get("metrics") or {}).get("split_semantic", {})
-    merged_metrics = {**existing, **metrics}
-    existing_metrics = (meta or {}).get("metrics") or {}
-    return {
-        **(meta or {}),
-        "metrics": {**existing_metrics, "split_semantic": merged_metrics},
-    }
-
-
-def _resolve_opts(
-    meta: Mapping[str, Any] | None, base: _SplitSemanticPass
-) -> tuple[int, int, int]:  # noqa: E501
-    """Return ``chunk_size``, ``overlap``, and ``min_chunk_size`` from ``meta``."""
-
-    opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
-    chunk = int(opts.get("chunk_size", base.chunk_size))
-    overlap = int(opts.get("overlap", base.overlap))
-    min_size = (
-        int(opts["min_chunk_size"])
-        if "min_chunk_size" in opts
-        else (
-            base.min_chunk_size
-            if "chunk_size" not in opts
-            else _derive_min_chunk_size(chunk, None)  # noqa: E501
-        )
-    )
-    return chunk, overlap, cast(int, min_size)
-
-
 @dataclass
 class _SplitSemanticPass:
     name: str = field(default="split_semantic", init=False)
@@ -386,7 +351,7 @@ class _SplitSemanticPass:
     generate_metadata: bool = True
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = _derive_min_chunk_size(
+        self.min_chunk_size = derive_min_chunk_size(
             self.chunk_size, self.min_chunk_size
         )  # noqa: E501
 
@@ -394,9 +359,12 @@ class _SplitSemanticPass:
         doc = a.payload
         if not isinstance(doc, dict) or doc.get("type") != "page_blocks":
             return a
-        chunk_size, overlap, min_chunk_size = _resolve_opts(a.meta, self)
-        split_fn, metric_fn = _get_split_fn(chunk_size, overlap, min_chunk_size)
-        limit = _compute_limit(chunk_size, overlap, min_chunk_size)
+        defaults = SplitOptions.from_base(self.chunk_size, self.overlap, self.min_chunk_size)
+        options = defaults.with_meta(a.meta)
+        split_fn, metric_fn = _get_split_fn(
+            options.chunk_size, options.overlap, options.min_chunk_size
+        )
+        limit = options.compute_limit()
         items = list(
             _chunk_items(
                 doc,
@@ -406,7 +374,7 @@ class _SplitSemanticPass:
             )
         )
         items = _inject_continuation_context(items, limit)
-        meta = _update_meta(a.meta, len(items), metric_fn())
+        meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
 
@@ -415,7 +383,7 @@ DEFAULT_SPLITTER = _SplitSemanticPass()
 
 def make_splitter(**opts: Any) -> _SplitSemanticPass:
     """Return a configured ``split_semantic`` pass from ``opts``."""
-    opts_map: _SplitOpts = {
+    opts_map: _OverrideOpts = {
         "chunk_size": int(opts.get("chunk_size", DEFAULT_SPLITTER.chunk_size)),
         "overlap": int(opts.get("overlap", DEFAULT_SPLITTER.overlap)),
         "generate_metadata": bool(
