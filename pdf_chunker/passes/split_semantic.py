@@ -16,6 +16,18 @@ from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.passes.chunk_pipeline import (
+    attach_headings as pipeline_attach_headings,
+)
+from pdf_chunker.passes.chunk_pipeline import (
+    chunk_records as pipeline_chunk_records,
+)
+from pdf_chunker.passes.chunk_pipeline import (
+    iter_blocks as pipeline_iter_blocks,
+)
+from pdf_chunker.passes.chunk_pipeline import (
+    merge_adjacent_blocks as pipeline_merge_adjacent_blocks,
+)
 from pdf_chunker.passes.sentence_fusion import (
     _ENDS_SENTENCE,
     SOFT_LIMIT,
@@ -154,72 +166,64 @@ def _get_split_fn(
     return split, metrics
 
 
-def _iter_blocks(doc: Doc) -> Iterable[tuple[int, Block]]:
-    """Yield ``(page_number, block)`` pairs from a document."""
+def _block_text(block: Block) -> str:
+    return block.get("text", "")
 
-    return (
-        (page.get("page", i + 1), block)
-        for i, page in enumerate(doc.get("pages", []))
-        for block in page.get("blocks", [])
-    )
+
+def _starts_list_like(block: Block, text: str) -> bool:
+    if block.get("type") == "list_item" and block.get("list_kind"):
+        return True
+    stripped = text.lstrip()
+    return bool(stripped) and (starts_with_bullet(stripped) or starts_with_number(stripped))
+
+
+def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
+    if not prev_text.rstrip().endswith(":"):
+        return False
+    lead = text.lstrip()
+    if not lead:
+        return False
+    head = lead[0]
+    return head.isupper() or head.isdigit() or _starts_list_like(block, text)
+
+
+def _merge_blocks(
+    acc: list[tuple[int, Block, str]],
+    cur: tuple[int, Block, str],
+) -> list[tuple[int, Block, str]]:
+    page, block, text = cur
+    if not acc:
+        return acc + [cur]
+    prev_page, prev_block, prev_text = acc[-1]
+    if prev_page != page:
+        return acc + [cur]
+    if _is_heading(prev_block) or _is_heading(block):
+        return acc + [cur]
+    if _starts_list_like(block, text):
+        return acc + [cur]
+    if _should_break_after_colon(prev_text, block, text):
+        return acc + [cur]
+    lead = text.lstrip()
+    continuation_chars = ",.;:)]\"'"
+    prev_ends_sentence = _ENDS_SENTENCE.search(prev_text.rstrip())
+    if lead and (
+        _is_continuation_lead(lead)
+        or (not prev_ends_sentence and (lead[0].islower() or lead[0] in continuation_chars))
+    ):
+        acc[-1] = (prev_page, prev_block, f"{prev_text} {text}".strip())
+        return acc
+    return acc + [cur]
 
 
 def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]]:
     """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
-    def _starts_list_like(block: Block, text: str) -> bool:
-        if block.get("type") == "list_item" and block.get("list_kind"):
-            return True
-        stripped = text.lstrip()
-        return bool(stripped) and (starts_with_bullet(stripped) or starts_with_number(stripped))
-
-    def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
-        if not prev_text.rstrip().endswith(":"):
-            return False
-        lead = text.lstrip()
-        if not lead:
-            return False
-        head = lead[0]
-        return head.isupper() or head.isdigit() or _starts_list_like(block, text)
-
-    def _merge(
-        acc: list[tuple[int, Block, str]],
-        cur: tuple[int, Block, str],
-    ) -> list[tuple[int, Block, str]]:
-        page, block, text = cur
-        if not acc:
-            return acc + [cur]
-        prev_page, prev_block, prev_text = acc[-1]
-        if prev_page != page:
-            return acc + [cur]
-        if _is_heading(prev_block) or _is_heading(block):
-            return acc + [cur]
-        if _starts_list_like(block, text):
-            return acc + [cur]
-        if _should_break_after_colon(prev_text, block, text):
-            return acc + [cur]
-        lead = text.lstrip()
-        continuation_chars = ",.;:)]\"'"
-        prev_ends_sentence = _ENDS_SENTENCE.search(prev_text.rstrip())
-        if lead and (
-            _is_continuation_lead(lead)
-            or (not prev_ends_sentence and (lead[0].islower() or lead[0] in continuation_chars))
-        ):
-            acc[-1] = (
-                prev_page,
-                prev_block,
-                f"{prev_text} {text}".strip(),
-            )
-            return acc
-        return acc + [cur]
-
-    merged: list[tuple[int, Block, str]] = reduce(
-        _merge,
-        ((p, b, b.get("text", "")) for p, b in _iter_blocks(doc)),
-        cast(list[tuple[int, Block, str]], []),
+    return pipeline_merge_adjacent_blocks(
+        pipeline_iter_blocks(doc),
+        text_of=_block_text,
+        fold=_merge_blocks,
+        split_fn=split_fn,
     )
-
-    return ((page, block, text) for page, block, raw in merged for text in split_fn(raw) if text)
 
 
 def _is_heading(block: Block) -> bool:
@@ -251,37 +255,12 @@ def _normalize_bullet_tail(tail: str) -> str:
     return f"{normalized} {rest[0]}".strip() if rest and rest[0] else normalized
 
 
-def _merge_heading_texts(headings: list[str], body: str) -> str:
+def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
     if any(starts_with_bullet(h.lstrip()) for h in headings):
         lead = " ".join(h.rstrip() for h in headings).rstrip()
         tail = _normalize_bullet_tail(body.lstrip()) if body else ""
         return f"{lead} {tail}".strip()
     return "\n".join(chain(headings, [body])).strip()
-
-
-def _merge_headings(
-    seq: Iterator[tuple[int, Block, str]],
-) -> Iterator[tuple[int, Block, str]]:
-    """Attach consecutive headings to the following block and drop trailing ones."""
-
-    it = iter(seq)
-    for page, block, text in it:
-        if not _is_heading(block):
-            yield page, block, text
-            continue
-
-        pages = [page]
-        texts = [text]
-        for page, block, text in it:
-            if _is_heading(block):
-                pages.append(page)
-                texts.append(text)
-                continue
-            merged_text = _merge_heading_texts(texts, text)
-            yield pages[0], {**block}, merged_text
-            break
-        else:
-            return
 
 
 def _with_source(block: Block, page: int, filename: str | None) -> Block:
@@ -325,19 +304,19 @@ def _chunk_items(
 
     filename = doc.get("source_path")
     merged = _stitch_block_continuations(
-        _merge_headings(_block_texts(doc, split_fn)),
+        pipeline_attach_headings(
+            _block_texts(doc, split_fn),
+            is_heading=_is_heading,
+            merge_block_text=_merge_heading_texts,
+        ),
         limit,
     )
-    return (
-        {
-            "id": str(i),
-            **(
-                build_chunk_with_meta(text, block, page, filename, i)
-                if generate_metadata
-                else build_chunk(text)
-            ),
-        }
-        for i, (page, block, text) in enumerate(merged)
+    builder = partial(build_chunk_with_meta, filename=filename)
+    return pipeline_chunk_records(
+        merged,
+        generate_metadata=generate_metadata,
+        build_plain=build_chunk,
+        build_with_meta=builder,
     )
 
 
