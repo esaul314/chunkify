@@ -318,22 +318,23 @@ def _chunk_items(
     )
 
 
-def _inject_continuation_context(items: list[Chunk], limit: int | None) -> list[Chunk]:
+def _inject_continuation_context(items: Iterable[Chunk], limit: int | None) -> Iterator[Chunk]:
     prev_text: str | None = None
     for item in items:
         text = item.get("text", "")
         lead = text.lstrip()
         if prev_text is None or not lead or not _is_continuation_lead(lead):
             prev_text = text
+            yield item
             continue
         context = _last_sentence(prev_text)
         if not context or lead.startswith(context):
             prev_text = text
+            yield item
             continue
         combined = f"{context} {text}".strip()
-        item["text"] = combined
         prev_text = combined
-    return items
+        yield {**item, "text": combined}
 
 
 @dataclass
@@ -359,21 +360,35 @@ class _SplitSemanticPass:
         doc = a.payload
         if not isinstance(doc, dict) or doc.get("type") != "page_blocks":
             return a
-        defaults = SplitOptions.from_base(self.chunk_size, self.overlap, self.min_chunk_size)
-        options = defaults.with_meta(a.meta)
+        options = SplitOptions.from_base(
+            self.chunk_size, self.overlap, self.min_chunk_size
+        ).with_meta(a.meta)
         split_fn, metric_fn = _get_split_fn(
             options.chunk_size, options.overlap, options.min_chunk_size
         )
         limit = options.compute_limit()
-        items = list(
-            _chunk_items(
-                doc,
-                split_fn,
-                generate_metadata=self.generate_metadata,
-                limit=limit,
-            )
+        chunk_records = pipeline_chunk_records(
+            _stitch_block_continuations(
+                pipeline_attach_headings(
+                    pipeline_merge_adjacent_blocks(
+                        pipeline_iter_blocks(doc),
+                        text_of=_block_text,
+                        fold=_merge_blocks,
+                        split_fn=split_fn,
+                    ),
+                    is_heading=_is_heading,
+                    merge_block_text=_merge_heading_texts,
+                ),
+                limit,
+            ),
+            generate_metadata=self.generate_metadata,
+            build_plain=build_chunk,
+            build_with_meta=partial(
+                build_chunk_with_meta,
+                filename=doc.get("source_path"),
+            ),
         )
-        items = _inject_continuation_context(items, limit)
+        items = list(_inject_continuation_context(chunk_records, limit))
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
