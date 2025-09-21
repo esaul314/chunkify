@@ -49,11 +49,18 @@ def _merge_sentence_fragments(
     max_words: int = 80,
     chunk_size: int | None = None,
     overlap: int = 0,
+    min_chunk_size: int | None = None,
 ) -> list[str]:
     """Merge trailing fragments until a sentence boundary or limits reached."""
 
     allowed_overlap = max(overlap, 0)
-    limit = max(chunk_size - allowed_overlap, 0) if chunk_size and chunk_size > 0 else None
+    respect_limit = (
+        chunk_size is not None
+        and chunk_size > 0
+        and min_chunk_size is not None
+        and min_chunk_size <= chunk_size // 2
+    )
+    limit = max(cast(int, chunk_size) - allowed_overlap, 0) if respect_limit else None
 
     def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
         """Return ``True`` when ``previous`` and ``current`` should coalesce."""
@@ -123,8 +130,7 @@ def _merge_sentence_fragments(
         if not _should_merge(prev_text, trimmed_text, list(prev_words)):
             return _append(acc, chunk, words)
 
-        projected = len(prev_words) + len(trimmed_words)
-        if limit is not None and projected > limit:
+        if limit is not None and len(prev_words) + len(trimmed_words) > limit:
             return _append(acc, chunk, words)
 
         merged_text = f"{prev_text} {trimmed_text}".strip()
@@ -169,10 +175,7 @@ def _get_split_fn(
     soft_hits = 0
 
     try:
-        from pdf_chunker.splitter import (
-            iter_word_chunks,
-            semantic_chunker,
-        )
+        from pdf_chunker.splitter import semantic_chunker
 
         semantic = partial(
             semantic_chunker,
@@ -195,13 +198,13 @@ def _get_split_fn(
                     soft_hits += 1
                 return splits
 
-            raw = [
-                seg
-                for c in merged
-                for sub in iter_word_chunks(c, chunk_size, overlap)
-                for seg in _soften(sub)
-            ]
-            final = _merge_sentence_fragments(raw, chunk_size=chunk_size, overlap=overlap)
+            raw = [softened for chunk in merged for softened in _soften(chunk)]
+            final = _merge_sentence_fragments(
+                raw,
+                chunk_size=chunk_size,
+                overlap=overlap,
+                min_chunk_size=min_chunk_size,
+            )
             soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
             return final
 
@@ -210,7 +213,12 @@ def _get_split_fn(
         def split(text: str) -> list[str]:
             nonlocal soft_hits
             raw = _soft_segments(text)
-            final = _merge_sentence_fragments(raw, chunk_size=chunk_size, overlap=overlap)
+            final = _merge_sentence_fragments(
+                raw,
+                chunk_size=chunk_size,
+                overlap=overlap,
+                min_chunk_size=min_chunk_size,
+            )
             soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
             return final
 
@@ -233,6 +241,21 @@ def _iter_blocks(doc: Doc) -> Iterable[tuple[int, Block]]:
 def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]]:
     """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
+    def _starts_list_like(block: Block, text: str) -> bool:
+        if block.get("type") == "list_item" and block.get("list_kind"):
+            return True
+        stripped = text.lstrip()
+        return bool(stripped) and (starts_with_bullet(stripped) or starts_with_number(stripped))
+
+    def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
+        if not prev_text.rstrip().endswith(":"):
+            return False
+        lead = text.lstrip()
+        if not lead:
+            return False
+        head = lead[0]
+        return head.isupper() or head.isdigit() or _starts_list_like(block, text)
+
     def _merge(
         acc: list[tuple[int, Block, str]],
         cur: tuple[int, Block, str],
@@ -245,7 +268,16 @@ def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]
             return acc + [cur]
         if _is_heading(prev_block) or _is_heading(block):
             return acc + [cur]
-        if not _ENDS_SENTENCE.search(prev_text.rstrip()) or text[:1].islower():
+        if _starts_list_like(block, text):
+            return acc + [cur]
+        if _should_break_after_colon(prev_text, block, text):
+            return acc + [cur]
+        lead = text.lstrip()
+        if (
+            not _ENDS_SENTENCE.search(prev_text.rstrip())
+            and lead
+            and (lead[0].islower() or lead[0] in ",.;:)]\"'")
+        ):
             acc[-1] = (
                 prev_page,
                 prev_block,

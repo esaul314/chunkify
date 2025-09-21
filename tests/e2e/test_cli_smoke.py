@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -8,10 +9,20 @@ from shutil import which
 
 import pytest
 
-# Skip if heavy PDF dependency or CLI is missing
-pytest.importorskip("fitz")
-if which("pdf_chunker") is None:
-    pytest.skip("pdf_chunker CLI not installed", allow_module_level=True)
+
+def _is_cli_prerequisite_available() -> bool:
+    return all(
+        (
+            importlib.util.find_spec("fitz") is not None,
+            which("pdf_chunker") is not None,
+        )
+    )
+
+
+pytestmark = pytest.mark.skipif(
+    not _is_cli_prerequisite_available(),
+    reason="PyMuPDF (fitz) and pdf_chunker CLI required for smoke test",
+)
 
 
 def _materialize_sample_pdf() -> Path:
