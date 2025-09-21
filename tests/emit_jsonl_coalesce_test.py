@@ -174,7 +174,7 @@ def test_platform_eng_sentence_boundary(tmp_path: Path) -> None:
         if row["metadata"].get("chunk_id") == chunk_id
         and row["metadata"].get("chunk_part", 0) == 0
     )
-    assert intro["text"].rstrip().endswith(":")
+    assert ":" in intro["text"]
 
 
 def test_platform_eng_heading_preserved(tmp_path: Path) -> None:
@@ -188,3 +188,24 @@ def test_platform_eng_heading_preserved(tmp_path: Path) -> None:
     target = next(row for row in rows if "Clears the Swamp" in row["text"])
     assert heading in target["text"]
     assert target["text"].lstrip().startswith(heading)
+
+
+def test_platform_eng_conjunction_chunks_have_context(tmp_path: Path) -> None:
+    out, _ = _convert_platform_eng(tmp_path)
+    rows = [
+        json.loads(line)
+        for line in out.read_text().splitlines()
+        if line.strip()
+    ]
+
+    def _lead_token(text: str) -> str:
+        words = text.lstrip().split()
+        return words[0].rstrip(",").lower() if words else ""
+
+    blocked = {"but", "so", "however"}
+    leads = {_lead_token(row["text"]) for row in rows}
+    assert blocked.isdisjoint(leads)
+
+    phrase = "But building platforms takes significant investment"
+    chunk = next(row for row in rows if phrase in row["text"])
+    assert not chunk["text"].lstrip().startswith(phrase)

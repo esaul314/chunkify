@@ -42,6 +42,55 @@ def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
 
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
 _SENTENCE_BOUNDARY = re.compile(r"[.?!][\"')\]]*\s+")
+_WORD_START = re.compile(r"[\w']+")
+_LEADING_CONTINUATIONS = frozenset(
+    token.lower()
+    for token in (
+        "And",
+        "But",
+        "So",
+        "However",
+        "Therefore",
+        "Yet",
+        "Still",
+        "Also",
+        "Meanwhile",
+        "Additionally",
+        "Then",
+        "Thus",
+        "Instead",
+        "Nevertheless",
+        "Nonetheless",
+        "Consequently",
+        "Moreover",
+    )
+)
+
+
+def _leading_token(text: str) -> str:
+    match = _WORD_START.match(text)
+    return match.group(0).lower() if match else ""
+
+
+def _is_continuation_lead(text: str) -> bool:
+    return _leading_token(text) in _LEADING_CONTINUATIONS
+
+
+def _compute_limit(chunk_size: int | None, overlap: int, min_chunk_size: int | None) -> int | None:
+    if chunk_size is None or chunk_size <= 0:
+        return None
+    derived_min = min_chunk_size if min_chunk_size is not None else chunk_size // 10
+    if derived_min > chunk_size // 2:
+        return None
+    return max(int(chunk_size) - max(overlap, 0), 0)
+
+
+def _last_sentence(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    segments = [seg.strip() for seg in _SENTENCE_BOUNDARY.split(stripped) if seg.strip()]
+    return segments[-1] if segments else stripped
 
 
 def _merge_sentence_fragments(
@@ -55,23 +104,18 @@ def _merge_sentence_fragments(
     """Merge trailing fragments until a sentence boundary or limits reached."""
 
     allowed_overlap = max(overlap, 0)
-    respect_limit = (
-        chunk_size is not None
-        and chunk_size > 0
-        and min_chunk_size is not None
-        and min_chunk_size <= chunk_size // 2
-    )
-    limit = max(cast(int, chunk_size) - allowed_overlap, 0) if respect_limit else None
+    limit = _compute_limit(chunk_size, allowed_overlap, min_chunk_size)
 
     def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
         """Return ``True`` when ``previous`` and ``current`` should coalesce."""
 
         if not previous:
             return False
-        if _ENDS_SENTENCE.search(previous.rstrip()):
-            return False
         lead = current.lstrip()
         if not lead:
+            return False
+        continuation_lead = _is_continuation_lead(lead)
+        if _ENDS_SENTENCE.search(previous.rstrip()) and not continuation_lead:
             return False
         current_words = current.split()
         first_word = current_words[0] if current_words else ""
@@ -79,7 +123,7 @@ def _merge_sentence_fragments(
             return False
         head = lead[0]
         continuation_chars = ",.;:)]\"'"
-        if not (head.islower() or head in continuation_chars):
+        if not (continuation_lead or head.islower() or head in continuation_chars):
             return False
         combined = len(previous) + 1 + len(current)
         if len(previous) >= SOFT_LIMIT or len(current) >= SOFT_LIMIT:
@@ -152,7 +196,85 @@ def _merge_sentence_fragments(
         [],
     )
 
-    return [text for text, _ in merged]
+    return _stitch_continuation_heads([text for text, _ in merged], limit)
+
+
+def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str]:
+    def _consume(acc: list[str], chunk: str) -> list[str]:
+        if not chunk:
+            return acc
+        if not acc:
+            return [*acc, chunk]
+
+        prev = acc[-1]
+        prev_words = tuple(prev.split())
+        remaining = chunk
+        changed = False
+
+        while True:
+            lead = remaining.lstrip()
+            if not lead or not _is_continuation_lead(lead):
+                break
+            boundary = next(
+                (
+                    match.end()
+                    for match in _SENTENCE_BOUNDARY.finditer(remaining)
+                    if match.end() < len(remaining)
+                ),
+                None,
+            )
+            if boundary is None:
+                break
+            head = remaining[:boundary].strip()
+            tail = remaining[boundary:].lstrip()
+            if not head or not tail:
+                break
+            head_words = tuple(head.split())
+            if limit is not None and len(prev_words) + len(head_words) > limit:
+                break
+            prev = f"{prev} {head}".strip()
+            prev_words = tuple(prev.split())
+            remaining = tail
+            changed = True
+
+        if not changed:
+            if _is_continuation_lead(chunk.lstrip()):
+                context = _last_sentence(prev)
+                if context and not chunk.lstrip().startswith(context):
+                    prefixed = f"{context} {chunk}".strip()
+                    return [*acc, prefixed]
+            return [*acc, chunk]
+        if not remaining:
+            return [*acc[:-1], prev]
+        return [*acc[:-1], prev, remaining]
+
+    return reduce(_consume, chunks, [])
+
+
+def _stitch_block_continuations(
+    seq: Iterable[tuple[int, Block, str]], limit: int | None
+) -> list[tuple[int, Block, str]]:
+    def _consume(
+        acc: list[tuple[int, Block, str]],
+        cur: tuple[int, Block, str],
+    ) -> list[tuple[int, Block, str]]:
+        page, block, text = cur
+        if not acc:
+            return [*acc, cur]
+        lead = text.lstrip()
+        if not lead or not _is_continuation_lead(lead):
+            return [*acc, cur]
+        context = _last_sentence(acc[-1][2])
+        if not context or text.lstrip().startswith(context):
+            return [*acc, cur]
+        context_words = tuple(context.split())
+        text_words = tuple(text.split())
+        if limit is not None and len(text_words) + len(context_words) > limit:
+            return [*acc, cur]
+        enriched = f"{context} {text}".strip()
+        return [*acc, (page, block, enriched)]
+
+    return reduce(_consume, seq, [])
 
 
 def _rebalance_overflow(
@@ -161,29 +283,60 @@ def _rebalance_overflow(
     next_text: str,
     limit: int | None,
 ) -> tuple[str, tuple[str, ...], str] | None:
-    if limit is None or len(prev_words) <= limit:
+    if limit is None:
         return None
-    boundaries = [
-        match.end()
-        for match in _SENTENCE_BOUNDARY.finditer(prev_text)
-        if match.end() < len(prev_text)
-    ]
-    if not boundaries:
-        return None
-    for pos in reversed(boundaries):
-        head = prev_text[:pos].rstrip()
-        tail = prev_text[pos:].lstrip()
-        if not head or not tail:
-            continue
-        head_words = tuple(head.split())
-        if len(head_words) > limit:
-            continue
-        merged = _merge_tail_with_next(tail, next_text)
-        merged_words = tuple(merged.split())
-        if not merged_words:
-            continue
-        return head, head_words, merged
-    return None
+
+    updated_prev = prev_text
+    updated_prev_words = prev_words
+    updated_next = next_text
+    changed = False
+
+    if len(updated_prev_words) > limit:
+        boundaries = [
+            match.end()
+            for match in _SENTENCE_BOUNDARY.finditer(updated_prev)
+            if match.end() < len(updated_prev)
+        ]
+        for pos in reversed(boundaries):
+            head = updated_prev[:pos].rstrip()
+            tail = updated_prev[pos:].lstrip()
+            if not head or not tail:
+                continue
+            head_words = tuple(head.split())
+            if len(head_words) > limit:
+                continue
+            merged = _merge_tail_with_next(tail, updated_next)
+            merged_words = tuple(merged.split())
+            if not merged_words:
+                continue
+            updated_prev = head
+            updated_prev_words = head_words
+            updated_next = merged
+            changed = True
+            break
+        else:
+            return None
+
+    lead = updated_next.lstrip()
+    if lead and _is_continuation_lead(lead):
+        boundaries = [
+            match.end()
+            for match in _SENTENCE_BOUNDARY.finditer(updated_next)
+            if match.end() < len(updated_next)
+        ]
+        if boundaries:
+            pos = boundaries[0]
+            head = updated_next[:pos].strip()
+            tail = updated_next[pos:].lstrip()
+            if head and tail:
+                head_words = tuple(head.split())
+                if len(updated_prev_words) + len(head_words) <= limit:
+                    updated_prev = f"{updated_prev} {head}".strip()
+                    updated_prev_words = tuple(updated_prev.split())
+                    updated_next = tail
+                    changed = True
+
+    return (updated_prev, updated_prev_words, updated_next) if changed else None
 
 
 def _merge_tail_with_next(tail: str, current: str) -> str:
@@ -333,10 +486,11 @@ def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]
         if _should_break_after_colon(prev_text, block, text):
             return acc + [cur]
         lead = text.lstrip()
-        if (
-            not _ENDS_SENTENCE.search(prev_text.rstrip())
-            and lead
-            and (lead[0].islower() or lead[0] in ",.;:)]\"'")
+        continuation_chars = ",.;:)]\"'"
+        prev_ends_sentence = _ENDS_SENTENCE.search(prev_text.rstrip())
+        if lead and (
+            _is_continuation_lead(lead)
+            or (not prev_ends_sentence and (lead[0].islower() or lead[0] in continuation_chars))
         ):
             acc[-1] = (
                 prev_page,
@@ -451,11 +605,16 @@ def _chunk_items(
     doc: Doc,
     split_fn: SplitFn,
     generate_metadata: bool = True,
+    *,
+    limit: int | None = None,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
-    merged = _merge_headings(_block_texts(doc, split_fn))
+    merged = _stitch_block_continuations(
+        _merge_headings(_block_texts(doc, split_fn)),
+        limit,
+    )
     return (
         {
             "id": str(i),
@@ -467,6 +626,24 @@ def _chunk_items(
         }
         for i, (page, block, text) in enumerate(merged)
     )
+
+
+def _inject_continuation_context(items: list[Chunk], limit: int | None) -> list[Chunk]:
+    prev_text: str | None = None
+    for item in items:
+        text = item.get("text", "")
+        lead = text.lstrip()
+        if prev_text is None or not lead or not _is_continuation_lead(lead):
+            prev_text = text
+            continue
+        context = _last_sentence(prev_text)
+        if not context or lead.startswith(context):
+            prev_text = text
+            continue
+        combined = f"{context} {text}".strip()
+        item["text"] = combined
+        prev_text = combined
+    return items
 
 
 def _update_meta(
@@ -527,7 +704,16 @@ class _SplitSemanticPass:
             return a
         chunk_size, overlap, min_chunk_size = _resolve_opts(a.meta, self)
         split_fn, metric_fn = _get_split_fn(chunk_size, overlap, min_chunk_size)
-        items = list(_chunk_items(doc, split_fn, self.generate_metadata))
+        limit = _compute_limit(chunk_size, overlap, min_chunk_size)
+        items = list(
+            _chunk_items(
+                doc,
+                split_fn,
+                generate_metadata=self.generate_metadata,
+                limit=limit,
+            )
+        )
+        items = _inject_continuation_context(items, limit)
         meta = _update_meta(a.meta, len(items), metric_fn())
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
