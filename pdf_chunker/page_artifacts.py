@@ -48,6 +48,9 @@ def _looks_like_footnote(text: str) -> bool:
 
 _BULLET_CHARS = ("\u2022", "*", "-")
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+_PHONE_RE = re.compile(r"\+?\d[\d()\s.-]{5,}\d")
+_CONTACT_KEYWORDS = ("contact", "tel", "phone", "fax", "email")
 
 
 def _starts_with_bullet(line: str) -> bool:
@@ -79,31 +82,75 @@ def _looks_like_footer_context(text: str) -> bool:
     )
 
 
+def _bullet_body(text: str) -> str:
+    """Return ``text`` without its leading bullet marker and adornments."""
+
+    stripped = text.lstrip()
+    if not _starts_with_bullet(stripped):
+        return ""
+    without_marker = stripped.lstrip("".join(_BULLET_CHARS))
+    return without_marker.strip(" -\u2022*.")
+
+
+def _first_non_empty_line(lines: Iterable[str]) -> str:
+    """Return the first non-empty line from ``lines`` with surrounding whitespace trimmed."""
+
+    return next((candidate.strip() for candidate in lines if candidate.strip()), "")
+
+
+def _looks_like_contact_detail(text: str) -> bool:
+    """Return ``True`` when ``text`` resembles an inline contact detail."""
+
+    lowered = text.lower()
+    return bool(
+        _EMAIL_RE.search(text)
+        or _PHONE_RE.search(text)
+        or any(keyword in lowered for keyword in _CONTACT_KEYWORDS)
+    )
+
+
+def _trailing_bullet_candidates(lines: list[str]) -> list[tuple[int, str]]:
+    """Return trailing bullet candidates paired with their indices."""
+
+    enumerated = (
+        (idx, line)
+        for idx, line in enumerate(reversed(lines))
+    )
+    trailing = list(
+        takewhile(lambda pair: _starts_with_bullet(pair[1].lstrip()), enumerated)
+    )
+    return [(len(lines) - 1 - idx, line) for idx, line in trailing]
+
+
+def _footer_bullet_signals(*candidates: str) -> bool:
+    """Return ``True`` if any ``candidates`` resemble footer content."""
+
+    return any(
+        predicate(candidate)
+        for candidate in candidates
+        if candidate
+        for predicate in (_looks_like_footer_context, _looks_like_contact_detail)
+    )
+
+
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
 
-    def _bulletish(line: str) -> bool:
-        stripped = line.strip()
-        return _starts_with_bullet(stripped) and len(stripped.split()) <= 2
-
-    trailing = list(takewhile(_bulletish, reversed(lines)))
+    trailing = _trailing_bullet_candidates(lines)
     if len(trailing) != 1:
         return lines
 
-    bullet = trailing[0].lstrip()
-    body = bullet.lstrip("".join(_BULLET_CHARS)).strip(" -\u2022*.")
-    prior = next((ln.strip() for ln in reversed(lines[:-1]) if ln.strip()), "")
-    if not any(
-        _looks_like_footer_context(candidate)
-        for candidate in filter(None, (body, prior))
-    ):
+    idx, candidate = trailing[0]
+    body = _bullet_body(candidate)
+    previous = _first_non_empty_line(lines[pos] for pos in range(idx - 1, -1, -1))
+    if body and not _footer_bullet_signals(body, previous):
         return lines
 
     logger.debug(
         "remove_page_artifact_lines dropped trailing bullet footer: %s",
-        trailing[0][:30],
+        candidate.strip()[:30],
     )
-    return lines[:-1]
+    return [line for pos, line in enumerate(lines) if pos != idx]
 
 
 def _strip_spurious_number_prefix(text: str) -> str:
@@ -537,6 +584,48 @@ def _flatten_markdown_table(text: str) -> str:
     return "\n".join(filter(None, [flattened, *remaining]))
 
 
+def _leading_alpha(text: str) -> tuple[Optional[int], Optional[str]]:
+    """Return the position and character of the first alphabetical symbol."""
+
+    return next(((idx, ch) for idx, ch in enumerate(text) if ch.isalpha()), (None, None))
+
+
+def _uppercase_char(text: str, index: int) -> str:
+    """Return ``text`` with the character at ``index`` upper-cased."""
+
+    return "".join(ch.upper() if idx == index else ch for idx, ch in enumerate(text))
+
+
+def _normalize_leading_case(original: str, cleaned: str) -> str:
+    """Return ``cleaned`` with casing aligned to ``original``'s leading alpha."""
+
+    if not cleaned:
+        return cleaned
+
+    stripped_original = original.lstrip()
+    stripped_cleaned = cleaned.lstrip()
+    orig_idx, orig_char = _leading_alpha(stripped_original)
+    clean_idx, clean_char = _leading_alpha(stripped_cleaned)
+
+    if not orig_char or not clean_char or orig_char.islower() or clean_char.isupper():
+        return cleaned
+
+    offset = len(cleaned) - len(stripped_cleaned)
+    return _uppercase_char(cleaned, offset + clean_idx)
+
+
+def _apply_leading_case(pairs: list[tuple[str, str]]) -> list[str]:
+    """Return cleaned lines with the first entry's case normalised."""
+
+    if not pairs:
+        return []
+
+    first_original, first_cleaned = pairs[0]
+    head = _normalize_leading_case(first_original, first_cleaned)
+    tail = [cleaned for _, cleaned in pairs[1:]]
+    return [head, *tail]
+
+
 def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     """Remove header or footer artifact lines from a block."""
 
@@ -575,12 +664,14 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
         return stripped
 
-    cleaned_lines = list(filter(None, (_clean_line(ln) for ln in lines)))
-    if cleaned_lines and cleaned_lines[0] and cleaned_lines[0][0].islower():
-        first = cleaned_lines[0]
-        cleaned_lines[0] = first[0].upper() + first[1:]
-    cleaned_lines = _drop_trailing_bullet_footers(cleaned_lines)
-    return "\n".join(cleaned_lines)
+    cleaned_pairs = [
+        (original, cleaned)
+        for original, cleaned in ((ln, _clean_line(ln)) for ln in lines)
+        if cleaned
+    ]
+    normalised = _apply_leading_case(cleaned_pairs)
+    pruned = _drop_trailing_bullet_footers(normalised)
+    return "\n".join(pruned)
 
 
 def strip_artifacts(blocks: Iterable["Block"], config=None) -> Iterable["Block"]:
