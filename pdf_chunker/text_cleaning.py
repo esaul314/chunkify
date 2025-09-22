@@ -125,12 +125,27 @@ BULLET_CONTINUATION_RE = re.compile(
 
 # Terminal punctuation for quoted sentence continuation
 END_PUNCT = ".!?…"
+_TOKEN_RE = re.compile(r"\w+|[^\w\s]")
+_CLOSING_QUOTE_CHARS = frozenset({'"', "'", "”", "’", "›", "»"})
+_EM_DASH_CHARS = frozenset("—")
+_STOPWORD_LOWERCASE_CHARS = frozenset(",;:'\"-")
 
 # Inline artifacts
 # Avoid collapsing list markers like "2.\n3." by skipping digits after the break
 COLLAPSE_ARTIFACT_BREAKS_RE = re.compile(r"([._])\n(?!\d)(\w)")
 PIPE_RE = re.compile(r"\|")
-UNDERSCORE_WRAP_RE = re.compile(r"_{1,2}([^_]+?)_{1,2}")
+UNDERSCORE_WRAP_RE = re.compile(
+    r"(?<!\w)(?P<wrap>_{1,2})(?P<content>[^_]+?)(?P=wrap)(?!\w)"
+)
+_SIMPLE_LEADING_UNDERSCORE_RE = re.compile(
+    r"(?<!\w)_(?P<word>[A-Za-z0-9]+(?:['’\-][A-Za-z0-9]+)*)"
+)
+_SIMPLE_TRAILING_UNDERSCORE_RE = re.compile(
+    r"(?P<word>[A-Za-z0-9]+(?:['’\-][A-Za-z0-9]+)*)_+(?!\w)"
+)
+_PRESERVE_MULTIWORD_UNDERSCORE_RE = re.compile(
+    r"(?<!\w)_(?P<content>[^_\n]*\s[^_]*)_(?!\w)"
+)
 DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
 
 # Stray bullet variants
@@ -572,6 +587,25 @@ def _restore_list_breaks(text: str, sentinels: Tuple[ListBreakSentinel, ...]) ->
     return "".join(_segments())
 
 
+def _should_lowercase_bullet_stopword(prefix: str) -> bool:
+    tokens = tuple(_TOKEN_RE.findall(prefix))
+    if not tokens:
+        last_char = prefix[-1]
+        return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
+
+    for token in reversed(tokens):
+        if token in _CLOSING_QUOTE_CHARS:
+            return False
+        if token in _EM_DASH_CHARS:
+            return False
+        if any(char in END_PUNCT for char in token):
+            return False
+        last_char = token[-1]
+        return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
+
+    return False
+
+
 def _normalize_bullet_stopword_case(text: str) -> str:
     """Lowercase stopwords restored mid-sentence inside bullet items."""
 
@@ -587,8 +621,12 @@ def _normalize_bullet_stopword_case(text: str) -> str:
             trimmed = prefix.rstrip()
             if not trimmed:
                 return match.group(0)
-            prev = trimmed[-1]
-            return match.group(0).lower() if prev.islower() or prev in ",;:'\"-" else match.group(0)
+
+            return (
+                match.group(0).lower()
+                if _should_lowercase_bullet_stopword(trimmed)
+                else match.group(0)
+            )
 
         return _BULLET_STOPWORD_PATTERN.sub(_replace, line)
 
@@ -816,7 +854,32 @@ def replace_pipes(text: str) -> str:
 
 def remove_underscore_emphasis(text: str) -> str:
     """Remove single/double underscore emphasis markers."""
-    return UNDERSCORE_WRAP_RE.sub(r"\1", text)
+
+    def _unwrap(match: Match[str]) -> str:
+        content = match.group("content")
+        should_strip = (
+            bool(content)
+            and content[0].isalnum()
+            and content[-1].isalnum()
+            and all(ch.isalnum() or ch in "-'’" for ch in content)
+        )
+        return content if should_strip else match.group(0)
+
+    def _strip_leading(match: Match[str]) -> str:
+        word = match.group("word")
+        if word and (word[0].islower() or word[0].isdigit()):
+            return word
+        return match.group(0)
+
+    def _strip_trailing(match: Match[str]) -> str:
+        word = match.group("word")
+        if word and (word[0].islower() or word[0].isdigit()):
+            return word
+        return match.group(0)
+
+    stripped = UNDERSCORE_WRAP_RE.sub(_unwrap, text)
+    stripped = _SIMPLE_LEADING_UNDERSCORE_RE.sub(_strip_leading, stripped)
+    return _SIMPLE_TRAILING_UNDERSCORE_RE.sub(_strip_trailing, stripped)
 
 
 def strip_underscore_wrapping(text: str) -> str:
@@ -826,7 +889,34 @@ def strip_underscore_wrapping(text: str) -> str:
 
 def remove_dangling_underscores(text: str) -> str:
     """Remove underscores that don't join word characters."""
-    return DANGLING_UNDERSCORE_RE.sub("", text)
+    preserved_ranges = [
+        (match.start(), match.end())
+        for match in _PRESERVE_MULTIWORD_UNDERSCORE_RE.finditer(text)
+    ]
+
+    def _is_preserved(index: int) -> bool:
+        return any(start <= index < end for start, end in preserved_ranges)
+
+    def _should_keep(start: int, end: int) -> bool:
+        if _is_preserved(start):
+            return True
+        following = text[end] if end < len(text) else ""
+        return bool(following and following.isupper())
+
+    result: List[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] == "_":
+            match = DANGLING_UNDERSCORE_RE.match(text, i)
+            if match:
+                if _should_keep(match.start(), match.end()):
+                    result.append(match.group(0))
+                i = match.end()
+                continue
+        result.append(text[i])
+        i += 1
+
+    return "".join(result)
 
 
 # ---------------------------------------------------------------------------
