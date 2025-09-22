@@ -163,6 +163,8 @@ def _collapse_records(
 
     for idx, record in enumerate(seq):
         page, block, text = record
+        if buffer and page != buffer[-1][0]:
+            yield from emit()
         words = _count_words(text)
         if words > limit:
             yield from emit()
