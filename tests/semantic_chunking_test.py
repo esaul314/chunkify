@@ -1,5 +1,6 @@
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import _dedupe
+from pdf_chunker.passes.sentence_fusion import _merge_sentence_fragments
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
 import re
 
@@ -50,6 +51,42 @@ def test_no_chunk_starts_mid_sentence() -> None:
     art = _SplitSemanticPass(chunk_size=10, overlap=0)(Artifact(payload=_doc(text)))
     chunks = [c["text"] for c in art.payload["items"]]
     assert all(end_re.search(prev.rstrip()) for prev in chunks[:-1])
+
+
+def test_sentence_merge_allows_soft_limit_overflow() -> None:
+    """Sentence fusion tolerates soft-limit overflow when hard limit allows it."""
+    chunk_size, overlap = 12, 4
+    fragments = [
+        "Alpha beta gamma delta epsilon zeta",
+        "and eta theta iota.",
+    ]
+    merged = _merge_sentence_fragments(
+        fragments,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        min_chunk_size=2,
+    )
+    assert merged == ["Alpha beta gamma delta epsilon zeta and eta theta iota."]
+    word_count = len(merged[0].split())
+    assert chunk_size - overlap < word_count <= chunk_size
+
+
+def test_limit_fallback_dedupes_overlap_tokens() -> None:
+    """Fallback chunks trim duplicated overlap tokens."""
+    fragments = [
+        "alpha beta gamma delta epsilon zeta eta theta",
+        "eta theta iota kappa lambda mu",
+    ]
+    merged = _merge_sentence_fragments(
+        fragments,
+        chunk_size=10,
+        overlap=2,
+        min_chunk_size=2,
+    )
+    assert merged == [
+        "alpha beta gamma delta epsilon zeta eta theta",
+        "iota kappa lambda mu",
+    ]
 
 
 def test_blocks_merge_into_sentence() -> None:
