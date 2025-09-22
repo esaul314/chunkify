@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from functools import reduce
+from numbers import Real
 
 SOFT_LIMIT = 8_000
 
@@ -71,6 +72,11 @@ def _merge_sentence_fragments(
 ) -> list[str]:
     allowed_overlap = max(overlap, 0)
     limit = _compute_limit(chunk_size, allowed_overlap, min_chunk_size)
+    hard_limit = (
+        int(chunk_size)
+        if isinstance(chunk_size, Real) and chunk_size > 0
+        else None
+    )
 
     def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
         if not previous:
@@ -139,16 +145,26 @@ def _merge_sentence_fragments(
         if not _should_merge(prev_text, trimmed_text, list(prev_words)):
             return _append(acc, chunk, words)
 
-        if limit is not None and len(prev_words) + len(trimmed_words) > limit:
-            adjusted = _rebalance_overflow(prev_text, prev_words, trimmed_text, limit)
-            if adjusted is not None:
-                prev_text, prev_words, trimmed_text = adjusted
-                trimmed_words = tuple(trimmed_text.split())
-                if trimmed_words:
-                    acc = [*acc[:-1], (prev_text, prev_words)]
-            if not trimmed_words:
-                return _append(acc, chunk, words)
-            return _append(acc, trimmed_text, trimmed_words)
+        combined = len(prev_words) + len(trimmed_words)
+        exceeds_soft = limit is not None and combined > limit
+        if exceeds_soft:
+            if hard_limit is not None and combined <= hard_limit:
+                exceeds_soft = False
+            else:
+                adjusted = _rebalance_overflow(prev_text, prev_words, trimmed_text, limit)
+                if adjusted is not None:
+                    prev_text, prev_words, trimmed_text = adjusted
+                    trimmed_words = tuple(trimmed_text.split())
+                    if trimmed_words:
+                        acc = [*acc[:-1], (prev_text, prev_words)]
+                        combined = len(prev_words) + len(trimmed_words)
+                        exceeds_soft = limit is not None and combined > limit
+                        if hard_limit is not None and combined <= hard_limit:
+                            exceeds_soft = False
+                if not trimmed_words:
+                    return acc
+                if exceeds_soft:
+                    return _append(acc, trimmed_text, trimmed_words)
 
         merged_text = f"{prev_text} {trimmed_text}".strip()
         merged_words = (*prev_words, *trimmed_words)
@@ -160,7 +176,8 @@ def _merge_sentence_fragments(
         [],
     )
 
-    return _stitch_continuation_heads([text for text, _ in merged], limit)
+    stitch_limit = hard_limit if hard_limit is not None else limit
+    return _stitch_continuation_heads([text for text, _ in merged], stitch_limit)
 
 
 def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str]:
