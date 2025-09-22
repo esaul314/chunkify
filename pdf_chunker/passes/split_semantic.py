@@ -153,7 +153,7 @@ def _collapse_records(
                     yield page, _with_chunk_index(block, first_index + offset), text
             else:
                 joined = "\n\n".join(part.strip() for _, _, part in buffer if part.strip()).strip()
-                if not joined:
+                if not joined or len(joined) > SOFT_LIMIT:
                     for offset, (page, block, text) in enumerate(buffer):
                         yield page, _with_chunk_index(block, first_index + offset), text
                 else:

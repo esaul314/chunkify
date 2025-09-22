@@ -1,6 +1,6 @@
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import _dedupe
-from pdf_chunker.passes.sentence_fusion import _merge_sentence_fragments
+from pdf_chunker.passes.sentence_fusion import _compute_limit, _merge_sentence_fragments
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
 import re
 
@@ -71,6 +71,18 @@ def test_sentence_merge_allows_soft_limit_overflow() -> None:
     assert chunk_size - overlap < word_count <= chunk_size
 
 
+def test_compute_limit_handles_small_chunk_override() -> None:
+    """Fallback limits keep small chunk overrides from inflating merges."""
+
+    assert _compute_limit(chunk_size=5, overlap=0, min_chunk_size=8) == 5
+
+
+def test_compute_limit_applies_overlap_margin() -> None:
+    """Chunk limits deduct overlap before enforcing minimum capacity."""
+
+    assert _compute_limit(chunk_size=123, overlap=23, min_chunk_size=None) == 100
+
+
 def test_limit_fallback_dedupes_overlap_tokens() -> None:
     """Fallback chunks trim duplicated overlap tokens."""
     fragments = [
@@ -87,6 +99,41 @@ def test_limit_fallback_dedupes_overlap_tokens() -> None:
         "alpha beta gamma delta epsilon zeta eta theta",
         "iota kappa lambda mu",
     ]
+
+
+def test_sentence_merge_respects_small_chunk_capacity() -> None:
+    """Sentence fusion honors tiny chunk overrides instead of merging endlessly."""
+
+    fragments = [
+        "Alpha beta gamma delta epsilon.",
+        "And zeta eta theta iota kappa.",
+        "And lambda mu nu xi omicron.",
+    ]
+    merged = _merge_sentence_fragments(
+        fragments,
+        chunk_size=5,
+        overlap=0,
+        min_chunk_size=8,
+    )
+    assert len(merged) > 1
+    assert len(merged[0].split()) <= 5
+
+
+def test_sentence_merge_large_chunks_respect_hard_cap() -> None:
+    """Large chunk configurations still merge up to their hard cap."""
+
+    lead = " ".join(f"w{i}" for i in range(90))
+    tail = "and " + " ".join(f"w{i}" for i in range(90, 121)) + "."
+    merged = _merge_sentence_fragments(
+        (lead, tail),
+        chunk_size=123,
+        overlap=23,
+        min_chunk_size=None,
+    )
+    expected = f"{lead} {tail}".strip()
+    expected_words = len(expected.split())
+    assert merged == [expected]
+    assert 100 < expected_words <= 123
 
 
 def test_blocks_merge_into_sentence() -> None:

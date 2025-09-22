@@ -48,10 +48,15 @@ def _is_continuation_lead(text: str) -> bool:
 def _compute_limit(chunk_size: int | None, overlap: int, min_chunk_size: int | None) -> int | None:
     if chunk_size is None or chunk_size <= 0:
         return None
-    derived_min = min_chunk_size if min_chunk_size is not None else chunk_size // 10
-    if derived_min > chunk_size // 2:
-        return None
-    return max(int(chunk_size) - max(overlap, 0), 0)
+    normalized = int(chunk_size)
+    declared_min = (
+        int(min_chunk_size)
+        if min_chunk_size is not None
+        else normalized // 10
+    )
+    effective_min = min(max(declared_min, 0), normalized)
+    fallback = max(normalized - max(overlap, 0), 0)
+    return max(fallback, effective_min)
 
 
 def _last_sentence(text: str) -> str | None:
@@ -77,6 +82,7 @@ def _merge_sentence_fragments(
         if isinstance(chunk_size, Real) and chunk_size > 0
         else None
     )
+    target_limit = limit if limit is not None else hard_limit
 
     def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
         if not previous:
@@ -91,6 +97,12 @@ def _merge_sentence_fragments(
         first_word = current_words[0] if current_words else ""
         if prev_words and prev_words[-1] == first_word:
             return False
+        if target_limit is not None:
+            word_total = len(prev_words) + len(current_words)
+            if word_total > target_limit and (
+                hard_limit is None or word_total > hard_limit
+            ):
+                return False
         head = lead[0]
         continuation_chars = ",.;:)]\"'"
         if not (continuation_lead or head.islower() or head in continuation_chars):
@@ -143,28 +155,41 @@ def _merge_sentence_fragments(
             return _append(acc, chunk, words)
 
         if not _should_merge(prev_text, trimmed_text, list(prev_words)):
+            if trimmed_words != words:
+                return _append(acc, trimmed_text, trimmed_words)
             return _append(acc, chunk, words)
 
         combined = len(prev_words) + len(trimmed_words)
-        exceeds_soft = limit is not None and combined > limit
-        if exceeds_soft:
-            if hard_limit is not None and combined <= hard_limit:
-                exceeds_soft = False
-            else:
-                adjusted = _rebalance_overflow(prev_text, prev_words, trimmed_text, limit)
-                if adjusted is not None:
-                    prev_text, prev_words, trimmed_text = adjusted
-                    trimmed_words = tuple(trimmed_text.split())
-                    if trimmed_words:
-                        acc = [*acc[:-1], (prev_text, prev_words)]
-                        combined = len(prev_words) + len(trimmed_words)
-                        exceeds_soft = limit is not None and combined > limit
-                        if hard_limit is not None and combined <= hard_limit:
-                            exceeds_soft = False
-                if not trimmed_words:
-                    return acc
-                if exceeds_soft:
-                    return _append(acc, trimmed_text, trimmed_words)
+        exceeds_limit = target_limit is not None and combined > target_limit
+        if (
+            exceeds_limit
+            and limit is not None
+            and hard_limit is not None
+            and combined <= hard_limit
+        ):
+            exceeds_limit = False
+        if exceeds_limit:
+            adjusted = _rebalance_overflow(
+                prev_text, prev_words, trimmed_text, target_limit
+            ) if target_limit is not None else None
+            if adjusted is not None:
+                prev_text, prev_words, trimmed_text = adjusted
+                trimmed_words = tuple(trimmed_text.split())
+                if trimmed_words:
+                    acc = [*acc[:-1], (prev_text, prev_words)]
+                    combined = len(prev_words) + len(trimmed_words)
+                    exceeds_limit = target_limit is not None and combined > target_limit
+                    if (
+                        exceeds_limit
+                        and limit is not None
+                        and hard_limit is not None
+                        and combined <= hard_limit
+                    ):
+                        exceeds_limit = False
+            if not trimmed_words:
+                return acc
+            if exceeds_limit:
+                return _append(acc, trimmed_text, trimmed_words)
 
         merged_text = f"{prev_text} {trimmed_text}".strip()
         merged_words = (*prev_words, *trimmed_words)
@@ -176,7 +201,7 @@ def _merge_sentence_fragments(
         [],
     )
 
-    stitch_limit = hard_limit if hard_limit is not None else limit
+    stitch_limit = hard_limit if hard_limit is not None else target_limit
     return _stitch_continuation_heads([text for text, _ in merged], stitch_limit)
 
 
@@ -189,6 +214,7 @@ def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str
 
         prev = acc[-1]
         prev_words = tuple(prev.split())
+        chunk_words = tuple(chunk.split())
         remaining = chunk
         changed = False
 
@@ -220,6 +246,8 @@ def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str
 
         if not changed:
             if _is_continuation_lead(chunk.lstrip()):
+                if limit is not None and len(prev_words) + len(chunk_words) > limit:
+                    return [*acc, chunk]
                 context = _last_sentence(prev)
                 if context and not chunk.lstrip().startswith(context):
                     prefixed = f"{context} {chunk}".strip()
