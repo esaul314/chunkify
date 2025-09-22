@@ -86,6 +86,15 @@ SMART_QUOTES = {
     "`": "'",
 }
 
+WINDOWS_1252_QUOTE_TRANSLATION = str.maketrans(
+    {
+        "\x91": "'",
+        "\x92": "'",
+        "\x93": '"',
+        "\x94": '"',
+    }
+)
+
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
     # ensure space before an opening quote stuck to previous text (letters only)
     (re.compile(r'(?<=[A-Za-z])"(?=\w)'), r' "'),
@@ -432,6 +441,12 @@ def _map_smart_quotes(text: str) -> str:
 def _fix_quote_spacing(text: str) -> str:
     """Apply spacing and duplication fixes around quotes."""
     return reduce(lambda s, p: p[0].sub(p[1], s), QUOTE_SPACING_PATTERNS, text)
+
+
+def _normalize_windows_1252_quote_bytes(text: str) -> str:
+    """Replace stray Windows-1252 quote bytes with ASCII fallbacks."""
+
+    return text.translate(WINDOWS_1252_QUOTE_TRANSLATION) if text else text
 
 
 def normalize_quotes(text: str) -> str:
@@ -1070,6 +1085,10 @@ def _clean_text_impl(text: str) -> str:
             pass
 
     logger.debug("Using traditional text cleaning path")
+
+    logger.debug("Calling _normalize_windows_1252_quote_bytes")
+    text = _normalize_windows_1252_quote_bytes(text)
+    logger.debug(f"After _normalize_windows_1252_quote_bytes: {_preview(text)}")
 
     # Normalize newlines and fix broken words before other cleanup
     logger.debug("Calling normalize_newlines")
