@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Iterable, Optional
 from pathlib import Path
 import sys
 import base64
@@ -8,6 +8,48 @@ import nltk
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+
+try:  # Optional regression plugin used by a subset of golden tests.
+    import pytest_regressions  # type: ignore  # noqa: F401
+except ImportError:
+    _PYTEST_REGRESSIONS_AVAILABLE = False
+else:
+    _PYTEST_REGRESSIONS_AVAILABLE = True
+
+
+def _skip_optional_regression(request_path: Path) -> Optional[str]:
+    """Return a skip reason for optional regression tests missing dependencies."""
+
+    optional_targets: Iterable[tuple[Path, str]] = (
+        (
+            Path("tests/golden/test_conversion.py"),
+            (
+                "pytest-regressions is required for golden conversion checks. "
+                "Install it via `pip install .[dev]` to enable the file_regression fixture."
+            ),
+        ),
+    )
+    return next(
+        (
+            reason
+            for target, reason in optional_targets
+            if request_path.as_posix().endswith(target.as_posix())
+        ),
+        None,
+    )
+
+
+if not _PYTEST_REGRESSIONS_AVAILABLE:
+
+    @pytest.fixture
+    def file_regression(request: pytest.FixtureRequest):  # type: ignore[name-defined]
+        reason = _skip_optional_regression(Path(str(request.node.fspath)))
+        if reason is not None:
+            pytest.skip(reason)
+        pytest.skip(
+            "pytest-regressions is not installed; install the optional dependency to use file_regression."
+        )
 
 
 def _download_if_missing(resource: str, name: str) -> None:
