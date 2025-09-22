@@ -290,6 +290,22 @@ _LINEBREAK_LOWER_SUFFIXES = frozenset(
     }
 )
 
+_LINEBREAK_TITLE_JOIN_HEADS = frozenset(
+    word.title()
+    for word in (
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+    )
+)
+
 
 # ---------------------------------------------------------------------------
 # Hyphenation and word glue fixes
@@ -316,6 +332,24 @@ def _choose_hyphenation(head: str, tail: str) -> str:
 
     joined, hyphenated, joined_freq, hyphen_freq = _hyphenation_scores(head, tail)
     return hyphenated if hyphen_freq > joined_freq else joined
+
+
+def _linebreak_prefers_join(
+    head: str, tail: str, joined_freq: float, token: str, prefix: str
+) -> bool:
+    """Return ``True`` when newline hyphenation hints at a simple join."""
+
+    suffix = token.split("\n", 1)[-1]
+    shares_hyphen = any(char in _HYPHEN_CHARS for char in suffix)
+    resumes_lower = tail[:1].islower()
+    head_is_title = head in _LINEBREAK_TITLE_JOIN_HEADS
+    joined_missing = joined_freq <= 0
+    return shares_hyphen or (
+        not prefix.strip()
+        and resumes_lower
+        and head_is_title
+        and joined_missing
+    )
 
 
 def _should_keep_linebreak_hyphen(
@@ -359,10 +393,17 @@ def _join_hyphenated_words(text: str) -> str:
         head, tail = match.group(1), match.group(2)
         hyphen = _hyphen_from_token(match.group(0))
         joined, hyphenated, joined_freq, hyphen_freq = _hyphenation_scores(head, tail)
+        prefer_join = _linebreak_prefers_join(
+            head, tail, joined_freq, match.group(0), match.string[: match.start()]
+        )
         if hyphen_freq > joined_freq and _should_keep_linebreak_hyphen(
             head, tail, joined_freq, hyphen_freq
         ):
-            return _replace_with_original(hyphenated, hyphen)
+            return (
+                _normalize_linebreak_join_case(head, tail, joined)
+                if prefer_join
+                else _replace_with_original(hyphenated, hyphen)
+            )
         return _normalize_linebreak_join_case(head, tail, joined)
 
     def choose_hyphenation(match: Match[str]) -> str:
