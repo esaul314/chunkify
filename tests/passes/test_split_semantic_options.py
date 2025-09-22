@@ -4,7 +4,7 @@ from pdf_chunker.cli import _cli_overrides
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import run_convert
 from pdf_chunker.framework import Artifact
-from pdf_chunker.passes.split_semantic import split_semantic
+from pdf_chunker.passes.split_semantic import _collapse_records, split_semantic
 
 
 def _observed_overlap(first: list[str], second: list[str]) -> int:
@@ -114,3 +114,22 @@ def test_run_convert_overrides_existing_meta_options(tmp_path, monkeypatch) -> N
 
     assert captured["args"] == (5, 1, 8)
     assert seeded.meta["options"]["split_semantic"] == {"chunk_size": 5, "overlap": 1}
+
+
+def test_collapse_records_does_not_span_pages() -> None:
+    records = [
+        (
+            page,
+            {"text": text, "type": "paragraph", "source": {"page": page}},
+            text,
+        )
+        for page, text in ((1, "alpha"), (1, "beta"), (2, "gamma"))
+    ]
+
+    collapsed = list(_collapse_records(records, limit=100))
+
+    pages = [page for page, *_ in collapsed]
+    assert pages == [1, 2]
+    assert collapsed[0][2].split() == ["alpha", "beta"]
+    assert collapsed[1][2] == "gamma"
+    assert collapsed[1][1]["source"]["page"] == 2

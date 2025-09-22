@@ -109,6 +109,84 @@ def _stitch_block_continuations(
     return reduce(_consume, seq, [])
 
 
+def _count_words(text: str) -> int:
+    return len(text.split())
+
+
+def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
+    block = records[0][1]
+    base = {k: v for k, v in block.items() if k not in {"text", "list_kind"}}
+    block_type = block.get("type")
+    normalized_type = block_type if block_type and block_type != "heading" else "paragraph"
+    return {**base, "type": normalized_type, "text": text}
+
+
+def _with_chunk_index(block: Block, index: int) -> Block:
+    return {**block, "_chunk_start_index": index}
+
+
+def _collapse_records(
+    records: Iterable[tuple[int, Block, str]], limit: int | None
+) -> Iterator[tuple[int, Block, str]]:
+    seq = list(records)
+    if limit is None or limit <= 0:
+        for idx, (page, block, text) in enumerate(seq):
+            yield page, _with_chunk_index(block, idx), text
+        return
+
+    buffer: list[tuple[int, Block, str]] = []
+    running = 0
+    start_index: int | None = None
+
+    def emit() -> Iterator[tuple[int, Block, str]]:
+        nonlocal buffer, running, start_index
+        if not buffer:
+            return
+        first_index = start_index if start_index is not None else 0
+        if len(buffer) == 1:
+            page, block, text = buffer[0]
+            yield page, _with_chunk_index(block, first_index), text
+        else:
+            total = sum(_count_words(text) for _, _, text in buffer)
+            if total > limit:
+                for offset, (page, block, text) in enumerate(buffer):
+                    yield page, _with_chunk_index(block, first_index + offset), text
+            else:
+                joined = "\n\n".join(part.strip() for _, _, part in buffer if part.strip()).strip()
+                if not joined:
+                    for offset, (page, block, text) in enumerate(buffer):
+                        yield page, _with_chunk_index(block, first_index + offset), text
+                else:
+                    merged = _merge_record_block(buffer, joined)
+                    yield buffer[0][0], _with_chunk_index(merged, first_index), joined
+        buffer, running, start_index = [], 0, None
+
+    for idx, record in enumerate(seq):
+        page, block, text = record
+        if buffer and page != buffer[-1][0]:
+            yield from emit()
+        words = _count_words(text)
+        if words > limit:
+            yield from emit()
+            yield page, _with_chunk_index(block, idx), text
+            continue
+        next_is_list = idx + 1 < len(seq) and _starts_list_like(seq[idx + 1][1], seq[idx + 1][2])
+        if buffer and _starts_list_like(block, text):
+            if not buffer[-1][2].rstrip().endswith(":"):
+                yield from emit()
+        elif buffer and text.rstrip().endswith(":") and next_is_list:
+            yield from emit()
+        next_total = running + words
+        if buffer and next_total > limit:
+            yield from emit()
+        if not buffer:
+            start_index = idx
+        buffer.append((page, block, text))
+        running += words
+
+    yield from emit()
+
+
 Doc = dict[str, Any]
 Block = dict[str, Any]
 Chunk = dict[str, Any]
@@ -301,12 +379,14 @@ def build_chunk_with_meta(
 ) -> Chunk:
     """Return chunk payload enriched with metadata."""
     annotated = _tag_list(block)
+    start_index = annotated.pop("_chunk_start_index", None)
+    chunk_index = start_index if isinstance(start_index, int) else index
     return {
         "text": text,
         "meta": _build_metadata(
             text,
             _with_source(annotated, page, filename),
-            index,
+            chunk_index,
             {},
         ),
     }
@@ -330,9 +410,10 @@ def _chunk_items(
         ),
         limit,
     )
+    collapsed = _collapse_records(merged, limit)
     builder = partial(build_chunk_with_meta, filename=filename)
     return pipeline_chunk_records(
-        merged,
+        collapsed,
         generate_metadata=generate_metadata,
         build_plain=build_chunk,
         build_with_meta=builder,
@@ -388,26 +469,11 @@ class _SplitSemanticPass:
             options.chunk_size, options.overlap, options.min_chunk_size
         )
         limit = options.compute_limit()
-        chunk_records = pipeline_chunk_records(
-            _stitch_block_continuations(
-                pipeline_attach_headings(
-                    pipeline_merge_adjacent_blocks(
-                        pipeline_iter_blocks(doc),
-                        text_of=_block_text,
-                        fold=_merge_blocks,
-                        split_fn=split_fn,
-                    ),
-                    is_heading=_is_heading,
-                    merge_block_text=_merge_heading_texts,
-                ),
-                limit,
-            ),
-            generate_metadata=self.generate_metadata,
-            build_plain=build_chunk,
-            build_with_meta=partial(
-                build_chunk_with_meta,
-                filename=doc.get("source_path"),
-            ),
+        chunk_records = _chunk_items(
+            doc,
+            split_fn,
+            self.generate_metadata,
+            limit=limit,
         )
         items = list(_inject_continuation_context(chunk_records, limit))
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)

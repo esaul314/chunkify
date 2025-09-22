@@ -61,13 +61,13 @@ def epub_cli_rows(tmp_path: Path) -> list[dict[str, object]]:
 def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, object]]) -> None:
     assert len(epub_cli_rows) == 2
     chunk_ids = [row["metadata"]["chunk_id"] for row in epub_cli_rows]
-    assert chunk_ids == ["sample.epub_p0_c0", "sample.epub_p2_c4"]
+    assert chunk_ids == ["sample.epub_p0_c0", "sample.epub_p2_c9"]
     assert {row["metadata"].get("source") for row in epub_cli_rows} == {"sample.epub"}
 
     first_text, second_text = (row["text"] for row in epub_cli_rows)
 
     intro_prefix = (
-        "1. Chapter 1: Introduction 2. Chapter 2: Sample Content 3. Chapter 3: Conclusion"
+        "1. Chapter 1: Introduction\n2. Chapter 2: Sample Content\n3. Chapter 3: Conclusion"
     )
     intro_suffix = (
         "Regular paragraph text continues here. This text should be processed as a normal paragraph block, separate from the dialogue above."
@@ -78,16 +78,17 @@ def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, objec
     assert "\"Yes, this helps test dialogue detection in EPUB format,\" replied the second." in first_text
 
     list_prefix = (
-        "Subsection with Lists This section tests structured content processing: "
-        "1. First numbered item 2. Second numbered item 3. Third numbered item "
+        "Subsection with Lists\nThis section tests structured content processing:\n"
+        "1. First numbered item\n2. Second numbered item\n3. Third numbered item\n"
         "Another paragraph with some technical terms like PyMuPDF4LLM and text processing algorithms to test specialized handling."
     )
     conclusion_suffix = (
-        "The EPUB format allows for rich HTML content, and this test document exercises various elements to ensure comprehensive text extraction and processing."
+        "HTML content extraction\nMulti-chapter document handling\n"
+        "Text cleaning and normalization\n\nEnd of test document."
     )
     expected_scaffolding = {
         "sample.epub_p0_c0": (intro_prefix, intro_suffix),
-        "sample.epub_p2_c4": (list_prefix, conclusion_suffix),
+        "sample.epub_p2_c9": (list_prefix, conclusion_suffix),
     }
     actual_scaffolding = [
         (
@@ -108,5 +109,8 @@ def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, objec
     assert second_text.endswith(conclusion_suffix)
     assert "\nChapter 3: Conclusion" in second_text
     assert "\n\nThe EPUB format allows for rich HTML content" in second_text
-    assert "1. First numbered item 2. Second numbered item 3. Third numbered item" in second_text
+    assert (
+        "1. First numbered item\n2. Second numbered item\n3. Third numbered item"
+        in second_text
+    )
     assert "\n\n1. First numbered item" not in second_text
