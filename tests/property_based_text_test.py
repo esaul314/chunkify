@@ -1,3 +1,4 @@
+import string
 from functools import reduce
 from typing import Callable, TypeVar
 
@@ -8,6 +9,7 @@ from pdf_chunker.text_cleaning import clean_text
 
 
 T = TypeVar("T")
+WINDOWS_1252_QUOTES = "\x91\x92\x93\x94"
 
 
 def compose(*funcs: Callable[[T], T]) -> Callable[[T], T]:
@@ -23,6 +25,19 @@ def test_clean_text_idempotent(sample: str, repeats: int) -> None:
     cleaned = clean_text(sample)
     assert _apply_times(clean_text, repeats, cleaned) == cleaned
     assert all(ord(ch) >= 32 or ch == "\n" for ch in cleaned)
+
+
+@given(
+    st.text(
+        alphabet=WINDOWS_1252_QUOTES + string.ascii_letters + " \n'\"",  # noqa: RUF001
+        min_size=1,
+        max_size=50,
+    )
+)
+def test_clean_text_normalizes_windows_quote_bytes(sample: str) -> None:
+    cleaned = clean_text(sample)
+    assert clean_text(cleaned) == cleaned
+    assert all(ch not in WINDOWS_1252_QUOTES for ch in cleaned)
 
 
 @given(st.text(min_size=1, max_size=200))
