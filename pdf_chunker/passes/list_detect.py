@@ -63,16 +63,30 @@ def split_bullet_fragment(text: str) -> Tuple[str, str]:
     return first.strip(), rest.lstrip()
 
 
+def _block_contains_bullet_marker(text: str) -> bool:
+    """Return True when any line in ``text`` begins with a bullet marker."""
+
+    return starts_with_bullet(text) or any(
+        starts_with_bullet(line) for line in text.splitlines()
+    )
+
+
+def colon_leads_bullet_list(text: str) -> bool:
+    """Return True when a trailing colon signals an inline bullet leader."""
+
+    stripped = text.rstrip()
+    inline_marker = bool(re.search(rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", text))
+    has_bullet = _block_contains_bullet_marker(text)
+    return inline_marker or (stripped.endswith(":") and has_bullet)
+
+
 def is_bullet_list_pair(curr: str, nxt: str) -> bool:
     """Return True when ``curr`` and ``nxt`` belong to the same bullet list."""
 
-    colon_bullet = curr.rstrip().endswith(":") or bool(
-        re.search(rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", curr)
-    )
-    has_bullet = starts_with_bullet(curr) or any(
-        starts_with_bullet(line) for line in curr.splitlines()
-    )
-    return bool(starts_with_bullet(nxt) and (has_bullet or colon_bullet))
+    if not starts_with_bullet(nxt):
+        return False
+    has_bullet = _block_contains_bullet_marker(curr)
+    return has_bullet or colon_leads_bullet_list(curr)
 
 
 def starts_with_number(text: str) -> bool:

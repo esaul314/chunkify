@@ -5,7 +5,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pdf_chunker.core import process_document
 from pdf_chunker.chunk_validation import validate_chunks
-from pdf_chunker.page_artifacts import remove_page_artifact_lines
+from pdf_chunker.page_artifacts import (
+    remove_page_artifact_lines,
+    _drop_trailing_bullet_footers,
+)
 
 
 def test_footer_and_subfooter_removed():
@@ -57,6 +60,11 @@ def test_bullet_footer_removed():
     texts = [c["text"] for c in chunks]
     assert all("Faintly from Far in the Lincoln Woods" not in t for t in texts)
     assert len(chunks) == 1
+
+
+def test_trailing_bullet_footer_dropped_from_lines():
+    lines = ["Community Updates:", "• example.com"]
+    assert _drop_trailing_bullet_footers(lines) == ["Community Updates:"]
 
 
 def test_inline_footnote_removed():
