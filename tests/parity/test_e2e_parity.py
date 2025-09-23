@@ -4,6 +4,8 @@ from itertools import combinations, chain
 from pathlib import Path
 from typing import Mapping, Sequence
 
+import re
+
 import pytest
 
 import fitz
@@ -17,6 +19,18 @@ from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import _input_artifact
 from pdf_chunker.page_utils import parse_page_ranges
 from pdf_chunker.pdf_parsing import _excluded_pages
+
+_TOKEN_PATTERN = re.compile(r"[^0-9A-Za-z]+")
+
+
+def _normalize_flag_token(token: str) -> str:
+    sanitized = _TOKEN_PATTERN.sub("_", token.lstrip("-")).strip("_")
+    return sanitized or "flag"
+
+
+def _flag_identifier(flags: Sequence[str]) -> str:
+    return "base" if not flags else "__".join(map(_normalize_flag_token, flags))
+
 
 SAMPLES = Path("tests/golden/samples")
 PDFS = sorted(SAMPLES.glob("*.pdf"))
@@ -50,7 +64,12 @@ def flag_sets() -> list[tuple[str, ...]]:
     ]
 
 
-@pytest.mark.parametrize("flags", flag_sets(), ids=lambda f: " ".join(f) or "base")
+def test_flag_identifier_sanitizes_tokens() -> None:
+    assert _flag_identifier(("--chunk-size", "200", "--no-metadata")) == "chunk_size__200__no_metadata"
+    assert _flag_identifier(()) == "base"
+
+
+@pytest.mark.parametrize("flags", flag_sets(), ids=_flag_identifier)
 def test_e2e_parity_flags(tmp_path: Path, flags: tuple[str, ...]) -> None:
     pairs = [(pdf, run_parity(pdf, tmp_path / f"{i}", flags)) for i, pdf in enumerate(PDFS)]
     assert all(
