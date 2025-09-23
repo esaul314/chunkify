@@ -129,6 +129,8 @@ class TestPageArtifactDetection(unittest.TestCase):
         expected = "This closed car smells of salt fish"
         cleaned = remove_page_artifact_lines(table_text, 1)
         self.assertEqual(cleaned, expected)
+        self.assertNotIn("Person Name", cleaned)
+        self.assertNotIn("Quebec", cleaned)
 
     def test_pymupdf4llm_block_normalization(self):
         table_text = (
@@ -144,6 +146,7 @@ class TestPageArtifactDetection(unittest.TestCase):
             cleaned["text"],
             "This closed car smells of salt fish",
         )
+        self.assertNotIn("Person Name", cleaned["text"])
 
     def test_numbered_list_item_not_removed(self):
         text = (
