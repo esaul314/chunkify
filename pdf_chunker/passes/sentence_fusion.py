@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from math import ceil
 from functools import reduce
 from numbers import Real
+from typing import NamedTuple
 
 SOFT_LIMIT = 8_000
+
+_AVERAGE_CHARS_PER_TOKEN = 5.0
 
 _WORD_START = re.compile(r"[\w']+")
 _SENTENCE_BOUNDARY = re.compile(r"[.?!][\"')\]]*\s+")
@@ -57,6 +61,56 @@ def _compute_limit(chunk_size: int | None, overlap: int, min_chunk_size: int | N
     effective_min = min(max(declared_min, 0), normalized)
     fallback = max(normalized - max(overlap, 0), 0)
     return max(fallback, effective_min)
+
+
+class _MergeBudget(NamedTuple):
+    """Effective budget for combining sentence fragments."""
+
+    limit: int | None
+    hard_limit: int | None
+    word_total: int
+    dense_total: int
+    effective_total: int
+
+
+def _derive_merge_budget(
+    previous: Iterable[str],
+    current: Iterable[str],
+    *,
+    chunk_size: int | None,
+    overlap: int,
+    min_chunk_size: int | None = None,
+    average_chars_per_token: float = _AVERAGE_CHARS_PER_TOKEN,
+) -> _MergeBudget:
+    """Derive the merge ceiling using both word and character density data.
+
+    ``chunk_size`` and ``overlap`` originate from CLI overrides.  The helper
+    synthesises a deterministic ceiling so whitespace-free fragments can still
+    exceed the configured budget and trigger a split.
+    """
+
+    allowed_overlap = max(overlap, 0)
+    limit = _compute_limit(chunk_size, allowed_overlap, min_chunk_size)
+    hard_limit = (
+        int(chunk_size)
+        if isinstance(chunk_size, Real) and chunk_size > 0
+        else None
+    )
+    density = average_chars_per_token if average_chars_per_token > 0 else _AVERAGE_CHARS_PER_TOKEN
+
+    def _load(words: tuple[str, ...]) -> tuple[int, int]:
+        word_count = len(words)
+        char_total = sum(len(token) for token in words)
+        dense_total = int(ceil(char_total / density)) if char_total else 0
+        return word_count, dense_total
+
+    prev_words = tuple(previous)
+    next_words = tuple(current)
+    word_loads = tuple(_load(words) for words in (prev_words, next_words))
+    word_total = sum(count for count, _ in word_loads)
+    dense_total = sum(dense for _, dense in word_loads)
+    effective_total = max(word_total, dense_total)
+    return _MergeBudget(limit, hard_limit, word_total, dense_total, effective_total)
 
 
 def _last_sentence(text: str) -> str | None:
