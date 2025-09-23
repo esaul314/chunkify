@@ -39,6 +39,7 @@ from pdf_chunker.passes.sentence_fusion import (
     _effective_token_count,
     _is_continuation_lead,
     _last_sentence,
+    _looks_like_caption,
     _merge_sentence_fragments,
 )
 from pdf_chunker.text_cleaning import STOPWORDS
@@ -149,6 +150,10 @@ def _collapse_records(
             yield page, _with_chunk_index(block, first_index), text
         else:
             total = sum(_count_words(text) for _, _, text in buffer)
+            if any(_looks_like_caption(text) for _, _, text in buffer):
+                for offset, (page, block, text) in enumerate(buffer):
+                    yield page, _with_chunk_index(block, first_index + offset), text
+                return
             if total > limit:
                 for offset, (page, block, text) in enumerate(buffer):
                     yield page, _with_chunk_index(block, first_index + offset), text

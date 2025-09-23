@@ -171,6 +171,21 @@ def test_sentence_merge_respects_small_chunk_capacity() -> None:
     assert len(merged[0].split()) <= 5
 
 
+def test_caption_stays_separate_from_following_paragraph() -> None:
+    """Figure captions remain distinct instead of swallowing next paragraphs."""
+
+    caption = (
+        "Figure 1-1. The over-general swamp, held together by glue "
+        "the problem with the swamp isn't just the messy architecture diagram; "
+        "it's how difficult it is to change that sticky mess over time."
+    )
+    merged = _merge_sentence_fragments([caption])
+    assert len(merged) == 2
+    head, tail = merged
+    assert head.startswith("Figure 1-1. The over-general swamp, held together by glue")
+    assert tail.startswith("The problem with the swamp isn't just the messy architecture diagram;")
+
+
 def test_sentence_merge_large_chunks_respect_hard_cap() -> None:
     """Large chunk configurations still merge up to their hard cap."""
 

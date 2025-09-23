@@ -16,6 +16,38 @@ _AVERAGE_CHARS_PER_TOKEN = 5.0
 _WORD_START = re.compile(r"[\w']+")
 _SENTENCE_BOUNDARY = re.compile(r"[.?!][\"')\]]*\s+")
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
+_CAPTION_PREFIXES = ("Figure", "Table", "Exhibit")
+_CAPTION_RE = re.compile(rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+\d[\w.-]*\.\s+", re.IGNORECASE)
+_CAPTION_ANYWHERE_RE = re.compile(
+    rf"(?:{'|'.join(_CAPTION_PREFIXES)})\s+\d[\w.-]*\.\s+",
+    re.IGNORECASE,
+)
+_CAPTION_BREAK_STARTERS = (
+    "the",
+    "this",
+    "that",
+    "these",
+    "those",
+    "we",
+    "it",
+    "they",
+    "there",
+    "their",
+    "our",
+    "his",
+    "her",
+    "its",
+    "however",
+    "but",
+    "so",
+    "yet",
+    "although",
+    "though",
+    "once",
+    "while",
+    "when",
+    "because",
+)
 _LEADING_CONTINUATIONS = frozenset(
     token.lower()
     for token in (
@@ -131,6 +163,78 @@ def _derive_merge_budget(
     return _MergeBudget(limit, hard_limit, word_total, dense_total, effective_total)
 
 
+def _looks_like_caption(text: str) -> bool:
+    stripped = text.strip()
+    return bool(stripped and _CAPTION_RE.match(stripped))
+
+
+def _capitalize_lead(text: str) -> str:
+    for idx, char in enumerate(text):
+        if char.isalpha():
+            return f"{text[:idx]}{char.upper()}{text[idx + 1:]}"
+    return text
+
+
+def _split_caption_body(text: str) -> tuple[str, ...]:
+    stripped = text.strip()
+    if not stripped:
+        return (text,)
+    match = _CAPTION_RE.match(stripped)
+    if not match:
+        return (stripped,)
+    label = match.group(0).strip()
+    body = stripped[match.end() :].strip()
+    if not body:
+        return (stripped,)
+    words = body.split()
+    candidates = (
+        idx
+        for idx, word in enumerate(words)
+        if idx >= 4
+        and (token := re.sub(r"[^A-Za-z]", "", word).lower())
+        and token in _CAPTION_BREAK_STARTERS
+        and word[0].islower()
+        and len(words) - idx >= 4
+    )
+    for idx in candidates:
+        caption_words = words[:idx]
+        remainder_words = words[idx:]
+        caption_text = " ".join(caption_words).strip()
+        remainder_text = " ".join(remainder_words).strip()
+        if not (caption_text and remainder_text):
+            continue
+        caption = f"{label} {caption_text}".strip()
+        if caption and caption[-1] not in ".!?":
+            caption = f"{caption}."
+        remainder = _capitalize_lead(remainder_text)
+        return (caption, remainder)
+    return (stripped,)
+
+
+def _split_caption_chunk(chunk: str) -> tuple[str, ...]:
+    stripped = chunk.strip()
+    if not stripped:
+        return (chunk,)
+    match = _CAPTION_ANYWHERE_RE.search(stripped)
+    if not match:
+        return (chunk,)
+    leading = stripped[: match.start()].strip()
+    trailing = stripped[match.start() :]
+    parts: list[str] = []
+    if leading:
+        parts.append(leading)
+    parts.extend(_split_caption_body(trailing))
+    return tuple(part for part in parts if part)
+
+
+def _expand_caption_chunks(chunks: Iterable[str]) -> tuple[str, ...]:
+    return tuple(
+        part
+        for chunk in chunks
+        for part in _split_caption_chunk(chunk)
+    )
+
+
 def _last_sentence(text: str) -> str | None:
     stripped = text.strip()
     if not stripped:
@@ -148,6 +252,10 @@ def _merge_sentence_fragments(
     min_chunk_size: int | None = None,
 ) -> list[str]:
     allowed_overlap = max(overlap, 0)
+    normalized_chunks = _expand_caption_chunks(chunks)
+    has_sentence_boundary = any(
+        _ENDS_SENTENCE.search(chunk.strip()) for chunk in normalized_chunks
+    )
     base_limit = _compute_limit(chunk_size, allowed_overlap, min_chunk_size)
     hard_limit = (
         int(chunk_size)
@@ -171,14 +279,21 @@ def _merge_sentence_fragments(
         if not lead:
             return False
         continuation_lead = _is_continuation_lead(lead)
-        if _ENDS_SENTENCE.search(previous.rstrip()) and not continuation_lead:
+        prev_ends_sentence = bool(_ENDS_SENTENCE.search(previous.rstrip()))
+        if prev_ends_sentence and not continuation_lead:
             return False
         first_word = current_words[0] if current_words else ""
         if prev_words and prev_words[-1] == first_word:
             return False
         limit = _target_limit(budget)
         if limit is not None and budget.effective_total > limit:
-            return False
+            soft_limit = budget.limit is not None and budget.hard_limit is not None
+            allowed_overflow = (
+                (soft_limit and budget.effective_total <= budget.hard_limit)
+                or (has_sentence_boundary and not prev_ends_sentence)
+            )
+            if not allowed_overflow:
+                return False
         head = lead[0]
         continuation_chars = ",.;:)]\"'"
         if not (continuation_lead or head.islower() or head in continuation_chars):
@@ -200,9 +315,13 @@ def _merge_sentence_fragments(
     def _dedupe_overlap(
         prev_words: tuple[str, ...],
         words: tuple[str, ...],
+        *,
+        trim: bool = True,
     ) -> tuple[str, tuple[str, ...]]:
         if not words:
             return "", words
+        if not trim:
+            return " ".join(words), words
         overlap_words = _actual_overlap(prev_words, words)
         trimmed_words = words[overlap_words:] if overlap_words else words
         return " ".join(trimmed_words), trimmed_words
@@ -219,6 +338,7 @@ def _merge_sentence_fragments(
         chunk: str,
     ) -> list[tuple[str, tuple[str, ...]]]:
         words = tuple(chunk.split())
+        is_caption = _looks_like_caption(chunk)
         if not words:
             return acc
 
@@ -226,7 +346,11 @@ def _merge_sentence_fragments(
             return _append(acc, chunk, words)
 
         prev_text, prev_words = acc[-1]
-        trimmed_text, trimmed_words = _dedupe_overlap(prev_words, words)
+        trimmed_text, trimmed_words = _dedupe_overlap(
+            prev_words,
+            words,
+            trim=not is_caption,
+        )
         if not trimmed_words:
             return _append(acc, chunk, words)
 
@@ -237,6 +361,8 @@ def _merge_sentence_fragments(
             overlap=allowed_overlap,
             min_chunk_size=min_chunk_size,
         )
+        prev_ends_sentence = bool(_ENDS_SENTENCE.search(prev_text.rstrip()))
+
         if not _should_merge(
             prev_text,
             trimmed_text,
@@ -250,6 +376,12 @@ def _merge_sentence_fragments(
 
         target_limit = _target_limit(budget)
         exceeds_limit = target_limit is not None and budget.effective_total > target_limit
+        if exceeds_limit:
+            soft_limit = budget.limit is not None and budget.hard_limit is not None
+            if soft_limit and budget.effective_total <= budget.hard_limit:
+                exceeds_limit = False
+        if exceeds_limit and has_sentence_boundary and not prev_ends_sentence:
+            exceeds_limit = False
         if exceeds_limit:
             adjusted = (
                 _rebalance_overflow(prev_text, prev_words, trimmed_text, budget)
@@ -270,6 +402,13 @@ def _merge_sentence_fragments(
                     )
                     target_limit = _target_limit(budget)
                     exceeds_limit = target_limit is not None and budget.effective_total > target_limit
+                    if exceeds_limit:
+                        soft_limit = budget.limit is not None and budget.hard_limit is not None
+                        if soft_limit and budget.effective_total <= budget.hard_limit:
+                            exceeds_limit = False
+                    prev_ends_sentence = bool(_ENDS_SENTENCE.search(prev_text.rstrip()))
+                    if exceeds_limit and has_sentence_boundary and not prev_ends_sentence:
+                        exceeds_limit = False
             if not trimmed_words:
                 return acc
             if exceeds_limit:
@@ -281,7 +420,7 @@ def _merge_sentence_fragments(
 
     merged: list[tuple[str, tuple[str, ...]]] = reduce(
         _merge,
-        chunks,
+        normalized_chunks,
         [],
     )
 
