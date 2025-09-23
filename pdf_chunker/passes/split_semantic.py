@@ -151,8 +151,15 @@ def _collapse_records(
         else:
             total = sum(_count_words(text) for _, _, text in buffer)
             if any(_looks_like_caption(text) for _, _, text in buffer):
-                for offset, (page, block, text) in enumerate(buffer):
-                    yield page, _with_chunk_index(block, first_index + offset), text
+                yield from (
+                    (
+                        page,
+                        _with_chunk_index(block, first_index + offset),
+                        text,
+                    )
+                    for offset, (page, block, text) in enumerate(buffer)
+                )
+                buffer, running, start_index = [], 0, None
                 return
             if total > limit:
                 for offset, (page, block, text) in enumerate(buffer):
