@@ -44,4 +44,9 @@ def test_conversion_epub_cli(tmp_path: Path) -> None:
         for line in (BASE / "expected" / "epub.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    assert len(actual) == len(expected) == 2
+    actual_chunk_ids = [row["metadata"]["chunk_id"] for row in actual]
+    expected_chunk_ids = [row["metadata"]["chunk_id"] for row in expected]
+    assert actual_chunk_ids == expected_chunk_ids
+    assert [row["metadata"] for row in actual] == [row["metadata"] for row in expected]
     assert actual == expected

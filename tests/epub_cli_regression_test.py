@@ -60,9 +60,14 @@ def epub_cli_rows(tmp_path: Path) -> list[dict[str, object]]:
 
 def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, object]]) -> None:
     assert len(epub_cli_rows) == 2
-    chunk_ids = [row["metadata"]["chunk_id"] for row in epub_cli_rows]
-    assert chunk_ids == ["sample.epub_p0_c0", "sample.epub_p2_c9"]
-    assert {row["metadata"].get("source") for row in epub_cli_rows} == {"sample.epub"}
+    metadata = [row["metadata"] for row in epub_cli_rows]
+    chunk_ids = [meta["chunk_id"] for meta in metadata]
+    assert chunk_ids == ["sample.epub_p0_c0", "sample.epub_p2_c1"]
+    assert {meta.get("source") for meta in metadata} == {"sample.epub"}
+    assert metadata[0]["block_type"] == "list_item"
+    assert metadata[0].get("list_kind") == "numbered"
+    assert metadata[1]["block_type"] == "paragraph"
+    assert "list_kind" not in metadata[1]
 
     first_text, second_text = (row["text"] for row in epub_cli_rows)
 
@@ -78,17 +83,17 @@ def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, objec
     assert "\"Yes, this helps test dialogue detection in EPUB format,\" replied the second." in first_text
 
     list_prefix = (
-        "Subsection with Lists\nThis section tests structured content processing:\n"
-        "1. First numbered item\n2. Second numbered item\n3. Third numbered item\n"
+        "Subsection with Lists\n\nThis section tests structured content processing:\n"
+        "1. First numbered item\n2. Second numbered item\n3. Third numbered item\n\n"
         "Another paragraph with some technical terms like PyMuPDF4LLM and text processing algorithms to test specialized handling."
     )
     conclusion_suffix = (
-        "HTML content extraction\nMulti-chapter document handling\n"
-        "Text cleaning and normalization\n\nEnd of test document."
+        "HTML content extraction\n\nMulti-chapter document handling\n\n"
+        "Text cleaning and normalization End of test document."
     )
     expected_scaffolding = {
         "sample.epub_p0_c0": (intro_prefix, intro_suffix),
-        "sample.epub_p2_c9": (list_prefix, conclusion_suffix),
+        "sample.epub_p2_c1": (list_prefix, conclusion_suffix),
     }
     actual_scaffolding = [
         (
