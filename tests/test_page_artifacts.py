@@ -8,11 +8,7 @@ TABLE_TEXT = (
     "|Person Name, PMP<br>Alma, Quebec, Canada|Person Name, PMP<br>Alma, Quebec, Canada|"
 )
 
-EXPECTED = (
-    "This closed car smells of salt fish\n"
-    "Person Name, PMP\n"
-    "Alma, Quebec, Canada"
-)
+EXPECTED = "This closed car smells of salt fish"
 
 
 def _doc() -> dict:
@@ -26,6 +22,7 @@ def test_markdown_table_flattened() -> None:
     result = detect_page_artifacts(Artifact(payload=_doc()))
     blocks = result.payload["pages"][0]["blocks"]
     assert blocks[0]["text"] == EXPECTED
+    assert "Person Name" not in blocks[0]["text"]
     assert (
         result.meta["metrics"]["detect_page_artifacts"]["blocks_cleaned"] == 1
     )

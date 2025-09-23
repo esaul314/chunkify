@@ -529,6 +529,18 @@ def _strip_toc_dot_leaders(text: str) -> str:
 TRAILING_FOOTER_RE = re.compile(
     rf"\s*\|\s*(\d{{1,3}}|{ROMAN_RE})(?![0-9ivxlcdm])\s*$", re.IGNORECASE
 )
+BR_SPLIT_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+CELL_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+CONTACT_KEYWORD_RE = re.compile(
+    r"\b(?:phone|email|contact|tel|mobile|fax)\b",
+    re.IGNORECASE,
+)
+CREDENTIAL_RE = re.compile(
+    r"\b(?:pmp|phd|mba|cfa|cpa|esq|md|jd)\b",
+    re.IGNORECASE,
+)
+DIGIT_SEQUENCE_RE = re.compile(r"\d{3,}")
+WORD_RE = re.compile(r"[A-Za-z]+")
 
 
 def _strip_trailing_footer(text: str, page_num: Optional[int]) -> str:
@@ -545,6 +557,32 @@ def _strip_trailing_footer(text: str, page_num: Optional[int]) -> str:
         logger.info("_strip_trailing_footer removed: %s", text[:30])
         return text[: match.start()].rstrip()
     return text
+
+
+def _normalize_table_cell(text: str) -> str:
+    """Return a lowercase, punctuation-stripped form of ``text``."""
+
+    return CELL_NORMALIZE_RE.sub("", text.lower())
+
+
+def _looks_like_contact_cell(segment: str, source: str) -> bool:
+    """Heuristically determine whether ``segment`` holds contact metadata."""
+
+    lower_source = source.lower()
+    if "@" in source or DOMAIN_RE.search(source) or CONTACT_KEYWORD_RE.search(lower_source):
+        return True
+    if CREDENTIAL_RE.search(segment) or DIGIT_SEQUENCE_RE.search(segment):
+        return True
+
+    words = WORD_RE.findall(segment)
+    if not words or any(word.islower() for word in words):
+        return False
+
+    has_multiple_words = len(words) >= 2
+    has_contact_punctuation = "," in source or "<br" in lower_source
+    has_short_upper_suffix = any(len(word) <= 3 and word.isupper() for word in words)
+
+    return has_multiple_words and (has_contact_punctuation or has_short_upper_suffix)
 
 
 def _flatten_markdown_table(text: str) -> str:
@@ -572,12 +610,44 @@ def _flatten_markdown_table(text: str) -> str:
 
     filtered = (c for c in cells if c and not col_re.fullmatch(c) and not rule_re.fullmatch(c))
 
-    expanded = (part.strip() for cell in filtered for part in cell.split("<br>"))
+    expanded = (
+        (segment.strip(), cell)
+        for cell in filtered
+        for segment in BR_SPLIT_RE.split(cell)
+    )
 
-    def _dedupe(acc: list[str], t: str) -> list[str]:
-        return acc if any(t in prev for prev in acc) else acc + [t]
+    def _dedupe(
+        acc: tuple[list[str], tuple[tuple[str, str], ...]],
+        item: tuple[str, str],
+    ) -> tuple[list[str], tuple[tuple[str, str], ...]]:
+        values, contexts = acc
+        segment, source = item
+        if not segment:
+            return acc
+        if any(segment in prev for prev in values):
+            return acc
+        return (values + [segment], contexts + ((segment, source),))
 
-    deduped: list[str] = reduce(_dedupe, expanded, [])
+    deduped, contexts = reduce(_dedupe, expanded, ([], tuple()))
+
+    def _filter_segments() -> Iterable[str]:
+        seen_norm = set()
+        kept: list[str] = []
+        for segment, source in contexts:
+            normalized = _normalize_table_cell(segment)
+            if not normalized:
+                continue
+            if _looks_like_contact_cell(segment, source):
+                continue
+            if normalized in seen_norm:
+                continue
+            if any(segment.lower() in existing.lower() for existing in kept):
+                continue
+            seen_norm.add(normalized)
+            kept.append(segment)
+            yield segment
+
+    deduped = list(_filter_segments()) or deduped
 
     remaining = stripped.splitlines()[len(lines) :]  # noqa: E203
     flattened = "\n".join(deduped)
