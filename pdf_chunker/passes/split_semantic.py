@@ -36,6 +36,7 @@ from pdf_chunker.passes.chunk_pipeline import (
 from pdf_chunker.passes.sentence_fusion import (
     _ENDS_SENTENCE,
     SOFT_LIMIT,
+    _effective_token_count,
     _is_continuation_lead,
     _last_sentence,
     _merge_sentence_fragments,
@@ -110,7 +111,7 @@ def _stitch_block_continuations(
 
 
 def _count_words(text: str) -> int:
-    return len(text.split())
+    return _effective_token_count(text.split())
 
 
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:

@@ -1,5 +1,7 @@
 import pytest
 
+import pytest
+
 from pdf_chunker.cli import _cli_overrides
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import run_convert
@@ -62,31 +64,44 @@ def test_cli_flags_affect_split_semantic(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "overrides, relation",
+    "overrides, relation, text",
     [
-        ({"split_semantic": {"chunk_size": 200}}, "gt"),
-        ({"split_semantic": {"overlap": 10}}, "lt"),
+        ({"split_semantic": {"chunk_size": 200}}, "gt", "x" * 1150),
+        (
+            {"split_semantic": {"chunk_size": 800}},
+            "lt",
+            " ".join(f"w{i}" for i in range(1000)),
+        ),
     ],
 )
-def test_split_counts_change_with_overrides(tmp_path, monkeypatch, overrides, relation) -> None:
+def test_split_counts_change_with_overrides(tmp_path, monkeypatch, overrides, relation, text) -> None:
+    captured_args: list[tuple[int, int]] = []
+
     def fake_semantic_chunker(
         text: str, chunk_size: int, overlap: int, *, min_chunk_size: int
     ) -> list[str]:
+        captured_args.append((chunk_size, overlap))
         step = chunk_size - overlap
         return [text[i : i + chunk_size] for i in range(0, len(text), step)]
 
     monkeypatch.setattr("pdf_chunker.splitter.semantic_chunker", fake_semantic_chunker)
 
-    def _run(opts: dict | None = None) -> int:
+    def _run(payload_text: str, opts: dict | None = None) -> tuple[int, list[str]]:
         spec_opts = {"run_report": {"output_path": str(tmp_path / "r.json")}}
         spec = PipelineSpec(options={**spec_opts, **(opts or {})})
-        art = Artifact(payload=_doc("x" * 1150), meta={"metrics": {}, "input": "doc.pdf"})
+        art = Artifact(payload=_doc(payload_text), meta={"metrics": {}, "input": "doc.pdf"})
         seeded, _ = run_convert(art, spec)
-        return len(split_semantic(seeded).payload["items"])
+        items = split_semantic(seeded).payload["items"]
+        return len(items), [item["text"] for item in items]
 
-    base = _run()
-    new = _run(overrides)
-    assert (new > base) if relation == "gt" else (new < base)
+    base_count, base_items = _run(text)
+    override_count, override_items = _run(text, overrides)
+    assert len(captured_args) >= 2
+    base_args, override_args = captured_args[-2:]
+    assert base_args != override_args
+    assert base_items != override_items
+    comparator = override_count > base_count if relation == "gt" else override_count < base_count
+    assert comparator
 
 
 def test_run_convert_overrides_existing_meta_options(tmp_path, monkeypatch) -> None:
