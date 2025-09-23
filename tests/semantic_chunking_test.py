@@ -1,8 +1,14 @@
+import math
+import re
+
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import _dedupe
-from pdf_chunker.passes.sentence_fusion import _compute_limit, _merge_sentence_fragments
+from pdf_chunker.passes.sentence_fusion import (
+    _compute_limit,
+    _derive_merge_budget,
+    _merge_sentence_fragments,
+)
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
-import re
 
 
 def _doc(text: str) -> dict:
@@ -81,6 +87,52 @@ def test_compute_limit_applies_overlap_margin() -> None:
     """Chunk limits deduct overlap before enforcing minimum capacity."""
 
     assert _compute_limit(chunk_size=123, overlap=23, min_chunk_size=None) == 100
+
+
+def test_merge_budget_respects_word_total_when_text_has_spacing() -> None:
+    """Normal sentences rely on word counts for their merge budget."""
+
+    prev = tuple("a bb ccc".split())
+    current = tuple("dd ee".split())
+    budget = _derive_merge_budget(
+        prev,
+        current,
+        chunk_size=10,
+        overlap=2,
+        min_chunk_size=3,
+    )
+    assert budget.limit == _compute_limit(10, 2, 3)
+    assert budget.hard_limit == 10
+    assert budget.word_total == 5
+    assert budget.effective_total == budget.word_total
+
+
+def test_merge_budget_accounts_for_dense_fragments() -> None:
+    """Whitespace-free runs trigger the character-density fallback."""
+
+    fragment = tuple(("a" * 200,))
+    budget = _derive_merge_budget(
+        fragment,
+        fragment,
+        chunk_size=50,
+        overlap=0,
+        min_chunk_size=None,
+    )
+    expected_dense = math.ceil((200 + 200) / 5.0)
+    assert budget.word_total == 2
+    assert budget.dense_total == expected_dense
+    assert budget.effective_total == expected_dense
+    assert budget.effective_total > 50
+
+
+def test_merge_budget_handles_missing_chunk_limits() -> None:
+    """Absent chunk overrides still compute deterministic fragment load."""
+
+    budget = _derive_merge_budget((), ("dense",), chunk_size=None, overlap=5)
+    assert budget.limit is None
+    assert budget.hard_limit is None
+    assert budget.word_total == 1
+    assert budget.dense_total == 1
 
 
 def test_limit_fallback_dedupes_overlap_tokens() -> None:
