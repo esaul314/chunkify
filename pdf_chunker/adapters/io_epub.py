@@ -49,7 +49,12 @@ def read_epub(path: str, spine: str | None = None) -> dict[str, Any]:
 
     import ebooklib
     from ebooklib import epub
-    from pdf_chunker.epub_parsing import process_epub_item
+    from pdf_chunker.epub_parsing import (
+        EPUB_DOCUMENT_CHAR_LIMIT,
+        EPUB_DOCUMENT_MIN_TARGET,
+        _coalesce_body_blocks,
+        process_epub_item,
+    )
 
     abs_path = str(Path(path).resolve())
     book = epub.read_epub(abs_path)
@@ -62,13 +67,20 @@ def read_epub(path: str, spine: str | None = None) -> dict[str, Any]:
         block
         for idx, item in enumerate(spine_items, 1)
         if idx not in excluded
-        for block in process_epub_item(item, filename)
+        for block in process_epub_item(item, filename, idx)
     ]
+    grouped_blocks = _coalesce_body_blocks(
+        blocks,
+        max_chars=EPUB_DOCUMENT_CHAR_LIMIT,
+        min_anchor=EPUB_DOCUMENT_MIN_TARGET,
+    )
 
     return {
         "type": "page_blocks",
         "source_path": abs_path,
-        "pages": _group_blocks(cast(Iterable[dict[str, Any]], blocks), mapping),
+        "pages": _group_blocks(
+            cast(Iterable[dict[str, Any]], grouped_blocks), mapping
+        ),
     }
 
 
