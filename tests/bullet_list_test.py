@@ -3,6 +3,7 @@ from dataclasses import asdict
 
 sys.path.insert(0, ".")
 
+from pdf_chunker.pdf_blocks import Block, merge_continuation_blocks
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 from pdf_chunker.chunk_validation import validate_chunks
 from pdf_chunker.framework import Artifact
@@ -41,3 +42,22 @@ def test_bullet_items_annotated_with_list_kind():
     }
     annotated = list_detect(Artifact(payload=doc)).payload["pages"][0]["blocks"]
     assert [b.get("list_kind") for b in annotated] == ["bullet", None]
+
+
+def test_colon_intro_not_merged_with_following_bullet():
+    source = {"filename": "example.pdf", "page": 1, "location": None}
+    intro = Block(text="Options:", source=source)
+    bullet = Block(text="• choice", source=source)
+    merged = merge_continuation_blocks([intro, bullet])
+
+    assert [block.text for block in merged] == ["Options:", "• choice"]
+
+    doc = {
+        "type": "page_blocks",
+        "pages": [
+            {"page": 1, "blocks": [asdict(block) for block in merged]},
+        ],
+    }
+    annotated = list_detect(Artifact(payload=doc)).payload["pages"][0]["blocks"]
+    kinds = [block.get("list_kind") for block in annotated]
+    assert kinds == [None, "bullet"]

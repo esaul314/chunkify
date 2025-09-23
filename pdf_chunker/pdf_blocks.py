@@ -481,6 +481,19 @@ def _normalize_sentence_tail(current_text: str, next_text: str) -> str:
     return next_text
 
 
+def _block_has_list_markers(block: Block) -> bool:
+    """Return True when ``block`` carries explicit list annotations."""
+
+    if getattr(block, "type", None) == "list_item":
+        return True
+    source = block.source if isinstance(block.source, dict) else {}
+    nested = (
+        source,
+        *(candidate for candidate in (source.get("attrs"), source.get("block_attrs")) if isinstance(candidate, dict)),
+    )
+    return any(candidate.get("list_kind") for candidate in nested if isinstance(candidate, dict))
+
+
 def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
     curr_text = curr.text.strip()
     next_text = nxt.text.strip()
@@ -508,7 +521,10 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
     ):
         return True, "bullet_short_fragment"
 
+    colon_intro = curr_text.rstrip().endswith(":") and not starts_with_bullet(curr_text)
     if is_bullet_list_pair(curr_text, next_text):
+        if colon_intro and not _block_has_list_markers(curr):
+            return False, "colon_intro_without_list_markers"
         return True, "bullet_list"
 
     if is_numbered_list_pair(curr_text, next_text):
