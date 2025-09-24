@@ -24,6 +24,30 @@ import re
 Block = Dict[str, Any]
 
 
+_HEADING_STYLE_TAGS = frozenset({"bold", "caps", "small_caps"})
+_CAPS_STYLE_TAGS = frozenset({"caps", "small_caps"})
+
+
+def _inline_style_ratio(block: Block, styles: Iterable[str]) -> float:
+    spans = tuple(block.get("inline_styles") or ())
+    total = len(block.get("text", ""))
+    style_set = frozenset(styles)
+    return (
+        sum(
+            max(0, min(total, getattr(span, "end", 0)) - max(0, getattr(span, "start", 0)))
+            for span in spans
+            if getattr(span, "style", None) in style_set
+        )
+        / total
+        if spans and total > 0
+        else 0.0
+    )
+
+
+def _promote_heading(block: Block) -> bool:
+    return _inline_style_ratio(block, _HEADING_STYLE_TAGS) >= 0.6 or _inline_style_ratio(block, _CAPS_STYLE_TAGS) >= 0.8
+
+
 def _estimate_threshold(text: str) -> Optional[int]:
     words = text.split()
     checks = (
@@ -52,15 +76,22 @@ def _estimate_threshold(text: str) -> Optional[int]:
 
 def _annotate(block: Block) -> Block:
     text = block.get("text", "").strip()
-    is_heading = _detect_heading_fallback(text)
+    fallback_heading = _detect_heading_fallback(text)
+    inline_heading = _promote_heading(block) if text else False
+    is_heading = fallback_heading or inline_heading
     threshold = _estimate_threshold(text) if is_heading else None
+    if inline_heading and threshold is not None:
+        threshold = min(threshold, 6)
+    source = "inline_styles" if inline_heading else None
+    if fallback_heading:
+        source = "fallback+inline_styles" if inline_heading else "fallback"
     enriched = {
         **block,
         "text": text,
         "is_heading": is_heading,
         "heading_level": _estimate_heading_level(text) if is_heading else None,
         "heading_threshold": threshold,
-        "heading_source": "fallback" if is_heading else None,
+        "heading_source": source,
     }
     if is_heading:
         enriched["type"] = "heading"

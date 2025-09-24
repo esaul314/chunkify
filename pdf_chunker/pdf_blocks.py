@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from itertools import chain
-from typing import Iterable, Callable, List, Optional, Tuple
+from statistics import median
+from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple
 import os
 import re
 
 import fitz  # PyMuPDF
 
+from .inline_styles import (
+    InlineStyleSpan,
+    build_index_map,
+    build_index_remapper,
+    normalize_spans,
+)
 from .text_cleaning import (
     clean_text,
     HYPHEN_CHARS_ESC,
@@ -40,6 +47,7 @@ class Block:
     type: str = "paragraph"
     language: Optional[str] = None
     bbox: Optional[tuple] = None
+    inline_styles: Optional[list[InlineStyleSpan]] = None
 
 
 @dataclass
@@ -94,15 +102,169 @@ def _structured_block(page, block_tuple, page_num, filename) -> Block | None:
         except (KeyError, IndexError, TypeError):
             is_heading = _detect_heading_fallback(cleaned)
 
+    inline_styles = _extract_block_inline_styles(page, block_tuple, cleaned)
+
     return Block(
         type="heading" if is_heading else "paragraph",
         text=cleaned,
         language=default_language(),
         source={"filename": filename, "page": page_num, "location": None},
         bbox=block_tuple[:4],
+        inline_styles=inline_styles,
     )
 
 
+def _extract_block_inline_styles(page, block_tuple, cleaned_text: str) -> Optional[list[InlineStyleSpan]]:
+    if not cleaned_text:
+        return None
+
+    try:
+        block_dict = page.get_text("dict", clip=block_tuple[:4])
+    except Exception:
+        return None
+
+    raw_spans = tuple(_iter_text_spans(block_dict))
+    if not raw_spans:
+        return None
+
+    raw_text = "".join(str(span.get("text", "")) for span, _ in raw_spans)
+    if not raw_text:
+        return None
+
+    offsets = tuple(_span_offsets(raw_spans))
+    styles_per_span = tuple(tuple(_collect_styles(span, baseline)) for span, baseline in raw_spans)
+    spans = tuple(
+        InlineStyleSpan(
+            start=start,
+            end=end,
+            style=style,
+            confidence=1.0,
+            attrs=attrs,
+        )
+        for (start, end), styles in zip(offsets, styles_per_span)
+        for style, attrs in styles
+    )
+    if not spans:
+        return None
+
+    remapper = build_index_remapper(build_index_map(raw_text, cleaned_text))
+    normalized = normalize_spans(spans, len(cleaned_text), remapper)
+    return list(normalized) or None
+
+
+def _iter_text_spans(
+    block_dict: Mapping[str, object]
+) -> Iterable[tuple[Mapping[str, object], Optional[float]]]:
+    blocks = block_dict.get("blocks", [])
+    for block in blocks if isinstance(blocks, Sequence) else ():
+        if not hasattr(block, "get"):
+            continue
+        if block.get("type", 0) not in (0, None):
+            continue
+        lines = block.get("lines", [])
+        if not isinstance(lines, Sequence):
+            continue
+        for line in lines:
+            if not hasattr(line, "get"):
+                continue
+            spans = line.get("spans", [])
+            if not isinstance(spans, Sequence):
+                continue
+            baseline = _line_baseline(spans)
+            for span in spans:
+                if not hasattr(span, "get"):
+                    continue
+                text = span.get("text", "")
+                if not text:
+                    continue
+                yield span, baseline
+
+
+def _span_offsets(spans: Sequence[tuple[Mapping[str, object], Optional[float]]]) -> Iterable[tuple[int, int]]:
+    cursor = 0
+    for span, _ in spans:
+        text = str(span.get("text", ""))
+        length = len(text)
+        start = cursor
+        cursor += length
+        yield (start, cursor)
+
+
+def _collect_styles(
+    span: Mapping[str, object], line_baseline: Optional[float]
+) -> Iterable[tuple[str, Optional[Mapping[str, str]]]]:
+    flags = int(span.get("flags", 0))
+    font = str(span.get("font", "")).lower()
+
+    if flags & 16 or any(marker in font for marker in ("bold", "black", "heavy")):
+        yield ("bold", None)
+    if flags & 2 or any(marker in font for marker in ("italic", "oblique", "slanted")):
+        yield ("italic", None)
+    if flags & 8:
+        yield ("underline", None)
+    if _is_monospace(font):
+        yield ("monospace", None)
+
+    baseline_style = _baseline_style(span, line_baseline)
+    if baseline_style:
+        yield (baseline_style, None)
+
+    attrs = _link_attrs(span)
+    if attrs:
+        yield ("link", attrs)
+
+
+def _line_baseline(spans: Sequence[Mapping[str, object]]) -> Optional[float]:
+    positions = [
+        float(origin[1])
+        for span in spans
+        if hasattr(span, "get")
+        and isinstance((origin := span.get("origin")), Sequence)
+        and len(origin) >= 2
+    ]
+    return median(positions) if positions else None
+
+
+def _baseline_style(span: Mapping[str, object], line_baseline: Optional[float]) -> str | None:
+    if line_baseline is None:
+        return None
+    origin = span.get("origin") if hasattr(span, "get") else None
+    size = span.get("size") if hasattr(span, "get") else None
+    if not isinstance(origin, Sequence) or len(origin) < 2:
+        return None
+    if not isinstance(size, (int, float)) or size <= 0:
+        return None
+    y = float(origin[1])
+    delta = line_baseline - y
+    threshold = max(1.0, float(size) * 0.25)
+    if delta >= threshold:
+        return "superscript"
+    if delta <= -threshold:
+        return "subscript"
+    return None
+
+
+def _link_attrs(span: Mapping[str, object]) -> Optional[Mapping[str, str]]:
+    link = span.get("link") if hasattr(span, "get") else None
+    if isinstance(link, str):
+        return {"href": link}
+    if isinstance(link, Mapping):
+        href = link.get("uri") or link.get("url") or link.get("href")
+        if href:
+            attrs = {"href": str(href)}
+            title = link.get("title")
+            if title:
+                attrs["title"] = str(title)
+            return attrs
+    for key in ("uri", "url", "href"):
+        value = span.get(key) if hasattr(span, "get") else None
+        if value:
+            return {"href": str(value)}
+    return None
+
+
+def _is_monospace(font: str) -> bool:
+    return any(token in font for token in ("mono", "code", "courier", "console"))
 def _extract_page_blocks(page, page_num: int, filename: str) -> list[Block]:
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")
@@ -212,11 +374,24 @@ SENTENCE_CONTINUATION_LOWER = frozenset(
 
 _CAPTION_PREFIXES = ("Figure", "Table", "Exhibit")
 _CAPTION_RE = re.compile(rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+\d")
+_CAPTION_STYLE_TAGS = frozenset({"italic", "bold"})
+_CAPTION_STYLE_THRESHOLD = 0.6
 
 
-def _looks_like_caption(text: str) -> bool:
+def _inline_style_ratio(block: Block, styles: Iterable[str]) -> float:
+    spans = tuple(block.inline_styles or ())
+    total = len(block.text or "")
+    style_set = frozenset(styles)
+    return (
+        sum(max(0, min(total, span.end) - max(0, span.start)) for span in spans if span.style in style_set) / total
+        if spans and total > 0
+        else 0.0
+    )
+
+
+def _looks_like_caption(text: str, *, emphasis_ratio: float = 0.0) -> bool:
     stripped = text.strip()
-    return bool(stripped and _CAPTION_RE.match(stripped))
+    return bool(stripped and _CAPTION_RE.match(stripped)) or emphasis_ratio >= _CAPTION_STYLE_THRESHOLD
 
 
 def _word_count(text: str) -> int:
@@ -280,13 +455,12 @@ def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     return False
 
 
-def _is_cross_page_continuation(
-    curr_text: str,
-    next_text: str,
-    curr_page: Optional[int],
-    next_page: Optional[int],
-) -> bool:
-    if _looks_like_caption(curr_text):
+def _is_cross_page_continuation(curr: Block, nxt: Block) -> bool:
+    curr_text = curr.text.strip()
+    next_text = nxt.text.strip()
+    curr_page = curr.source.get("page")
+    next_page = nxt.source.get("page")
+    if _looks_like_caption(curr_text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
         return False
     if not (curr_text and next_text):
         return False
@@ -310,6 +484,8 @@ def _is_cross_page_continuation(
 
 
 def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
+    if _looks_like_caption(curr.text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
+        return False
     curr_page = curr.source.get("page")
     next_page = nxt.source.get("page")
     if curr_page is None or next_page is None or next_page != curr_page + 1:
@@ -329,14 +505,16 @@ def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
     return True
 
 
-def _is_same_page_continuation(
-    curr_text: str, next_text: str, curr_page: Optional[int], next_page: Optional[int]
-) -> bool:
+def _is_same_page_continuation(curr: Block, nxt: Block) -> bool:
+    curr_text = curr.text.strip()
+    next_text = nxt.text.strip()
+    curr_page = curr.source.get("page")
+    next_page = nxt.source.get("page")
     if curr_page is None or next_page is None:
         return False
     if curr_page != next_page or not next_text:
         return False
-    if _looks_like_caption(curr_text):
+    if _looks_like_caption(curr_text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
         return False
     if any(b in curr_text for b in BULLET_CHARS):
         return False
@@ -561,9 +739,9 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
         and (tail_is_lower or (tail_is_titlecase and head_word.islower()))
     ):
         return True, "hyphenated_continuation"
-    elif _is_same_page_continuation(curr_text, next_text, curr_page, next_page):
+    elif _is_same_page_continuation(curr, nxt):
         return True, "sentence_continuation"
-    elif _is_cross_page_continuation(curr_text, next_text, curr_page, next_page):
+    elif _is_cross_page_continuation(curr, nxt):
         return True, "sentence_continuation"
     elif _is_cross_page_paragraph_continuation(curr, nxt):
         return True, "sentence_continuation"

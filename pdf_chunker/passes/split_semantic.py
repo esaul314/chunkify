@@ -8,7 +8,7 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
 from itertools import chain
@@ -44,6 +44,39 @@ from pdf_chunker.text_cleaning import STOPWORDS
 from pdf_chunker.utils import _build_metadata
 
 _STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
+_FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
+
+
+def _collect_superscripts(
+    block: Block, text: str
+) -> tuple[list[dict[str, str]], tuple[tuple[int, int], ...]]:
+    if not text:
+        return [], ()
+    limit = len(text)
+
+    def _normalize(span: Any) -> tuple[dict[str, str], tuple[int, int]] | None:
+        if getattr(span, "style", None) != "superscript":
+            return None
+        start = max(0, min(limit, getattr(span, "start", 0)))
+        end = max(start, min(limit, getattr(span, "end", start)))
+        raw = text[start:end]
+        snippet = raw.strip()
+        if not snippet or text[end:].strip() not in _FOOTNOTE_TAILS:
+            return None
+        attrs = getattr(span, "attrs", None)
+        note_id = attrs.get("note_id") if isinstance(attrs, Mapping) else None
+        focus = raw.find(snippet)
+        span_start = start + (focus if focus >= 0 else 0)
+        span_end = span_start + len(snippet)
+        public = {"text": snippet, **({"note_id": note_id} if note_id else {})}
+        return public, (span_start, span_end)
+
+    entries = tuple(
+        entry for entry in (_normalize(span) for span in block.get("inline_styles") or ()) if entry
+    )
+    anchors = [public for public, _ in entries]
+    spans = tuple(span for _, span in entries if span[0] < span[1])
+    return anchors, spans
 
 
 def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
@@ -381,15 +414,17 @@ def build_chunk_with_meta(
     annotated = _tag_list(block)
     start_index = annotated.pop("_chunk_start_index", None)
     chunk_index = start_index if isinstance(start_index, int) else index
-    return {
-        "text": text,
-        "meta": _build_metadata(
-            text,
-            _with_source(annotated, page, filename),
-            chunk_index,
-            {},
-        ),
-    }
+    metadata = _build_metadata(
+        text,
+        _with_source(annotated, page, filename),
+        chunk_index,
+        {},
+    )
+    anchors, spans = _collect_superscripts(annotated, text)
+    if anchors:
+        metadata["footnote_anchors"] = anchors
+    chunk = {"text": text, "meta": metadata}
+    return {**chunk, "_footnote_spans": spans} if spans else chunk
 
 
 def _chunk_items(
