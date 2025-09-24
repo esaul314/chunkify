@@ -116,9 +116,11 @@ class InlineStyleSpan:
 ### Phase 5 — Telemetry, Tooling, and Rollout
 12. **Metrics instrumentation**
     - Emit counters/histograms for percentage of blocks carrying inline styles and the distribution of style tags.
+    - Surface these values via `metrics["text_clean"]` as `inline_style_block_ratio` and `inline_style_tag_counts` for downstream monitoring.
     - Add dashboards or logging hooks to monitor extraction completeness across samples.
 13. **Trace + developer tooling updates**
     - Extend trace artifacts and CLI debug commands to include inline style spans in a developer-friendly format.
+    - Persist an additional `<step>_inline_styles.json` per traced pass summarizing spans, text snippets, and attributes.
     - Document usage within `docs/` and update `AGENTS.md` debugging guidance.
 14. **Rollout + verification**
     - Run the conversion pipeline on canonical fixtures (e.g., `platform-eng-excerpt.pdf`) comparing before/after outputs for structural parity.
