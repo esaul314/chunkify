@@ -12,6 +12,7 @@ from pdf_chunker.inline_styles import (
     remap_spans,
 )
 from pdf_chunker.pdf_blocks import _structured_block, Block, merge_continuation_blocks
+from pdf_chunker.passes.emit_jsonl import emit_jsonl
 from pdf_chunker.passes.heading_detect import annotate_headings
 from pdf_chunker.passes.split_semantic import split_semantic
 from pdf_chunker.passes.text_clean import _clean_block
@@ -288,3 +289,24 @@ def test_inline_style_consumers() -> None:
     )
     merged = list(merge_continuation_blocks([caption, paragraph]))
     assert len(merged) == 2 and merged[0].text == caption_text
+
+
+def test_emit_jsonl_strips_superscripts_and_keeps_metadata() -> None:
+    footnote_block = {
+        "text": "Main text1",
+        "type": "paragraph",
+        "source": {"filename": "doc.pdf", "page": 1},
+        "inline_styles": [
+            InlineStyleSpan(start=9, end=10, style="superscript", attrs={"note_id": "1"})
+        ],
+    }
+    doc = {
+        "type": "page_blocks",
+        "source_path": "doc.pdf",
+        "pages": [{"page": 1, "blocks": [footnote_block]}],
+    }
+    chunk_artifact = split_semantic(Artifact(payload=doc))
+    rows = emit_jsonl(Artifact(payload=chunk_artifact.payload)).payload
+    assert rows[0]["text"] == "Main text"
+    metadata = rows[0]["metadata"]
+    assert metadata["footnote_anchors"] == [{"text": "1", "note_id": "1"}]

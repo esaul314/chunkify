@@ -643,6 +643,31 @@ def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
+def _strip_superscripts(item: dict[str, Any]) -> dict[str, Any]:
+    spans = tuple(item.get("_footnote_spans") or ())
+    text = item.get("text", "")
+    limit = len(text)
+    normalized = tuple(
+        (max(0, min(limit, start)), max(0, min(limit, end)))
+        for start, end in sorted(spans, key=lambda pair: pair[0])
+        if start < end
+    )
+    trimmed = {k: v for k, v in item.items() if k != "_footnote_spans"}
+    if not text or not normalized:
+        return {**trimmed, "text": text}
+    starts = tuple(start for start, _ in normalized)
+    ends = tuple(end for _, end in normalized)
+    gaps = (0, *ends)
+    pieces = (text[prev_end:curr_start] for prev_end, curr_start in zip(gaps, starts, strict=False))
+    tail = text[ends[-1] :]
+    stripped = "".join(pieces) + tail
+    return {**trimmed, "text": stripped}
+
+
+def _sanitize_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_strip_superscripts(item) for item in items]
+
+
 def _dedupe(
     items: Iterable[dict[str, Any]], *, log: list[str] | None = None
 ) -> list[dict[str, Any]]:
@@ -775,7 +800,7 @@ def _rows(doc: Doc, *, preserve: bool = False) -> list[Row]:
     debug_log: list[str] | None = (
         [] if (not preserve and os.getenv("PDF_CHUNKER_DEDUP_DEBUG")) else None
     )
-    items = doc.get("items", [])
+    items = _sanitize_items(doc.get("items", []))
     processed = items if preserve else _dedupe(_coalesce(items), log=debug_log)
     if debug_log is not None:
         logger = logging.getLogger(__name__)

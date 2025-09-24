@@ -112,6 +112,7 @@ class InlineStyleSpan:
 11. **emit_jsonl and downstream metadata**
     - Preserve `attrs.note_id` while stripping superscript glyphs during deduplication to avoid payload churn.
     - Serialize inline span summaries into trace/debug artifacts behind a feature flag; ensure JSONL payload remains unchanged by default.
+    - ✅ `_collect_superscripts` now records internal `_footnote_spans` for chunk items and `emit_jsonl` removes superscript glyphs while keeping `footnote_anchors` metadata untouched for downstream consumers.
 
 ### Phase 5 — Telemetry, Tooling, and Rollout
 12. **Metrics instrumentation**
@@ -125,6 +126,7 @@ class InlineStyleSpan:
 14. **Rollout + verification**
     - Run the conversion pipeline on canonical fixtures (e.g., `platform-eng-excerpt.pdf`) comparing before/after outputs for structural parity.
     - Record performance benchmarks (<5% regression target) and capture final sign-off before enabling wider serialization.
+    - ✅ Verified Phase 5 by exercising `split_semantic → emit_jsonl` on inline-style fixtures, confirming metrics (`inline_style_block_ratio`, `inline_style_tag_counts`) and trace artifacts (`<step>_inline_styles.json`) populate as expected while JSONL rows remain stable apart from superscript trimming.
 
 ### Phase 6 — Follow-up Enablement
 15. **Expose spans to external consumers (optional)**
@@ -137,6 +139,13 @@ class InlineStyleSpan:
 - **Non-textual cues**: should inline images or equations embed pseudo-style spans (e.g., `{"style": "inline_image"}`)? Pending design input from math extraction workstream.
 - **Performance**: additional span remapping during text cleaning may add overhead. Benchmark once implemented to ensure <5% impact on large PDFs.
 - **Accessibility metadata**: linking `attrs` to PDF structure tree (e.g., actual alt text) may require future schema extension; note dependency on upcoming accessibility extraction tasks.
+
+## Developer Handoff Notes
+
+- **Chunk metadata additions**: chunks emitted by `split_semantic` may now carry a private `_footnote_spans` tuple (start/end pairs) alongside existing `footnote_anchors`. Downstream passes must treat keys prefixed with `_` as internal-only helpers and avoid serializing them verbatim.
+- **Superscript sanitization**: the `emit_jsonl` pass automatically strips superscript glyphs using `_footnote_spans` while preserving `footnote_anchors` metadata. New consumers should rely on the metadata field for anchors instead of scanning the text payload.
+- **Telemetry + traces**: `text_clean` metrics include `inline_style_block_ratio` and `inline_style_tag_counts`, and trace runs emit `<step>_inline_styles.json` summaries. Tooling or dashboards should read these metrics to monitor rollout health.
+- **Testing guidance**: add regression coverage alongside inline-style scenarios to ensure `_footnote_spans` stays in sync with superscript removal and that sanitized JSONL outputs remain stable across dedupe operations.
 
 ## Acceptance Checklist
 - Schema documented here is approved by platform owners.

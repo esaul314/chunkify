@@ -47,23 +47,36 @@ _STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
 _FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
 
 
-def _collect_superscripts(block: Block, text: str) -> list[dict[str, str]]:
+def _collect_superscripts(
+    block: Block, text: str
+) -> tuple[list[dict[str, str]], tuple[tuple[int, int], ...]]:
     if not text:
-        return []
+        return [], ()
     limit = len(text)
-    anchors: list[dict[str, str]] = []
-    for span in block.get("inline_styles") or ():
+
+    def _normalize(span: Any) -> tuple[dict[str, str], tuple[int, int]] | None:
         if getattr(span, "style", None) != "superscript":
-            continue
+            return None
         start = max(0, min(limit, getattr(span, "start", 0)))
         end = max(start, min(limit, getattr(span, "end", start)))
-        snippet = text[start:end].strip()
+        raw = text[start:end]
+        snippet = raw.strip()
         if not snippet or text[end:].strip() not in _FOOTNOTE_TAILS:
-            continue
+            return None
         attrs = getattr(span, "attrs", None)
         note_id = attrs.get("note_id") if isinstance(attrs, Mapping) else None
-        anchors.append({"text": snippet, **({"note_id": note_id} if note_id else {})})
-    return anchors
+        focus = raw.find(snippet)
+        span_start = start + (focus if focus >= 0 else 0)
+        span_end = span_start + len(snippet)
+        public = {"text": snippet, **({"note_id": note_id} if note_id else {})}
+        return public, (span_start, span_end)
+
+    entries = tuple(
+        entry for entry in (_normalize(span) for span in block.get("inline_styles") or ()) if entry
+    )
+    anchors = [public for public, _ in entries]
+    spans = tuple(span for _, span in entries if span[0] < span[1])
+    return anchors, spans
 
 
 def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
@@ -407,10 +420,11 @@ def build_chunk_with_meta(
         chunk_index,
         {},
     )
-    anchors = _collect_superscripts(annotated, text)
+    anchors, spans = _collect_superscripts(annotated, text)
     if anchors:
         metadata["footnote_anchors"] = anchors
-    return {"text": text, "meta": metadata}
+    chunk = {"text": text, "meta": metadata}
+    return {**chunk, "_footnote_spans": spans} if spans else chunk
 
 
 def _chunk_items(
