@@ -1,5 +1,8 @@
 import pytest
 
+from pathlib import Path
+
+from pdf_chunker.adapters.io_pdf import read
 from pdf_chunker.cli import _cli_overrides
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import run_convert
@@ -138,3 +141,16 @@ def test_collapse_records_does_not_span_pages() -> None:
     assert collapsed[0][2].split() == ["alpha", "beta"]
     assert collapsed[1][2] == "gamma"
     assert collapsed[1][1]["source"]["page"] == 2
+
+
+def test_figure_caption_preserves_paragraph_boundary() -> None:
+    pytest.importorskip("fitz")
+    doc = read(str(Path("platform-eng-excerpt.pdf")))
+    art = Artifact(payload=doc, meta={"input": "platform-eng-excerpt.pdf"})
+    result = split_semantic(art)
+    chunks = [item["text"] for item in result.payload["items"]]
+    target = next(text for text in chunks if "The problem with the swamp" in text)
+
+    assert "glue the problem" not in target
+    assert "Figure 1-1." in target
+    assert "The problem with the swamp" in target
