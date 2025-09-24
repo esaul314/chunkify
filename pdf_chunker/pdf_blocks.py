@@ -8,6 +8,7 @@ import re
 
 import fitz  # PyMuPDF
 
+from .inline_styles import InlineStyleSpan
 from .text_cleaning import (
     clean_text,
     HYPHEN_CHARS_ESC,
@@ -40,6 +41,7 @@ class Block:
     type: str = "paragraph"
     language: Optional[str] = None
     bbox: Optional[tuple] = None
+    inline_styles: Optional[list[InlineStyleSpan]] = None
 
 
 @dataclass
