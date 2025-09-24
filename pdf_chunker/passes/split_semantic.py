@@ -85,6 +85,10 @@ def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
     return restored
 
 
+def _append_caption(prefix: str, caption: str) -> str:
+    return "\n\n".join(part for part in (prefix.rstrip(), caption.strip()) if part).strip()
+
+
 def _stitch_block_continuations(
     seq: Iterable[tuple[int, Block, str]], limit: int | None
 ) -> list[tuple[int, Block, str]]:
@@ -95,6 +99,23 @@ def _stitch_block_continuations(
         page, block, text = cur
         if not acc:
             return [*acc, cur]
+        stripped = text.strip()
+        if stripped:
+            caption_line, _, remainder = stripped.partition("\n")
+            if caption_line and _looks_like_caption(caption_line.strip()):
+                prev_page, prev_block, prev_text = acc[-1]
+                if prev_page == page:
+                    caption = caption_line.strip()
+                    tail = remainder.lstrip("\n")
+                    acc[-1] = (
+                        prev_page,
+                        prev_block,
+                        _append_caption(prev_text, caption),
+                    )
+                    if tail:
+                        block_tail = {**block, "_force_split": True}
+                        return [*acc, (page, block_tail, tail)]
+                    return acc
         lead = text.lstrip()
         if not lead or not _is_continuation_lead(lead):
             return [*acc, cur]
@@ -170,6 +191,18 @@ def _collapse_records(
 
     for idx, record in enumerate(seq):
         page, block, text = record
+        force_split = bool(block.get("_force_split"))
+        if force_split:
+            block = {k: v for k, v in block.items() if k != "_force_split"}
+            record = (page, block, text)
+        if buffer and (force_split or buffer[-1][1].get("_force_split")):
+            yield from emit()
+            if buffer and buffer[-1][1].get("_force_split"):
+                buffer[-1] = (
+                    buffer[-1][0],
+                    {k: v for k, v in buffer[-1][1].items() if k != "_force_split"},
+                    buffer[-1][2],
+                )
         if buffer and page != buffer[-1][0]:
             yield from emit()
         words = _count_words(text)

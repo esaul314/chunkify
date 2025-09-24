@@ -153,17 +153,33 @@ def test_figure_caption_preserves_paragraph_boundary() -> None:
     seeded = heading_detect(text_clean(art))
     result = split_semantic(seeded)
     chunks = [item["text"] for item in result.payload["items"]]
-    target = next(text for text in chunks if "The problem with the swamp" in text)
+    for body_index, body_chunk in enumerate(chunks):
+        if "The problem with the swamp" in body_chunk:
+            break
+    else:  # pragma: no cover - defensive guard for unexpected data drift
+        pytest.fail("missing chunk containing 'The problem with the swamp'")
 
-    assert "glue the problem" not in target
-    assert "Figure 1-1." in target
-    assert "The problem with the swamp" in target
+    assert body_index > 0
+    caption_chunk = chunks[body_index - 1]
+
+    assert "glue the problem" not in body_chunk
+    assert "Figure 1-1." not in body_chunk
+    assert "The problem with the swamp" in body_chunk
+    assert "Figure 1-1." in caption_chunk
+    assert "The problem with the swamp" not in caption_chunk
 
     emitted = emit_jsonl(result)
     rows = [row["text"] for row in emitted.payload]
-    emitted_target = next(
-        text for text in rows if "The over-general swamp" in text
-    )
+    for emitted_body_index, emitted_body in enumerate(rows):
+        if "The problem with the swamp" in emitted_body:
+            break
+    else:  # pragma: no cover - defensive guard for unexpected data drift
+        pytest.fail("missing emitted row containing 'The problem with the swamp'")
 
-    assert "Figure 1-1." in emitted_target
-    assert "The problem with the swamp" in emitted_target
+    assert emitted_body_index > 0
+    emitted_caption = rows[emitted_body_index - 1]
+
+    assert "Figure 1-1." not in emitted_body
+    assert "The problem with the swamp" in emitted_body
+    assert "Figure 1-1." in emitted_caption
+    assert "The problem with the swamp" not in emitted_caption

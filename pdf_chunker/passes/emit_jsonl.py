@@ -611,7 +611,11 @@ def _merge_if_fragment(
 def _should_merge(prev_text: str, curr_text: str, min_words: int) -> bool:
     prev_words = _word_count(prev_text)
     curr_words = _word_count(curr_text)
-    prev_coherent = _coherent(prev_text)
+    prev_lines = [line for line in prev_text.splitlines() if line.strip()]
+    prev_tail = prev_lines[-1].strip() if prev_lines else prev_text.strip()
+    prev_coherent = (
+        _coherent(prev_text) if not (prev_tail and _looks_like_caption(prev_tail)) else True
+    )
     curr_coherent = _coherent(curr_text)
     return any(
         (
