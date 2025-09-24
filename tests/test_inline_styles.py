@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from pdf_chunker.inline_styles import (
     InlineStyleSpan,
     build_index_remapper,
@@ -8,6 +10,7 @@ from pdf_chunker.inline_styles import (
     normalize_spans,
     remap_spans,
 )
+from pdf_chunker.pdf_blocks import _structured_block
 
 
 def _span(
@@ -91,3 +94,138 @@ def test_build_index_remapper_handles_deleted_glyphs() -> None:
         _span(1, 2, "bold"),
         _span(2, 4, "italic"),
     )
+
+
+class _FakePage:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def get_text(self, kind: str, clip=None):  # noqa: ANN001 - signature mirrors PyMuPDF
+        assert kind == "dict"
+        return self._payload
+
+
+def _block_tuple(raw_text: str) -> tuple[int, int, int, int, str]:
+    return (0, 0, 100, 20, raw_text)
+
+
+def test_structured_block_emits_basic_styles(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pdf_chunker.pdf_blocks.clean_text", lambda text: text)
+
+    payload = {
+        "blocks": [
+            {
+                "type": 0,
+                "lines": [
+                    {
+                        "spans": [
+                            {
+                                "text": "Bold ",
+                                "flags": 16,
+                                "font": "Helvetica-Bold",
+                                "origin": (0.0, 100.0),
+                                "size": 12.0,
+                            },
+                            {
+                                "text": "Italic",
+                                "flags": 2,
+                                "font": "Helvetica-Oblique",
+                                "origin": (40.0, 100.0),
+                                "size": 12.0,
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    block = _structured_block(_FakePage(payload), _block_tuple("Bold Italic"), 1, "doc.pdf")
+    assert block is not None
+    assert block.inline_styles == [
+        InlineStyleSpan(start=0, end=5, style="bold", confidence=1.0, attrs=None),
+        InlineStyleSpan(start=5, end=11, style="italic", confidence=1.0, attrs=None),
+    ]
+
+
+def test_structured_block_detects_superscript(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pdf_chunker.pdf_blocks.clean_text", lambda text: text)
+
+    payload = {
+        "blocks": [
+            {
+                "type": 0,
+                "lines": [
+                    {
+                        "spans": [
+                            {
+                                "text": "Text",
+                                "flags": 0,
+                                "font": "Times-Roman",
+                                "origin": (0.0, 100.0),
+                                "size": 12.0,
+                            },
+                            {
+                                "text": "1",
+                                "flags": 0,
+                                "font": "Times-Roman",
+                                "origin": (40.0, 96.0),
+                                "size": 6.0,
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    block = _structured_block(_FakePage(payload), _block_tuple("Text1"), 1, "doc.pdf")
+    assert block is not None
+    assert block.inline_styles == [
+        InlineStyleSpan(start=4, end=5, style="superscript", confidence=1.0, attrs=None)
+    ]
+
+
+def test_structured_block_remaps_offsets_after_cleaning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pdf_chunker.pdf_blocks.clean_text", lambda text: text.replace("-\n", ""))
+
+    payload = {
+        "blocks": [
+            {
+                "type": 0,
+                "lines": [
+                    {
+                        "spans": [
+                            {
+                                "text": "co-",
+                                "flags": 2,
+                                "font": "Times-Italic",
+                                "origin": (0.0, 100.0),
+                                "size": 12.0,
+                            },
+                            {
+                                "text": "\n",
+                                "flags": 0,
+                                "font": "Times-Roman",
+                                "origin": (0.0, 100.0),
+                                "size": 12.0,
+                            },
+                            {
+                                "text": "operate",
+                                "flags": 2,
+                                "font": "Times-Italic",
+                                "origin": (20.0, 100.0),
+                                "size": 12.0,
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    block = _structured_block(_FakePage(payload), _block_tuple("co-\noperate"), 1, "doc.pdf")
+    assert block is not None
+    assert block.inline_styles == [
+        InlineStyleSpan(start=0, end=9, style="italic", confidence=1.0, attrs=None)
+    ]
