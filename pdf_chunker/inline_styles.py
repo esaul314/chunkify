@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from operator import attrgetter
-from typing import Callable, Iterable, Mapping, Sequence
+from collections.abc import Mapping as MappingABC
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 
 BoundsTransform = Callable[[int, int], tuple[int, int] | None]
@@ -128,14 +129,61 @@ def build_index_remapper(
     return transform
 
 
+def _coerce_attrs(attrs: Any) -> Mapping[str, str] | None:
+    if not isinstance(attrs, MappingABC):
+        return None
+    return {str(k): str(v) for k, v in attrs.items()}
+
+
+def _coerce_span(span: Any) -> InlineStyleSpan | None:
+    if isinstance(span, InlineStyleSpan):
+        return span
+    if not isinstance(span, MappingABC):
+        return None
+
+    start = span.get("start")
+    end = span.get("end")
+    style = span.get("style")
+    if start is None or end is None or style is None:
+        return None
+
+    try:
+        start_idx = int(start)
+        end_idx = int(end)
+    except (TypeError, ValueError):
+        return None
+
+    confidence = span.get("confidence")
+    try:
+        confidence_val = (
+            float(confidence)
+            if confidence is not None and confidence != ""
+            else None
+        )
+    except (TypeError, ValueError):
+        confidence_val = None
+
+    return InlineStyleSpan(
+        start=start_idx,
+        end=end_idx,
+        style=str(style),
+        confidence=confidence_val,
+        attrs=_coerce_attrs(span.get("attrs")),
+    )
+
+
 def normalize_spans(
-    spans: Iterable[InlineStyleSpan],
+    spans: Iterable[InlineStyleSpan | Mapping[str, Any] | Any],
     text_length: int,
     transform: BoundsTransform | None = None,
 ) -> tuple[InlineStyleSpan, ...]:
     """Apply remapping, clamping, sorting, and merging to spans."""
 
-    remapped = remap_spans(spans, transform)
+    materialized = tuple(filter(None, (_coerce_span(span) for span in spans)))
+    if not materialized:
+        return ()
+
+    remapped = remap_spans(materialized, transform)
     clamped = clamp_spans(remapped, text_length)
     ordered = sort_and_deduplicate(clamped)
     return merge_adjacent_spans(ordered)

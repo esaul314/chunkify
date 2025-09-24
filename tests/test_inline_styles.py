@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
 
 from pdf_chunker.framework import Artifact
@@ -83,6 +85,26 @@ def test_normalize_spans_applies_full_pipeline() -> None:
         _span(0, 2, "bold"),
         _span(2, 5, "bold", attrs={"note_id": "1"}),
         _span(5, 10, "bold"),
+    )
+
+
+def test_normalize_spans_accepts_mapping_input() -> None:
+    spans = (
+        {"start": "0", "end": 4, "style": "bold", "confidence": "0.8", "attrs": {"href": "https://example.com"}},
+        _span(4, 6, "italic"),
+    )
+
+    normalized = normalize_spans(spans, text_length=6)
+
+    assert normalized == (
+        InlineStyleSpan(
+            start=0,
+            end=4,
+            style="bold",
+            confidence=0.8,
+            attrs={"href": "https://example.com"},
+        ),
+        _span(4, 6, "italic"),
     )
 
 
@@ -249,6 +271,35 @@ def test_text_clean_pass_updates_inline_styles() -> None:
         InlineStyleSpan(start=0, end=9, style="bold", confidence=None, attrs=None)
     ]
     assert block["inline_styles"][0].end == 10
+
+
+def test_text_clean_pass_handles_dict_inline_styles() -> None:
+    span_dict = asdict(
+        InlineStyleSpan(
+            start=0,
+            end=10,
+            style="bold",
+            confidence=0.7,
+            attrs={"href": "https://example.com"},
+        )
+    )
+    block = {
+        "text": "Bold-\ntext",
+        "inline_styles": [span_dict],
+    }
+
+    cleaned = _clean_block(block)
+
+    assert cleaned["text"] == "Bold-text"
+    assert cleaned["inline_styles"] == [
+        InlineStyleSpan(
+            start=0,
+            end=9,
+            style="bold",
+            confidence=0.7,
+            attrs={"href": "https://example.com"},
+        )
+    ]
 
 
 def test_inline_style_consumers() -> None:
