@@ -374,11 +374,24 @@ SENTENCE_CONTINUATION_LOWER = frozenset(
 
 _CAPTION_PREFIXES = ("Figure", "Table", "Exhibit")
 _CAPTION_RE = re.compile(rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+\d")
+_CAPTION_STYLE_TAGS = frozenset({"italic", "bold"})
+_CAPTION_STYLE_THRESHOLD = 0.6
 
 
-def _looks_like_caption(text: str) -> bool:
+def _inline_style_ratio(block: Block, styles: Iterable[str]) -> float:
+    spans = tuple(block.inline_styles or ())
+    total = len(block.text or "")
+    style_set = frozenset(styles)
+    return (
+        sum(max(0, min(total, span.end) - max(0, span.start)) for span in spans if span.style in style_set) / total
+        if spans and total > 0
+        else 0.0
+    )
+
+
+def _looks_like_caption(text: str, *, emphasis_ratio: float = 0.0) -> bool:
     stripped = text.strip()
-    return bool(stripped and _CAPTION_RE.match(stripped))
+    return bool(stripped and _CAPTION_RE.match(stripped)) or emphasis_ratio >= _CAPTION_STYLE_THRESHOLD
 
 
 def _word_count(text: str) -> int:
@@ -442,13 +455,12 @@ def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     return False
 
 
-def _is_cross_page_continuation(
-    curr_text: str,
-    next_text: str,
-    curr_page: Optional[int],
-    next_page: Optional[int],
-) -> bool:
-    if _looks_like_caption(curr_text):
+def _is_cross_page_continuation(curr: Block, nxt: Block) -> bool:
+    curr_text = curr.text.strip()
+    next_text = nxt.text.strip()
+    curr_page = curr.source.get("page")
+    next_page = nxt.source.get("page")
+    if _looks_like_caption(curr_text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
         return False
     if not (curr_text and next_text):
         return False
@@ -472,6 +484,8 @@ def _is_cross_page_continuation(
 
 
 def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
+    if _looks_like_caption(curr.text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
+        return False
     curr_page = curr.source.get("page")
     next_page = nxt.source.get("page")
     if curr_page is None or next_page is None or next_page != curr_page + 1:
@@ -491,14 +505,16 @@ def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
     return True
 
 
-def _is_same_page_continuation(
-    curr_text: str, next_text: str, curr_page: Optional[int], next_page: Optional[int]
-) -> bool:
+def _is_same_page_continuation(curr: Block, nxt: Block) -> bool:
+    curr_text = curr.text.strip()
+    next_text = nxt.text.strip()
+    curr_page = curr.source.get("page")
+    next_page = nxt.source.get("page")
     if curr_page is None or next_page is None:
         return False
     if curr_page != next_page or not next_text:
         return False
-    if _looks_like_caption(curr_text):
+    if _looks_like_caption(curr_text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
         return False
     if any(b in curr_text for b in BULLET_CHARS):
         return False
@@ -723,9 +739,9 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
         and (tail_is_lower or (tail_is_titlecase and head_word.islower()))
     ):
         return True, "hyphenated_continuation"
-    elif _is_same_page_continuation(curr_text, next_text, curr_page, next_page):
+    elif _is_same_page_continuation(curr, nxt):
         return True, "sentence_continuation"
-    elif _is_cross_page_continuation(curr_text, next_text, curr_page, next_page):
+    elif _is_cross_page_continuation(curr, nxt):
         return True, "sentence_continuation"
     elif _is_cross_page_paragraph_continuation(curr, nxt):
         return True, "sentence_continuation"

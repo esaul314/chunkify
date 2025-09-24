@@ -8,7 +8,7 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
 from itertools import chain
@@ -44,6 +44,26 @@ from pdf_chunker.text_cleaning import STOPWORDS
 from pdf_chunker.utils import _build_metadata
 
 _STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
+_FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
+
+
+def _collect_superscripts(block: Block, text: str) -> list[dict[str, str]]:
+    if not text:
+        return []
+    limit = len(text)
+    anchors: list[dict[str, str]] = []
+    for span in block.get("inline_styles") or ():
+        if getattr(span, "style", None) != "superscript":
+            continue
+        start = max(0, min(limit, getattr(span, "start", 0)))
+        end = max(start, min(limit, getattr(span, "end", start)))
+        snippet = text[start:end].strip()
+        if not snippet or text[end:].strip() not in _FOOTNOTE_TAILS:
+            continue
+        attrs = getattr(span, "attrs", None)
+        note_id = attrs.get("note_id") if isinstance(attrs, Mapping) else None
+        anchors.append({"text": snippet, **({"note_id": note_id} if note_id else {})})
+    return anchors
 
 
 def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
@@ -381,15 +401,16 @@ def build_chunk_with_meta(
     annotated = _tag_list(block)
     start_index = annotated.pop("_chunk_start_index", None)
     chunk_index = start_index if isinstance(start_index, int) else index
-    return {
-        "text": text,
-        "meta": _build_metadata(
-            text,
-            _with_source(annotated, page, filename),
-            chunk_index,
-            {},
-        ),
-    }
+    metadata = _build_metadata(
+        text,
+        _with_source(annotated, page, filename),
+        chunk_index,
+        {},
+    )
+    anchors = _collect_superscripts(annotated, text)
+    if anchors:
+        metadata["footnote_anchors"] = anchors
+    return {"text": text, "meta": metadata}
 
 
 def _chunk_items(

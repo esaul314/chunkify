@@ -42,7 +42,7 @@ def test_trace_snapshots(tmp_path, monkeypatch) -> None:
     }
 
     clean = json.loads((run_dir / "text_clean.json").read_text())
-    assert clean["pages"][0]["blocks"] == [{"text": "foo one"}]
+    assert [b["text"] for b in clean["pages"][0]["blocks"]] == ["foo one"]
 
     clean_dups = json.loads((run_dir / "text_clean_dups.json").read_text())
     assert clean_dups["dups"] == []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from pdf_chunker.framework import Artifact
 from pdf_chunker.inline_styles import (
     InlineStyleSpan,
     build_index_remapper,
@@ -10,7 +11,9 @@ from pdf_chunker.inline_styles import (
     normalize_spans,
     remap_spans,
 )
-from pdf_chunker.pdf_blocks import _structured_block
+from pdf_chunker.pdf_blocks import _structured_block, Block, merge_continuation_blocks
+from pdf_chunker.passes.heading_detect import annotate_headings
+from pdf_chunker.passes.split_semantic import split_semantic
 from pdf_chunker.passes.text_clean import _clean_block
 
 
@@ -245,3 +248,43 @@ def test_text_clean_pass_updates_inline_styles() -> None:
         InlineStyleSpan(start=0, end=9, style="bold", confidence=None, attrs=None)
     ]
     assert block["inline_styles"][0].end == 10
+
+
+def test_inline_style_consumers() -> None:
+    heading_block = {
+        "text": "introduction",
+        "type": "paragraph",
+        "inline_styles": [InlineStyleSpan(start=0, end=12, style="bold")],
+    }
+    annotated = annotate_headings([heading_block])[0]
+    assert annotated["is_heading"] is True
+    assert annotated["type"] == "heading"
+    assert annotated.get("heading_source")
+    assert "inline_styles" in annotated["heading_source"]
+
+    footnote_block = {
+        "text": "Main text1",
+        "type": "paragraph",
+        "source": {"filename": "doc.pdf", "page": 1},
+        "inline_styles": [InlineStyleSpan(start=9, end=10, style="superscript", attrs={"note_id": "1"})],
+    }
+    doc = {
+        "type": "page_blocks",
+        "source_path": "doc.pdf",
+        "pages": [{"page": 1, "blocks": [footnote_block]}],
+    }
+    items = split_semantic(Artifact(payload=doc)).payload["items"]
+    assert items[0]["meta"]["footnote_anchors"] == [{"text": "1", "note_id": "1"}]
+
+    caption_text = "Descriptive caption"
+    caption = Block(
+        text=caption_text,
+        source={"filename": "doc.pdf", "page": 1},
+        inline_styles=[InlineStyleSpan(start=0, end=len(caption_text), style="italic")],
+    )
+    paragraph = Block(
+        text="This is following text.",
+        source={"filename": "doc.pdf", "page": 1},
+    )
+    merged = list(merge_continuation_blocks([caption, paragraph]))
+    assert len(merged) == 2 and merged[0].text == caption_text
