@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from math import ceil
 from functools import reduce
 from numbers import Real
@@ -12,7 +12,6 @@ from typing import NamedTuple
 SOFT_LIMIT = 8_000
 
 _AVERAGE_CHARS_PER_TOKEN = 5.0
-
 _WORD_START = re.compile(r"[\w']+")
 _SENTENCE_BOUNDARY = re.compile(r"[.?!][\"')\]]*\s+")
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
@@ -73,6 +72,34 @@ class _MergeBudget(NamedTuple):
     effective_total: int
 
 
+def _token_metrics(
+    words: tuple[str, ...],
+    *,
+    density: float,
+) -> tuple[int, int, int]:
+    normalized_density = density if density > 0 else _AVERAGE_CHARS_PER_TOKEN
+    word_count = len(words)
+    char_total = sum(len(token) for token in words)
+    dense_total = int(ceil(char_total / normalized_density)) if char_total else 0
+    effective_total = max(word_count, dense_total)
+    return word_count, dense_total, effective_total
+
+
+def estimate_tokens(
+    text: str,
+    *,
+    average_chars_per_token: float = _AVERAGE_CHARS_PER_TOKEN,
+) -> int:
+    density = (
+        average_chars_per_token
+        if average_chars_per_token > 0
+        else _AVERAGE_CHARS_PER_TOKEN
+    )
+    words = tuple(text.split())
+    _, _, effective_total = _token_metrics(words, density=density)
+    return effective_total
+
+
 def _derive_merge_budget(
     previous: Iterable[str],
     current: Iterable[str],
@@ -98,19 +125,29 @@ def _derive_merge_budget(
     )
     density = average_chars_per_token if average_chars_per_token > 0 else _AVERAGE_CHARS_PER_TOKEN
 
-    def _load(words: tuple[str, ...]) -> tuple[int, int]:
-        word_count = len(words)
-        char_total = sum(len(token) for token in words)
-        dense_total = int(ceil(char_total / density)) if char_total else 0
-        return word_count, dense_total
-
     prev_words = tuple(previous)
     next_words = tuple(current)
-    word_loads = tuple(_load(words) for words in (prev_words, next_words))
-    word_total = sum(count for count, _ in word_loads)
-    dense_total = sum(dense for _, dense in word_loads)
+    metrics = tuple(
+        _token_metrics(words, density=density)
+        for words in (prev_words, next_words)
+    )
+    word_total = sum(count for count, _, _ in metrics)
+    dense_total = sum(dense for _, dense, _ in metrics)
     effective_total = max(word_total, dense_total)
     return _MergeBudget(limit, hard_limit, word_total, dense_total, effective_total)
+
+
+def _target_limit(budget: _MergeBudget) -> int | None:
+    return budget.limit if budget.limit is not None else budget.hard_limit
+
+
+def _breaches_limit(budget: _MergeBudget) -> bool:
+    target = _target_limit(budget)
+    return bool(target is not None and budget.effective_total > target)
+
+
+def _exceeds_budget(budget: _MergeBudget) -> bool:
+    return _breaches_limit(budget)
 
 
 def _last_sentence(text: str) -> str | None:
@@ -138,7 +175,25 @@ def _merge_sentence_fragments(
     )
     target_limit = limit if limit is not None else hard_limit
 
-    def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
+    def _budget_for(
+        previous: Iterable[str],
+        current: Iterable[str],
+    ) -> _MergeBudget:
+        return _derive_merge_budget(
+            previous,
+            current,
+            chunk_size=chunk_size,
+            overlap=allowed_overlap,
+            min_chunk_size=min_chunk_size,
+        )
+
+    def _should_merge(
+        previous: str,
+        current: str,
+        prev_words: tuple[str, ...],
+        current_words: tuple[str, ...],
+        budget: _MergeBudget,
+    ) -> bool:
         if not previous:
             return False
         lead = current.lstrip()
@@ -147,16 +202,11 @@ def _merge_sentence_fragments(
         continuation_lead = _is_continuation_lead(lead)
         if _ENDS_SENTENCE.search(previous.rstrip()) and not continuation_lead:
             return False
-        current_words = current.split()
         first_word = current_words[0] if current_words else ""
         if prev_words and prev_words[-1] == first_word:
             return False
-        if target_limit is not None:
-            word_total = len(prev_words) + len(current_words)
-            if word_total > target_limit and (
-                hard_limit is None or word_total > hard_limit
-            ):
-                return False
+        if target_limit is not None and _exceeds_budget(budget):
+            return False
         head = lead[0]
         continuation_chars = ",.;:)]\"'"
         if not (continuation_lead or head.islower() or head in continuation_chars):
@@ -173,7 +223,11 @@ def _merge_sentence_fragments(
         if not allowed_overlap or not prev_words or not current_words:
             return 0
         window = min(allowed_overlap, len(prev_words), len(current_words))
-        return window if window and prev_words[-window:] == current_words[:window] else 0
+        if window >= len(current_words):
+            window = max(len(current_words) - 1, 0)
+        if not window:
+            return 0
+        return window if prev_words[-window:] == current_words[:window] else 0
 
     def _dedupe_overlap(
         prev_words: tuple[str, ...],
@@ -208,38 +262,40 @@ def _merge_sentence_fragments(
         if not trimmed_words:
             return _append(acc, chunk, words)
 
-        if not _should_merge(prev_text, trimmed_text, list(prev_words)):
+        budget = _budget_for(prev_words, trimmed_words)
+        if not _should_merge(
+            prev_text,
+            trimmed_text,
+            prev_words,
+            trimmed_words,
+            budget,
+        ):
             if trimmed_words != words:
                 return _append(acc, trimmed_text, trimmed_words)
             return _append(acc, chunk, words)
 
-        combined = len(prev_words) + len(trimmed_words)
-        exceeds_limit = target_limit is not None and combined > target_limit
-        if (
-            exceeds_limit
-            and limit is not None
-            and hard_limit is not None
-            and combined <= hard_limit
-        ):
-            exceeds_limit = False
+        combined_tokens = budget.effective_total
+        exceeds_limit = _breaches_limit(budget)
         if exceeds_limit:
-            adjusted = _rebalance_overflow(
-                prev_text, prev_words, trimmed_text, target_limit
-            ) if target_limit is not None else None
+            adjusted = (
+                _rebalance_overflow(
+                    prev_text,
+                    prev_words,
+                    trimmed_text,
+                    budget,
+                    _budget_for,
+                )
+                if _target_limit(budget) is not None
+                else None
+            )
             if adjusted is not None:
                 prev_text, prev_words, trimmed_text = adjusted
                 trimmed_words = tuple(trimmed_text.split())
                 if trimmed_words:
                     acc = [*acc[:-1], (prev_text, prev_words)]
-                    combined = len(prev_words) + len(trimmed_words)
-                    exceeds_limit = target_limit is not None and combined > target_limit
-                    if (
-                        exceeds_limit
-                        and limit is not None
-                        and hard_limit is not None
-                        and combined <= hard_limit
-                    ):
-                        exceeds_limit = False
+                    budget = _budget_for(prev_words, trimmed_words)
+                    combined_tokens = budget.effective_total
+                    exceeds_limit = _breaches_limit(budget)
             if not trimmed_words:
                 return acc
             if exceeds_limit:
@@ -318,9 +374,10 @@ def _rebalance_overflow(
     prev_text: str,
     prev_words: tuple[str, ...],
     next_text: str,
-    limit: int | None,
+    budget: _MergeBudget,
+    compute_budget: Callable[[Iterable[str], Iterable[str]], _MergeBudget],
 ) -> tuple[str, tuple[str, ...], str] | None:
-    if limit is None:
+    if _target_limit(budget) is None:
         return None
 
     updated_prev = prev_text
@@ -328,7 +385,13 @@ def _rebalance_overflow(
     updated_next = next_text
     changed = False
 
-    if len(updated_prev_words) > limit:
+    def _budget(prev: Iterable[str], nxt: Iterable[str] = ()) -> _MergeBudget:
+        return compute_budget(prev, nxt)
+
+    def _breaches(prev: Iterable[str], nxt: Iterable[str] = ()) -> bool:
+        return _breaches_limit(_budget(prev, nxt))
+
+    if _breaches(updated_prev_words, ()):  # pragma: no branch - rare
         boundaries = [
             match.end()
             for match in _SENTENCE_BOUNDARY.finditer(updated_prev)
@@ -340,11 +403,13 @@ def _rebalance_overflow(
             if not head or not tail:
                 continue
             head_words = tuple(head.split())
-            if len(head_words) > limit:
+            if _breaches(head_words, ()):  # pragma: no branch - rare
                 continue
             merged = _merge_tail_with_next(tail, updated_next)
             merged_words = tuple(merged.split())
             if not merged_words:
+                continue
+            if _breaches(head_words, merged_words):
                 continue
             updated_prev = head
             updated_prev_words = head_words
@@ -367,7 +432,7 @@ def _rebalance_overflow(
             tail = updated_next[pos:].lstrip()
             if head and tail:
                 head_words = tuple(head.split())
-                if len(updated_prev_words) + len(head_words) <= limit:
+                if not _breaches(updated_prev_words, head_words):
                     updated_prev = f"{updated_prev} {head}".strip()
                     updated_prev_words = tuple(updated_prev.split())
                     updated_next = tail

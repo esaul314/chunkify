@@ -77,16 +77,21 @@ def test_split_counts_change_with_overrides(tmp_path, monkeypatch, overrides, re
 
     monkeypatch.setattr("pdf_chunker.splitter.semantic_chunker", fake_semantic_chunker)
 
-    def _run(opts: dict | None = None) -> int:
+    def _run(opts: dict | None = None) -> list[dict]:
         spec_opts = {"run_report": {"output_path": str(tmp_path / "r.json")}}
         spec = PipelineSpec(options={**spec_opts, **(opts or {})})
         art = Artifact(payload=_doc("x" * 1150), meta={"metrics": {}, "input": "doc.pdf"})
         seeded, _ = run_convert(art, spec)
-        return len(split_semantic(seeded).payload["items"])
+        return split_semantic(seeded).payload["items"]
 
-    base = _run()
-    new = _run(overrides)
-    assert (new > base) if relation == "gt" else (new < base)
+    base_items = _run()
+    new_items = _run(overrides)
+    base_count, new_count = len(base_items), len(new_items)
+    assert new_count != base_count, f"override preserved counts: base={base_count}, new={new_count}"
+    if relation == "gt":
+        assert new_count > base_count, f"expected overrides {overrides} to increase chunks"
+    else:
+        assert new_count < base_count, f"expected overrides {overrides} to decrease chunks"
 
 
 def test_run_convert_overrides_existing_meta_options(tmp_path, monkeypatch) -> None:

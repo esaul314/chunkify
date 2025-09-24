@@ -39,6 +39,7 @@ from pdf_chunker.passes.sentence_fusion import (
     _is_continuation_lead,
     _last_sentence,
     _merge_sentence_fragments,
+    estimate_tokens,
 )
 from pdf_chunker.text_cleaning import STOPWORDS
 from pdf_chunker.utils import _build_metadata
@@ -110,7 +111,12 @@ def _stitch_block_continuations(
 
 
 def _count_words(text: str) -> int:
-    return len(text.split())
+    tokens = estimate_tokens(text)
+    if not text.strip():
+        return 0
+    if len(text.split()) <= 1:
+        return max(tokens, len(text))
+    return tokens
 
 
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
