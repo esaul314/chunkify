@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from difflib import SequenceMatcher
 from itertools import chain
 from statistics import median
 from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -10,7 +9,12 @@ import re
 
 import fitz  # PyMuPDF
 
-from .inline_styles import InlineStyleSpan, build_index_remapper, normalize_spans
+from .inline_styles import (
+    InlineStyleSpan,
+    build_index_map,
+    build_index_remapper,
+    normalize_spans,
+)
 from .text_cleaning import (
     clean_text,
     HYPHEN_CHARS_ESC,
@@ -143,7 +147,7 @@ def _extract_block_inline_styles(page, block_tuple, cleaned_text: str) -> Option
     if not spans:
         return None
 
-    remapper = build_index_remapper(_build_index_map(raw_text, cleaned_text))
+    remapper = build_index_remapper(build_index_map(raw_text, cleaned_text))
     normalized = normalize_spans(spans, len(cleaned_text), remapper)
     return list(normalized) or None
 
@@ -261,24 +265,6 @@ def _link_attrs(span: Mapping[str, object]) -> Optional[Mapping[str, str]]:
 
 def _is_monospace(font: str) -> bool:
     return any(token in font for token in ("mono", "code", "courier", "console"))
-
-
-def _build_index_map(raw_text: str, cleaned_text: str) -> list[int | None]:
-    matcher = SequenceMatcher(a=raw_text, b=cleaned_text)
-    mapping: list[int | None] = [None] * (len(raw_text) + 1)
-    for a_start, b_start, size in matcher.get_matching_blocks():
-        for offset in range(size + 1):
-            mapping[a_start + offset] = b_start + offset
-    last = 0
-    for idx, value in enumerate(mapping):
-        if value is None:
-            mapping[idx] = last
-        else:
-            last = value
-    mapping[-1] = len(cleaned_text)
-    return mapping
-
-
 def _extract_page_blocks(page, page_num: int, filename: str) -> list[Block]:
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")

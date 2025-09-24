@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from difflib import SequenceMatcher
 from operator import attrgetter
 from typing import Callable, Iterable, Mapping, Sequence
 
@@ -150,9 +151,30 @@ def _spans_share_identity(
     )
 
 
+def build_index_map(source: str, target: str) -> list[int | None]:
+    """Return an index remapping from ``source`` to ``target`` text."""
+
+    matcher = SequenceMatcher(a=source, b=target)
+    mapping: list[int | None] = [None] * (len(source) + 1)
+    for a_start, b_start, size in matcher.get_matching_blocks():
+        for offset in range(size + 1):
+            mapping[a_start + offset] = b_start + offset
+
+    last = 0
+    for idx, value in enumerate(mapping):
+        if value is None:
+            mapping[idx] = last
+        else:
+            last = value
+
+    mapping[-1] = len(target)
+    return mapping
+
+
 __all__ = [
     "InlineStyleSpan",
     "BoundsTransform",
+    "build_index_map",
     "build_index_remapper",
     "clamp_spans",
     "merge_adjacent_spans",

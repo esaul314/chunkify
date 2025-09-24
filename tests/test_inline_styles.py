@@ -11,6 +11,7 @@ from pdf_chunker.inline_styles import (
     remap_spans,
 )
 from pdf_chunker.pdf_blocks import _structured_block
+from pdf_chunker.passes.text_clean import _clean_block
 
 
 def _span(
@@ -229,3 +230,18 @@ def test_structured_block_remaps_offsets_after_cleaning(monkeypatch: pytest.Monk
     assert block.inline_styles == [
         InlineStyleSpan(start=0, end=9, style="italic", confidence=1.0, attrs=None)
     ]
+
+
+def test_text_clean_pass_updates_inline_styles() -> None:
+    block = {
+        "text": "Bold-\ntext",
+        "inline_styles": [InlineStyleSpan(start=0, end=10, style="bold")],
+    }
+
+    cleaned = _clean_block(block)
+
+    assert cleaned["text"] == "Bold-text"
+    assert cleaned["inline_styles"] == [
+        InlineStyleSpan(start=0, end=9, style="bold", confidence=None, attrs=None)
+    ]
+    assert block["inline_styles"][0].end == 10

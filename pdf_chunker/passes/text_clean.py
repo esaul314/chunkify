@@ -8,9 +8,27 @@ from pdf_chunker.framework import Artifact, register
 def _clean_block(block: Dict[str, Any]) -> Dict[str, Any]:
     """Return a new block with normalized text."""
     from pdf_chunker import text_cleaning
+    from pdf_chunker.inline_styles import (
+        build_index_map,
+        build_index_remapper,
+        normalize_spans,
+    )
 
     text = block.get("text", "")
-    return {**block, "text": text_cleaning.clean_text(text)}
+    cleaned_text = text_cleaning.clean_text(text)
+
+    original_styles = block.get("inline_styles")
+    remapped_styles = original_styles
+    if original_styles:
+        remapper = build_index_remapper(build_index_map(text, cleaned_text))
+        normalized = normalize_spans(original_styles, len(cleaned_text), remapper)
+        remapped_styles = list(normalized)
+
+    return {
+        **block,
+        "text": cleaned_text,
+        "inline_styles": remapped_styles,
+    }
 
 
 def _clean_page(page: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
