@@ -68,18 +68,66 @@ class InlineStyleSpan:
 5. **AI enrichment**: expose inline style summary (e.g., first bold phrase) in metadata to inform downstream prompt engineering.
 6. **Trace/debug tooling**: extend trace artifacts to serialize inline span info for troubleshooting (JSON-friendly structure).
 
-## Implementation Tasks (sequenced)
-1. **Schema introduction**
-   - Add `InlineStyleSpan` dataclass + `inline_styles` field to `Block` with default `None` to avoid changing serialized payloads immediately.
-   - Provide helper functions for span normalization (merge, clamp) under a new `pdf_chunker.inline_styles` module.
-2. **Extractor instrumentation**
-   - Update PyMuPDF block assembly to emit spans based on `dict` output.
-   - Ensure cleaning transforms re-map offsets via pure functional utilities.
-3. **Consumer opt-in**
-   - Modify passes to accept the new metadata while retaining fallback behaviors when spans are missing.
-4. **Telemetry + validation**
-   - Emit metrics on percentage of blocks with style metadata.
-   - Add regression tests asserting span alignment after text cleaning.
+## Sequenced Execution Plan
+
+### Phase 0 — Preparation
+1. **Confirm scope + stakeholders**
+   - Review this schema with `split_semantic`, `heading_detect`, and `emit_jsonl` owners.
+   - Capture sign-off in the engineering log and create a shared project board for the tasks below.
+
+### Phase 1 — Schema & Utilities
+2. **Introduce core data structures**
+   - Add `InlineStyleSpan` and `inline_styles` to `pdf_chunker.pdf_blocks.Block` behind a default `None`.
+   - Create `pdf_chunker.inline_styles` with pure helper functions for span normalization (merge, clamp, remap offsets).
+3. **Unit tests for utilities**
+   - Add exhaustive tests covering merging, clamping, remapping across ligature fixes, and zero-length filtering.
+   - Include property-style checks (Hypothesis or table-driven) to ensure transformations preserve invariants.
+
+### Phase 2 — Extraction
+4. **PyMuPDF span harvesting**
+   - Extend the native PyMuPDF extractor to capture style hints from `page.get_text("dict")` spans and emit normalized spans.
+   - Cover bold/italic flags, baseline offsets for super/subscripts, hyperlink annotations, and list metadata.
+5. **PyMuPDF-focused regression tests**
+   - Add targeted fixtures in `tests/pdf_parse` validating span boundaries for bold, italic, superscript, and link cases.
+   - Verify serialization round-trips do not alter existing payload fields.
+6. **PyMuPDF4LLM bridge**
+   - Map PyMuPDF4LLM emphasis metadata into the new schema with parity to native extraction.
+   - Ensure missing metadata yields `inline_styles=None` without raising.
+
+### Phase 3 — Text Cleaning Alignment
+7. **Offset remapping utilities integration**
+   - Invoke normalization helpers inside `text_clean` transforms (ligature expansion, hyphen joins, whitespace fixes).
+   - Guarantee that discarded glyphs remove spans gracefully and that merged characters consolidate spans.
+8. **Cleaning regression coverage**
+   - Extend existing text cleaning tests (or add new ones) validating spans remain aligned after each transform.
+   - Include edge cases for multi-span blocks and ensure spans drop when text is deleted.
+
+### Phase 4 — Consumer Adoption
+9. **split_semantic enhancements**
+   - Factor inline superscripts into footnote extraction heuristics while keeping fallback when metadata is absent.
+   - Update functional tests ensuring chunks isolate footnotes when spans are present.
+10. **heading_detect and caption heuristics**
+    - Incorporate bold/caps/small caps spans into heading scoring and caption detection heuristics without regressing existing thresholds.
+    - Add regression tests guarding new weighting logic and verifying backward compatibility.
+11. **emit_jsonl and downstream metadata**
+    - Preserve `attrs.note_id` while stripping superscript glyphs during deduplication to avoid payload churn.
+    - Serialize inline span summaries into trace/debug artifacts behind a feature flag; ensure JSONL payload remains unchanged by default.
+
+### Phase 5 — Telemetry, Tooling, and Rollout
+12. **Metrics instrumentation**
+    - Emit counters/histograms for percentage of blocks carrying inline styles and the distribution of style tags.
+    - Add dashboards or logging hooks to monitor extraction completeness across samples.
+13. **Trace + developer tooling updates**
+    - Extend trace artifacts and CLI debug commands to include inline style spans in a developer-friendly format.
+    - Document usage within `docs/` and update `AGENTS.md` debugging guidance.
+14. **Rollout + verification**
+    - Run the conversion pipeline on canonical fixtures (e.g., `platform-eng-excerpt.pdf`) comparing before/after outputs for structural parity.
+    - Record performance benchmarks (<5% regression target) and capture final sign-off before enabling wider serialization.
+
+### Phase 6 — Follow-up Enablement
+15. **Expose spans to external consumers (optional)**
+    - Behind a feature flag, add spans to JSONL payloads and update schema documentation when downstream teams request access.
+    - Coordinate with RAG platform owners to validate contract changes before default enablement.
 
 ## Open Questions & Follow-ups
 - **Serialization format**: do we expose spans directly in JSONL output now or keep them internal? Recommendation: defer until consumers request; include feature flag when ready.
