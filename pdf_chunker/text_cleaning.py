@@ -38,7 +38,7 @@ import logging
 import os
 import re
 from functools import reduce
-from typing import Callable, Iterator, List, Match, Sequence, Tuple, TypeVar
+from typing import Callable, Iterator, List, Match, Optional, Sequence, Tuple, TypeVar
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -138,6 +138,8 @@ _TOKEN_RE = re.compile(r"\w+|[^\w\s]")
 _CLOSING_QUOTE_CHARS = frozenset({'"', "'", "”", "’", "›", "»"})
 _EM_DASH_CHARS = frozenset("—")
 _STOPWORD_LOWERCASE_CHARS = frozenset(",;:'\"-")
+_LIST_MARKER_RE = re.compile(rf"^\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])\s*")
+_LEADING_WORD_RE = re.compile(r"[A-Za-z]+(?:['’\-][A-Za-z]+)*")
 
 # Inline artifacts
 # Avoid collapsing list markers like "2.\n3." by skipping digits after the break
@@ -908,6 +910,52 @@ def replace_pipes(text: str) -> str:
     return PIPE_RE.sub(":", text)
 
 
+def _first_alpha_index(text: str) -> Optional[int]:
+    for idx, char in enumerate(text):
+        if char.isalpha():
+            return idx
+    return None
+
+
+def _leading_word(segment: str) -> Optional[str]:
+    match = _LEADING_WORD_RE.match(segment)
+    return match.group(0) if match else None
+
+
+def _should_skip_capitalization(word: str) -> bool:
+    return not word.islower() or any(char.isdigit() for char in word)
+
+
+def restore_leading_capitalization(text: str) -> str:
+    """Uppercase the first alphabetic character when the leading word is lowercase."""
+
+    if not text:
+        return text
+
+    offset = len(text) - len(text.lstrip())
+    remainder = text[offset:]
+
+    marker_match = _LIST_MARKER_RE.match(remainder)
+    if marker_match:
+        offset += marker_match.end()
+        remainder = remainder[marker_match.end():]
+
+    alpha_offset = _first_alpha_index(remainder)
+    if alpha_offset is None:
+        return text
+
+    absolute = offset + alpha_offset
+    current = text[absolute]
+    if not current.islower():
+        return text
+
+    word = _leading_word(remainder[alpha_offset:])
+    if not word or _should_skip_capitalization(word):
+        return text
+
+    return f"{text[:absolute]}{current.upper()}{text[absolute + 1:]}"
+
+
 def remove_underscore_emphasis(text: str) -> str:
     """Remove single/double underscore emphasis markers."""
 
@@ -1227,4 +1275,5 @@ __all__ = [
     "strip_headers_and_footers",
     "clean_paragraph",
     "clean_text",
+    "restore_leading_capitalization",
 ]
