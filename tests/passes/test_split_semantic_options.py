@@ -7,7 +7,10 @@ from pdf_chunker.cli import _cli_overrides
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import run_convert
 from pdf_chunker.framework import Artifact
+from pdf_chunker.passes.emit_jsonl import emit_jsonl
+from pdf_chunker.passes.heading_detect import heading_detect
 from pdf_chunker.passes.split_semantic import _collapse_records, split_semantic
+from pdf_chunker.passes.text_clean import text_clean
 
 
 def _observed_overlap(first: list[str], second: list[str]) -> int:
@@ -147,10 +150,20 @@ def test_figure_caption_preserves_paragraph_boundary() -> None:
     pytest.importorskip("fitz")
     doc = read(str(Path("platform-eng-excerpt.pdf")))
     art = Artifact(payload=doc, meta={"input": "platform-eng-excerpt.pdf"})
-    result = split_semantic(art)
+    seeded = heading_detect(text_clean(art))
+    result = split_semantic(seeded)
     chunks = [item["text"] for item in result.payload["items"]]
     target = next(text for text in chunks if "The problem with the swamp" in text)
 
     assert "glue the problem" not in target
     assert "Figure 1-1." in target
     assert "The problem with the swamp" in target
+
+    emitted = emit_jsonl(result)
+    rows = [row["text"] for row in emitted.payload]
+    emitted_target = next(
+        text for text in rows if "The over-general swamp" in text
+    )
+
+    assert "Figure 1-1." in emitted_target
+    assert "The problem with the swamp" in emitted_target
