@@ -8,10 +8,10 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
-from itertools import chain
 from typing import Any, TypedDict
 
 from pdf_chunker.framework import Artifact, Pass, register
@@ -39,7 +39,9 @@ from pdf_chunker.passes.sentence_fusion import (
     _is_continuation_lead,
     _last_sentence,
     _merge_sentence_fragments,
+    estimate_tokens,
 )
+from pdf_chunker.pdf_blocks import _looks_like_caption
 from pdf_chunker.text_cleaning import STOPWORDS
 from pdf_chunker.utils import _build_metadata
 
@@ -83,6 +85,10 @@ def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
     return restored
 
 
+def _append_caption(prefix: str, caption: str) -> str:
+    return "\n\n".join(part for part in (prefix.rstrip(), caption.strip()) if part).strip()
+
+
 def _stitch_block_continuations(
     seq: Iterable[tuple[int, Block, str]], limit: int | None
 ) -> list[tuple[int, Block, str]]:
@@ -93,6 +99,23 @@ def _stitch_block_continuations(
         page, block, text = cur
         if not acc:
             return [*acc, cur]
+        stripped = text.strip()
+        if stripped:
+            caption_line, _, remainder = stripped.partition("\n")
+            if caption_line and _looks_like_caption(caption_line.strip()):
+                prev_page, prev_block, prev_text = acc[-1]
+                if prev_page == page:
+                    caption = caption_line.strip()
+                    tail = remainder.lstrip("\n")
+                    acc[-1] = (
+                        prev_page,
+                        prev_block,
+                        _append_caption(prev_text, caption),
+                    )
+                    if tail:
+                        block_tail = {**block, "_force_split": True}
+                        return [*acc, (page, block_tail, tail)]
+                    return acc
         lead = text.lstrip()
         if not lead or not _is_continuation_lead(lead):
             return [*acc, cur]
@@ -110,7 +133,12 @@ def _stitch_block_continuations(
 
 
 def _count_words(text: str) -> int:
-    return len(text.split())
+    tokens = estimate_tokens(text)
+    if not text.strip():
+        return 0
+    if len(text.split()) <= 1:
+        return max(tokens, len(text))
+    return tokens
 
 
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
@@ -163,6 +191,18 @@ def _collapse_records(
 
     for idx, record in enumerate(seq):
         page, block, text = record
+        force_split = bool(block.get("_force_split"))
+        if force_split:
+            block = {k: v for k, v in block.items() if k != "_force_split"}
+            record = (page, block, text)
+        if buffer and (force_split or buffer[-1][1].get("_force_split")):
+            yield from emit()
+            if buffer and buffer[-1][1].get("_force_split"):
+                buffer[-1] = (
+                    buffer[-1][0],
+                    {k: v for k, v in buffer[-1][1].items() if k != "_force_split"},
+                    buffer[-1][2],
+                )
         if buffer and page != buffer[-1][0]:
             yield from emit()
         words = _count_words(text)
@@ -352,12 +392,93 @@ def _normalize_bullet_tail(tail: str) -> str:
     return f"{normalized} {rest[0]}".strip() if rest and rest[0] else normalized
 
 
+_CAPTION_BODY_STARTERS = frozenset(
+    {
+        "the",
+        "this",
+        "these",
+        "those",
+        "not",
+        "because",
+        "however",
+        "when",
+        "while",
+        "where",
+        "if",
+        "so",
+        "but",
+        "and",
+        "yet",
+        "still",
+        "also",
+        "meanwhile",
+        "additionally",
+        "then",
+        "thus",
+        "instead",
+        "nevertheless",
+        "nonetheless",
+        "consequently",
+        "moreover",
+    }
+)
+
+
+def _split_caption_heading(text: str) -> tuple[str, str | None]:
+    """Separate figure captions from trailing paragraph continuations."""
+
+    stripped = text.strip()
+    if not stripped or not _looks_like_caption(stripped):
+        return text, None
+
+    tokens = stripped.split()
+
+    def _token_alpha(word: str) -> str:
+        return re.sub(r"[^A-Za-z]", "", word)
+
+    for index, token in enumerate(tokens):
+        if index <= 2:
+            continue
+        if not token or not token[:1].islower():
+            continue
+        alpha = _token_alpha(token)
+        if not alpha:
+            continue
+        if alpha.lower() not in _CAPTION_BODY_STARTERS:
+            continue
+        head = " ".join(tokens[:index]).strip()
+        tail = " ".join(tokens[index:]).strip()
+        if not head or not tail:
+            continue
+        if len(tail.split()) < 4:
+            continue
+        lead = tail.lstrip()
+        if lead and lead[0].islower():
+            offset = len(tail) - len(lead)
+            tail = f"{tail[:offset]}{lead[0].upper()}{lead[1:]}"
+        return head, tail
+
+    return text, None
+
+
 def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
-    if any(starts_with_bullet(h.lstrip()) for h in headings):
-        lead = " ".join(h.rstrip() for h in headings).rstrip()
-        tail = _normalize_bullet_tail(body.lstrip()) if body else ""
+    split_headings = tuple(_split_caption_heading(h) for h in headings)
+    caption_texts = [head for head, _ in split_headings if head]
+    tail_fragments = [tail for _, tail in split_headings if tail]
+
+    merged_body = body.strip()
+    if tail_fragments:
+        tail = " ".join(fragment.strip() for fragment in tail_fragments if fragment).strip()
+        if tail:
+            merged_body = "\n\n".join(filter(None, (tail, merged_body))).strip()
+
+    if any(starts_with_bullet(text.lstrip()) for text in caption_texts):
+        lead = " ".join(text.rstrip() for text in caption_texts).rstrip()
+        tail = _normalize_bullet_tail(merged_body.lstrip()) if merged_body else ""
         return f"{lead} {tail}".strip()
-    return "\n".join(chain(headings, [body])).strip()
+
+    components = [*caption_texts, merged_body]
+    return "\n".join(part for part in components if part).strip()
 
 
 def _with_source(block: Block, page: int, filename: str | None) -> Block:

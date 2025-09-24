@@ -1,10 +1,16 @@
 import pytest
 
+from pathlib import Path
+
+from pdf_chunker.adapters.io_pdf import read
 from pdf_chunker.cli import _cli_overrides
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import run_convert
 from pdf_chunker.framework import Artifact
+from pdf_chunker.passes.emit_jsonl import emit_jsonl
+from pdf_chunker.passes.heading_detect import heading_detect
 from pdf_chunker.passes.split_semantic import _collapse_records, split_semantic
+from pdf_chunker.passes.text_clean import text_clean
 
 
 def _observed_overlap(first: list[str], second: list[str]) -> int:
@@ -77,16 +83,21 @@ def test_split_counts_change_with_overrides(tmp_path, monkeypatch, overrides, re
 
     monkeypatch.setattr("pdf_chunker.splitter.semantic_chunker", fake_semantic_chunker)
 
-    def _run(opts: dict | None = None) -> int:
+    def _run(opts: dict | None = None) -> list[dict]:
         spec_opts = {"run_report": {"output_path": str(tmp_path / "r.json")}}
         spec = PipelineSpec(options={**spec_opts, **(opts or {})})
         art = Artifact(payload=_doc("x" * 1150), meta={"metrics": {}, "input": "doc.pdf"})
         seeded, _ = run_convert(art, spec)
-        return len(split_semantic(seeded).payload["items"])
+        return split_semantic(seeded).payload["items"]
 
-    base = _run()
-    new = _run(overrides)
-    assert (new > base) if relation == "gt" else (new < base)
+    base_items = _run()
+    new_items = _run(overrides)
+    base_count, new_count = len(base_items), len(new_items)
+    assert new_count != base_count, f"override preserved counts: base={base_count}, new={new_count}"
+    if relation == "gt":
+        assert new_count > base_count, f"expected overrides {overrides} to increase chunks"
+    else:
+        assert new_count < base_count, f"expected overrides {overrides} to decrease chunks"
 
 
 def test_run_convert_overrides_existing_meta_options(tmp_path, monkeypatch) -> None:
@@ -133,3 +144,42 @@ def test_collapse_records_does_not_span_pages() -> None:
     assert collapsed[0][2].split() == ["alpha", "beta"]
     assert collapsed[1][2] == "gamma"
     assert collapsed[1][1]["source"]["page"] == 2
+
+
+def test_figure_caption_preserves_paragraph_boundary() -> None:
+    pytest.importorskip("fitz")
+    doc = read(str(Path("platform-eng-excerpt.pdf")))
+    art = Artifact(payload=doc, meta={"input": "platform-eng-excerpt.pdf"})
+    seeded = heading_detect(text_clean(art))
+    result = split_semantic(seeded)
+    chunks = [item["text"] for item in result.payload["items"]]
+    for body_index, body_chunk in enumerate(chunks):
+        if "The problem with the swamp" in body_chunk:
+            break
+    else:  # pragma: no cover - defensive guard for unexpected data drift
+        pytest.fail("missing chunk containing 'The problem with the swamp'")
+
+    assert body_index > 0
+    caption_chunk = chunks[body_index - 1]
+
+    assert "glue the problem" not in body_chunk
+    assert "Figure 1-1." not in body_chunk
+    assert "The problem with the swamp" in body_chunk
+    assert "Figure 1-1." in caption_chunk
+    assert "The problem with the swamp" not in caption_chunk
+
+    emitted = emit_jsonl(result)
+    rows = [row["text"] for row in emitted.payload]
+    for emitted_body_index, emitted_body in enumerate(rows):
+        if "The problem with the swamp" in emitted_body:
+            break
+    else:  # pragma: no cover - defensive guard for unexpected data drift
+        pytest.fail("missing emitted row containing 'The problem with the swamp'")
+
+    assert emitted_body_index > 0
+    emitted_caption = rows[emitted_body_index - 1]
+
+    assert "Figure 1-1." not in emitted_body
+    assert "The problem with the swamp" in emitted_body
+    assert "Figure 1-1." in emitted_caption
+    assert "The problem with the swamp" not in emitted_caption

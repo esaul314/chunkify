@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.pdf_blocks import _looks_like_caption
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -499,6 +500,8 @@ def _trim_overlap(prev: str, curr: str) -> str:
         single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
         if prev_char.isalnum():
             return curr
+        if stripped_prefix and _looks_like_caption(stripped_prefix):
+            return curr
         if single_title and (next_non_space.islower() or next_non_space.isdigit()):
             return curr
         return curr[overlap:].lstrip()
@@ -608,7 +611,11 @@ def _merge_if_fragment(
 def _should_merge(prev_text: str, curr_text: str, min_words: int) -> bool:
     prev_words = _word_count(prev_text)
     curr_words = _word_count(curr_text)
-    prev_coherent = _coherent(prev_text)
+    prev_lines = [line for line in prev_text.splitlines() if line.strip()]
+    prev_tail = prev_lines[-1].strip() if prev_lines else prev_text.strip()
+    prev_coherent = (
+        _coherent(prev_text) if not (prev_tail and _looks_like_caption(prev_tail)) else True
+    )
     curr_coherent = _coherent(curr_text)
     return any(
         (
@@ -668,12 +675,14 @@ def _dedupe(
             text_norm,
         )
         if overlap:
-            if log is not None:
-                log.append(text[:overlap])
-            text = text[overlap:].lstrip()
-            if not text:
-                return state
-            text_norm = _normalize(text)
+            prefix = text[:overlap]
+            if not (prefix.strip() and _looks_like_caption(prefix.strip())):
+                if log is not None:
+                    log.append(prefix)
+                text = text[overlap:].lstrip()
+                if not text:
+                    return state
+                text_norm = _normalize(text)
         return _merge_if_fragment(acc, acc_text, acc_norm, item, text, text_norm)
 
     initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")
