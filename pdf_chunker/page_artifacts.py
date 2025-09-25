@@ -239,6 +239,60 @@ def _looks_like_isolated_title(line: str) -> bool:
     )
 
 
+def _looks_like_running_text(line: str) -> bool:
+    """Return ``True`` when ``line`` resembles flowing body text."""
+
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", stripped)
+    if not tokens:
+        return False
+
+    lowercase_tokens = sum(token.islower() for token in tokens)
+    punctuation_present = any(ch in stripped for ch in ",.;:?!")
+
+    return punctuation_present or lowercase_tokens >= 2 or len(tokens) >= 10
+
+
+def _should_remove_isolated_title(
+    line: str,
+    idx: int,
+    lines: list[str],
+    page_num: Optional[int],
+) -> bool:
+    """Return ``True`` when an isolated title most likely belongs to a header/footer."""
+
+    if not _looks_like_isolated_title(line):
+        return False
+
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", line)
+    if len(tokens) > 5:
+        return False
+
+    prev_line = _first_non_empty_line(lines[pos] for pos in range(idx - 1, -1, -1))
+    next_line = _next_non_empty_line(lines, idx)
+    neighbours = [candidate for candidate in (prev_line, next_line) if candidate]
+
+    neighbour_signals = any(
+        is_page_artifact_text(candidate, page_num)
+        or _looks_like_footer_context(candidate)
+        or _looks_like_contact_detail(candidate)
+        for candidate in neighbours
+    )
+
+    if neighbour_signals:
+        return True
+
+    if idx == 0 and (page_num or 0) > 1:
+        next_line = _next_non_empty_line(lines, idx)
+        if next_line and _looks_like_running_text(next_line):
+            return True
+
+    return False
+
+
 def _looks_like_shipping_footer(line: str) -> bool:
     stripped = line.strip().lower()
     return any(stripped.startswith(prefix) for prefix in _SHIPPING_FOOTER_PREFIXES)
@@ -250,7 +304,7 @@ def _strip_spurious_number_prefix(text: str) -> str:
     return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
 
 
-_HEADER_CONNECTORS = {"of", "the", "and", "or", "to", "a", "an", "in", "for"}
+_HEADER_CONNECTORS = {"of", "the", "and", "or", "to", "a", "an", "in", "for", "on"}
 
 
 def _strip_page_header_prefix(text: str) -> str:
@@ -851,7 +905,7 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
 
         edge_band = 2
         if idx < edge_band or idx >= total - edge_band:
-            if _looks_like_isolated_title(normalized):
+            if _should_remove_isolated_title(normalized, idx, lines, page_num):
                 logger.debug(
                     "remove_page_artifact_lines dropped isolated title: %s",
                     normalized[:30],
