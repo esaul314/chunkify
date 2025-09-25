@@ -4,7 +4,10 @@ import re
 from functools import reduce
 from typing import Any, Dict, Iterable, Iterator, List, Match, Optional, Tuple
 
-from .text_cleaning import _is_probable_heading
+from .text_cleaning import (
+    _is_probable_heading,
+    pipe,
+)
 from .list_detection import starts_with_bullet
 from .page_artifacts import _drop_trailing_bullet_footers
 
@@ -474,10 +477,13 @@ def _tokenize_with_newlines(text: str) -> List[str]:
     def _join_newline_bullet(match: Match[str]) -> str:
         return f" {NEWLINE_TOKEN}{match.group(1)}"
 
-    prepared = _BULLET_AFTER_NEWLINE.sub(_join_newline_bullet, text)
-    prepared = prepared.replace(NBSP, f" {NBSP_TOKEN} ")
-    prepared = prepared.replace("\n", f" {NEWLINE_TOKEN} ")
-    return prepared.split()
+    prepared = pipe(
+        text,
+        lambda s: _BULLET_AFTER_NEWLINE.sub(_join_newline_bullet, s),
+        lambda s: s.replace(NBSP, f" {NBSP_TOKEN} "),
+        lambda s: s.replace("\n", f" {NEWLINE_TOKEN} "),
+    )
+    return [token for token in prepared.split() if token]
 
 
 def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
