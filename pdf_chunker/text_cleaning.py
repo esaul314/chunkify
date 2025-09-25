@@ -88,12 +88,33 @@ SMART_QUOTES = {
 
 WINDOWS_1252_QUOTE_TRANSLATION = str.maketrans(
     {
+        "\x82": "'",
         "\x91": "'",
         "\x92": "'",
         "\x93": '"',
         "\x94": '"',
     }
 )
+NBSP = "\u00a0"
+_NBSP_EQUIVALENTS = {
+    NBSP,
+    "\u1680",  # ogham space mark
+    "\u2000",  # en quad
+    "\u2001",  # em quad
+    "\u2002",  # en space
+    "\u2003",  # em space
+    "\u2004",  # three-per-em space
+    "\u2005",  # four-per-em space
+    "\u2006",  # six-per-em space
+    "\u2007",  # figure space
+    "\u2008",  # punctuation space
+    "\u2009",  # thin space
+    "\u200a",  # hair space
+    "\u202f",  # narrow no-break space
+    "\u205f",  # medium mathematical space
+    "\u3000",  # ideographic space
+}
+_NBSP_TRANSLATION = str.maketrans({ch: " " for ch in _NBSP_EQUIVALENTS})
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
     # ensure space before an opening quote stuck to previous text (letters only)
@@ -492,9 +513,27 @@ def _normalize_windows_1252_quote_bytes(text: str) -> str:
     return text.translate(WINDOWS_1252_QUOTE_TRANSLATION) if text else text
 
 
+def normalize_windows_1252_quotes(text: str) -> str:
+    """Public wrapper ensuring callers share the same byte normalization."""
+
+    return _normalize_windows_1252_quote_bytes(text)
+
+
+def normalize_non_breaking_spaces(text: str) -> str:
+    """Collapse NBSP-style separators to regular spaces for stable downstream handling."""
+
+    if not text or not any(ch in text for ch in _NBSP_EQUIVALENTS):
+        return text
+    return text.translate(_NBSP_TRANSLATION)
+
+
 def normalize_quotes(text: str) -> str:
     """Normalize smart quotes and repair missing surrounding spaces."""
-    return text if not text else pipe(text, _map_smart_quotes, _fix_quote_spacing)
+    return (
+        text
+        if not text
+        else pipe(text, normalize_windows_1252_quotes, _map_smart_quotes, _fix_quote_spacing)
+    )
 
 
 def normalize_ligatures(text: str) -> str:
@@ -1104,7 +1143,7 @@ def apply_json_safety_fixes(text: str) -> str:
             fixed = fixed[:-1]
         elif fixed.startswith('"'):
             fixed = fixed[1:]
-    return fixed
+    return fixed.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -1126,9 +1165,9 @@ def clean_paragraph(paragraph: str) -> str:
         cleanup_bullet_fragments,
         _preserve_list_newlines,
         remove_control_characters,
-        normalize_ligatures,
         remove_underscore_emphasis,
         remove_dangling_underscores,
+        normalize_ligatures,
         consolidate_whitespace,
     )
 
@@ -1175,9 +1214,13 @@ def _clean_text_impl(text: str) -> str:
 
     logger.debug("Using traditional text cleaning path")
 
-    logger.debug("Calling _normalize_windows_1252_quote_bytes")
-    text = _normalize_windows_1252_quote_bytes(text)
-    logger.debug(f"After _normalize_windows_1252_quote_bytes: {_preview(text)}")
+    logger.debug("Calling normalize_windows_1252_quotes")
+    text = normalize_windows_1252_quotes(text)
+    logger.debug(f"After normalize_windows_1252_quotes: {_preview(text)}")
+
+    logger.debug("Calling normalize_non_breaking_spaces")
+    text = normalize_non_breaking_spaces(text)
+    logger.debug(f"After normalize_non_breaking_spaces: {_preview(text)}")
 
     # Normalize newlines and fix broken words before other cleanup
     logger.debug("Calling normalize_newlines")
@@ -1262,6 +1305,8 @@ __all__ = [
     "collapse_single_newlines",
     "normalize_ligatures",
     "normalize_quotes",
+    "normalize_windows_1252_quotes",
+    "normalize_non_breaking_spaces",
     "remove_underscore_emphasis",
     "strip_underscore_wrapping",
     "remove_dangling_underscores",
