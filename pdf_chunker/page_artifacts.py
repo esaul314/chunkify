@@ -92,10 +92,26 @@ def _bullet_body(text: str) -> str:
     return without_marker.strip(" -\u2022*.")
 
 
+def _is_question_bullet_footer(text: str, idx: int) -> bool:
+    body = _bullet_body(text)
+    if not body:
+        return False
+    question_count = body.count("?")
+    if question_count < 2:
+        return False
+    return idx < 10
+
+
 def _first_non_empty_line(lines: Iterable[str]) -> str:
     """Return the first non-empty line from ``lines`` with surrounding whitespace trimmed."""
 
     return next((candidate.strip() for candidate in lines if candidate.strip()), "")
+
+
+def _next_non_empty_line(lines: list[str], start: int) -> str:
+    """Return the next non-empty line after ``start`` with whitespace stripped."""
+
+    return _first_non_empty_line(lines[pos] for pos in range(start + 1, len(lines)))
 
 
 def _looks_like_contact_detail(text: str) -> bool:
@@ -137,20 +153,149 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
 
     trailing = _trailing_bullet_candidates(lines)
-    if len(trailing) != 1:
+    if not trailing:
         return lines
 
-    idx, candidate = trailing[0]
-    body = _bullet_body(candidate)
-    previous = _first_non_empty_line(lines[pos] for pos in range(idx - 1, -1, -1))
-    if body and not _footer_bullet_signals(body, previous):
-        return lines
-
-    logger.debug(
-        "remove_page_artifact_lines dropped trailing bullet footer: %s",
-        candidate.strip()[:30],
+    bodies = [(_bullet_body(line), pos) for pos, line in trailing]
+    previous = _first_non_empty_line(
+        lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1)
     )
-    return [line for pos, line in enumerate(lines) if pos != idx]
+
+    def _should_prune(body: str) -> bool:
+        return not body or _footer_bullet_signals(body, previous)
+
+    after_idx = trailing[-1][0] + 1
+    after_line = lines[after_idx] if after_idx < len(lines) else ""
+    context_allows = _looks_like_shipping_footer(after_line) or _footer_bullet_signals(after_line, previous)
+
+    removals = [pos for body, pos in bodies if _should_prune(body)]
+    if len(removals) != len(bodies) or not context_allows:
+        return lines
+
+    keep_indices = set(removals)
+    logger.debug(
+        "remove_page_artifact_lines dropped trailing bullet footers: %s",
+        "; ".join(lines[pos].strip()[:30] for pos in removals),
+    )
+    return [line for idx, line in enumerate(lines) if idx not in keep_indices]
+
+
+_TITLE_CONNECTORS = {
+    "and",
+    "or",
+    "the",
+    "of",
+    "for",
+    "in",
+    "on",
+    "from",
+    "to",
+    "by",
+    "with",
+    "at",
+}
+
+_SHIPPING_FOOTER_PREFIXES = (
+    "directed to",
+    "some trader",
+    "he expects",
+)
+
+
+def _is_titlecase_token(token: str) -> bool:
+    return token.isupper() or token.istitle()
+
+
+def _looks_like_named_entity_line(text: str) -> bool:
+    """Return ``True`` for lines dominated by title-cased tokens."""
+
+    tokens = [re.sub(r"^[^A-Za-z]+|[^A-Za-z]+$", "", part) for part in text.split()]
+    tokens = [token for token in tokens if token]
+    if len(tokens) < 2:
+        return False
+
+    title_tokens = sum(1 for token in tokens if token[0].isupper())
+    if text.count(",") >= 1:
+        return title_tokens >= 2 and title_tokens >= len(tokens) // 2
+    return title_tokens >= max(3, (2 * len(tokens)) // 3)
+
+
+def _looks_like_isolated_title(line: str) -> bool:
+    """Return ``True`` for short title-case phrases without punctuation."""
+
+    stripped = line.strip()
+    if not stripped or any(ch.isdigit() for ch in stripped):
+        return False
+    if any(ch in stripped for ch in ",;:|?/•"):
+        return False
+
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", stripped)
+    if not 3 <= len(tokens) <= 8:
+        return False
+
+    return all(
+        _is_titlecase_token(token) or token.lower() in _TITLE_CONNECTORS
+        for token in tokens
+    )
+
+
+def _looks_like_running_text(line: str) -> bool:
+    """Return ``True`` when ``line`` resembles flowing body text."""
+
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", stripped)
+    if not tokens:
+        return False
+
+    lowercase_tokens = sum(token.islower() for token in tokens)
+    punctuation_present = any(ch in stripped for ch in ",.;:?!")
+
+    return punctuation_present or lowercase_tokens >= 2 or len(tokens) >= 10
+
+
+def _should_remove_isolated_title(
+    line: str,
+    idx: int,
+    lines: list[str],
+    page_num: Optional[int],
+) -> bool:
+    """Return ``True`` when an isolated title most likely belongs to a header/footer."""
+
+    if not _looks_like_isolated_title(line):
+        return False
+
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", line)
+    if len(tokens) > 5:
+        return False
+
+    prev_line = _first_non_empty_line(lines[pos] for pos in range(idx - 1, -1, -1))
+    next_line = _next_non_empty_line(lines, idx)
+    neighbours = [candidate for candidate in (prev_line, next_line) if candidate]
+
+    neighbour_signals = any(
+        is_page_artifact_text(candidate, page_num)
+        or _looks_like_footer_context(candidate)
+        or _looks_like_contact_detail(candidate)
+        for candidate in neighbours
+    )
+
+    if neighbour_signals:
+        return True
+
+    if idx == 0 and (page_num or 0) > 1:
+        next_line = _next_non_empty_line(lines, idx)
+        if next_line and _looks_like_running_text(next_line):
+            return True
+
+    return False
+
+
+def _looks_like_shipping_footer(line: str) -> bool:
+    stripped = line.strip().lower()
+    return any(stripped.startswith(prefix) for prefix in _SHIPPING_FOOTER_PREFIXES)
 
 
 def _strip_spurious_number_prefix(text: str) -> str:
@@ -159,7 +304,7 @@ def _strip_spurious_number_prefix(text: str) -> str:
     return re.sub(r"^\s*\d+\.\s*(?=[a-z])", "", text)
 
 
-_HEADER_CONNECTORS = {"of", "the", "and", "or", "to", "a", "an", "in", "for"}
+_HEADER_CONNECTORS = {"of", "the", "and", "or", "to", "a", "an", "in", "for", "on"}
 
 
 def _strip_page_header_prefix(text: str) -> str:
@@ -710,8 +855,9 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     text = reduce(lambda acc, fn: fn(acc), pipeline, text)
 
     lines = text.splitlines()
+    total = len(lines)
 
-    def _clean_line(ln: str) -> Optional[str]:
+    def _clean_line(idx: int, ln: str) -> Optional[str]:
         normalized = ln if _starts_with_bullet(ln) else _strip_page_header_prefix(ln)
         normalized, removed_inline = _remove_inline_footnote_prefix(normalized)
         if not normalized:
@@ -726,6 +872,46 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
                 "remove_page_artifact_lines preserved inline continuation: %s",
                 normalized[:30],
             )
+        stripped_norm = normalized.strip()
+        if stripped_norm in _BULLET_CHARS:
+            next_line = _next_non_empty_line(lines, idx)
+            previous_line = _first_non_empty_line(lines[pos] for pos in range(idx - 1, -1, -1))
+            prev_raw = lines[idx - 1] if idx > 0 else ""
+            prev_has_body = prev_raw.lstrip().startswith(_BULLET_CHARS) and bool(_bullet_body(prev_raw))
+            next_is_bullet = next_line.lstrip().startswith(_BULLET_CHARS) if next_line else False
+            if (
+                not next_line
+                or _footer_bullet_signals(next_line, previous_line)
+                or any(
+                    _looks_like_named_entity_line(candidate)
+                    for candidate in (next_line, previous_line)
+                    if candidate
+                )
+                or (prev_has_body and not next_is_bullet)
+                or (next_line and _looks_like_shipping_footer(next_line))
+                or next_is_bullet
+            ):
+                logger.debug(
+                    "remove_page_artifact_lines dropped empty bullet marker: %s",
+                    ln[:30],
+                )
+                return None
+        if _starts_with_bullet(normalized) and _is_question_bullet_footer(normalized, idx):
+            logger.debug(
+                "remove_page_artifact_lines dropped question bullet footer: %s",
+                ln[:30],
+            )
+            return None
+
+        edge_band = 2
+        if idx < edge_band or idx >= total - edge_band:
+            if _should_remove_isolated_title(normalized, idx, lines, page_num):
+                logger.debug(
+                    "remove_page_artifact_lines dropped isolated title: %s",
+                    normalized[:30],
+                )
+                return None
+
         if is_page_artifact_text(normalized, page_num) or _looks_like_bullet_footer(normalized):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
             return None
@@ -736,7 +922,10 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
 
     cleaned_pairs = [
         (original, cleaned)
-        for original, cleaned in ((ln, _clean_line(ln)) for ln in lines)
+        for original, cleaned in (
+            (ln, _clean_line(idx, ln))
+            for idx, ln in enumerate(lines)
+        )
         if cleaned
     ]
     normalised = _apply_leading_case(cleaned_pairs)
