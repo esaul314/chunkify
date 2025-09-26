@@ -53,11 +53,7 @@ def _compute_limit(chunk_size: int | None, overlap: int, min_chunk_size: int | N
     if chunk_size is None or chunk_size <= 0:
         return None
     normalized = int(chunk_size)
-    declared_min = (
-        int(min_chunk_size)
-        if min_chunk_size is not None
-        else normalized // 10
-    )
+    declared_min = int(min_chunk_size) if min_chunk_size is not None else normalized // 10
     effective_min = min(max(declared_min, 0), normalized)
     fallback = max(normalized - max(overlap, 0), 0)
     return max(fallback, effective_min)
@@ -91,11 +87,7 @@ def _derive_merge_budget(
 
     allowed_overlap = max(overlap, 0)
     limit = _compute_limit(chunk_size, allowed_overlap, min_chunk_size)
-    hard_limit = (
-        int(chunk_size)
-        if isinstance(chunk_size, Real) and chunk_size > 0
-        else None
-    )
+    hard_limit = int(chunk_size) if isinstance(chunk_size, Real) and chunk_size > 0 else None
     density = average_chars_per_token if average_chars_per_token > 0 else _AVERAGE_CHARS_PER_TOKEN
 
     def _load(words: tuple[str, ...]) -> tuple[int, int]:
@@ -131,14 +123,34 @@ def _merge_sentence_fragments(
 ) -> list[str]:
     allowed_overlap = max(overlap, 0)
     limit = _compute_limit(chunk_size, allowed_overlap, min_chunk_size)
-    hard_limit = (
-        int(chunk_size)
-        if isinstance(chunk_size, Real) and chunk_size > 0
-        else None
-    )
+    hard_limit = int(chunk_size) if isinstance(chunk_size, Real) and chunk_size > 0 else None
     target_limit = limit if limit is not None else hard_limit
 
-    def _should_merge(previous: str, current: str, prev_words: list[str]) -> bool:
+    def _target_limit_from(budget: _MergeBudget) -> int | None:
+        return budget.limit if budget.limit is not None else budget.hard_limit
+
+    def _violates_budget(
+        previous: str,
+        budget: _MergeBudget,
+        prev_words: tuple[str, ...],
+        current_words: tuple[str, ...],
+    ) -> bool:
+        dense_fragments = len(prev_words) <= 1 or len(current_words) <= 1
+        if budget.hard_limit is not None and budget.effective_total > budget.hard_limit:
+            return dense_fragments
+        if budget.limit is None or budget.effective_total <= budget.limit:
+            return False
+        if dense_fragments:
+            return True
+        return False
+
+    def _should_merge(
+        previous: str,
+        current: str,
+        prev_words: tuple[str, ...],
+        current_words: tuple[str, ...],
+        budget: _MergeBudget,
+    ) -> bool:
         if not previous:
             return False
         lead = current.lstrip()
@@ -147,16 +159,16 @@ def _merge_sentence_fragments(
         continuation_lead = _is_continuation_lead(lead)
         if _ENDS_SENTENCE.search(previous.rstrip()) and not continuation_lead:
             return False
-        current_words = current.split()
         first_word = current_words[0] if current_words else ""
         if prev_words and prev_words[-1] == first_word:
             return False
-        if target_limit is not None:
-            word_total = len(prev_words) + len(current_words)
-            if word_total > target_limit and (
-                hard_limit is None or word_total > hard_limit
-            ):
-                return False
+        if _violates_budget(previous, budget, prev_words, current_words):
+            return False
+        dense_fragments = len(prev_words) <= 1 or len(current_words) <= 1
+        if target_limit is not None and budget.effective_total > target_limit:
+            if budget.hard_limit is None or budget.effective_total > budget.hard_limit:
+                if dense_fragments:
+                    return False
         head = lead[0]
         continuation_chars = ",.;:)]\"'"
         if not (continuation_lead or head.islower() or head in continuation_chars):
@@ -208,40 +220,46 @@ def _merge_sentence_fragments(
         if not trimmed_words:
             return _append(acc, chunk, words)
 
-        if not _should_merge(prev_text, trimmed_text, list(prev_words)):
+        budget = _derive_merge_budget(
+            prev_words,
+            trimmed_words,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            min_chunk_size=min_chunk_size,
+        )
+        dense_fragments = len(prev_words) <= 1 or len(trimmed_words) <= 1
+
+        if not _should_merge(prev_text, trimmed_text, prev_words, trimmed_words, budget):
             if trimmed_words != words:
                 return _append(acc, trimmed_text, trimmed_words)
             return _append(acc, chunk, words)
 
-        combined = len(prev_words) + len(trimmed_words)
-        exceeds_limit = target_limit is not None and combined > target_limit
-        if (
-            exceeds_limit
-            and limit is not None
-            and hard_limit is not None
-            and combined <= hard_limit
-        ):
-            exceeds_limit = False
+        exceeds_limit = budget.limit is not None and budget.effective_total > budget.limit
         if exceeds_limit:
-            adjusted = _rebalance_overflow(
-                prev_text, prev_words, trimmed_text, target_limit
-            ) if target_limit is not None else None
+            adjusted = (
+                _rebalance_overflow(prev_text, prev_words, trimmed_text, _target_limit_from(budget))
+                if target_limit is not None
+                else None
+            )
             if adjusted is not None:
                 prev_text, prev_words, trimmed_text = adjusted
                 trimmed_words = tuple(trimmed_text.split())
                 if trimmed_words:
                     acc = [*acc[:-1], (prev_text, prev_words)]
-                    combined = len(prev_words) + len(trimmed_words)
-                    exceeds_limit = target_limit is not None and combined > target_limit
-                    if (
-                        exceeds_limit
-                        and limit is not None
-                        and hard_limit is not None
-                        and combined <= hard_limit
-                    ):
-                        exceeds_limit = False
+                    budget = _derive_merge_budget(
+                        prev_words,
+                        trimmed_words,
+                        chunk_size=chunk_size,
+                        overlap=overlap,
+                        min_chunk_size=min_chunk_size,
+                    )
+                    exceeds_limit = (
+                        budget.limit is not None and budget.effective_total > budget.limit
+                    )
             if not trimmed_words:
                 return acc
+            if not dense_fragments:
+                exceeds_limit = False
             if exceeds_limit:
                 return _append(acc, trimmed_text, trimmed_words)
 
