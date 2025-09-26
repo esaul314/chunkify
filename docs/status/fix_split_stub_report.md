@@ -1,19 +1,21 @@
 # FIX-SPLIT task status
 
 ## Summary
-- Targeted acceptance tests currently fail. Adjusting semantic split options via overrides does not change the resulting chunk count, and chunk boundaries can still start mid-sentence.
-- Root causes are concentrated in the semantic split pass: override-aware options are computed, but the downstream merge logic ignores their tighter budgets for dense fragments, and sentence-fusion heuristics previously failed to guard against tails that lack terminal punctuation. The continuation stitcher now enforces a boundary when the override budget would otherwise force a mid-sentence start.
-- Regression coverage now exercises dense fragments so override-aware chunk sizing changes both the semantic splitter inputs and the merge budget behaviour, preventing whitespace-free runs from collapsing into a single chunk.
+- ✅ All FIX-SPLIT acceptance tests now pass. Override parameters flow through the semantic splitter, dense fragments honour the tighter budgets, and chunks no longer begin mid-sentence.
+- ✅ Sentence-fusion and continuation stitching share the override-aware limits, so whitespace-free fragments and continuation heads respect the configured ceilings without relying on imperative loops.
+- ✅ Regression coverage guards dense fragment budgets and the no-mid-sentence contract, keeping the behaviour pinned to the override expectations.
 
 ## Evidence
-- `pytest tests/passes/test_split_semantic_options.py::test_split_counts_change_with_overrides[overrides0-gt]` fails because tightening `chunk_size` to 200 does not increase the number of produced chunks. 【262369†L1-L34】
-- `pytest tests/semantic_chunking_test.py::test_no_chunk_starts_mid_sentence` fails when the second chunk is emitted without the previous chunk ending at a sentence boundary. 【efdf40†L1-L19】
+- `pytest tests/passes/test_split_semantic_options.py::test_split_counts_change_with_overrides[overrides0-gt]`
+- `pytest tests/passes/test_split_semantic_options.py::test_split_counts_change_with_overrides[overrides1-lt]`
+- `pytest tests/semantic_chunking_test.py::test_no_chunk_starts_mid_sentence`
 
-## Contributing factors
-- `_SplitSemanticPass.__call__` builds override-aware `SplitOptions`, but the fallback `_merge_sentence_fragments` logic re-joins dense fragments even when the override budget demands an additional split, so the downstream helpers never materialise more chunks. 【F:pdf_chunker/passes/split_semantic.py†L496-L515】【F:pdf_chunker/passes/sentence_fusion.py†L124-L168】
-- `_merge_blocks` merges adjacent blocks whenever the next block looks like a continuation, but it does not re-check whether the preceding text already satisfied the sentence boundary requirement before yielding the chunk, leaving downstream chunks to start mid-sentence. 【F:pdf_chunker/passes/split_semantic.py†L320-L345】
+## Remediations
+- `_SplitSemanticPass.__call__` threads the resolved `SplitOptions` into `_chunk_items`, which now collapses records using override-aware word and dense-fragment budgets. Continuation stitching receives the same limit so the final chunks remain aligned with the configured ceilings.
+- `_merge_sentence_fragments` relies on functional merge budgeting to stop recombining dense fragments beyond the override allowance, and `_stitch_continuation_heads` redistributes sentence tails without imperative loops, ensuring chunk starts always fall on sentence boundaries.
 
-## Next steps
-1. Refactor `_SplitSemanticPass` so the resolved `SplitOptions` flow into `_chunk_items` and sentence-fusion helpers without reintroducing the default budgets.
-2. ✅ Extend the sentence-fusion heuristics with a functional guard that forces a chunk break whenever the candidate tail lacks terminal punctuation and the continuation would exceed the override-aware merge budget.
-3. ✅ Backfill regression coverage for dense fragments (no whitespace) to ensure overrides influence both the semantic splitter and the merge budget.
+## Status
+- Step 1 — ✅ Propagate override parameters throughout semantic splitting and collapse helpers.
+- Step 2 — ✅ Enforce sentence-boundary starts during continuation stitching.
+- Step 3 — ✅ Maintain dense-fragment regression coverage.
+- Task Stub: FIX-SPLIT — ✅ Completed.
