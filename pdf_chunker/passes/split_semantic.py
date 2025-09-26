@@ -168,16 +168,25 @@ def _with_chunk_index(block: Block, index: int) -> Block:
 
 def _collapse_records(
     records: Iterable[tuple[int, Block, str]],
-    options: SplitOptions,
-    limit: int | None,
+    options: SplitOptions | None = None,
+    limit: int | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
     seq = list(records)
-    if limit is None or limit <= 0:
+    resolved_limit = (
+        limit
+        if limit is not None
+        else (options.compute_limit() if options is not None else None)
+    )
+    if resolved_limit is None or resolved_limit <= 0:
         for idx, (page, block, text) in enumerate(seq):
             yield page, _with_chunk_index(block, idx), text
         return
 
-    hard_limit = options.chunk_size if options.chunk_size > 0 else None
+    hard_limit = None
+    if options is not None and options.chunk_size > 0:
+        hard_limit = options.chunk_size
+    elif resolved_limit is not None and resolved_limit > 0:
+        hard_limit = resolved_limit
     buffer: list[tuple[int, Block, str]] = []
     running_words = 0
     running_dense = 0
@@ -204,7 +213,7 @@ def _collapse_records(
         else:
             effective_total = max(running_words, running_dense)
             exceeds = False
-            if limit is not None and effective_total > limit:
+            if resolved_limit is not None and effective_total > resolved_limit:
                 exceeds = True
             if not exceeds and hard_limit is not None and effective_total > hard_limit:
                 exceeds = True
@@ -226,7 +235,7 @@ def _collapse_records(
         if buffer and page != buffer[-1][0]:
             yield from emit()
         word_count, dense_count, effective_count = _effective_counts(text)
-        if (limit is not None and effective_count > limit) or (
+        if (resolved_limit is not None and effective_count > resolved_limit) or (
             hard_limit is not None and effective_count > hard_limit
         ):
             yield from emit()
@@ -242,7 +251,7 @@ def _collapse_records(
             projected_words = running_words + word_count
             projected_dense = running_dense + dense_count
             projected_effective = max(projected_words, projected_dense)
-            if (limit is not None and projected_effective > limit) or (
+            if (resolved_limit is not None and projected_effective > resolved_limit) or (
                 hard_limit is not None and projected_effective > hard_limit
             ):
                 yield from emit()
@@ -512,12 +521,12 @@ def _chunk_items(
     split_fn: SplitFn,
     generate_metadata: bool = True,
     *,
-    options: SplitOptions,
+    options: SplitOptions | None = None,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
-    limit = options.compute_limit()
+    limit = options.compute_limit() if options is not None else None
     merged = _stitch_block_continuations(
         pipeline_attach_headings(
             _block_texts(doc, split_fn),
