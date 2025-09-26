@@ -166,7 +166,14 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
 
     after_idx = trailing[-1][0] + 1
     after_line = lines[after_idx] if after_idx < len(lines) else ""
-    context_allows = _looks_like_shipping_footer(after_line) or _footer_bullet_signals(after_line, previous)
+    trailing_count = len(trailing)
+    context_allows = any(
+        (
+            _looks_like_shipping_footer(after_line),
+            _footer_bullet_signals(after_line, previous),
+            _header_invites_footer(previous, trailing_count),
+        )
+    )
 
     removals = [pos for body, pos in bodies if _should_prune(body)]
     if len(removals) != len(bodies) or not context_allows:
@@ -178,6 +185,17 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         "; ".join(lines[pos].strip()[:30] for pos in removals),
     )
     return [line for idx, line in enumerate(lines) if idx not in keep_indices]
+
+
+def _header_invites_footer(previous_line: str, trailing_count: int) -> bool:
+    """Return ``True`` when ``previous_line`` resembles a footer heading."""
+
+    stripped = previous_line.strip()
+    if not stripped:
+        return False
+    colon_header = stripped.endswith(":") and trailing_count <= 3
+    uppercase_header = stripped.isupper() and len(stripped.split()) <= 5
+    return colon_header or uppercase_header
 
 
 _TITLE_CONNECTORS = {
