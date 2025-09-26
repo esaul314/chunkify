@@ -56,6 +56,7 @@ _CAPTION_PREFIXES = (
     "img.",
     "diagram",
 )
+_CAPTION_FLAG = "_caption_attached"
 
 
 def _collect_superscripts(
@@ -358,6 +359,30 @@ def _looks_like_caption(text: str) -> bool:
     return any(stripped.startswith(prefix) for prefix in _CAPTION_PREFIXES)
 
 
+def _contains_caption_line(text: str) -> bool:
+    return any(_looks_like_caption(line) for line in text.splitlines())
+
+
+def _has_caption(block: Block) -> bool:
+    return isinstance(block, Mapping) and bool(dict(block).get(_CAPTION_FLAG))
+
+
+def _mark_caption(block: Block) -> Block:
+    if not isinstance(block, Mapping):
+        return block
+    data = dict(block)
+    data[_CAPTION_FLAG] = True
+    return data
+
+
+def _append_caption(prev_text: str, caption: str) -> str:
+    head = prev_text.rstrip()
+    tail = caption.strip()
+    if not head:
+        return tail
+    return "\n\n".join(filter(None, (head, tail)))
+
+
 def _merge_blocks(
     acc: list[tuple[int, Block, str]],
     cur: tuple[int, Block, str],
@@ -371,6 +396,11 @@ def _merge_blocks(
     if block is prev_block and _is_heading(block) and _looks_like_caption(prev_text):
         merged = " ".join(part for part in (prev_text, text) if part).strip()
         acc[-1] = (prev_page, prev_block, merged)
+        return acc
+    if _looks_like_caption(text):
+        if _has_caption(prev_block) or _contains_caption_line(prev_text):
+            return acc + [cur]
+        acc[-1] = (prev_page, _mark_caption(prev_block), _append_caption(prev_text, text))
         return acc
     if _is_heading(prev_block) or _is_heading(block):
         return acc + [cur]

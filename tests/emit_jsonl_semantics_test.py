@@ -224,6 +224,10 @@ def test_platform_eng_caption_survives_emit_jsonl() -> None:
         text for text in texts if text.startswith(truncated) and caption not in text
     ]
     assert not offenders, "caption should retain its figure label"
+    starters = [text for text in texts if text.lstrip().startswith("Figure 1-1.")]
+    assert not starters, "caption should not start a fresh chunk"
+    combined = "seen in Figure 1-1.\n\nFigure 1-1. The over-general swamp"
+    assert any(combined in text for text in texts), "caption should follow its callout"
 
 
 def test_emit_jsonl_rebalances_sentence_after_limit(monkeypatch):
