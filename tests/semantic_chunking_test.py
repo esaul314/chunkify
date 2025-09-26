@@ -92,6 +92,29 @@ def test_sentence_merge_allows_soft_limit_overflow() -> None:
     assert chunk_size - overlap < word_count <= chunk_size
 
 
+def test_sentence_merge_blocks_dense_fragments_when_override_shrinks_budget() -> None:
+    """Dense fragments respect override budgets instead of merging endlessly."""
+
+    fragments = ["x" * 250, "y" * 250]
+    merged_default = _merge_sentence_fragments(
+        fragments,
+        chunk_size=400,
+        overlap=0,
+        min_chunk_size=None,
+    )
+    merged_override = _merge_sentence_fragments(
+        fragments,
+        chunk_size=80,
+        overlap=0,
+        min_chunk_size=None,
+    )
+
+    assert len(merged_default) == 1
+    assert merged_default[0].startswith("x" * 250)
+    assert merged_default[0].endswith("y" * 250)
+    assert merged_override == fragments
+
+
 def test_compute_limit_handles_small_chunk_override() -> None:
     """Fallback limits keep small chunk overrides from inflating merges."""
 

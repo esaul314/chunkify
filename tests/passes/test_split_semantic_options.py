@@ -89,6 +89,38 @@ def test_split_counts_change_with_overrides(tmp_path, monkeypatch, overrides, re
     assert (new > base) if relation == "gt" else (new < base)
 
 
+def test_dense_fragments_respect_override_limits(tmp_path, monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_semantic_chunker(
+        text: str, chunk_size: int, overlap: int, *, min_chunk_size: int
+    ) -> list[str]:
+        calls.append(chunk_size)
+        if chunk_size <= 80:
+            step = max(chunk_size - overlap, 1)
+            return [text[i : i + chunk_size] for i in range(0, len(text), step)]
+        return [text]
+
+    monkeypatch.setattr("pdf_chunker.splitter.semantic_chunker", fake_semantic_chunker)
+
+    def _run(opts: dict | None = None) -> list[str]:
+        spec_opts = {"run_report": {"output_path": str(tmp_path / "r.json")}}
+        spec = PipelineSpec(options={**spec_opts, **(opts or {})})
+        text = "x" * 600 + "y" * 600
+        art = Artifact(payload=_doc(text), meta={"metrics": {}, "input": "doc.pdf"})
+        seeded, _ = run_convert(art, spec)
+        return [item["text"] for item in split_semantic(seeded).payload["items"]]
+
+    base = _run()
+    override = _run({"split_semantic": {"chunk_size": 80, "overlap": 0}})
+
+    assert 400 in calls
+    assert 80 in calls
+    assert len(base) == 1
+    assert len(override) > len(base)
+    assert any(" " not in text for text in override)
+
+
 def test_run_convert_overrides_existing_meta_options(tmp_path, monkeypatch) -> None:
     captured: dict[str, tuple[int, int, int]] = {}
 
