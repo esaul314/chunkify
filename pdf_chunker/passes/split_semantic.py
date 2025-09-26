@@ -47,6 +47,15 @@ from pdf_chunker.utils import _build_metadata
 
 _STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
 _FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
+_CAPTION_PREFIXES = (
+    "figure",
+    "fig.",
+    "table",
+    "tbl.",
+    "image",
+    "img.",
+    "diagram",
+)
 
 
 def _collect_superscripts(
@@ -344,6 +353,11 @@ def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
     return head.isupper() or head.isdigit() or _starts_list_like(block, text)
 
 
+def _looks_like_caption(text: str) -> bool:
+    stripped = text.lstrip().lower()
+    return any(stripped.startswith(prefix) for prefix in _CAPTION_PREFIXES)
+
+
 def _merge_blocks(
     acc: list[tuple[int, Block, str]],
     cur: tuple[int, Block, str],
@@ -354,6 +368,10 @@ def _merge_blocks(
     prev_page, prev_block, prev_text = acc[-1]
     if prev_page != page:
         return acc + [cur]
+    if block is prev_block and _is_heading(block) and _looks_like_caption(prev_text):
+        merged = " ".join(part for part in (prev_text, text) if part).strip()
+        acc[-1] = (prev_page, prev_block, merged)
+        return acc
     if _is_heading(prev_block) or _is_heading(block):
         return acc + [cur]
     if _starts_list_like(block, text):
@@ -393,6 +411,11 @@ def _infer_list_kind(text: str) -> str | None:
     if starts_with_bullet(text):
         return "bullet"
     if starts_with_number(text):
+        return "numbered"
+    lines = tuple(line.lstrip() for line in text.splitlines())
+    if any(starts_with_bullet(line) for line in lines):
+        return "bullet"
+    if any(starts_with_number(line) for line in lines):
         return "numbered"
     return None
 
