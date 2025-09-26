@@ -129,20 +129,21 @@ def _merge_sentence_fragments(
     def _target_limit_from(budget: _MergeBudget) -> int | None:
         return budget.limit if budget.limit is not None else budget.hard_limit
 
-    def _violates_budget(
-        previous: str,
-        budget: _MergeBudget,
-        prev_words: tuple[str, ...],
-        current_words: tuple[str, ...],
+    def _is_dense_fragment(
+        prev_words: tuple[str, ...], current_words: tuple[str, ...]
     ) -> bool:
-        dense_fragments = len(prev_words) <= 1 or len(current_words) <= 1
+        return len(prev_words) <= 1 or len(current_words) <= 1
+
+    def _violates_budget(
+        budget: _MergeBudget,
+        *,
+        dense_fragments: bool,
+    ) -> bool:
         if budget.hard_limit is not None and budget.effective_total > budget.hard_limit:
-            return dense_fragments
+            return True
         if budget.limit is None or budget.effective_total <= budget.limit:
             return False
-        if dense_fragments:
-            return True
-        return False
+        return not dense_fragments
 
     def _should_merge(
         previous: str,
@@ -162,9 +163,9 @@ def _merge_sentence_fragments(
         first_word = current_words[0] if current_words else ""
         if prev_words and prev_words[-1] == first_word:
             return False
-        if _violates_budget(previous, budget, prev_words, current_words):
+        dense_fragments = _is_dense_fragment(prev_words, current_words)
+        if _violates_budget(budget, dense_fragments=dense_fragments):
             return False
-        dense_fragments = len(prev_words) <= 1 or len(current_words) <= 1
         if target_limit is not None and budget.effective_total > target_limit:
             if budget.hard_limit is None or budget.effective_total > budget.hard_limit:
                 if dense_fragments:
@@ -227,14 +228,13 @@ def _merge_sentence_fragments(
             overlap=overlap,
             min_chunk_size=min_chunk_size,
         )
-        dense_fragments = len(prev_words) <= 1 or len(trimmed_words) <= 1
-
         if not _should_merge(prev_text, trimmed_text, prev_words, trimmed_words, budget):
             if trimmed_words != words:
                 return _append(acc, trimmed_text, trimmed_words)
             return _append(acc, chunk, words)
 
-        exceeds_limit = budget.limit is not None and budget.effective_total > budget.limit
+        dense_fragments = _is_dense_fragment(prev_words, trimmed_words)
+        exceeds_limit = _violates_budget(budget, dense_fragments=dense_fragments)
         if exceeds_limit:
             adjusted = (
                 _rebalance_overflow(prev_text, prev_words, trimmed_text, _target_limit_from(budget))
@@ -253,13 +253,12 @@ def _merge_sentence_fragments(
                         overlap=overlap,
                         min_chunk_size=min_chunk_size,
                     )
-                    exceeds_limit = (
-                        budget.limit is not None and budget.effective_total > budget.limit
+                    dense_fragments = _is_dense_fragment(prev_words, trimmed_words)
+                    exceeds_limit = _violates_budget(
+                        budget, dense_fragments=dense_fragments
                     )
             if not trimmed_words:
                 return acc
-            if not dense_fragments:
-                exceeds_limit = False
             if exceeds_limit:
                 return _append(acc, trimmed_text, trimmed_words)
 
