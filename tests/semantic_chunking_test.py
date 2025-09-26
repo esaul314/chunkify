@@ -7,6 +7,7 @@ from pdf_chunker.passes.sentence_fusion import (
     _compute_limit,
     _derive_merge_budget,
     _merge_sentence_fragments,
+    _stitch_continuation_heads,
 )
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
 
@@ -59,6 +60,20 @@ def test_no_chunk_starts_mid_sentence() -> None:
     assert all(end_re.search(prev.rstrip()) for prev in chunks[:-1])
 
 
+def test_stitch_forces_boundary_when_limit_blocks_context() -> None:
+    """Continuation stitching pushes trailing fragments into the next chunk."""
+
+    fragments = [
+        "Intro sentence. And this fragment trails without punctuation",
+        "And now the continuation completes the idea.",
+    ]
+    stitched = _stitch_continuation_heads(fragments, limit=5)
+    assert stitched == [
+        "Intro sentence.",
+        "And this fragment trails without punctuation And now the continuation completes the idea.",
+    ]
+
+
 def test_sentence_merge_allows_soft_limit_overflow() -> None:
     """Sentence fusion tolerates soft-limit overflow when hard limit allows it."""
     chunk_size, overlap = 12, 4
@@ -75,6 +90,29 @@ def test_sentence_merge_allows_soft_limit_overflow() -> None:
     assert merged == ["Alpha beta gamma delta epsilon zeta and eta theta iota."]
     word_count = len(merged[0].split())
     assert chunk_size - overlap < word_count <= chunk_size
+
+
+def test_sentence_merge_blocks_dense_fragments_when_override_shrinks_budget() -> None:
+    """Dense fragments respect override budgets instead of merging endlessly."""
+
+    fragments = ["x" * 250, "y" * 250]
+    merged_default = _merge_sentence_fragments(
+        fragments,
+        chunk_size=400,
+        overlap=0,
+        min_chunk_size=None,
+    )
+    merged_override = _merge_sentence_fragments(
+        fragments,
+        chunk_size=80,
+        overlap=0,
+        min_chunk_size=None,
+    )
+
+    assert len(merged_default) == 1
+    assert merged_default[0].startswith("x" * 250)
+    assert merged_default[0].endswith("y" * 250)
+    assert merged_override == fragments
 
 
 def test_compute_limit_handles_small_chunk_override() -> None:

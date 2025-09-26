@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
 from itertools import chain
+from math import ceil
 from typing import Any, TypedDict
 
 from pdf_chunker.framework import Artifact, Pass, register
@@ -34,6 +35,7 @@ from pdf_chunker.passes.chunk_pipeline import (
     merge_adjacent_blocks as pipeline_merge_adjacent_blocks,
 )
 from pdf_chunker.passes.sentence_fusion import (
+    _AVERAGE_CHARS_PER_TOKEN,
     _ENDS_SENTENCE,
     SOFT_LIMIT,
     _is_continuation_lead,
@@ -45,6 +47,16 @@ from pdf_chunker.utils import _build_metadata
 
 _STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
 _FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
+_CAPTION_PREFIXES = (
+    "figure",
+    "fig.",
+    "table",
+    "tbl.",
+    "image",
+    "img.",
+    "diagram",
+)
+_CAPTION_FLAG = "_caption_attached"
 
 
 def _collect_superscripts(
@@ -142,10 +154,6 @@ def _stitch_block_continuations(
     return reduce(_consume, seq, [])
 
 
-def _count_words(text: str) -> int:
-    return len(text.split())
-
-
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
     block = records[0][1]
     base = {k: v for k, v in block.items() if k not in {"text", "list_kind"}}
@@ -159,7 +167,9 @@ def _with_chunk_index(block: Block, index: int) -> Block:
 
 
 def _collapse_records(
-    records: Iterable[tuple[int, Block, str]], limit: int | None
+    records: Iterable[tuple[int, Block, str]],
+    options: SplitOptions,
+    limit: int | None,
 ) -> Iterator[tuple[int, Block, str]]:
     seq = list(records)
     if limit is None or limit <= 0:
@@ -167,12 +177,24 @@ def _collapse_records(
             yield page, _with_chunk_index(block, idx), text
         return
 
+    hard_limit = options.chunk_size if options.chunk_size > 0 else None
     buffer: list[tuple[int, Block, str]] = []
-    running = 0
+    running_words = 0
+    running_dense = 0
     start_index: int | None = None
 
+    def _effective_counts(text: str) -> tuple[int, int, int]:
+        words = tuple(text.split())
+        word_count = len(words)
+        char_total = sum(len(token) for token in words)
+        dense_total = int(ceil(char_total / _AVERAGE_CHARS_PER_TOKEN)) if char_total else 0
+        if word_count <= 1 and text:
+            dense_total = max(dense_total, len(text))
+        effective_total = max(word_count, dense_total)
+        return word_count, dense_total, effective_total
+
     def emit() -> Iterator[tuple[int, Block, str]]:
-        nonlocal buffer, running, start_index
+        nonlocal buffer, running_words, running_dense, start_index
         if not buffer:
             return
         first_index = start_index if start_index is not None else 0
@@ -180,8 +202,13 @@ def _collapse_records(
             page, block, text = buffer[0]
             yield page, _with_chunk_index(block, first_index), text
         else:
-            total = sum(_count_words(text) for _, _, text in buffer)
-            if total > limit:
+            effective_total = max(running_words, running_dense)
+            exceeds = False
+            if limit is not None and effective_total > limit:
+                exceeds = True
+            if not exceeds and hard_limit is not None and effective_total > hard_limit:
+                exceeds = True
+            if exceeds:
                 for offset, (page, block, text) in enumerate(buffer):
                     yield page, _with_chunk_index(block, first_index + offset), text
             else:
@@ -192,14 +219,16 @@ def _collapse_records(
                 else:
                     merged = _merge_record_block(buffer, joined)
                     yield buffer[0][0], _with_chunk_index(merged, first_index), joined
-        buffer, running, start_index = [], 0, None
+        buffer, running_words, running_dense, start_index = [], 0, 0, None
 
     for idx, record in enumerate(seq):
         page, block, text = record
         if buffer and page != buffer[-1][0]:
             yield from emit()
-        words = _count_words(text)
-        if words > limit:
+        word_count, dense_count, effective_count = _effective_counts(text)
+        if (limit is not None and effective_count > limit) or (
+            hard_limit is not None and effective_count > hard_limit
+        ):
             yield from emit()
             yield page, _with_chunk_index(block, idx), text
             continue
@@ -209,13 +238,21 @@ def _collapse_records(
                 yield from emit()
         elif buffer and text.rstrip().endswith(":") and next_is_list:
             yield from emit()
-        next_total = running + words
-        if buffer and next_total > limit:
-            yield from emit()
+        if buffer:
+            projected_words = running_words + word_count
+            projected_dense = running_dense + dense_count
+            projected_effective = max(projected_words, projected_dense)
+            if (limit is not None and projected_effective > limit) or (
+                hard_limit is not None and projected_effective > hard_limit
+            ):
+                yield from emit()
         if not buffer:
             start_index = idx
+            running_words, running_dense = word_count, dense_count
+        else:
+            running_words += word_count
+            running_dense += dense_count
         buffer.append((page, block, text))
-        running += words
 
     yield from emit()
 
@@ -317,6 +354,35 @@ def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
     return head.isupper() or head.isdigit() or _starts_list_like(block, text)
 
 
+def _looks_like_caption(text: str) -> bool:
+    stripped = text.lstrip().lower()
+    return any(stripped.startswith(prefix) for prefix in _CAPTION_PREFIXES)
+
+
+def _contains_caption_line(text: str) -> bool:
+    return any(_looks_like_caption(line) for line in text.splitlines())
+
+
+def _has_caption(block: Block) -> bool:
+    return isinstance(block, Mapping) and bool(dict(block).get(_CAPTION_FLAG))
+
+
+def _mark_caption(block: Block) -> Block:
+    if not isinstance(block, Mapping):
+        return block
+    data = dict(block)
+    data[_CAPTION_FLAG] = True
+    return data
+
+
+def _append_caption(prev_text: str, caption: str) -> str:
+    head = prev_text.rstrip()
+    tail = caption.strip()
+    if not head:
+        return tail
+    return "\n\n".join(filter(None, (head, tail)))
+
+
 def _merge_blocks(
     acc: list[tuple[int, Block, str]],
     cur: tuple[int, Block, str],
@@ -327,6 +393,15 @@ def _merge_blocks(
     prev_page, prev_block, prev_text = acc[-1]
     if prev_page != page:
         return acc + [cur]
+    if block is prev_block and _is_heading(block) and _looks_like_caption(prev_text):
+        merged = " ".join(part for part in (prev_text, text) if part).strip()
+        acc[-1] = (prev_page, prev_block, merged)
+        return acc
+    if _looks_like_caption(text):
+        if _has_caption(prev_block) or _contains_caption_line(prev_text):
+            return acc + [cur]
+        acc[-1] = (prev_page, _mark_caption(prev_block), _append_caption(prev_text, text))
+        return acc
     if _is_heading(prev_block) or _is_heading(block):
         return acc + [cur]
     if _starts_list_like(block, text):
@@ -366,6 +441,11 @@ def _infer_list_kind(text: str) -> str | None:
     if starts_with_bullet(text):
         return "bullet"
     if starts_with_number(text):
+        return "numbered"
+    lines = tuple(line.lstrip() for line in text.splitlines())
+    if any(starts_with_bullet(line) for line in lines):
+        return "bullet"
+    if any(starts_with_number(line) for line in lines):
         return "numbered"
     return None
 
@@ -432,11 +512,12 @@ def _chunk_items(
     split_fn: SplitFn,
     generate_metadata: bool = True,
     *,
-    limit: int | None = None,
+    options: SplitOptions,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
+    limit = options.compute_limit()
     merged = _stitch_block_continuations(
         pipeline_attach_headings(
             _block_texts(doc, split_fn),
@@ -445,7 +526,7 @@ def _chunk_items(
         ),
         limit,
     )
-    collapsed = _collapse_records(merged, limit)
+    collapsed = _collapse_records(merged, options, limit)
     builder = partial(build_chunk_with_meta, filename=filename)
     return pipeline_chunk_records(
         collapsed,
@@ -508,7 +589,7 @@ class _SplitSemanticPass:
             doc,
             split_fn,
             self.generate_metadata,
-            limit=limit,
+            options=options,
         )
         items = list(_inject_continuation_context(chunk_records, limit))
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)

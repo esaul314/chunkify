@@ -17,6 +17,21 @@ Row = dict[str, Any]
 Doc = dict[str, Any]
 
 
+_CAPTION_PREFIXES = (
+    "figure",
+    "fig.",
+    "table",
+    "tbl.",
+    "image",
+    "img.",
+    "diagram",
+)
+
+_CAPTION_LABEL_RE = re.compile(
+    rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+(?:[a-z]*\d[\w.-]*|[ivxlcdm]+)"
+)
+
+
 def _min_words() -> int:
     return int(os.getenv("PDF_CHUNKER_JSONL_MIN_WORDS", "50"))
 
@@ -482,6 +497,11 @@ def _prefix_contained_len(haystack: str, needle: str) -> int:
     return next((idx for idx in range(length, 0, -1) if _match(idx)), 0)
 
 
+def _looks_like_caption_label(text: str) -> bool:
+    normalized = text.strip().lower()
+    return bool(normalized and _CAPTION_LABEL_RE.match(normalized))
+
+
 def _trim_overlap(prev: str, curr: str) -> str:
     """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
@@ -497,6 +517,8 @@ def _trim_overlap(prev: str, curr: str) -> str:
         stripped_prefix = prefix.strip()
         words = re.findall(r"\b\w+\b", stripped_prefix)
         single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
+        if _looks_like_caption_label(stripped_prefix):
+            return curr
         if prev_char.isalnum():
             return curr
         if single_title and (next_non_space.islower() or next_non_space.isdigit()):
@@ -693,12 +715,16 @@ def _dedupe(
             text_norm,
         )
         if overlap:
-            if log is not None:
-                log.append(text[:overlap])
-            text = text[overlap:].lstrip()
-            if not text:
-                return state
-            text_norm = _normalize(text)
+            prefix = text[:overlap]
+            if _looks_like_caption_label(prefix):
+                overlap = 0
+            if overlap:
+                if log is not None:
+                    log.append(prefix)
+                text = text[overlap:].lstrip()
+                if not text:
+                    return state
+                text_norm = _normalize(text)
         return _merge_if_fragment(acc, acc_text, acc_norm, item, text, text_norm)
 
     initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")

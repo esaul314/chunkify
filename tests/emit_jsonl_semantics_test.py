@@ -1,5 +1,11 @@
+from pathlib import Path
+
+import pytest
+
+from pdf_chunker.adapters.io_pdf import read
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import _rebalance_lists, emit_jsonl
+from pdf_chunker.passes.split_semantic import DEFAULT_SPLITTER
 
 
 def _sentence(words: int, *, start: int = 0) -> str:
@@ -67,6 +73,24 @@ def test_emit_jsonl_trims_overlap_without_merging(monkeypatch):
         {"text": first},
         {"text": "Caused a lot of excitement across the team."},
     ]
+
+
+def test_emit_jsonl_retains_caption_label_after_overlap(monkeypatch):
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    intro = "Teams repeatedly reference the architecture seen in Figure 9-1."
+    caption = "Figure 9-1. Platform control plane layering across product areas"
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": intro},
+            {"text": caption},
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    texts = [row["text"] for row in rows]
+    assert any(caption in text for text in texts)
+    truncated = "Platform control plane layering across product areas"
+    assert not any(text.startswith(truncated) for text in texts)
 
 
 def test_emit_jsonl_drops_incoherent_tail():
@@ -183,6 +207,27 @@ def test_emit_jsonl_preserves_caption_sentence_start(monkeypatch):
     first_alpha = next((ch for ch in text if ch.isalpha()), "")
     assert first_alpha.isupper()
     assert "Initially, it was hoped" in text
+
+
+@pytest.mark.usefixtures("_nltk_data")
+def test_platform_eng_caption_survives_emit_jsonl() -> None:
+    pytest.importorskip("fitz")
+    doc = read(str(Path("platform-eng-excerpt.pdf")))
+    artifact = DEFAULT_SPLITTER(Artifact(payload=doc))
+    items = artifact.payload.get("items", [])
+    rows = emit_jsonl(Artifact(payload={"type": "chunks", "items": items})).payload
+    caption = "Figure 1-1. The over-general swamp, held together by glue"
+    texts = [row["text"] for row in rows]
+    assert any(caption in text for text in texts)
+    truncated = "The over-general swamp, held together by glue"
+    offenders = [
+        text for text in texts if text.startswith(truncated) and caption not in text
+    ]
+    assert not offenders, "caption should retain its figure label"
+    starters = [text for text in texts if text.lstrip().startswith("Figure 1-1.")]
+    assert not starters, "caption should not start a fresh chunk"
+    combined = "seen in Figure 1-1.\n\nFigure 1-1. The over-general swamp"
+    assert any(combined in text for text in texts), "caption should follow its callout"
 
 
 def test_emit_jsonl_rebalances_sentence_after_limit(monkeypatch):

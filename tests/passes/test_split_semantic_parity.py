@@ -40,6 +40,7 @@ from pdf_chunker.passes.chunk_pipeline import (
 from pdf_chunker.passes.split_semantic import (
     DEFAULT_SPLITTER,
     _block_text,
+    _collapse_records,
     _inject_continuation_context,
     _merge_blocks,
     _merge_heading_texts,
@@ -75,12 +76,13 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         merge_block_text=_merge_heading_texts,
     )
     stitched = _stitch_block_continuations(headed, limit)
+    collapsed = _collapse_records(stitched, options, limit)
     build_meta = partial(
         build_chunk_with_meta,
         filename=doc.get("source_path"),
     )
     base_chunks = chunk_records_pipeline(
-        stitched,
+        collapsed,
         generate_metadata=DEFAULT_SPLITTER.generate_metadata,
         build_plain=build_chunk,
         build_with_meta=build_meta,
@@ -150,3 +152,23 @@ def test_sample_book_list_metadata() -> None:
         for meta in _metas(refactored_items)
         if meta.get("list_kind")
     }
+
+
+@pytest.mark.usefixtures("_nltk_data")
+def test_platform_eng_figure_caption_retains_label() -> None:
+    pytest.importorskip("fitz")
+    doc = _pdf(str(Path("platform-eng-excerpt.pdf")))
+
+    items, _ = _legacy_chunks(doc)
+    texts = [item.get("text", "") for item in items]
+
+    caption = "Figure 1-1. The over-general swamp, held together by glue"
+    assert any(caption in text for text in texts)
+
+    truncated = "The over-general swamp, held together by glue"
+    offenders = [text for text in texts if text.startswith(truncated) and caption not in text]
+    assert not offenders, "caption should retain its figure label"
+    starters = [text for text in texts if text.lstrip().startswith("Figure 1-1.")]
+    assert not starters, "caption should not start a fresh chunk"
+    combined = "seen in Figure 1-1.\n\nFigure 1-1. The over-general swamp"
+    assert any(combined in text for text in texts), "caption should follow its callout"
