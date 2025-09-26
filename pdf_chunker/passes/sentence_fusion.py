@@ -278,6 +278,58 @@ def _merge_sentence_fragments(
 
 
 def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str]:
+    def _split_sentence_tail(text: str) -> tuple[str, str] | None:
+        boundaries = tuple(
+            match.end()
+            for match in _SENTENCE_BOUNDARY.finditer(text)
+            if match.end() < len(text)
+        )
+        if not boundaries:
+            return None
+        pivot = boundaries[-1]
+        head = text[:pivot].rstrip()
+        tail = text[pivot:].lstrip()
+        if not head or not tail:
+            return None
+        return head, tail
+
+    def _merge_tail_with_chunk(tail: str, chunk: str) -> str:
+        tail_words = tuple(tail.split())
+        chunk_words = tuple(chunk.split())
+        if not tail_words:
+            return chunk.strip()
+        if not chunk_words:
+            return tail.strip()
+        overlap = next(
+            (
+                size
+                for size in range(
+                    min(len(tail_words), len(chunk_words)), 0, -1
+                )
+                if tail_words[-size:] == chunk_words[:size]
+            ),
+            0,
+        )
+        prefix_words = tail_words[:-overlap] if overlap else tail_words
+        segments = (
+            " ".join(prefix_words).strip(),
+            chunk.strip(),
+        )
+        return " ".join(part for part in segments if part)
+
+    def _redistribute_sentence_tail(
+        previous: str, current: str, limit: int | None
+    ) -> tuple[str, str] | None:
+        split = _split_sentence_tail(previous)
+        if split is None:
+            return None
+        head, tail = split
+        head_words = tuple(head.split())
+        if limit is not None and len(head_words) > limit:
+            return None
+        next_chunk = _merge_tail_with_chunk(tail, current)
+        return head, next_chunk
+
     def _consume(acc: list[str], chunk: str) -> list[str]:
         if not chunk:
             return acc
@@ -289,6 +341,24 @@ def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str
         chunk_words = tuple(chunk.split())
         remaining = chunk
         changed = False
+
+        if limit is not None:
+            total = len(prev_words) + len(chunk_words)
+            if total > limit:
+                redistributed = (
+                    _redistribute_sentence_tail(prev, chunk, limit)
+                    if not _ENDS_SENTENCE.search(prev.rstrip())
+                    else None
+                )
+                if redistributed is not None:
+                    prev, chunk = redistributed
+                    prev_words = tuple(prev.split())
+                    chunk_words = tuple(chunk.split())
+                    acc = [*acc[:-1], prev]
+                    remaining = chunk
+                    total = len(prev_words) + len(chunk_words)
+                if total > limit:
+                    return [*acc, chunk]
 
         while True:
             lead = remaining.lstrip()

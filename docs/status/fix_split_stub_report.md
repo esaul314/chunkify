@@ -2,7 +2,7 @@
 
 ## Summary
 - Targeted acceptance tests currently fail. Adjusting semantic split options via overrides does not change the resulting chunk count, and chunk boundaries can still start mid-sentence.
-- Root causes are concentrated in the semantic split pass: override-aware options are computed, but the downstream merge logic ignores their tighter budgets for dense fragments, and sentence-fusion heuristics do not guard against tails that lack terminal punctuation.
+- Root causes are concentrated in the semantic split pass: override-aware options are computed, but the downstream merge logic ignores their tighter budgets for dense fragments, and sentence-fusion heuristics previously failed to guard against tails that lack terminal punctuation. The continuation stitcher now enforces a boundary when the override budget would otherwise force a mid-sentence start.
 
 ## Evidence
 - `pytest tests/passes/test_split_semantic_options.py::test_split_counts_change_with_overrides[overrides0-gt]` fails because tightening `chunk_size` to 200 does not increase the number of produced chunks. 【262369†L1-L34】
@@ -14,5 +14,5 @@
 
 ## Next steps
 1. Refactor `_SplitSemanticPass` so the resolved `SplitOptions` flow into `_chunk_items` and sentence-fusion helpers without reintroducing the default budgets.
-2. Extend the sentence-fusion heuristics with a functional guard that forces a chunk break whenever the candidate tail lacks terminal punctuation and the continuation would exceed the override-aware merge budget.
+2. ✅ Extend the sentence-fusion heuristics with a functional guard that forces a chunk break whenever the candidate tail lacks terminal punctuation and the continuation would exceed the override-aware merge budget.
 3. Backfill regression coverage for dense fragments (no whitespace) to ensure overrides influence both the semantic splitter and the merge budget.

@@ -7,6 +7,7 @@ from pdf_chunker.passes.sentence_fusion import (
     _compute_limit,
     _derive_merge_budget,
     _merge_sentence_fragments,
+    _stitch_continuation_heads,
 )
 from pdf_chunker.passes.split_semantic import _SplitSemanticPass
 
@@ -57,6 +58,20 @@ def test_no_chunk_starts_mid_sentence() -> None:
     art = _SplitSemanticPass(chunk_size=10, overlap=0)(Artifact(payload=_doc(text)))
     chunks = [c["text"] for c in art.payload["items"]]
     assert all(end_re.search(prev.rstrip()) for prev in chunks[:-1])
+
+
+def test_stitch_forces_boundary_when_limit_blocks_context() -> None:
+    """Continuation stitching pushes trailing fragments into the next chunk."""
+
+    fragments = [
+        "Intro sentence. And this fragment trails without punctuation",
+        "And now the continuation completes the idea.",
+    ]
+    stitched = _stitch_continuation_heads(fragments, limit=5)
+    assert stitched == [
+        "Intro sentence.",
+        "And this fragment trails without punctuation And now the continuation completes the idea.",
+    ]
 
 
 def test_sentence_merge_allows_soft_limit_overflow() -> None:
