@@ -7,12 +7,12 @@ Accepts the historical flag set and forwards them to the modern
 from __future__ import annotations
 
 import argparse
+import io
+import tempfile
 import sys
 from collections.abc import Sequence
 from contextlib import redirect_stdout
 from pathlib import Path
-import io
-import tempfile
 
 from pdf_chunker import cli
 
@@ -45,15 +45,55 @@ def _to_cli_args(ns: argparse.Namespace) -> list[str]:
     return ["convert", str(ns.input_path), *flags, *bools]
 
 
-def _delegate(argv: Sequence[str]) -> None:
-    """Print a deprecation notice and invoke the modern CLI."""
-    print("chunk_pdf.py is deprecated; use `pdf_chunker` instead.", file=sys.stderr)
+def _exit_code(exc: BaseException) -> int | None:
+    """Return the exit code carried by ``exc`` when available."""
+
+    if isinstance(exc, SystemExit):
+        code = exc.code
+        if code in (None, 0):
+            return 0
+        if isinstance(code, int):
+            return code
+        try:
+            return int(code)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return None
+
+    for attr in ("exit_code", "code"):
+        value = getattr(exc, attr, None)
+        if value is None:
+            continue
+        if isinstance(value, int):
+            return value
+        if value == 0:
+            return 0
+    return None
+
+
+def _invoke_cli(argv: Sequence[str]) -> int:
+    """Execute the ``pdf_chunker`` CLI while normalising exit codes."""
+
     run = cli.app
     args = list(argv)
-    if getattr(cli, "typer", None):
-        run(args=args, standalone_mode=False)
-    else:
-        run(args)
+
+    try:
+        if getattr(cli, "typer", None):
+            run(args=args, standalone_mode=False)
+        else:
+            run(args)
+    except BaseException as exc:  # ``typer.Exit`` is not a ``SystemExit``
+        code = _exit_code(exc)
+        if code == 0:
+            return 0
+        raise
+    return 0
+
+
+def _delegate(argv: Sequence[str]) -> int:
+    """Print a deprecation notice and invoke the modern CLI."""
+
+    print("chunk_pdf.py is deprecated; use `pdf_chunker` instead.", file=sys.stderr)
+    return _invoke_cli(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
