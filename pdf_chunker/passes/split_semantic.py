@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
-from itertools import chain
+from itertools import accumulate, chain
 from typing import Any, TypedDict
 
 from pdf_chunker.framework import Artifact, Pass, register
@@ -35,7 +35,9 @@ from pdf_chunker.passes.chunk_pipeline import (
 )
 from pdf_chunker.passes.sentence_fusion import (
     _ENDS_SENTENCE,
+    _SENTENCE_BOUNDARY,
     SOFT_LIMIT,
+    _derive_merge_budget,
     _is_continuation_lead,
     _last_sentence,
     _merge_sentence_fragments,
@@ -159,7 +161,12 @@ def _with_chunk_index(block: Block, index: int) -> Block:
 
 
 def _collapse_records(
-    records: Iterable[tuple[int, Block, str]], limit: int | None
+    records: Iterable[tuple[int, Block, str]],
+    limit: int | None,
+    *,
+    chunk_size: int | None = None,
+    overlap: int = 0,
+    min_chunk_size: int | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
     seq = list(records)
     if limit is None or limit <= 0:
@@ -168,11 +175,14 @@ def _collapse_records(
         return
 
     buffer: list[tuple[int, Block, str]] = []
-    running = 0
+    buffer_words: tuple[str, ...] = ()
+    buffer_dense = True
     start_index: int | None = None
+    allowed_overlap = max(overlap, 0)
+    hard_limit = chunk_size if isinstance(chunk_size, int) and chunk_size > 0 else None
 
     def emit() -> Iterator[tuple[int, Block, str]]:
-        nonlocal buffer, running, start_index
+        nonlocal buffer, buffer_words, buffer_dense, start_index
         if not buffer:
             return
         first_index = start_index if start_index is not None else 0
@@ -180,8 +190,8 @@ def _collapse_records(
             page, block, text = buffer[0]
             yield page, _with_chunk_index(block, first_index), text
         else:
-            total = sum(_count_words(text) for _, _, text in buffer)
-            if total > limit:
+            total_words = len(buffer_words)
+            if total_words > limit:
                 for offset, (page, block, text) in enumerate(buffer):
                     yield page, _with_chunk_index(block, first_index + offset), text
             else:
@@ -192,14 +202,39 @@ def _collapse_records(
                 else:
                     merged = _merge_record_block(buffer, joined)
                     yield buffer[0][0], _with_chunk_index(merged, first_index), joined
-        buffer, running, start_index = [], 0, None
+        buffer, buffer_words, buffer_dense, start_index = [], (), True, None
+
+    def _effective_total(
+        previous: tuple[str, ...],
+        current: tuple[str, ...],
+        dense_guard: bool,
+    ) -> tuple[int, bool]:
+        budget = _derive_merge_budget(
+            previous,
+            current,
+            chunk_size=chunk_size,
+            overlap=allowed_overlap,
+            min_chunk_size=min_chunk_size,
+        )
+        if dense_guard and chunk_size is not None:
+            effective_total = sum(len(token) for token in (*previous, *current))
+            using_dense = True
+        else:
+            effective_total = budget.effective_total
+            using_dense = budget.dense_total > budget.word_total
+        overflow_allowed = (
+            not using_dense and hard_limit is not None and effective_total <= hard_limit
+        )
+        return effective_total, overflow_allowed
 
     for idx, record in enumerate(seq):
         page, block, text = record
         if buffer and page != buffer[-1][0]:
             yield from emit()
-        words = _count_words(text)
-        if words > limit:
+        words = tuple(text.split())
+        record_dense = not any(char.isspace() for char in text)
+        effective_self, self_overflow = _effective_total((), words, record_dense)
+        if limit is not None and effective_self > limit and not self_overflow:
             yield from emit()
             yield page, _with_chunk_index(block, idx), text
             continue
@@ -209,15 +244,87 @@ def _collapse_records(
                 yield from emit()
         elif buffer and text.rstrip().endswith(":") and next_is_list:
             yield from emit()
-        next_total = running + words
-        if buffer and next_total > limit:
+        effective_total, overflow_allowed = _effective_total(
+            buffer_words,
+            words,
+            buffer_dense and record_dense,
+        )
+        if buffer and limit is not None and effective_total > limit and not overflow_allowed:
             yield from emit()
         if not buffer:
             start_index = idx
         buffer.append((page, block, text))
-        running += words
+        buffer_words = (*buffer_words, *words)
+        buffer_dense = buffer_dense and record_dense
 
     yield from emit()
+
+
+def _with_text(record: tuple[int, Block, str], text: str) -> tuple[int, Block, str]:
+    page, block, _ = record
+    return page, {**block, "text": text}, text
+
+
+def _sentence_boundary_split(text: str) -> tuple[str | None, str]:
+    candidates = (
+        (text[: match.end()].strip(), text[match.end() :].lstrip())
+        for match in _SENTENCE_BOUNDARY.finditer(text)
+    )
+    return next(((head, tail) for head, tail in candidates if head and tail), (None, text))
+
+
+def _has_sentence_boundary(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return bool(_SENTENCE_BOUNDARY.search(stripped) or _ENDS_SENTENCE.search(stripped))
+
+
+def _rebalance_sentence_starts(
+    records: Iterable[tuple[int, Block, str]],
+) -> list[tuple[int, Block, str]]:
+    seq = list(records)
+    if not seq:
+        return []
+    boundary_flags = [_has_sentence_boundary(text) for _, _, text in seq]
+    suffix_flags = list(
+        reversed(
+            list(
+                accumulate(
+                    reversed(boundary_flags),
+                    lambda acc, value: bool(acc) or bool(value),
+                )
+            )
+        )
+    )
+
+    def _consume(
+        acc: list[tuple[int, Block, str]],
+        payload: tuple[tuple[int, Block, str], bool],
+    ) -> list[tuple[int, Block, str]]:
+        record, future_has_boundary = payload
+        if not acc:
+            return [*acc, record]
+        prev = acc[-1]
+        prev_text = prev[2]
+        text = record[2]
+        if (
+            _ENDS_SENTENCE.search(prev_text.rstrip())
+            or not text.strip()
+            or not any(char.isspace() for char in text)
+        ):
+            return [*acc, record]
+        head, tail = _sentence_boundary_split(text)
+        if head is None and not future_has_boundary:
+            return [*acc, record]
+        merged_text = (
+            f"{prev_text} {text}".strip() if head is None else f"{prev_text} {head}".strip()
+        )
+        updated = _with_text(prev, merged_text)
+        prefix = [*acc[:-1], updated]
+        return prefix if head is None or not tail else [*prefix, _with_text(record, tail)]
+
+    return reduce(_consume, zip(seq, suffix_flags, strict=False), [])
 
 
 Doc = dict[str, Any]
@@ -433,6 +540,9 @@ def _chunk_items(
     generate_metadata: bool = True,
     *,
     limit: int | None = None,
+    chunk_size: int | None = None,
+    overlap: int = 0,
+    min_chunk_size: int | None = None,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
@@ -445,10 +555,17 @@ def _chunk_items(
         ),
         limit,
     )
-    collapsed = _collapse_records(merged, limit)
+    collapsed = _collapse_records(
+        merged,
+        limit,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        min_chunk_size=min_chunk_size,
+    )
+    balanced = _rebalance_sentence_starts(collapsed)
     builder = partial(build_chunk_with_meta, filename=filename)
     return pipeline_chunk_records(
-        collapsed,
+        balanced,
         generate_metadata=generate_metadata,
         build_plain=build_chunk,
         build_with_meta=builder,
@@ -509,6 +626,9 @@ class _SplitSemanticPass:
             split_fn,
             self.generate_metadata,
             limit=limit,
+            chunk_size=options.chunk_size,
+            overlap=options.overlap,
+            min_chunk_size=options.min_chunk_size,
         )
         items = list(_inject_continuation_context(chunk_records, limit))
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)
