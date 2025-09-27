@@ -230,12 +230,38 @@ def _stitch_block_continuations(
     return reduce(_consume, seq, [])
 
 
+def _coalesce_block_type(blocks: Iterable[Block]) -> str:
+    """Return the merged block ``type`` for ``blocks``."""
+
+    types = tuple(filter(None, (block.get("type") for block in blocks)))
+    if not types:
+        return "paragraph"
+    non_heading = tuple(t for t in types if t != "heading")
+    if not non_heading:
+        return "paragraph"
+    unique = {t for t in non_heading}
+    if len(unique) == 1:
+        return next(iter(unique))
+    if "list_item" in unique:
+        return "list_item" if len(unique - {"list_item"}) == 0 else "paragraph"
+    return non_heading[0]
+
+
+def _coalesce_list_kind(blocks: Iterable[Block]) -> str | None:
+    """Return a stable ``list_kind`` shared by ``blocks`` when present."""
+
+    kinds = {block.get("list_kind") for block in blocks if block.get("list_kind")}
+    return next(iter(kinds)) if len(kinds) == 1 else None
+
+
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
-    block = records[0][1]
-    base = {k: v for k, v in block.items() if k not in {"text", "list_kind"}}
-    block_type = block.get("type")
-    normalized_type = block_type if block_type and block_type != "heading" else "paragraph"
-    return {**base, "type": normalized_type, "text": text}
+    blocks = tuple(block for _, block, _ in records)
+    first = blocks[0] if blocks else {}
+    base = {k: v for k, v in first.items() if k not in {"text", "list_kind"}}
+    block_type = _coalesce_block_type(blocks)
+    list_kind = _coalesce_list_kind(blocks) if block_type == "list_item" else None
+    merged = {**base, "type": block_type, "text": text}
+    return {**merged, "list_kind": list_kind} if list_kind else merged
 
 
 def _with_chunk_index(block: Block, index: int) -> Block:
@@ -561,6 +587,20 @@ def _infer_list_kind(text: str) -> str | None:
     return None
 
 
+def _list_line_ratio(text: str) -> tuple[int, int]:
+    """Return count of list-like lines vs total non-empty lines."""
+
+    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+    if not lines:
+        return 0, 0
+    list_lines = sum(
+        1
+        for line in lines
+        if starts_with_bullet(line) or starts_with_number(line)
+    )
+    return list_lines, len(lines)
+
+
 def _tag_list(block: Block) -> Block:
     """Return ``block`` with list metadata inferred when appropriate."""
 
@@ -576,6 +616,12 @@ def _tag_list(block: Block) -> Block:
 
     leading_kind = _leading_list_kind(text)
     if not leading_kind:
+        inferred = _infer_list_kind(text)
+        if not inferred:
+            return block
+        list_lines, total_lines = _list_line_ratio(text)
+        if total_lines and (list_lines * 2) >= total_lines:
+            return {**block, "type": "list_item", "list_kind": inferred}
         return block
 
     return {**block, "type": "list_item", "list_kind": leading_kind}
