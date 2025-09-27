@@ -112,6 +112,16 @@ def _pdf(path: str) -> dict:
     return read(path)
 
 
+def test_merge_heading_texts_inserts_blank_line() -> None:
+    headings = ("CHAPTER 1", "Why Platform Engineering Is Becoming Essential")
+    body = "Platform teams accelerate delivery."
+    merged = _merge_heading_texts(headings, body)
+    assert (
+        merged
+        == "CHAPTER 1\nWhy Platform Engineering Is Becoming Essential\n\nPlatform teams accelerate delivery."
+    )
+
+
 @pytest.mark.usefixtures("_nltk_data")
 def test_platform_eng_parity() -> None:
     pytest.importorskip("fitz")
