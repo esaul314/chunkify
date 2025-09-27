@@ -140,6 +140,10 @@ def test_platform_eng_parity() -> None:
     continuation = "ownership of operating the application's infrastructure"
     assert any(continuation in chunk for chunk in _texts(legacy_items))
 
+    chapter_reference = "Chapter 10.\n\nWrapping Up"
+    assert any(chapter_reference in chunk for chunk in _texts(legacy_items))
+    assert any(chapter_reference in chunk for chunk in _texts(refactored_items))
+
     list_meta = [meta for meta in _metas(legacy_items) if meta.get("list_kind")]
     assert list_meta, "expected list metadata to be present"
     assert list_meta == [

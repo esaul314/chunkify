@@ -570,6 +570,25 @@ def merge_number_suffix_lines(text: str) -> str:
     return NUMBER_SUFFIX_LINE_RE.sub(repl, text)
 
 
+_TRAILING_NUMBER_EXCEPTIONS = frozenset(
+    {"chapter", "section", "part", "figure", "table", "appendix"}
+)
+_TRAILING_NUMBER_MARKER_RE = re.compile(
+    r"(?P<prefix>\b[A-Za-z]+)(?P<sep>\s+)(?P<marker>\d+[.)](?:['\"\u2019])?)(?P<trail>\s*)$",
+    re.IGNORECASE,
+)
+
+
+def _strip_trailing_number_marker(text: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        prefix = match.group("prefix")
+        if prefix and prefix.lower() in _TRAILING_NUMBER_EXCEPTIONS:
+            return match.group(0)
+        return f"{prefix}{match.group('trail')}"
+
+    return _TRAILING_NUMBER_MARKER_RE.sub(_replace, text)
+
+
 def drop_spurious_number_markers(text: str) -> str:
     """Remove numbered markers created by hyphenated splits or isolated lines."""
     return pipe(
@@ -578,7 +597,7 @@ def drop_spurious_number_markers(text: str) -> str:
         lambda t: re.sub(r"\n\d+[.)]\n", "\n", t),
         lambda t: re.sub(r"\n\d+[.)]\s+(?=[A-Z]{2,}\b)", "\n", t),
         lambda t: re.sub(r"(?<=\b[a-z])\s+\d+[.)]\s+(?=[a-z])", " ", t),
-        lambda t: re.sub("(?<=[a-z])\\s+\\d+[.)](?:['\"\\u2019])?(?=\\s*$)", "", t),
+        _strip_trailing_number_marker,
         lambda t: re.sub(r"\n{2,}(\d+[.)])", r"\n\1", t),
     )
 

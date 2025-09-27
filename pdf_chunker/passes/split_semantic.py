@@ -8,6 +8,8 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
@@ -57,6 +59,7 @@ _CAPTION_PREFIXES = (
     "diagram",
 )
 _CAPTION_FLAG = "_caption_attached"
+_TOKEN_PATTERN = re.compile(r"\S+")
 
 
 def _span_attr(span: Any, name: str, default: Any = None) -> Any:
@@ -151,51 +154,70 @@ def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
     if overlap <= 0:
         return chunks
     restored: list[str] = []
-    previous: tuple[str, ...] = ()
+    previous_words: tuple[str, ...] = ()
+    previous_text = ""
 
     for chunk in chunks:
+        updated = chunk
         words = tuple(chunk.split())
-        if previous:
-            window = min(overlap, len(previous))
+        prefilled = False
+
+        if previous_words:
+            window = min(overlap, len(previous_words))
             if window:
-                overlap_words = tuple(previous[-window:])
+                overlap_words = tuple(previous_words[-window:])
                 match_limit = min(window, len(words))
                 matched = next(
                     (
                         size
                         for size in range(match_limit, 0, -1)
-                        if tuple(previous[-size:]) == words[:size]
+                        if tuple(overlap_words[-size:]) == tuple(words[:size])
                     ),
                     0,
                 )
-                if matched and matched < window:
-                    missing = overlap_words[: window - matched]
-                    if missing:
-                        words = (*missing, *words)
-                        chunk = " ".join(words)
-                match_limit = min(window, len(words))
-                matched_after = next(
-                    (
-                        size
-                        for size in range(match_limit, 0, -1)
-                        if tuple(previous[-size:]) == words[:size]
-                    ),
-                    0,
-                )
-                if matched_after:
-                    overlap_segment = " ".join(words[:matched_after]).strip()
-                    trimmed = (
-                        words[matched_after:]
-                        if len(words) > matched_after
-                        else ()
-                    )
-                    if overlap_segment and overlap_segment[-1] in {".", "?", "!"} and trimmed:
-                        words = trimmed
-                        chunk = " ".join(words)
-        restored.append(chunk)
-        previous = words
+                missing_count = window - matched
+                if missing_count > 0 and overlap_words:
+                    prefix = " ".join(overlap_words[:missing_count])
+                    if prefix:
+                        glue = " " if updated and not updated[0].isspace() else ""
+                        updated = f"{prefix}{glue}{updated}"
+                        prefilled = True
+                if not prefilled:
+                    updated = _trim_sentence_prefix(previous_text, updated)
+
+        restored.append(updated)
+        previous_words = tuple(updated.split())
+        previous_text = updated
 
     return restored
+
+
+def _trim_sentence_prefix(previous_text: str, text: str) -> str:
+    if not previous_text or not text:
+        return text
+    sentence = _last_sentence(previous_text)
+    if not sentence:
+        return text
+    candidate = sentence.strip()
+    if not candidate or candidate[-1] not in {".", "?", "!"}:
+        return text
+    if re.search(r"Chapter\s+\d+", candidate):
+        return text
+    if not text.startswith(candidate):
+        return text
+    remainder = text[len(candidate) :]
+    if not remainder or not remainder.strip():
+        return text
+    match = re.search(r"((?:Chapter|Section|Part)\s+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)\.?$", candidate)
+    preserved = match.group(0) if match else ""
+    leading_space = remainder.startswith(" ")
+    gap = remainder[1:] if leading_space else remainder
+    if preserved:
+        if gap.startswith("\n"):
+            return f"{preserved}{gap}"
+        spacer = "" if not gap or gap[0].isspace() else " "
+        return f"{preserved}{spacer}{gap}"
+    return gap
 
 
 def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
@@ -217,9 +239,16 @@ def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
     )
     if not matched or len(current_words) <= matched:
         return text
+    if matched < window:
+        return text
     overlap_segment = " ".join(current_words[:matched]).strip()
     if overlap_segment and overlap_segment[-1] in {".", "?", "!"}:
-        return " ".join(current_words[matched:])
+        matches = list(_TOKEN_PATTERN.finditer(text))
+        if len(matches) >= matched:
+            cut = matches[matched - 1].end()
+            remainder = text[cut:]
+            return remainder.lstrip(" ")
+        return ""
     return text
 
 
