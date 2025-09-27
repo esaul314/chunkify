@@ -590,11 +590,23 @@ def _normalize_bullet_tail(tail: str) -> str:
 
 
 def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
-    if any(starts_with_bullet(h.lstrip()) for h in headings):
-        lead = " ".join(h.rstrip() for h in headings).rstrip()
+    normalized_headings = tuple(
+        heading.strip() for heading in headings if heading and heading.strip()
+    )
+    if any(starts_with_bullet(h.lstrip()) for h in normalized_headings):
+        lead = " ".join(h.rstrip() for h in normalized_headings).rstrip()
         tail = _normalize_bullet_tail(body.lstrip()) if body else ""
         return f"{lead} {tail}".strip()
-    return "\n".join(chain(headings, [body])).strip()
+
+    heading_block = "\n".join(normalized_headings)
+    body_text = body.strip()
+
+    if not heading_block:
+        return body_text
+    if not body_text:
+        return heading_block
+
+    return f"{heading_block}\n\n{body_text}"
 
 
 def _with_source(block: Block, page: int, filename: str | None) -> Block:
