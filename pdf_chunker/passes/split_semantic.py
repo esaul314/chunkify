@@ -128,6 +128,39 @@ def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
     return restored
 
 
+def _promote_inline_heading(block: Block, text: str) -> Block:
+    """Return ``block`` promoted to a heading when inline styles indicate one."""
+
+    if block.get("type") == "heading":
+        return block
+
+    styles = tuple(block.get("inline_styles") or ())
+    if not styles:
+        return block
+
+    length = len(text)
+
+    def _covers_entire(style: Mapping[str, Any]) -> bool:
+        start = max(0, min(length, int(style.get("start", 0))))
+        end = max(start, min(length, int(style.get("end", start))))
+        return start == 0 and end >= length
+
+    def _is_heading_style(style: Mapping[str, Any]) -> bool:
+        flavor = str(style.get("style", "")).lower()
+        return flavor in {"bold", "italic", "small_caps", "caps", "uppercase"}
+
+    word_limit = len(tuple(token for token in text.split() if token))
+    if word_limit > 12:
+        return block
+
+    if any(
+        _covers_entire(style) and _is_heading_style(style) for style in styles
+    ):
+        return {**block, "type": "heading"}
+
+    return block
+
+
 def _stitch_block_continuations(
     seq: Iterable[tuple[int, Block, str]], limit: int | None
 ) -> list[tuple[int, Block, str]]:
@@ -147,7 +180,8 @@ def _stitch_block_continuations(
         context_words = tuple(context.split())
         text_words = tuple(text.split())
         if limit is not None and len(text_words) + len(context_words) > limit:
-            return [*acc, cur]
+            merged = f"{acc[-1][2]} {text}".strip()
+            return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
         enriched = f"{context} {text}".strip()
         return [*acc, (page, block, enriched)]
 
@@ -191,6 +225,7 @@ def _collapse_records(
     running_words = 0
     running_dense = 0
     start_index: int | None = None
+    overflow_buffer = False
 
     def _effective_counts(text: str) -> tuple[int, int, int]:
         words = tuple(text.split())
@@ -203,7 +238,7 @@ def _collapse_records(
         return word_count, dense_total, effective_total
 
     def emit() -> Iterator[tuple[int, Block, str]]:
-        nonlocal buffer, running_words, running_dense, start_index
+        nonlocal buffer, running_words, running_dense, start_index, overflow_buffer
         if not buffer:
             return
         first_index = start_index if start_index is not None else 0
@@ -212,11 +247,13 @@ def _collapse_records(
             yield page, _with_chunk_index(block, first_index), text
         else:
             effective_total = max(running_words, running_dense)
-            exceeds = False
-            if resolved_limit is not None and effective_total > resolved_limit:
-                exceeds = True
-            if not exceeds and hard_limit is not None and effective_total > hard_limit:
-                exceeds = True
+            exceeds_soft = (
+                resolved_limit is not None and effective_total > resolved_limit
+            )
+            exceeds_hard = (
+                hard_limit is not None and effective_total > hard_limit
+            )
+            exceeds = (exceeds_soft or exceeds_hard) and not overflow_buffer
             if exceeds:
                 for offset, (page, block, text) in enumerate(buffer):
                     yield page, _with_chunk_index(block, first_index + offset), text
@@ -228,7 +265,7 @@ def _collapse_records(
                 else:
                     merged = _merge_record_block(buffer, joined)
                     yield buffer[0][0], _with_chunk_index(merged, first_index), joined
-        buffer, running_words, running_dense, start_index = [], 0, 0, None
+        buffer, running_words, running_dense, start_index, overflow_buffer = [], 0, 0, None, False
 
     for idx, record in enumerate(seq):
         page, block, text = record
@@ -241,20 +278,27 @@ def _collapse_records(
             yield from emit()
             yield page, _with_chunk_index(block, idx), text
             continue
-        next_is_list = idx + 1 < len(seq) and _starts_list_like(seq[idx + 1][1], seq[idx + 1][2])
         if buffer and _starts_list_like(block, text):
             if not buffer[-1][2].rstrip().endswith(":"):
                 yield from emit()
-        elif buffer and text.rstrip().endswith(":") and next_is_list:
-            yield from emit()
         if buffer:
             projected_words = running_words + word_count
             projected_dense = running_dense + dense_count
             projected_effective = max(projected_words, projected_dense)
-            if (resolved_limit is not None and projected_effective > resolved_limit) or (
+            exceeds_soft = (
+                resolved_limit is not None and projected_effective > resolved_limit
+            )
+            exceeds_hard = (
                 hard_limit is not None and projected_effective > hard_limit
-            ):
-                yield from emit()
+            )
+            if exceeds_hard:
+                last_text = buffer[-1][2].rstrip()
+                if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
+                    yield from emit()
+                else:
+                    overflow_buffer = True
+            elif exceeds_soft:
+                overflow_buffer = True
         if not buffer:
             start_index = idx
             running_words, running_dense = word_count, dense_count
@@ -397,6 +441,8 @@ def _merge_blocks(
     cur: tuple[int, Block, str],
 ) -> list[tuple[int, Block, str]]:
     page, block, text = cur
+    block = _promote_inline_heading(block, text)
+    cur = (page, block, text)
     if not acc:
         return acc + [cur]
     prev_page, prev_block, prev_text = acc[-1]
