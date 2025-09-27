@@ -59,6 +59,39 @@ _CAPTION_PREFIXES = (
 _CAPTION_FLAG = "_caption_attached"
 
 
+def _span_attr(span: Any, name: str, default: Any = None) -> Any:
+    if isinstance(span, Mapping):
+        return span.get(name, default)
+    return getattr(span, name, default)
+
+
+def _span_bounds(
+    span: Any, limit: int
+) -> tuple[int, int] | None:
+    try:
+        start_raw = _span_attr(span, "start")
+        end_raw = _span_attr(span, "end", start_raw)
+        if start_raw is None or end_raw is None:
+            return None
+        start = max(0, min(limit, int(start_raw)))
+        end = max(start, min(limit, int(end_raw)))
+    except (TypeError, ValueError):
+        return None
+    if end <= start:
+        return None
+    return start, end
+
+
+def _span_style(span: Any) -> str:
+    style = _span_attr(span, "style", "")
+    return str(style or "")
+
+
+def _span_attrs(span: Any) -> Mapping[str, Any] | None:
+    attrs = _span_attr(span, "attrs")
+    return attrs if isinstance(attrs, Mapping) else None
+
+
 def _collect_superscripts(
     block: Block, text: str
 ) -> tuple[list[dict[str, str]], tuple[tuple[int, int], ...]]:
@@ -67,16 +100,18 @@ def _collect_superscripts(
     limit = len(text)
 
     def _normalize(span: Any) -> tuple[dict[str, str], tuple[int, int]] | None:
-        if getattr(span, "style", None) != "superscript":
+        if _span_style(span) != "superscript":
             return None
-        start = max(0, min(limit, getattr(span, "start", 0)))
-        end = max(start, min(limit, getattr(span, "end", start)))
+        bounds = _span_bounds(span, limit)
+        if bounds is None:
+            return None
+        start, end = bounds
         raw = text[start:end]
         snippet = raw.strip()
         if not snippet or text[end:].strip() not in _FOOTNOTE_TAILS:
             return None
-        attrs = getattr(span, "attrs", None)
-        note_id = attrs.get("note_id") if isinstance(attrs, Mapping) else None
+        attrs = _span_attrs(span)
+        note_id = attrs.get("note_id") if attrs else None
         focus = raw.find(snippet)
         span_start = start + (focus if focus >= 0 else 0)
         span_end = span_start + len(snippet)
@@ -84,7 +119,12 @@ def _collect_superscripts(
         return public, (span_start, span_end)
 
     entries = tuple(
-        entry for entry in (_normalize(span) for span in block.get("inline_styles") or ()) if entry
+        entry
+        for entry in (
+            _normalize(span)
+            for span in tuple(block.get("inline_styles") or ())
+        )
+        if entry
     )
     anchors = [public for public, _ in entries]
     spans = tuple(span for _, span in entries if span[0] < span[1])
@@ -140,13 +180,15 @@ def _promote_inline_heading(block: Block, text: str) -> Block:
 
     length = len(text)
 
-    def _covers_entire(style: Mapping[str, Any]) -> bool:
-        start = max(0, min(length, int(style.get("start", 0))))
-        end = max(start, min(length, int(style.get("end", start))))
+    def _covers_entire(style: Any) -> bool:
+        bounds = _span_bounds(style, length)
+        if bounds is None:
+            return False
+        start, end = bounds
         return start == 0 and end >= length
 
-    def _is_heading_style(style: Mapping[str, Any]) -> bool:
-        flavor = str(style.get("style", "")).lower()
+    def _is_heading_style(style: Any) -> bool:
+        flavor = _span_style(style).lower()
         return flavor in {"bold", "italic", "small_caps", "caps", "uppercase"}
 
     word_limit = len(tuple(token for token in text.split() if token))
