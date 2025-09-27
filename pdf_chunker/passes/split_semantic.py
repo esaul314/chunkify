@@ -157,15 +157,70 @@ def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
         words = tuple(chunk.split())
         if previous:
             window = min(overlap, len(previous))
-            prefix = words[:window]
-            overlap_words = previous[-window:]
-            if overlap_words and tuple(prefix) != overlap_words:
-                words = (*overlap_words, *words)
-                chunk = " ".join(words)
+            if window:
+                overlap_words = tuple(previous[-window:])
+                match_limit = min(window, len(words))
+                matched = next(
+                    (
+                        size
+                        for size in range(match_limit, 0, -1)
+                        if tuple(previous[-size:]) == words[:size]
+                    ),
+                    0,
+                )
+                if matched and matched < window:
+                    missing = overlap_words[: window - matched]
+                    if missing:
+                        words = (*missing, *words)
+                        chunk = " ".join(words)
+                match_limit = min(window, len(words))
+                matched_after = next(
+                    (
+                        size
+                        for size in range(match_limit, 0, -1)
+                        if tuple(previous[-size:]) == words[:size]
+                    ),
+                    0,
+                )
+                if matched_after:
+                    overlap_segment = " ".join(words[:matched_after]).strip()
+                    trimmed = (
+                        words[matched_after:]
+                        if len(words) > matched_after
+                        else ()
+                    )
+                    if overlap_segment and overlap_segment[-1] in {".", "?", "!"} and trimmed:
+                        words = trimmed
+                        chunk = " ".join(words)
         restored.append(chunk)
         previous = words
 
     return restored
+
+
+def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
+    if overlap <= 0 or not prev_text or not text:
+        return text
+    previous_words = tuple(prev_text.split())
+    current_words = tuple(text.split())
+    window = min(overlap, len(previous_words))
+    if not window:
+        return text
+    match_limit = min(window, len(current_words))
+    matched = next(
+        (
+            size
+            for size in range(match_limit, 0, -1)
+            if tuple(previous_words[-size:]) == current_words[:size]
+        ),
+        0,
+    )
+    if not matched or len(current_words) <= matched:
+        return text
+    overlap_segment = " ".join(current_words[:matched]).strip()
+    if overlap_segment and overlap_segment[-1] in {".", "?", "!"}:
+        return " ".join(current_words[matched:])
+    return text
 
 
 def _promote_inline_heading(block: Block, text: str) -> Block:
@@ -259,7 +314,7 @@ def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Blo
     first = blocks[0] if blocks else {}
     base = {k: v for k, v in first.items() if k not in {"text", "list_kind"}}
     block_type = _coalesce_block_type(blocks)
-    list_kind = _coalesce_list_kind(blocks) if block_type == "list_item" else None
+    list_kind = _coalesce_list_kind(blocks)
     merged = {**base, "type": block_type, "text": text}
     return {**merged, "list_kind": list_kind} if list_kind else merged
 
@@ -718,12 +773,23 @@ def _chunk_items(
     )
 
 
-def _inject_continuation_context(items: Iterable[Chunk], limit: int | None) -> Iterator[Chunk]:
+def _inject_continuation_context(
+    items: Iterable[Chunk], limit: int | None, overlap: int
+) -> Iterator[Chunk]:
     prev_text: str | None = None
     for item in items:
-        text = item.get("text", "")
+        original = item.get("text", "")
+        trimmed = (
+            _trim_boundary_overlap(prev_text, original, overlap)
+            if prev_text is not None
+            else original
+        )
+        text = trimmed
+        was_trimmed = text != original
+        if was_trimmed:
+            item = {**item, "text": text}
         lead = text.lstrip()
-        if prev_text is None or not lead or not _is_continuation_lead(lead):
+        if prev_text is None or not lead or was_trimmed or not _is_continuation_lead(lead):
             prev_text = text
             yield item
             continue
@@ -773,7 +839,11 @@ class _SplitSemanticPass:
             self.generate_metadata,
             options=options,
         )
-        items = list(_inject_continuation_context(chunk_records, limit))
+        items = list(
+            _inject_continuation_context(
+                chunk_records, limit, options.overlap if options else self.overlap
+            )
+        )
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
