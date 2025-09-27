@@ -1,6 +1,7 @@
-import importlib
 import logging
-from typing import Any, Callable, Iterable, cast
+import re
+from functools import lru_cache
+from typing import Callable, Iterable
 from itertools import accumulate
 from haystack.dataclasses import Document
 from concurrent.futures import ThreadPoolExecutor
@@ -9,10 +10,100 @@ from dataclasses import dataclass
 from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
 
-textstat = cast(Any, importlib.import_module("textstat"))
+try:
+    from cmudict import dict as _load_cmudict
+except ImportError:  # pragma: no cover - optional dependency
+    _load_cmudict = None
+
+import pyphen
 
 
 logger = logging.getLogger(__name__)
+
+
+_READABILITY_LANG = "en_US"
+_RE_CONTRACTION_ENDINGS = r"[tsd]|ve|ll|re"
+_RE_NONCONTRACTION_APOSTROPHE = re.compile(
+    r"\'(?!" + _RE_CONTRACTION_ENDINGS + r")",
+    re.IGNORECASE,
+)
+_RE_WORD_CHARS = re.compile(r"[^\w\s']")
+_RE_SENTENCE = re.compile(r"\b[^.!?]+[.!?]*", re.UNICODE)
+
+
+@lru_cache(maxsize=None)
+def _get_pyphen(lang: str = _READABILITY_LANG) -> pyphen.Pyphen:
+    return pyphen.Pyphen(lang=lang)
+
+
+@lru_cache(maxsize=1)
+def _get_cmudict(lang: str = _READABILITY_LANG) -> dict[str, list[list[str]]] | None:
+    if _load_cmudict is None:
+        return None
+    try:
+        if lang.split("_", 1)[0] != "en":
+            return None
+        return _load_cmudict()
+    except Exception:  # pragma: no cover - cmudict import failure
+        return None
+
+
+def _remove_punctuation(text: str, *, rm_apostrophe: bool = False) -> str:
+    if rm_apostrophe:
+        return re.sub(r"[^\w\s]", "", text)
+    sanitized = _RE_NONCONTRACTION_APOSTROPHE.sub("", text)
+    return _RE_WORD_CHARS.sub("", sanitized)
+
+
+def _list_words(text: str, *, lowercase: bool = False) -> list[str]:
+    stripped = _remove_punctuation(text)
+    words = stripped.split()
+    return [w.lower() for w in words] if lowercase else words
+
+
+def _count_words(text: str) -> int:
+    return len(_list_words(text))
+
+
+def _count_sentences(text: str) -> int:
+    if not text:
+        return 0
+    sentences = _RE_SENTENCE.findall(text)
+    if not sentences:
+        return 0
+    ignore = sum(1 for sentence in sentences if _count_words(sentence) <= 2)
+    return max(1, len(sentences) - ignore)
+
+
+def _count_syllables(text: str, lang: str = _READABILITY_LANG) -> int:
+    words = _list_words(text, lowercase=True)
+    if not words:
+        return 0
+    cmu_dict = _get_cmudict(lang)
+    hyphenator = _get_pyphen(lang)
+    return sum(
+        (
+            sum(1 for phone in cmu_dict[word][0] if phone[-1].isdigit())
+            if cmu_dict and word in cmu_dict and cmu_dict[word]
+            else len(hyphenator.positions(word)) + 1
+        )
+        for word in words
+    )
+
+
+def _flesch_kincaid_grade(text: str, lang: str = _READABILITY_LANG) -> float:
+    word_count = _count_words(text)
+    if word_count == 0:
+        return 0.0
+    sentence_count = _count_sentences(text)
+    if sentence_count == 0:
+        return 0.0
+    syllable_count = _count_syllables(text, lang=lang)
+    if syllable_count == 0:
+        return 0.0
+    return (0.39 * (word_count / sentence_count)) + (
+        11.8 * (syllable_count / word_count)
+    ) - 15.59
 
 
 @dataclass(frozen=True)
@@ -24,7 +115,7 @@ class CharSpan:
 
 def _compute_readability(text: str) -> dict:
     """Computes readability scores and returns them as a dictionary matching canonical schema."""
-    flesch_kincaid = textstat.flesch_kincaid_grade(text)
+    flesch_kincaid = _flesch_kincaid_grade(text)
 
     # Map grade level to difficulty description
     if flesch_kincaid <= 6:
