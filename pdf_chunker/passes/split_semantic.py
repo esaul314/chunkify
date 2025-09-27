@@ -446,7 +446,21 @@ def _is_heading(block: Block) -> bool:
     return block.get("type") == "heading"
 
 
+def _leading_list_kind(text: str) -> str | None:
+    """Return list kind inferred from the first non-empty line of ``text``."""
+
+    lines = (line.lstrip() for line in text.splitlines())
+    first = next((line for line in lines if line), "")
+    if starts_with_bullet(first):
+        return "bullet"
+    if starts_with_number(first):
+        return "numbered"
+    return None
+
+
 def _infer_list_kind(text: str) -> str | None:
+    """Return list kind when any line resembles a bullet or numbered item."""
+
     if starts_with_bullet(text):
         return "bullet"
     if starts_with_number(text):
@@ -460,10 +474,23 @@ def _infer_list_kind(text: str) -> str | None:
 
 
 def _tag_list(block: Block) -> Block:
-    if block.get("type") == "list_item" and block.get("list_kind"):
+    """Return ``block`` with list metadata inferred when appropriate."""
+
+    text = block.get("text", "")
+    block_type = block.get("type")
+    existing_kind = block.get("list_kind")
+
+    if block_type == "list_item":
+        if existing_kind:
+            return block
+        inferred = _infer_list_kind(text)
+        return {**block, "list_kind": inferred} if inferred else block
+
+    leading_kind = _leading_list_kind(text)
+    if not leading_kind:
         return block
-    kind = _infer_list_kind(block.get("text", ""))
-    return {**block, "type": "list_item", "list_kind": kind} if kind else block
+
+    return {**block, "type": "list_item", "list_kind": leading_kind}
 
 
 def _normalize_bullet_tail(tail: str) -> str:

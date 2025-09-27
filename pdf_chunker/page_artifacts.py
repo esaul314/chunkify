@@ -92,14 +92,29 @@ def _bullet_body(text: str) -> str:
     return without_marker.strip(" -\u2022*.")
 
 
+def _question_footer_token_stats(body: str) -> tuple[int, int]:
+    """Return ``(total_tokens, long_tokens)`` for ``body``."""
+
+    tokens = tuple(re.findall(r"[A-Za-z0-9]+", body))
+    long_tokens = sum(1 for token in tokens if len(token) > 3)
+    return len(tokens), long_tokens
+
+
 def _is_question_bullet_footer(text: str, idx: int) -> bool:
     body = _bullet_body(text)
     if not body:
         return False
+
     question_count = body.count("?")
-    if question_count < 2:
+    if question_count < 2 or idx >= 10:
         return False
-    return idx < 10
+
+    total_tokens, long_tokens = _question_footer_token_stats(body)
+    if total_tokens == 0:
+        return False
+
+    punctuation_ratio = question_count / total_tokens
+    return total_tokens <= 6 and long_tokens <= 3 and punctuation_ratio >= 0.75
 
 
 def _first_non_empty_line(lines: Iterable[str]) -> str:
@@ -166,7 +181,14 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
 
     after_idx = trailing[-1][0] + 1
     after_line = lines[after_idx] if after_idx < len(lines) else ""
-    context_allows = _looks_like_shipping_footer(after_line) or _footer_bullet_signals(after_line, previous)
+    trailing_count = len(trailing)
+    context_allows = any(
+        (
+            _looks_like_shipping_footer(after_line),
+            _footer_bullet_signals(after_line, previous),
+            _header_invites_footer(previous, trailing_count),
+        )
+    )
 
     removals = [pos for body, pos in bodies if _should_prune(body)]
     if len(removals) != len(bodies) or not context_allows:
@@ -178,6 +200,17 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         "; ".join(lines[pos].strip()[:30] for pos in removals),
     )
     return [line for idx, line in enumerate(lines) if idx not in keep_indices]
+
+
+def _header_invites_footer(previous_line: str, trailing_count: int) -> bool:
+    """Return ``True`` when ``previous_line`` resembles a footer heading."""
+
+    stripped = previous_line.strip()
+    if not stripped:
+        return False
+    colon_header = stripped.endswith(":") and trailing_count <= 3
+    uppercase_header = stripped.isupper() and len(stripped.split()) <= 5
+    return colon_header or uppercase_header
 
 
 _TITLE_CONNECTORS = {
