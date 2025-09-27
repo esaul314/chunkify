@@ -92,14 +92,29 @@ def _bullet_body(text: str) -> str:
     return without_marker.strip(" -\u2022*.")
 
 
+def _question_footer_token_stats(body: str) -> tuple[int, int]:
+    """Return ``(total_tokens, long_tokens)`` for ``body``."""
+
+    tokens = tuple(re.findall(r"[A-Za-z0-9]+", body))
+    long_tokens = sum(1 for token in tokens if len(token) > 3)
+    return len(tokens), long_tokens
+
+
 def _is_question_bullet_footer(text: str, idx: int) -> bool:
     body = _bullet_body(text)
     if not body:
         return False
+
     question_count = body.count("?")
-    if question_count < 2:
+    if question_count < 2 or idx >= 10:
         return False
-    return idx < 10
+
+    total_tokens, long_tokens = _question_footer_token_stats(body)
+    if total_tokens == 0:
+        return False
+
+    punctuation_ratio = question_count / total_tokens
+    return total_tokens <= 6 and long_tokens <= 3 and punctuation_ratio >= 0.75
 
 
 def _first_non_empty_line(lines: Iterable[str]) -> str:
