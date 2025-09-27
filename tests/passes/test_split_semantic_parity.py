@@ -46,6 +46,7 @@ from pdf_chunker.passes.split_semantic import (
     _merge_record_block,
     _merge_heading_texts,
     _restore_overlap_words,
+    _split_inline_heading_records,
     _stitch_block_continuations,
     _get_split_fn,
     _is_heading,
@@ -72,8 +73,9 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         fold=_merge_blocks,
         split_fn=split_fn,
     )
+    styled = _split_inline_heading_records(records)
     headed = attach_headings_pipeline(
-        records,
+        styled,
         is_heading=_is_heading,
         merge_block_text=_merge_heading_texts,
     )
@@ -125,6 +127,25 @@ def test_merge_heading_texts_inserts_blank_line() -> None:
     )
 
 
+def test_split_inline_heading_records_promotes_styled_list() -> None:
+    block = {
+        "text": "Focus Body text remains intact for testing scenarios.",
+        "type": "paragraph",
+        "inline_styles": [{"start": 0, "end": 5, "style": "italic"}],
+    }
+    records = list(_split_inline_heading_records([(1, block, block["text"])]))
+
+    assert len(records) == 2
+    _, heading_block, heading_text = records[0]
+    assert heading_block["type"] == "heading"
+    assert heading_text == "Focus"
+
+    _, body_block, body_text = records[1]
+    assert body_block["type"] == "list_item"
+    assert body_block.get("list_kind") == "styled"
+    assert body_text.startswith("Body text remains")
+
+
 @pytest.mark.usefixtures("_nltk_data")
 def test_platform_eng_parity() -> None:
     pytest.importorskip("fitz")
@@ -149,6 +170,15 @@ def test_platform_eng_parity() -> None:
     assert list_meta == [
         meta for meta in _metas(refactored_items) if meta.get("list_kind")
     ]
+
+    assert any(
+        "Leverage\n\nCore to the value" in text for text in _texts(refactored_items)
+    )
+
+    platform_item = next(
+        item for item in refactored_items if "Platform\n\nWe use" in item["text"]
+    )
+    assert platform_item["meta"].get("list_kind")
 
 
 def test_sample_book_list_metadata() -> None:
