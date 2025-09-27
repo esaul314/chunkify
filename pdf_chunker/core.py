@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Sequence
 from functools import partial
+from itertools import groupby
 from pathlib import Path
 from typing import Any, cast
 
 from . import parsing
 from .ai_enrichment import classify_chunk_utterance
-from .splitter import semantic_chunker
+from .framework import Artifact
+from .passes.split_semantic import _SplitSemanticPass
 from .text_cleaning import normalize_bullet_stopwords
 from .utils import format_chunks_with_metadata as utils_format_chunks_with_metadata
 
@@ -138,6 +140,37 @@ def filter_blocks(blocks: Iterable[Block], excluded_pages: set[int]) -> list[Blo
     return filtered
 
 
+def _blocks_to_page_doc(blocks: Sequence[Block]) -> dict[str, Any]:
+    """Convert ``blocks`` into a ``page_blocks`` document for semantic splitting."""
+
+    def _page_index(block: Block) -> tuple[int, int]:
+        source = block.get("source") or {}
+        page = int(source.get("page") or 0)
+        index = int(source.get("index") or 0)
+        return page, index
+
+    sorted_blocks = sorted(
+        (
+            {**block, "text": normalize_bullet_stopwords(block.get("text", ""))}
+            for block in blocks
+            if block.get("text", "").strip()
+        ),
+        key=_page_index,
+    )
+
+    pages = [
+        {
+            "page": page,
+            "blocks": list(group),
+        }
+        for page, group in groupby(
+            sorted_blocks, key=lambda block: int((block.get("source") or {}).get("page") or 0)
+        )
+    ]
+
+    return {"type": "page_blocks", "pages": pages}
+
+
 def chunk_text(
     blocks: Iterable[Block],
     chunk_size: int,
@@ -147,15 +180,21 @@ def chunk_text(
     enable_dialogue_detection: bool,
 ) -> list[str]:
     """Chunk blocks of text into semantic units."""
-    full_text = "\n\n".join(block.get("text", "") for block in blocks if block.get("text", ""))
-    full_text = normalize_bullet_stopwords(full_text)
-    chunks = semantic_chunker(
-        full_text,
-        chunk_size,
-        overlap,
+
+    block_list = tuple(blocks)
+    if not block_list:
+        return []
+
+    doc = _blocks_to_page_doc(block_list)
+    splitter = _SplitSemanticPass(
+        chunk_size=chunk_size,
+        overlap=overlap,
         min_chunk_size=min_chunk_size,
-        enable_dialogue_detection=enable_dialogue_detection,
+        generate_metadata=False,
     )
+    artifact = splitter(Artifact(payload=doc))
+    items = artifact.payload.get("items", []) if isinstance(artifact.payload, dict) else []
+    chunks = [item.get("text", "") for item in items if item.get("text", "")]  # type: ignore[arg-type]
     logger.debug(
         "Semantic chunking with conversational text handling produced %d chunks",
         len(chunks),

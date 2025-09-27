@@ -59,6 +59,39 @@ _CAPTION_PREFIXES = (
 _CAPTION_FLAG = "_caption_attached"
 
 
+def _span_attr(span: Any, name: str, default: Any = None) -> Any:
+    if isinstance(span, Mapping):
+        return span.get(name, default)
+    return getattr(span, name, default)
+
+
+def _span_bounds(
+    span: Any, limit: int
+) -> tuple[int, int] | None:
+    try:
+        start_raw = _span_attr(span, "start")
+        end_raw = _span_attr(span, "end", start_raw)
+        if start_raw is None or end_raw is None:
+            return None
+        start = max(0, min(limit, int(start_raw)))
+        end = max(start, min(limit, int(end_raw)))
+    except (TypeError, ValueError):
+        return None
+    if end <= start:
+        return None
+    return start, end
+
+
+def _span_style(span: Any) -> str:
+    style = _span_attr(span, "style", "")
+    return str(style or "")
+
+
+def _span_attrs(span: Any) -> Mapping[str, Any] | None:
+    attrs = _span_attr(span, "attrs")
+    return attrs if isinstance(attrs, Mapping) else None
+
+
 def _collect_superscripts(
     block: Block, text: str
 ) -> tuple[list[dict[str, str]], tuple[tuple[int, int], ...]]:
@@ -67,16 +100,18 @@ def _collect_superscripts(
     limit = len(text)
 
     def _normalize(span: Any) -> tuple[dict[str, str], tuple[int, int]] | None:
-        if getattr(span, "style", None) != "superscript":
+        if _span_style(span) != "superscript":
             return None
-        start = max(0, min(limit, getattr(span, "start", 0)))
-        end = max(start, min(limit, getattr(span, "end", start)))
+        bounds = _span_bounds(span, limit)
+        if bounds is None:
+            return None
+        start, end = bounds
         raw = text[start:end]
         snippet = raw.strip()
         if not snippet or text[end:].strip() not in _FOOTNOTE_TAILS:
             return None
-        attrs = getattr(span, "attrs", None)
-        note_id = attrs.get("note_id") if isinstance(attrs, Mapping) else None
+        attrs = _span_attrs(span)
+        note_id = attrs.get("note_id") if attrs else None
         focus = raw.find(snippet)
         span_start = start + (focus if focus >= 0 else 0)
         span_end = span_start + len(snippet)
@@ -84,7 +119,12 @@ def _collect_superscripts(
         return public, (span_start, span_end)
 
     entries = tuple(
-        entry for entry in (_normalize(span) for span in block.get("inline_styles") or ()) if entry
+        entry
+        for entry in (
+            _normalize(span)
+            for span in tuple(block.get("inline_styles") or ())
+        )
+        if entry
     )
     anchors = [public for public, _ in entries]
     spans = tuple(span for _, span in entries if span[0] < span[1])
@@ -128,6 +168,41 @@ def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
     return restored
 
 
+def _promote_inline_heading(block: Block, text: str) -> Block:
+    """Return ``block`` promoted to a heading when inline styles indicate one."""
+
+    if block.get("type") == "heading":
+        return block
+
+    styles = tuple(block.get("inline_styles") or ())
+    if not styles:
+        return block
+
+    length = len(text)
+
+    def _covers_entire(style: Any) -> bool:
+        bounds = _span_bounds(style, length)
+        if bounds is None:
+            return False
+        start, end = bounds
+        return start == 0 and end >= length
+
+    def _is_heading_style(style: Any) -> bool:
+        flavor = _span_style(style).lower()
+        return flavor in {"bold", "italic", "small_caps", "caps", "uppercase"}
+
+    word_limit = len(tuple(token for token in text.split() if token))
+    if word_limit > 12:
+        return block
+
+    if any(
+        _covers_entire(style) and _is_heading_style(style) for style in styles
+    ):
+        return {**block, "type": "heading"}
+
+    return block
+
+
 def _stitch_block_continuations(
     seq: Iterable[tuple[int, Block, str]], limit: int | None
 ) -> list[tuple[int, Block, str]]:
@@ -147,19 +222,46 @@ def _stitch_block_continuations(
         context_words = tuple(context.split())
         text_words = tuple(text.split())
         if limit is not None and len(text_words) + len(context_words) > limit:
-            return [*acc, cur]
+            merged = f"{acc[-1][2]} {text}".strip()
+            return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
         enriched = f"{context} {text}".strip()
         return [*acc, (page, block, enriched)]
 
     return reduce(_consume, seq, [])
 
 
+def _coalesce_block_type(blocks: Iterable[Block]) -> str:
+    """Return the merged block ``type`` for ``blocks``."""
+
+    types = tuple(filter(None, (block.get("type") for block in blocks)))
+    if not types:
+        return "paragraph"
+    non_heading = tuple(t for t in types if t != "heading")
+    if not non_heading:
+        return "paragraph"
+    unique = {t for t in non_heading}
+    if len(unique) == 1:
+        return next(iter(unique))
+    if "list_item" in unique:
+        return "list_item" if len(unique - {"list_item"}) == 0 else "paragraph"
+    return non_heading[0]
+
+
+def _coalesce_list_kind(blocks: Iterable[Block]) -> str | None:
+    """Return a stable ``list_kind`` shared by ``blocks`` when present."""
+
+    kinds = {block.get("list_kind") for block in blocks if block.get("list_kind")}
+    return next(iter(kinds)) if len(kinds) == 1 else None
+
+
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
-    block = records[0][1]
-    base = {k: v for k, v in block.items() if k not in {"text", "list_kind"}}
-    block_type = block.get("type")
-    normalized_type = block_type if block_type and block_type != "heading" else "paragraph"
-    return {**base, "type": normalized_type, "text": text}
+    blocks = tuple(block for _, block, _ in records)
+    first = blocks[0] if blocks else {}
+    base = {k: v for k, v in first.items() if k not in {"text", "list_kind"}}
+    block_type = _coalesce_block_type(blocks)
+    list_kind = _coalesce_list_kind(blocks) if block_type == "list_item" else None
+    merged = {**base, "type": block_type, "text": text}
+    return {**merged, "list_kind": list_kind} if list_kind else merged
 
 
 def _with_chunk_index(block: Block, index: int) -> Block:
@@ -191,6 +293,7 @@ def _collapse_records(
     running_words = 0
     running_dense = 0
     start_index: int | None = None
+    overflow_buffer = False
 
     def _effective_counts(text: str) -> tuple[int, int, int]:
         words = tuple(text.split())
@@ -203,7 +306,7 @@ def _collapse_records(
         return word_count, dense_total, effective_total
 
     def emit() -> Iterator[tuple[int, Block, str]]:
-        nonlocal buffer, running_words, running_dense, start_index
+        nonlocal buffer, running_words, running_dense, start_index, overflow_buffer
         if not buffer:
             return
         first_index = start_index if start_index is not None else 0
@@ -212,11 +315,13 @@ def _collapse_records(
             yield page, _with_chunk_index(block, first_index), text
         else:
             effective_total = max(running_words, running_dense)
-            exceeds = False
-            if resolved_limit is not None and effective_total > resolved_limit:
-                exceeds = True
-            if not exceeds and hard_limit is not None and effective_total > hard_limit:
-                exceeds = True
+            exceeds_soft = (
+                resolved_limit is not None and effective_total > resolved_limit
+            )
+            exceeds_hard = (
+                hard_limit is not None and effective_total > hard_limit
+            )
+            exceeds = (exceeds_soft or exceeds_hard) and not overflow_buffer
             if exceeds:
                 for offset, (page, block, text) in enumerate(buffer):
                     yield page, _with_chunk_index(block, first_index + offset), text
@@ -228,7 +333,7 @@ def _collapse_records(
                 else:
                     merged = _merge_record_block(buffer, joined)
                     yield buffer[0][0], _with_chunk_index(merged, first_index), joined
-        buffer, running_words, running_dense, start_index = [], 0, 0, None
+        buffer, running_words, running_dense, start_index, overflow_buffer = [], 0, 0, None, False
 
     for idx, record in enumerate(seq):
         page, block, text = record
@@ -241,20 +346,27 @@ def _collapse_records(
             yield from emit()
             yield page, _with_chunk_index(block, idx), text
             continue
-        next_is_list = idx + 1 < len(seq) and _starts_list_like(seq[idx + 1][1], seq[idx + 1][2])
         if buffer and _starts_list_like(block, text):
             if not buffer[-1][2].rstrip().endswith(":"):
                 yield from emit()
-        elif buffer and text.rstrip().endswith(":") and next_is_list:
-            yield from emit()
         if buffer:
             projected_words = running_words + word_count
             projected_dense = running_dense + dense_count
             projected_effective = max(projected_words, projected_dense)
-            if (resolved_limit is not None and projected_effective > resolved_limit) or (
+            exceeds_soft = (
+                resolved_limit is not None and projected_effective > resolved_limit
+            )
+            exceeds_hard = (
                 hard_limit is not None and projected_effective > hard_limit
-            ):
-                yield from emit()
+            )
+            if exceeds_hard:
+                last_text = buffer[-1][2].rstrip()
+                if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
+                    yield from emit()
+                else:
+                    overflow_buffer = True
+            elif exceeds_soft:
+                overflow_buffer = True
         if not buffer:
             start_index = idx
             running_words, running_dense = word_count, dense_count
@@ -397,6 +509,8 @@ def _merge_blocks(
     cur: tuple[int, Block, str],
 ) -> list[tuple[int, Block, str]]:
     page, block, text = cur
+    block = _promote_inline_heading(block, text)
+    cur = (page, block, text)
     if not acc:
         return acc + [cur]
     prev_page, prev_block, prev_text = acc[-1]
@@ -473,6 +587,20 @@ def _infer_list_kind(text: str) -> str | None:
     return None
 
 
+def _list_line_ratio(text: str) -> tuple[int, int]:
+    """Return count of list-like lines vs total non-empty lines."""
+
+    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+    if not lines:
+        return 0, 0
+    list_lines = sum(
+        1
+        for line in lines
+        if starts_with_bullet(line) or starts_with_number(line)
+    )
+    return list_lines, len(lines)
+
+
 def _tag_list(block: Block) -> Block:
     """Return ``block`` with list metadata inferred when appropriate."""
 
@@ -488,6 +616,12 @@ def _tag_list(block: Block) -> Block:
 
     leading_kind = _leading_list_kind(text)
     if not leading_kind:
+        inferred = _infer_list_kind(text)
+        if not inferred:
+            return block
+        list_lines, total_lines = _list_line_ratio(text)
+        if total_lines and (list_lines * 2) >= total_lines:
+            return {**block, "type": "list_item", "list_kind": inferred}
         return block
 
     return {**block, "type": "list_item", "list_kind": leading_kind}
@@ -502,11 +636,23 @@ def _normalize_bullet_tail(tail: str) -> str:
 
 
 def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
-    if any(starts_with_bullet(h.lstrip()) for h in headings):
-        lead = " ".join(h.rstrip() for h in headings).rstrip()
+    normalized_headings = tuple(
+        heading.strip() for heading in headings if heading and heading.strip()
+    )
+    if any(starts_with_bullet(h.lstrip()) for h in normalized_headings):
+        lead = " ".join(h.rstrip() for h in normalized_headings).rstrip()
         tail = _normalize_bullet_tail(body.lstrip()) if body else ""
         return f"{lead} {tail}".strip()
-    return "\n".join(chain(headings, [body])).strip()
+
+    heading_block = "\n".join(normalized_headings)
+    body_text = body.strip()
+
+    if not heading_block:
+        return body_text
+    if not body_text:
+        return heading_block
+
+    return f"{heading_block}\n\n{body_text}"
 
 
 def _with_source(block: Block, page: int, filename: str | None) -> Block:

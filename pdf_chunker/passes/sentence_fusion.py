@@ -139,10 +139,21 @@ def _merge_sentence_fragments(
         *,
         dense_fragments: bool,
     ) -> bool:
-        if budget.hard_limit is not None and budget.effective_total > budget.hard_limit:
+        hard_cap_exceeded = (
+            budget.hard_limit is not None and budget.effective_total > budget.hard_limit
+        )
+        if hard_cap_exceeded:
             return True
+
         if budget.limit is None or budget.effective_total <= budget.limit:
             return False
+
+        soft_cap_overflow_within_hard_cap = (
+            budget.hard_limit is not None and budget.effective_total <= budget.hard_limit
+        )
+        if soft_cap_overflow_within_hard_cap:
+            return False
+
         return not dense_fragments
 
     def _should_merge(
