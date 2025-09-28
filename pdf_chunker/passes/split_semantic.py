@@ -8,6 +8,7 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -47,6 +48,8 @@ from pdf_chunker.passes.sentence_fusion import (
 )
 from pdf_chunker.text_cleaning import STOPWORDS
 from pdf_chunker.utils import _build_metadata
+
+logger = logging.getLogger(__name__)
 
 _STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
 _FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
@@ -96,6 +99,55 @@ def _span_style(span: Any) -> str:
 def _span_attrs(span: Any) -> Mapping[str, Any] | None:
     attrs = _span_attr(span, "attrs")
     return attrs if isinstance(attrs, Mapping) else None
+
+
+def _inline_list_kinds(block: Mapping[str, Any]) -> tuple[str, ...]:
+    styles = tuple(block.get("inline_styles") or ())
+    return tuple(
+        attrs["list_kind"]
+        for attrs in (_span_attrs(span) for span in styles)
+        if isinstance(attrs, Mapping)
+        and isinstance(attrs.get("list_kind"), str)
+        and attrs["list_kind"]
+    )
+
+
+def _block_list_kind(block: Block) -> str | None:
+    if not isinstance(block, Mapping):
+        return None
+    declared = block.get("list_kind")
+    if isinstance(declared, str) and declared:
+        return declared
+    inline = _inline_list_kinds(block)
+    return next(iter(inline), None)
+
+
+def _warn_stitching_issue(message: str, *, page: int | None = None) -> None:
+    if not message:
+        return
+    detail = f"{message} (page={page})" if page is not None else message
+    logger.warning("split_semantic: %s", detail)
+
+
+def _chunk_meta(chunk: Chunk) -> Mapping[str, Any]:
+    meta = chunk.get("meta")
+    if isinstance(meta, Mapping):
+        return meta
+    legacy = chunk.get("metadata")
+    return legacy if isinstance(legacy, Mapping) else {}
+
+
+def _meta_is_list(meta: Mapping[str, Any] | None) -> bool:
+    if not isinstance(meta, Mapping):
+        return False
+    if meta.get("block_type") == "list_item":
+        return True
+    kind = meta.get("list_kind")
+    return isinstance(kind, str) and bool(kind)
+
+
+def _chunk_is_list(chunk: Chunk) -> bool:
+    return _meta_is_list(_chunk_meta(chunk))
 
 
 def _is_heading_style_span(span: Any) -> bool:
@@ -556,6 +608,8 @@ def _stitch_block_continuations(
         page, block, text = cur
         if not acc:
             return [*acc, cur]
+        if _starts_list_like(block, text):
+            return [*acc, cur]
         lead = text.lstrip()
         if not lead or not _is_continuation_lead(lead):
             return [*acc, cur]
@@ -565,6 +619,10 @@ def _stitch_block_continuations(
         context_words = tuple(context.split())
         text_words = tuple(text.split())
         if limit is not None and len(text_words) + len(context_words) > limit:
+            _warn_stitching_issue(
+                "continuation context skipped due to chunk limit",
+                page=acc[-1][0],
+            )
             merged = f"{acc[-1][2]} {text}".strip()
             return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
         enriched = f"{context} {text}".strip()
@@ -802,7 +860,10 @@ def _block_text(block: Block) -> str:
 
 
 def _starts_list_like(block: Block, text: str) -> bool:
-    if block.get("type") == "list_item" and block.get("list_kind"):
+    kind = _block_list_kind(block)
+    if kind:
+        return True
+    if block.get("type") == "list_item":
         return True
     stripped = text.lstrip()
     return bool(stripped) and (starts_with_bullet(stripped) or starts_with_number(stripped))
@@ -1068,11 +1129,19 @@ def _inject_continuation_context(
     items: Iterable[Chunk], limit: int | None, overlap: int
 ) -> Iterator[Chunk]:
     prev_text: str | None = None
+    prev_meta: Mapping[str, Any] | None = None
     for item in items:
         original = item.get("text", "")
+        current_meta = _chunk_meta(item)
+        current_is_list = _meta_is_list(current_meta)
+        can_trim = (
+            prev_text is not None
+            and not current_is_list
+            and not _meta_is_list(prev_meta)
+        )
         trimmed = (
             _trim_boundary_overlap(prev_text, original, overlap)
-            if prev_text is not None
+            if can_trim
             else original
         )
         text = trimmed
@@ -1080,17 +1149,27 @@ def _inject_continuation_context(
         if was_trimmed:
             item = {**item, "text": text}
         lead = text.lstrip()
-        if prev_text is None or not lead or was_trimmed or not _is_continuation_lead(lead):
+        if (
+            prev_text is None
+            or not lead
+            or was_trimmed
+            or current_is_list
+            or _meta_is_list(prev_meta)
+            or not _is_continuation_lead(lead)
+        ):
             prev_text = text
+            prev_meta = current_meta
             yield item
             continue
         context = _last_sentence(prev_text)
         if not context or lead.startswith(context):
             prev_text = text
+            prev_meta = current_meta
             yield item
             continue
         combined = f"{context} {text}".strip()
         prev_text = combined
+        prev_meta = current_meta
         yield {**item, "text": combined}
 
 
