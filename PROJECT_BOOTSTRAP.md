@@ -2,6 +2,22 @@
 
 This file defines the base project scaffolding, dev tooling, and “starter” tests. Codex can read this and create/modify the listed files.
 
+## Regression Sweep — 2025-09-28
+
+| Test | Symptom | Mitigation Guidance |
+| --- | --- | --- |
+| `tests/footer_artifact_test.py::test_footer_and_subfooter_removed` | `validate_chunks` now reports overlapping chunk boundaries for `sample_book-footer.pdf`. | Inspect `split_semantic` pagination merges—current logic appears to duplicate footer spill-over text between adjacent chunks. Re-run `pytest tests/footer_artifact_test.py::test_footer_and_subfooter_removed -vv` after tightening the overlap guard. |
+| `tests/golden/test_conversion.py::test_conversion[pdf-b64_path0]` / `tests/golden/test_golden_pdf.py::test_golden_pdf` | Golden JSONL snapshots drift: long paragraphs split into multiple chunks and readability grades shift (e.g., FK grade 11.18 → 17.92). | Audit recent readability/scoring helpers and chunk-size heuristics. Once behaviour is confirmed, refresh `tests/golden/expected/*.jsonl` via `pytest --update-expected` (or equivalent helper) to lock in the new layout. |
+| `tests/golden/test_conversion_epub_cli.py::test_conversion_epub_cli` | CLI emits two chunks for the EPUB smoke sample; harness expects a single consolidated block. | Confirm whether `process_document(..., overlap=0)` still honours `chunk_size` for EPUB. If the double emission is expected, adjust the regression fixture and document the new semantics. |
+| `tests/heading_merge_rule_test.py::test_heading_followed_by_paragraph` / `...list_item` | Heading blocks now retain a blank line separator before following content (`"Heading\n\nBody text"`). | Review heading merge rules in `pdf_chunker.heading_detection.merge_heading_with_body`. Ensure the join step normalises whitespace to a single newline before re-running the focused tests. |
+| `tests/hyphen_bullet_list_test.py::test_hyphen_bullet_lists_preserved` | Hyphen bullets exceed the allowed merge count (`3 <= 2` fails). | Check recent hyphenation cleanup: confirm hyphen bullets remain tagged as list items before dehyphenation, or relax the assertion after validating intended behaviour. |
+| `tests/passes/test_split_semantic_options.py::test_cli_flags_affect_split_semantic` / `...dense_fragments_respect_override_limits` | CLI flag plumbing no longer toggles dense fragment thresholds (observed `1 == 2` and `1 > 1`). | Trace the CLI option wiring for `split_semantic` in `pdf_chunker.cli`. Restore propagation of `--target-density`/`--max-chunks` into the pass configuration. |
+| `tests/passes/test_split_semantic_parity.py::test_merge_record_block_preserves_list_kind_in_mixed_merge` | `list_kind` metadata falls back to `paragraph` when merging mixed record blocks. | Ensure `merge_record_blocks` forwards `list_kind` from any list-bearing source chunk. Adjust metadata folding accordingly. |
+| `tests/property_based_text_test.py::test_split_roundtrip_cleaning` | Non-breaking spaces collapse to standard spaces (`0 † → 0 †`). | Revisit the text cleaning pipeline: preserve NBSP where semantic meaning matters, or update the property-based expectation if the change is intentional. |
+| `tests/test_readability.py::test_readability_matches_expected_grade` | Flesch-Kincaid grade now computes as ~10.02 instead of 11.18. | Double-check the readability coefficient inputs and rounding. If the new grade is authoritative, update the expected constant and document the driver (e.g., new syllable counter). |
+
+Run `nox -s tests` after addressing each cluster to confirm the suite is green.
+
 ## 1) Files to add
 
 ### `pyproject.toml`
