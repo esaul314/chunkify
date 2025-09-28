@@ -20,6 +20,7 @@ from typing import Any, TypedDict, cast
 from pdf_chunker.framework import Artifact, Pass, register
 from pdf_chunker.inline_styles import InlineStyleSpan
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.page_artifacts import _drop_trailing_bullet_footers
 from pdf_chunker.passes.chunk_options import (
     SplitMetrics,
     SplitOptions,
@@ -746,6 +747,31 @@ def _record_is_list_like(record: tuple[int, Block, str]) -> bool:
     return _starts_list_like(block, text)
 
 
+def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, ...]:
+    """Return trailing bullet lines that heuristically resemble footers."""
+
+    _, block, text = record
+    if not _starts_list_like(block, text):
+        return tuple()
+    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+    if not lines:
+        return tuple()
+    pruned = _drop_trailing_bullet_footers(list(lines))
+    if len(pruned) == len(lines):
+        return tuple()
+    tail = lines[len(pruned) :]
+    bullet_like = tuple(
+        line
+        for line in tail
+        if starts_with_bullet(line) or starts_with_number(line)
+    )
+    return bullet_like if len(bullet_like) == len(tail) else tuple()
+
+
+def _record_is_footer_candidate(record: tuple[int, Block, str]) -> bool:
+    return bool(_record_trailing_footer_lines(record))
+
+
 def _list_tail_split_index(text: str) -> int | None:
     """Return the index where a list block transitions into narrative text."""
 
@@ -971,8 +997,12 @@ def _collapse_records(
 
     for idx, record in enumerate(seq):
         page, block, text = record
-        if buffer and page != buffer[-1][0]:
-            emit()
+        is_footer = _record_is_footer_candidate(record)
+        if buffer:
+            prev_page = buffer[-1][0]
+            prev_is_footer = _record_is_footer_candidate(buffer[-1])
+            if prev_page != page or (is_footer != prev_is_footer and (is_footer or prev_is_footer)):
+                emit()
         word_count, dense_count, effective_count = _effective_counts(text)
         if (resolved_limit is not None and effective_count > resolved_limit) or (
             hard_limit is not None and effective_count > hard_limit
@@ -984,7 +1014,7 @@ def _collapse_records(
             _, prev_block, prev_text = buffer[-1]
             if not prev_text.rstrip().endswith(":") and not _starts_list_like(
                 prev_block, prev_text
-            ):
+            ) and not _record_is_footer_candidate(buffer[-1]):
                 emit()
         if buffer:
             projected_words = running_words + word_count

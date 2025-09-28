@@ -2,7 +2,7 @@ import logging
 from collections import Counter
 import re
 from functools import reduce
-from typing import Any, Dict, Iterable, Iterator, List, Match, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Match, Optional, Sequence, Tuple
 
 from .text_cleaning import (
     _is_probable_heading,
@@ -495,6 +495,46 @@ def _detokenize_with_newlines(tokens: Iterable[str]) -> str:
     return re.sub(r"[ \t]*\n[ \t]*", "\n", joined)
 
 
+_WORD_PATTERN = re.compile(r"\S+")
+
+
+def _word_spans(text: str) -> List[Tuple[int, int]]:
+    """Return (start, end) spans for non-whitespace runs in ``text``."""
+
+    return [match.span() for match in _WORD_PATTERN.finditer(text)]
+
+
+def _window_bounds(count: int, chunk_size: int, overlap: int) -> Iterator[Tuple[int, int]]:
+    """Yield (start, end) word indices for each chunk window."""
+
+    if chunk_size <= 0 or count <= 0:
+        return iter(())
+
+    step = max(1, chunk_size - max(overlap, 0))
+    return ((start, min(start + chunk_size, count)) for start in range(0, count, step))
+
+
+def _slice_text_window(text: str, spans: Sequence[Tuple[int, int]], start: int, end: int) -> str:
+    """Return the substring covering ``spans[start:end]`` including trailing spacing."""
+
+    if start >= end or not spans:
+        return ""
+
+    slice_start = 0 if start == 0 else spans[start][0]
+    trailing_index = spans[end][0] if end < len(spans) else len(text)
+    return text[slice_start:trailing_index]
+
+
+def _remove_footer_artifacts(text: str) -> str:
+    """Prune trailing footer bullet lines while preserving other spacing."""
+
+    if not text:
+        return text
+
+    filtered_lines = _drop_trailing_bullet_footers(text.split("\n"))
+    return "\n".join(filtered_lines)
+
+
 def iter_word_chunks(text: str, max_words: int, overlap: int = 0) -> Iterator[str]:
     """Yield ``text`` split into sequential word windows respecting ``overlap``."""
 
@@ -542,25 +582,28 @@ def _dedupe_overlapping_chunks(chunks: List[str]) -> List[str]:
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
     """Return ``text`` split into word windows respecting ``overlap``."""
 
-    tokens = _tokenize_with_newlines(text)
-    if not tokens or chunk_size <= 0:
+    if chunk_size <= 0:
         return []
-    if len(tokens) <= chunk_size:
-        return [
-            "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
-        ]
-    step = max(1, chunk_size - overlap)
-    windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens), step))
+
+    spans = _word_spans(text)
+    if not spans:
+        return []
+
+    if len(spans) <= chunk_size:
+        return [_remove_footer_artifacts(text)]
+
+    windows = _window_bounds(len(spans), chunk_size, overlap)
     chunks = [
-        "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(w).splitlines()))
-        for w in windows
+        _remove_footer_artifacts(_slice_text_window(text, spans, start, end))
+        for start, end in windows
     ]
     chunks = _dedupe_overlapping_chunks(chunks)
     if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
         chunks = chunks[:-1]
-    return chunks or [
-        "\n".join(_drop_trailing_bullet_footers(_detokenize_with_newlines(tokens).splitlines()))
-    ]
+    return chunks or [_remove_footer_artifacts(text)]
+
+
+setattr(_split_text_into_chunks, "_preserves_raw_fragment", True)
 
 
 def _fix_quote_splitting_issues(chunks: List[str]) -> List[str]:
