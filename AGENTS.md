@@ -54,6 +54,7 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 - Ensure `_get_split_fn` pipes `semantic_chunker` through `merge_conversational_chunks` prior to `iter_word_chunks` and `_soft_segments`; skipping this step truncates or duplicates sentences.
 - Use `pdf_chunker convert ... --trace <phrase>` or run `tests/emit_jsonl_coalesce_test.py::test_split_does_not_duplicate` to pinpoint which pass introduces the anomaly.
 - `emit_jsonl` deduplication can mask upstream defects, so validate semantic split outputs first to avoid chasing the wrong component.
+- Inline style spans are fully wired through extraction, cleaning, tracing, and chunk consumers. Review `docs/inline_style_schema.md` before modifying inline-style logic, and update the document whenever tags, heuristics, or telemetry change.
 
 ## Pass Responsibilities
 

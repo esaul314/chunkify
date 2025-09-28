@@ -1,154 +1,157 @@
-# Inline Style Metadata Schema Proposal
+# Inline Style Metadata Schema & Feature Guide
 
-## Context
-- `pdf_chunker.pdf_blocks.Block` currently provides block-level metadata (`text`, `type`, `bbox`, etc.) but drops inline emphasis information coming from source extraction spans.
-- Downstream passes (`split_semantic`, `heading_detect`, future caption and footnote classifiers) therefore cannot differentiate:
-  - Emphasized fragments that signal captions or sidebars.
-  - Superscript footnote markers needed for deduplication or metadata linkage.
-  - Inline bullets/ordinal markers that survive cleaning but should influence chunk boundaries.
-- Goal: extend the shared `Block` payload with a **normalized inline style layer** while keeping existing semantics intact.
+## Why this matters
+Inline style metadata is now part of the end-to-end PDF pipeline. Every `pdf_chunker.pdf_blocks.Block` can carry a normalized
+`inline_styles` payload, and downstream passes (splitting, heading detection, telemetry, tracing) actively consume it. The schema
+is therefore a first-class contract that future work must keep in sync. This document is written for AI agents who will extend,
+troubleshoot, or redesign the feature.
 
-## Proposed Data Model
-Add an optional `inline_styles: list[InlineStyleSpan] | None` attribute to `Block`.
+### Current footprint
+* **Extraction:** `pdf_chunker.pdf_blocks._extract_block_inline_styles` harvests PyMuPDF spans, remaps them to the cleaned block
+  text, and normalizes them with helpers from `pdf_chunker.inline_styles`.
+* **Cleaning alignment:** `pdf_chunker.passes.text_clean` remaps spans after text transforms, and exports roll-up metrics via
+  `_inline_style_metrics`.
+* **Consumers:**
+  - `split_semantic` uses inline styles to isolate footnote anchors, detect captions, and preserve span metadata while merging
+    blocks.
+  - `heading_detect` boosts confidence when bold/caps inline spans dominate a block.
+  - `emit_jsonl` strips superscript glyphs while retaining metadata traced from inline styles.
+* **Trace + telemetry:** `pdf_chunker.adapters.emit_trace` emits `<step>_inline_styles.json` artifacts for every traced step, and
+  the cleaning pass counts styled blocks per run.
 
+## Data model
 ```python
 @dataclass(frozen=True)
 class InlineStyleSpan:
-    start: int           # Unicode codepoint offset into Block.text
+    start: int           # Unicode code point offset into Block.text
     end: int             # Exclusive offset
-    style: StyleTag      # Enumerated token (see below)
+    style: str           # Normalized style token
     confidence: float | None = None
     attrs: Mapping[str, str] | None = None
 ```
 
-### StyleTag enumeration
-| Tag                | Description / extraction hint                             | Consumer use cases                                    |
-| ------------------ | --------------------------------------------------------- | ----------------------------------------------------- |
-| `bold`             | PyMuPDF flag 16 or span font weight > baseline             | Caption detection; emphasis heuristics                |
-| `italic`           | PyMuPDF flag 2 or font style contains `Italic/Oblique`     | Emphasis heuristics; highlight quotes                 |
-| `small_caps`       | Detected by span font metadata or uppercase ratio         | Identify subheadings; annotate acronyms               |
-| `superscript`      | Span baseline offset < -2pt relative to line median       | Footnote marker detection                             |
-| `subscript`        | Span baseline offset > +2pt relative to line median       | Chemical formulas; math notation                      |
-| `underline`        | Span flag 8                                               | Link detection; special formatting cues               |
-| `link`             | Extracted URI or link annotation                          | Preserve anchor metadata; emit clickable references   |
-| `monospace`        | Font family flagged as mono                               | Code snippet recognition                              |
-| `caps`             | All uppercase tokens within mixed-case context            | Abbreviation spotting; emphasis scoring               |
-| `em_dash_break`    | Inline em dash from span boundary (for list heuristics)   | Soft-split heuristics; chunk boundary hints           |
-| `drop_cap`         | Single leading glyph significantly taller than median     | Decorative detection; avoid misclassifying headings   |
+Spans live in `Block.inline_styles: list[InlineStyleSpan] | None`. When the list is empty we coerce the attribute to `None` so
+consumers can keep treating absence as "no style information".
 
-*Tags can be extended; unknown tags must be ignored by consumers.*
+### Style tags
+The table below documents the tags we currently emit (✅), those that consumers expect but extraction does not yet provide (⚠️),
+and placeholders for future expansion (🛠️).
+
+| Tag | Status | Emitted by | Consumers | Notes |
+| --- | --- | --- | --- | --- |
+| `bold` | ✅ | PyMuPDF flags & font weight checks | `split_semantic`, `heading_detect` | Triggered when flag 16 is set or the font name suggests heavy weight. |
+| `italic` | ✅ | PyMuPDF flags & font style checks | `split_semantic`, `heading_detect` | Flag 2 or `italic/oblique/slanted` in font name. |
+| `underline` | ✅ | PyMuPDF flag 8 | (future) link emphasis | Captured so that later passes can recognize emphasized references. |
+| `monospace` | ✅ | Font-family heuristics | (planned) code-fragment heuristics | Set when font name contains `mono`, `code`, `courier`, or `console`. |
+| `superscript` | ✅ | Baseline delta vs. line median | `split_semantic`, `emit_jsonl` | Primary signal for footnote anchors. |
+| `subscript` | ✅ | Baseline delta vs. line median | (future) math processing | Useful for chemical formulas. |
+| `link` | ✅ | Span metadata or annotations | `emit_trace` (for debugging) | Includes `attrs['href']` and optional `title`. |
+| `caps` | ⚠️ | Not yet emitted | `heading_detect`, `split_semantic` | Low-hanging fruit: detect all-caps tokens within mixed-case lines. |
+| `small_caps` | ⚠️ | Not yet emitted | `heading_detect` | Should be derived from font metadata or uppercase ratio heuristics. |
+| `drop_cap` | 🛠️ | Pending design | (future) decoration filters | Requires bbox-aware size comparison. |
+| `em_dash_break` | 🛠️ | Pending design | (future) soft split hints | Detect span boundaries coinciding with em dash separators. |
+
+Tags are extensible. Downstream code must ignore unknown tags.
 
 ### Span invariants
-1. `0 <= start < end <= len(Block.text)` using Python `len` (Unicode codepoints).
-2. Spans are sorted ascending by `start` and **non-overlapping**. Nested emphasis is represented by multiple spans with the same boundaries (e.g., bold+italic) rather than overlaps.
-3. Adjacent spans with identical `(style, confidence, attrs)` must be merged upstream before emission.
-4. `confidence` defaults to `1.0` when derived from deterministic engine flags; probabilistic classifiers may emit values in `[0.0, 1.0]`.
-5. `attrs` encodes auxiliary data such as `{"href": "..."}` for links or `{"note_id": "1"}` for superscripts mapped to footnotes. Keys must be lower snake case.
-6. When `inline_styles` is absent or empty, downstream logic must behave exactly as today.
+1. `0 <= start < end <= len(Block.text)` (Python `len`, Unicode-aware).
+2. Spans are sorted and non-overlapping. Combined emphasis uses duplicate spans sharing bounds, not nesting.
+3. Adjacent spans with identical `(style, confidence, attrs)` are merged during normalization.
+4. Deterministic extractors emit `confidence=1.0`. Statistical emitters may use `[0.0, 1.0]`.
+5. `attrs` holds auxiliary metadata (`{"href": "..."}` or future `{"note_id": "1"}`); keys use `snake_case`.
+6. Consumers must gracefully handle `inline_styles is None`.
 
-## Extraction Responsibilities
-- **pdf_parse (PyMuPDF native)**
-  - Inspect `page.get_text("dict")` spans to derive baseline, font flags, and textual fragments.
-  - Convert per-span formatting to normalized `InlineStyleSpan` objects relative to the cleaned block text.
-  - Record hyperlink URIs from annotations into `link` spans with `attrs` containing `href` and optional `title`.
-- **pymupdf4llm integration**
-  - Translate existing PyMuPDF4LLM metadata (e.g., `list_kind`, `emphasis`) to the same schema.
-  - Guarantee parity with native extractor; when PyMuPDF4LLM lacks data, emit empty spans but preserve attribute for compatibility.
-- **text_clean pass**
-  - When altering text (e.g., ligature repair, hyphen joins), apply identical transforms to span offsets using pure functions to avoid drift.
-  - Drop spans that collapse to zero length after cleaning.
-- **fallback extractors**
-  - When upstream data lacks spans, set `inline_styles=None` and log capability gaps for monitoring.
+## Implementation reference
+### Normalization helpers (`pdf_chunker.inline_styles`)
+* `normalize_spans` composes coercion, optional bounds remapping, clamping, sorting, and adjacent-merge logic into a pure
+  pipeline.
+* `build_index_map` + `build_index_remapper` translate offsets from raw extractor text to cleaned block text. The remapper is a
+  pure `Callable` so downstream code can remain functional and testable.
 
-## Consumer Requirements
-1. **Split heuristics**: `split_semantic` may treat blocks with `superscript` near the end as footnotes and detach them into metadata instead of main text.
-2. **Heading detection**: combine `bold`, `caps`, and `small_caps` spans to boost heading confidence without altering baseline heuristics.
-3. **Caption scoring**: list detection and future caption classifiers should look for blocks where >60% of characters fall under `italic` or `bold` spans.
-4. **Deduplication**: `emit_jsonl` should strip `superscript` spans while keeping `attrs.note_id` for cross-referencing footnote bodies.
-5. **AI enrichment**: expose inline style summary (e.g., first bold phrase) in metadata to inform downstream prompt engineering.
-6. **Trace/debug tooling**: extend trace artifacts to serialize inline span info for troubleshooting (JSON-friendly structure).
+Unit tests live in `tests/test_inline_styles.py` and cover coercion, normalization, cleaning remaps, consumer behavior, and the
+footnote anchor plumbing.
 
-## Sequenced Execution Plan
+### Extraction (`pdf_chunker.pdf_blocks`)
+1. `_iter_text_spans` walks PyMuPDF’s `page.get_text("dict")` payload to recover spans and their baselines.
+2. `_collect_styles` converts PyMuPDF flags, font metadata, and link annotations into `(style, attrs)` tuples.
+3. `_extract_block_inline_styles` expands those tuples into spans, remaps them to cleaned text, and returns a list or `None`.
+4. The resulting list is stored on each `Block` returned by `_structured_block`.
 
-### Phase 0 — Preparation
-1. **Confirm scope + stakeholders**
-   - Review this schema with `split_semantic`, `heading_detect`, and `emit_jsonl` owners.
-   - Capture sign-off in the engineering log and create a shared project board for the tasks below.
+The extraction phase currently emits the ✅ tags from the status table above. Adding new tags should happen here (or in the
+future PyMuPDF4LLM bridge).
 
-### Phase 1 — Schema & Utilities
-2. **Introduce core data structures**
-   - Add `InlineStyleSpan` and `inline_styles` to `pdf_chunker.pdf_blocks.Block` behind a default `None`.
-   - Create `pdf_chunker.inline_styles` with pure helper functions for span normalization (merge, clamp, remap offsets).
-3. **Unit tests for utilities**
-   - Add exhaustive tests covering merging, clamping, remapping across ligature fixes, and zero-length filtering.
-   - Include property-style checks (Hypothesis or table-driven) to ensure transformations preserve invariants.
+### Cleaning alignment (`pdf_chunker.passes.text_clean`)
+* `_inline_style_metrics` calculates `inline_style_block_ratio` and `inline_style_tag_counts` for run-level telemetry.
+* `_remap_inline_styles` rebuilds spans after ligature fixes, hyphen merges, or whitespace edits by delegating to the
+  normalization helpers.
 
-### Phase 2 — Extraction
-4. **PyMuPDF span harvesting**
-   - Extend the native PyMuPDF extractor to capture style hints from `page.get_text("dict")` spans and emit normalized spans.
-   - Cover bold/italic flags, baseline offsets for super/subscripts, hyperlink annotations, and list metadata.
-5. **PyMuPDF-focused regression tests**
-   - Add targeted fixtures in `tests/pdf_parse` validating span boundaries for bold, italic, superscript, and link cases.
-   - Verify serialization round-trips do not alter existing payload fields.
-6. **PyMuPDF4LLM bridge**
-   - Map PyMuPDF4LLM emphasis metadata into the new schema with parity to native extraction.
-   - Ensure missing metadata yields `inline_styles=None` without raising.
+### Downstream consumers
+* **`split_semantic`**
+  - Uses `_inline_style_ratio` to recognize caption candidates when ≥60% of text is bold/italic.
+  - Extracts superscript spans into `_footnote_spans` and copies any `attrs` into `footnote_anchors` metadata.
+  - Carries spans forward when blocks are merged or split.
+* **`heading_detect`**
+  - Computes inline style ratios to boost heading confidence when bold/caps spans dominate the block.
+* **`emit_jsonl`**
+  - Drops literal superscript glyphs before serialization but preserves associated metadata so anchors stay intact.
+* **`emit_trace`**
+  - Writes `<step>_inline_styles.json` alongside every trace snapshot, summarizing styled ranges and attributes.
 
-### Phase 3 — Text Cleaning Alignment
-7. **Offset remapping utilities integration**
-   - Invoke normalization helpers inside `text_clean` transforms (ligature expansion, hyphen joins, whitespace fixes).
-   - Guarantee that discarded glyphs remove spans gracefully and that merged characters consolidate spans.
-8. **Cleaning regression coverage**
-   - Extend existing text cleaning tests (or add new ones) validating spans remain aligned after each transform.
-   - Include edge cases for multi-span blocks and ensure spans drop when text is deleted.
+## Working effectively with inline styles
+### Inspecting spans locally
+```bash
+pdf_chunker convert platform-eng-excerpt.pdf --spec pipeline.yaml --out /tmp/out.jsonl --no-enrich --trace "inline footnote"
+```
+This produces `artifacts/trace/<run_id>/<step>_inline_styles.json`. Each entry lists block indices, snippets, and style metadata.
 
-### Phase 4 — Consumer Adoption
-9. **split_semantic enhancements**
-   - Factor inline superscripts into footnote extraction heuristics while keeping fallback when metadata is absent.
-   - Update functional tests ensuring chunks isolate footnotes when spans are present.
-10. **heading_detect and caption heuristics**
-    - Incorporate bold/caps/small caps spans into heading scoring and caption detection heuristics without regressing existing thresholds.
-    - Add regression tests guarding new weighting logic and verifying backward compatibility.
-11. **emit_jsonl and downstream metadata**
-    - Preserve `attrs.note_id` while stripping superscript glyphs during deduplication to avoid payload churn.
-    - Serialize inline span summaries into trace/debug artifacts behind a feature flag; ensure JSONL payload remains unchanged by default.
-    - ✅ `_collect_superscripts` now records internal `_footnote_spans` for chunk items and `emit_jsonl` removes superscript glyphs while keeping `footnote_anchors` metadata untouched for downstream consumers.
+### Adding new tags or heuristics
+1. Extend `_collect_styles` (or a dedicated helper) to emit the new tag.
+2. Update normalization/cleaning tests with representative spans.
+3. Amend consumer logic if the new tag should influence chunking or headings.
+4. Document the change in this file and regenerate any relevant trace fixtures.
 
-### Phase 5 — Telemetry, Tooling, and Rollout
-12. **Metrics instrumentation**
-    - Emit counters/histograms for percentage of blocks carrying inline styles and the distribution of style tags.
-    - Surface these values via `metrics["text_clean"]` as `inline_style_block_ratio` and `inline_style_tag_counts` for downstream monitoring.
-    - Add dashboards or logging hooks to monitor extraction completeness across samples.
-13. **Trace + developer tooling updates**
-    - Extend trace artifacts and CLI debug commands to include inline style spans in a developer-friendly format.
-    - Persist an additional `<step>_inline_styles.json` per traced pass summarizing spans, text snippets, and attributes.
-    - Document usage within `docs/` and update `AGENTS.md` debugging guidance.
-14. **Rollout + verification**
-    - Run the conversion pipeline on canonical fixtures (e.g., `platform-eng-excerpt.pdf`) comparing before/after outputs for structural parity.
-    - Record performance benchmarks (<5% regression target) and capture final sign-off before enabling wider serialization.
-    - ✅ Verified Phase 5 by exercising `split_semantic → emit_jsonl` on inline-style fixtures, confirming metrics (`inline_style_block_ratio`, `inline_style_tag_counts`) and trace artifacts (`<step>_inline_styles.json`) populate as expected while JSONL rows remain stable apart from superscript trimming.
+### Debugging & troubleshooting checklist
+* **Extraction sanity:** Use `tests/test_inline_styles.py::test_inline_style_extraction` as a template; feed a minimal PDF block
+  through `_extract_block_inline_styles` and assert span locations.
+* **Cleaning drift:** When spans misalign after hyphen or ligature fixes, inspect `_remap_inline_styles` outputs in trace files
+  and verify `build_index_map` produces a sensible mapping.
+* **Chunk anomalies:** If captions or footnotes regress, set `PDF_CHUNKER_DEBUG_INLINE=1` (env flag read by tests) to keep
+  `_footnote_spans` in emitted chunks for inspection, or instrument `split_semantic._collect_superscripts` locally.
+* **Telemetry gaps:** If `inline_style_block_ratio` unexpectedly drops, confirm the extractor is still populating spans by running
+  `pytest tests/test_inline_styles.py` and inspecting recent trace artifacts.
 
-### Phase 6 — Follow-up Enablement
-15. **Expose spans to external consumers (optional)**
-    - Behind a feature flag, add spans to JSONL payloads and update schema documentation when downstream teams request access.
-    - Coordinate with RAG platform owners to validate contract changes before default enablement.
+## High-value roadmap (low-effort, high-impact)
+The following items are prioritized because they unblock downstream heuristics with modest effort:
 
-## Open Questions & Follow-ups
-- **Serialization format**: do we expose spans directly in JSONL output now or keep them internal? Recommendation: defer until consumers request; include feature flag when ready.
-- **Nested emphasis**: current invariant forbids overlapping spans. If downstream needs nesting (e.g., bold+italic on same token), confirm whether duplicate spans are sufficient or if we should allow `styles: set[str]` per span.
-- **Non-textual cues**: should inline images or equations embed pseudo-style spans (e.g., `{"style": "inline_image"}`)? Pending design input from math extraction workstream.
-- **Performance**: additional span remapping during text cleaning may add overhead. Benchmark once implemented to ensure <5% impact on large PDFs.
-- **Accessibility metadata**: linking `attrs` to PDF structure tree (e.g., actual alt text) may require future schema extension; note dependency on upcoming accessibility extraction tasks.
+1. **Emit `caps` spans during extraction.**
+   - Detect all-uppercase tokens within mixed-case lines and add a `caps` span covering the word (or contiguous range).
+   - Update heading detection tests to assert the new signal is honored.
 
-## Developer Handoff Notes
+2. **Implement `small_caps` detection.**
+   - When PyMuPDF exposes `smallcaps` font metadata or when a span’s glyphs are uppercase but rendered at reduced size, tag the
+     range as `small_caps`.
+   - Backfill fixtures in `tests/test_inline_styles.py` to assert remapping and consumption.
 
-- **Chunk metadata additions**: chunks emitted by `split_semantic` may now carry a private `_footnote_spans` tuple (start/end pairs) alongside existing `footnote_anchors`. Downstream passes must treat keys prefixed with `_` as internal-only helpers and avoid serializing them verbatim.
-- **Superscript sanitization**: the `emit_jsonl` pass automatically strips superscript glyphs using `_footnote_spans` while preserving `footnote_anchors` metadata. New consumers should rely on the metadata field for anchors instead of scanning the text payload.
-- **Telemetry + traces**: `text_clean` metrics include `inline_style_block_ratio` and `inline_style_tag_counts`, and trace runs emit `<step>_inline_styles.json` summaries. Tooling or dashboards should read these metrics to monitor rollout health.
-- **Testing guidance**: add regression coverage alongside inline-style scenarios to ensure `_footnote_spans` stays in sync with superscript removal and that sanitized JSONL outputs remain stable across dedupe operations.
+3. **Attach `note_id` attributes to superscript anchors.**
+   - During extraction or cleaning, parse superscript spans that contain purely numeric text and set `attrs={"note_id": text}`.
+   - Extend `split_semantic` tests to confirm metadata survives into `footnote_anchors`.
 
-## Acceptance Checklist
-- Schema documented here is approved by platform owners.
-- Downstream teams sign off on invariants (non-overlap, offset semantics).
-- Follow-up tickets filed for unresolved questions.
-- No change in current JSONL payload until a separate rollout plan is in place.
+4. **Expose inline style ratios in trace metadata.**
+   - Augment the trace payload with per-block style coverage (e.g., `% bold`, `% italic`) to simplify debugging of borderline
+     headings or captions.
+
+5. **Harden link attribute capture.**
+   - Normalize additional annotation shapes (e.g., nested dictionaries) and include `attrs['title']` or `['dest']` where present.
+   - Add regression tests exercising the coercion path in `inline_styles._coerce_span`.
+
+Track these items in the engineering board and update this roadmap as work completes.
+
+## Extending beyond PDFs
+When EPUB or alternative extractors emit inline style hints, conform them to the same schema:
+* Coerce upstream metadata to `InlineStyleSpan` using `normalize_spans`.
+* Guarantee offsets refer to the cleaned text that downstream passes see.
+* If a format cannot supply spans, set `inline_styles=None` and log an explicit capability gap so telemetry reflects the absence.
+
+---
+Maintain this document as the single source of truth for inline style behavior. When you ship enhancements, update the table and
+roadmap so the next agent knows the current state of the world.
