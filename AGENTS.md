@@ -349,6 +349,7 @@ All CLI scripts follow these conventions:
 * **Split-word merging guarded**: only joins across newlines or double spaces when the combined form is more common than its parts, avoiding merges like "no longer"→"nolonger".
 * **JSONL deduplication**: repeated sentences are trimmed during emission, even when the duplicate is followed by new material; run conversions with `--trace <phrase>` to verify expected lines survive.
 * **Dedup debug**: set `PDF_CHUNKER_DEDUP_DEBUG=1` to emit a warning for each dropped duplicate, a summary count, and a notice for any long sentences that still appear more than once after dedupe.
+* **Regression sweep status**: `nox -s tests` currently surfaces footer overlap, golden snapshot drift, heading merge whitespace, CLI flag wiring, and readability expectation regressions (see `PROJECT_BOOTSTRAP.md`'s “Regression Sweep — 2025-09-28” table for reproduction steps).
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts
