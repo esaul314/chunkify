@@ -1178,24 +1178,36 @@ def _normalize_bullet_tail(tail: str) -> str:
     return f"{normalized} {rest[0]}".strip() if rest and rest[0] else normalized
 
 
-def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
-    normalized_headings = tuple(
-        heading.strip() for heading in headings if heading and heading.strip()
+def _normalized_heading_lines(headings: Iterable[str]) -> tuple[str, ...]:
+    return tuple(
+        stripped
+        for heading in headings
+        if heading and (stripped := heading.strip())
     )
+
+
+def _heading_body_separator(heading_block: str) -> str:
+    # Single-line headings get one newline; multi-line headings keep a blank line.
+    return "\n\n" if "\n" in heading_block else "\n"
+
+
+def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
+    normalized_headings = _normalized_heading_lines(headings)
     if any(starts_with_bullet(h.lstrip()) for h in normalized_headings):
         lead = " ".join(h.rstrip() for h in normalized_headings).rstrip()
         tail = _normalize_bullet_tail(body.lstrip()) if body else ""
         return f"{lead} {tail}".strip()
 
     heading_block = "\n".join(normalized_headings)
-    body_text = body.strip()
+    body_text = body.strip() if body else ""
 
     if not heading_block:
         return body_text
     if not body_text:
         return heading_block
 
-    return f"{heading_block}\n\n{body_text}"
+    separator = _heading_body_separator(heading_block)
+    return f"{heading_block}{separator}{body_text}"
 
 
 def _with_source(block: Block, page: int, filename: str | None) -> Block:
