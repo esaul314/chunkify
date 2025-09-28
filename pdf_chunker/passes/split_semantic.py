@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import logging
 import re
-
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
 from itertools import accumulate, chain
 from math import ceil
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
 from pdf_chunker.inline_styles import InlineStyleSpan
@@ -61,6 +60,10 @@ _CAPTION_PREFIXES = (
     "image",
     "img.",
     "diagram",
+)
+_CAPTION_LABEL_RE = re.compile(
+    r"(?:\d+(?:[-–—.]\d+)*[a-z]?|[ivxlcdm]+(?:[-–—.][ivxlcdm]+)*[a-z]?)",
+    re.IGNORECASE,
 )
 _CAPTION_FLAG = "_caption_attached"
 _TOKEN_PATTERN = re.compile(r"\S+")
@@ -614,6 +617,8 @@ def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
     matched = _overlap_window(previous_words, current_words, window)
     if not matched or len(current_words) <= matched:
         return text
+    if _looks_like_caption(text):
+        return text
     overlap_segment = _overlap_text(current_words, matched)
     if not _should_trim_overlap(overlap_segment):
         return text
@@ -703,10 +708,10 @@ def _coalesce_block_type(blocks: Iterable[Block]) -> str:
         return "list_item"
     unique = frozenset(candidates)
     if len(unique) == 1:
-        return candidates[0]
+        return cast(str, candidates[0])
     if "list_item" in unique:
         return "paragraph"
-    return candidates[0]
+    return cast(str, candidates[0])
 
 
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
@@ -736,6 +741,55 @@ def _colon_bullet_boundary(prev_text: str, block: Block, text: str) -> bool:
     return prev_text.rstrip().endswith(":") and _starts_list_like(block, text)
 
 
+def _record_is_list_like(record: tuple[int, Block, str]) -> bool:
+    _, block, text = record
+    return _starts_list_like(block, text)
+
+
+def _list_tail_split_index(text: str) -> int | None:
+    """Return the index where a list block transitions into narrative text."""
+
+    parts = text.splitlines(keepends=True)
+    if len(parts) <= 1:
+        return None
+    offsets = tuple(accumulate(len(part) for part in parts))
+    candidates = zip(range(1, len(parts)), parts[1:], offsets[:-1], strict=False)
+    for idx, part, offset in candidates:
+        stripped = part.lstrip()
+        if not stripped:
+            continue
+        if starts_with_bullet(stripped) or starts_with_number(stripped):
+            continue
+        indent = len(part) - len(stripped)
+        if indent:
+            continue
+        prefix = "".join(parts[:idx]).rstrip()
+        if not prefix or prefix[-1] not in ".?!":
+            continue
+        if _is_continuation_lead(stripped) or stripped[0].islower():
+            continue
+        return offset
+    return None
+
+
+def _split_list_record(
+    record: tuple[int, Block, str]
+) -> tuple[tuple[int, Block, str], ...]:
+    page, block, text = record
+    split_at = _list_tail_split_index(text)
+    if split_at is None:
+        return (record,)
+    head_text = text[:split_at].rstrip()
+    tail_text = text[split_at:].lstrip("\n")
+    if not head_text or not tail_text:
+        return (record,)
+    head_block = {**block, "text": head_text}
+    tail_envelope = _resolve_envelope((block,), default_list_kind=None)
+    non_list_envelope = _BlockEnvelope(tail_envelope.block_type, None)
+    tail_block = _apply_envelope(block, tail_text, non_list_envelope)
+    return ((page, head_block, head_text), (page, tail_block, tail_text))
+
+
 def _split_colon_bullet_segments(
     buffer: Iterable[tuple[int, Block, str]]
 ) -> tuple[tuple[tuple[int, Block, str], ...], ...]:
@@ -754,6 +808,8 @@ def _split_colon_bullet_segments(
             head = acc[:-1]
             head = (*head, prefix) if prefix else head
             return (*head, (colon_record, record))
+        if _record_is_list_like(previous[-1]) and not _record_is_list_like(record):
+            return (*acc, (record,))
         return (*acc[:-1], previous + (record,))
 
     return reduce(_append_segment, buffer, tuple())
@@ -810,11 +866,17 @@ def _emit_segment_records(
     """Emit ``segment`` as merged or individual records respecting limits."""
     if not segment:
         return tuple()
-    if overflow or len(segment) == 1:
-        return _emit_individual_records(segment, start_index)
+    expanded = tuple(
+        chain.from_iterable(_split_list_record(record) for record in segment)
+    )
+    segment = expanded if expanded else segment
     words, dense, effective = _segment_totals(segment)
     exceeds_soft = resolved_limit is not None and effective > resolved_limit
     exceeds_hard = hard_limit is not None and effective > hard_limit
+    if overflow and not exceeds_soft and not exceeds_hard:
+        overflow = False
+    if overflow or len(segment) == 1:
+        return _emit_individual_records(segment, start_index)
     if exceeds_soft or exceeds_hard:
         return _emit_individual_records(segment, start_index)
     trimmed = _apply_overlap_within_segment(segment, overlap)
@@ -826,6 +888,33 @@ def _emit_segment_records(
     merged = _merge_record_block(list(trimmed), joined)
     first_page = trimmed[0][0]
     return ((first_page, _with_chunk_index(merged, start_index), joined),)
+
+
+def _maybe_merge_dense_page(
+    records: Iterable[tuple[int, Block, str]],
+    options: SplitOptions | None,
+    limit: int | None,
+) -> tuple[tuple[int, Block, str], ...]:
+    sequence = tuple(records)
+    if len(sequence) <= 1:
+        return sequence
+    if options is None or options.chunk_size <= 0:
+        return sequence
+    if {page for page, _, _ in sequence} != {sequence[0][0]}:
+        return sequence
+    dense_total = sum(_effective_counts(text)[1] for _, _, text in sequence)
+    if dense_total > options.chunk_size:
+        return sequence
+    word_total = sum(_effective_counts(text)[0] for _, _, text in sequence)
+    if limit is not None and word_total <= limit:
+        return sequence
+    merged_text = "\n\n".join(
+        part.strip() for _, _, part in sequence if part.strip()
+    ).strip()
+    if not merged_text:
+        return sequence
+    merged_block = _merge_record_block(list(sequence), merged_text)
+    return ((sequence[0][0], merged_block, merged_text),)
 
 
 def _collapse_records(
@@ -854,10 +943,11 @@ def _collapse_records(
     running_words = 0
     running_dense = 0
     start_index: int | None = None
+    outputs: list[tuple[int, Block, str]] = []
 
     def emit(
         *, overflow: bool = False
-    ) -> Iterator[tuple[int, Block, str]]:
+    ) -> None:
         nonlocal buffer, running_words, running_dense, start_index
         if not buffer:
             return
@@ -867,8 +957,8 @@ def _collapse_records(
         offsets = tuple(
             chain((0,), accumulate(len(segment) for segment in segments[:-1]))
         )
-        for offset, segment in zip(offsets, segments):
-            yield from _emit_segment_records(
+        for offset, segment in zip(offsets, segments, strict=False):
+            produced = _emit_segment_records(
                 segment,
                 start_index=first_index + offset,
                 overlap=overlap,
@@ -876,25 +966,26 @@ def _collapse_records(
                 hard_limit=hard_limit,
                 overflow=overflow,
             )
+            outputs.extend(produced)
         buffer, running_words, running_dense, start_index = [], 0, 0, None
 
     for idx, record in enumerate(seq):
         page, block, text = record
         if buffer and page != buffer[-1][0]:
-            yield from emit()
+            emit()
         word_count, dense_count, effective_count = _effective_counts(text)
         if (resolved_limit is not None and effective_count > resolved_limit) or (
             hard_limit is not None and effective_count > hard_limit
         ):
-            yield from emit()
-            yield page, _with_chunk_index(block, idx), text
+            emit()
+            outputs.append((page, _with_chunk_index(block, idx), text))
             continue
         if buffer and _starts_list_like(block, text):
             _, prev_block, prev_text = buffer[-1]
             if not prev_text.rstrip().endswith(":") and not _starts_list_like(
                 prev_block, prev_text
             ):
-                yield from emit()
+                emit()
         if buffer:
             projected_words = running_words + word_count
             projected_dense = running_dense + dense_count
@@ -908,11 +999,11 @@ def _collapse_records(
             if exceeds_hard:
                 last_text = buffer[-1][2].rstrip()
                 if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
-                    yield from emit()
+                    emit()
                 else:
-                    yield from emit(overflow=True)
+                    emit(overflow=True)
             elif exceeds_soft:
-                yield from emit(overflow=True)
+                emit(overflow=True)
         if not buffer:
             start_index = idx
             running_words, running_dense = word_count, dense_count
@@ -921,7 +1012,10 @@ def _collapse_records(
             running_dense += dense_count
         buffer.append((page, block, text))
 
-    yield from emit()
+    emit()
+    merged_outputs = _maybe_merge_dense_page(outputs, options, limit)
+    for idx, (page, block, text) in enumerate(merged_outputs):
+        yield page, _with_chunk_index(block, idx), text
 
 
 Doc = dict[str, Any]
@@ -1025,8 +1119,33 @@ def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
 
 
 def _looks_like_caption(text: str) -> bool:
-    stripped = text.lstrip().lower()
-    return any(stripped.startswith(prefix) for prefix in _CAPTION_PREFIXES)
+    stripped = text.lstrip()
+    lower = stripped.lower()
+    prefix = next(
+        (candidate for candidate in _CAPTION_PREFIXES if lower.startswith(candidate)),
+        None,
+    )
+    if not prefix:
+        return False
+    remainder = stripped[len(prefix) :].lstrip()
+    if not remainder:
+        return False
+    label_match = _CAPTION_LABEL_RE.match(remainder)
+    if not label_match:
+        return False
+    tail = remainder[label_match.end() :].lstrip()
+    if not tail:
+        return False
+    head = tail[0]
+    if head in '.:()"“”':
+        return True
+    if head in "–—":
+        return True
+    if head == "-":
+        if len(tail) == 1:
+            return True
+        return not tail[1].isalnum()
+    return False
 
 
 def _contains_caption_line(text: str) -> bool:
@@ -1297,7 +1416,7 @@ def _inject_continuation_context(
             and not _meta_is_list(prev_meta)
         )
         trimmed = (
-            _trim_boundary_overlap(prev_text, original, overlap)
+            _trim_boundary_overlap(cast(str, prev_text), original, overlap)
             if can_trim
             else original
         )

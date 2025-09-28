@@ -69,6 +69,14 @@ class _MergeBudget(NamedTuple):
     effective_total: int
 
 
+class _MergeDecision(NamedTuple):
+    """Sentence merge outcome including overflow allowances."""
+
+    allowed: bool
+    allow_overflow: bool
+    dense_fragments: bool
+
+
 def _derive_merge_budget(
     previous: Iterable[str],
     current: Iterable[str],
@@ -156,39 +164,70 @@ def _merge_sentence_fragments(
 
         return not dense_fragments
 
-    def _should_merge(
+    def _allow_sentence_overflow(
+        previous: str,
+        prev_words: tuple[str, ...],
+        current_words: tuple[str, ...],
+        *,
+        budget: _MergeBudget,
+        dense_fragments: bool,
+    ) -> bool:
+        cap = target_limit if target_limit is not None else budget.hard_limit
+        return all(
+            condition
+            for condition in (
+                cap is not None,
+                not dense_fragments,
+                bool(prev_words),
+                bool(current_words),
+                len(prev_words) >= (cap or 0) if cap is not None else False,
+                not _ENDS_SENTENCE.search(previous.rstrip()),
+            )
+        )
+
+    def _assess_merge(
         previous: str,
         current: str,
         prev_words: tuple[str, ...],
         current_words: tuple[str, ...],
         budget: _MergeBudget,
-    ) -> bool:
+    ) -> _MergeDecision:
         if not previous:
-            return False
+            return _MergeDecision(False, False, False)
         lead = current.lstrip()
         if not lead:
-            return False
+            return _MergeDecision(False, False, False)
         continuation_lead = _is_continuation_lead(lead)
         if _ENDS_SENTENCE.search(previous.rstrip()) and not continuation_lead:
-            return False
+            return _MergeDecision(False, False, False)
         first_word = current_words[0] if current_words else ""
         if prev_words and prev_words[-1] == first_word:
-            return False
+            return _MergeDecision(False, False, False)
         dense_fragments = _is_dense_fragment(prev_words, current_words)
-        if _violates_budget(budget, dense_fragments=dense_fragments):
-            return False
+        allow_overflow = _allow_sentence_overflow(
+            previous,
+            prev_words,
+            current_words,
+            budget=budget,
+            dense_fragments=dense_fragments,
+        )
+        budget_violation = _violates_budget(
+            budget, dense_fragments=dense_fragments
+        )
+        if budget_violation and not allow_overflow:
+            return _MergeDecision(False, False, dense_fragments)
         if target_limit is not None and budget.effective_total > target_limit:
             if budget.hard_limit is None or budget.effective_total > budget.hard_limit:
-                if dense_fragments:
-                    return False
+                if dense_fragments and not allow_overflow:
+                    return _MergeDecision(False, False, dense_fragments)
         head = lead[0]
         continuation_chars = ",.;:)]\"'"
         if not (continuation_lead or head.islower() or head in continuation_chars):
-            return False
+            return _MergeDecision(False, allow_overflow, dense_fragments)
         combined = len(previous) + 1 + len(current)
         if len(previous) >= SOFT_LIMIT or len(current) >= SOFT_LIMIT:
-            return False
-        return combined <= SOFT_LIMIT
+            return _MergeDecision(False, allow_overflow, dense_fragments)
+        return _MergeDecision(combined <= SOFT_LIMIT, allow_overflow, dense_fragments)
 
     def _actual_overlap(
         prev_words: tuple[str, ...],
@@ -239,14 +278,21 @@ def _merge_sentence_fragments(
             overlap=overlap,
             min_chunk_size=min_chunk_size,
         )
-        if not _should_merge(prev_text, trimmed_text, prev_words, trimmed_words, budget):
+        decision = _assess_merge(
+            prev_text,
+            trimmed_text,
+            prev_words,
+            trimmed_words,
+            budget,
+        )
+        if not decision.allowed:
             if trimmed_words != words:
                 return _append(acc, trimmed_text, trimmed_words)
             return _append(acc, chunk, words)
 
-        dense_fragments = _is_dense_fragment(prev_words, trimmed_words)
+        dense_fragments = decision.dense_fragments
         exceeds_limit = _violates_budget(budget, dense_fragments=dense_fragments)
-        if exceeds_limit:
+        if exceeds_limit and not decision.allow_overflow:
             adjusted = (
                 _rebalance_overflow(prev_text, prev_words, trimmed_text, _target_limit_from(budget))
                 if target_limit is not None
