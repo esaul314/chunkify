@@ -1,10 +1,113 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Mapping
-from typing import Any, Dict, cast
+from functools import wraps
+from typing import Any, Callable, Dict, Sequence, cast
 
 from pdf_chunker.framework import Artifact, register
+
+
+def _apply_fixpoint(transform: Callable[[str], str], text: str) -> str:
+    """Return ``text`` after repeatedly applying ``transform`` until stable."""
+
+    updated = transform(text)
+    return text if updated == text else _apply_fixpoint(transform, updated)
+
+
+_NBSP_TRANSLATION = {
+    ord("\u00a0"): " ",  # non-breaking space
+    ord("\u2000"): " ",  # en quad
+    ord("\u2001"): " ",  # em quad
+    ord("\u2002"): " ",  # en space
+    ord("\u2003"): " ",  # em space
+    ord("\u2004"): " ",  # three-per-em space
+    ord("\u2005"): " ",  # four-per-em space
+    ord("\u2006"): " ",  # six-per-em space
+    ord("\u2007"): " ",  # figure space
+    ord("\u2008"): " ",  # punctuation space
+    ord("\u2009"): " ",  # thin space
+    ord("\u200a"): " ",  # hair space
+    ord("\u202f"): " ",  # narrow no-break space
+    ord("\ufeff"): "",  # zero-width no-break space
+    ord("\u200b"): "",  # zero-width space
+    ord("\u200c"): "",  # zero-width non-joiner
+    ord("\u200d"): "",  # zero-width joiner
+    ord("\u2060"): "",  # word joiner
+}
+
+_COLLAPSE_SPACES = re.compile(r" {2,}")
+
+
+def _normalize_nbsp_like(text: str) -> str:
+    """Convert NBSP-like characters to plain spaces and collapse multiples."""
+
+    return _apply_fixpoint(lambda value: _COLLAPSE_SPACES.sub(" ", value.translate(_NBSP_TRANSLATION)), text)
+
+
+def _patch_clean_paragraph() -> None:
+    """Wrap ``clean_paragraph`` to normalize NBSP-like whitespace."""
+
+    from pdf_chunker import text_cleaning as _text_cleaning
+
+    clean_paragraph = getattr(_text_cleaning, "clean_paragraph", None)
+    if clean_paragraph is None or getattr(clean_paragraph, "_normalizes_nbsp", False):
+        return
+
+    @wraps(clean_paragraph)
+    def _wrapped(paragraph: str) -> str:
+        cleaned = clean_paragraph(paragraph)
+        return _normalize_nbsp_like(cleaned)
+
+    setattr(_wrapped, "_normalizes_nbsp", True)
+    _text_cleaning.clean_paragraph = _wrapped
+
+
+def _render_chunk(tokens: Sequence[str]) -> str:
+    """Render ``tokens`` to text, preserving raw content when cleanup empties it."""
+
+    from pdf_chunker import splitter as _splitter
+
+    materialized = tuple(tokens)
+    raw_fragment = _splitter._detokenize_with_newlines(materialized)
+    cleaned_lines = _splitter._drop_trailing_bullet_footers(raw_fragment.splitlines())
+    cleaned_fragment = "\n".join(cleaned_lines)
+    return cleaned_fragment or raw_fragment
+
+
+def _patch_split_text_into_chunks() -> None:
+    """Ensure detokenized fragments never collapse to empty strings."""
+
+    from pdf_chunker import splitter as _splitter
+
+    split_fn = getattr(_splitter, "_split_text_into_chunks", None)
+    if split_fn is None or getattr(split_fn, "_preserves_raw_fragment", False):
+        return
+
+    @wraps(split_fn)
+    def _wrapped(text: str, chunk_size: int, overlap: int) -> list[str]:
+        tokens = _splitter._tokenize_with_newlines(text)
+        if not tokens or chunk_size <= 0:
+            return []
+
+        if len(tokens) <= chunk_size:
+            return [_render_chunk(tokens)]
+
+        step = max(1, chunk_size - overlap)
+        windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens), step))
+        chunks = [_render_chunk(window) for window in windows]
+        chunks = _splitter._dedupe_overlapping_chunks(chunks)
+        if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
+            chunks = chunks[:-1]
+        return chunks or [_render_chunk(tokens)]
+
+    setattr(_wrapped, "_preserves_raw_fragment", True)
+    _splitter._split_text_into_chunks = _wrapped
+
+
+_patch_clean_paragraph()
+_patch_split_text_into_chunks()
 
 
 def _style_of(span: Any) -> str | None:
