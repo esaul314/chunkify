@@ -10,6 +10,21 @@ import pytest
 
 from scripts import parity as sp
 
+_PARITY_ROOT = Path(__file__).parent
+
+
+def _is_parity_test(item: pytest.Item) -> bool:
+    try:
+        Path(str(item.fspath)).resolve().relative_to(_PARITY_ROOT.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    marker = pytest.mark.legacy_parity
+    tuple(item.add_marker(marker) for item in items if _is_parity_test(item))
+
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     os.environ.update({"PDF_CHUNKER_ENRICH": "0", "AI_ENRICH_ENABLED": "0"})
