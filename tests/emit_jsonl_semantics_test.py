@@ -1,11 +1,13 @@
 from pathlib import Path
 
+from functools import reduce
+
 import pytest
 
 from pdf_chunker.adapters.io_pdf import read
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import _rebalance_lists, emit_jsonl
-from pdf_chunker.passes.split_semantic import DEFAULT_SPLITTER
+from pdf_chunker.passes.split_semantic import DEFAULT_SPLITTER, _merge_blocks
 
 
 def _sentence(words: int, *, start: int = 0) -> str:
@@ -207,6 +209,26 @@ def test_emit_jsonl_preserves_caption_sentence_start(monkeypatch):
     first_alpha = next((ch for ch in text if ch.isalpha()), "")
     assert first_alpha.isupper()
     assert "Initially, it was hoped" in text
+
+
+def test_caption_block_merges_after_reference_sentence():
+    page = 3
+    sequence = tuple(
+        (page, {"text": text}, text)
+        for text in (
+            (
+                "You end up with an architecture more like Figure 1-3 "
+                "shows a high-level comparison of the two approaches."
+            ),
+            "Figure 1-3. Comparison of IaaS and PaaS models in terms of vendor versus customer responsibility",
+            "Initially, it was hoped that application teams would embrace fully supported PaaS offerings.",
+        )
+    )
+    merged = reduce(_merge_blocks, sequence, [])
+    assert len(merged) == 2
+    intro_with_caption, following = (record[2] for record in merged)
+    assert "Figure 1-3. Comparison" in intro_with_caption
+    assert following.startswith("Initially")
 
 
 @pytest.mark.usefixtures("_nltk_data")

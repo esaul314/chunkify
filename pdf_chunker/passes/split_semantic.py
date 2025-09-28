@@ -61,6 +61,10 @@ _CAPTION_PREFIXES = (
     "img.",
     "diagram",
 )
+_CAPTION_LABEL_RE = re.compile(
+    r"(?:\d+(?:[-–—.]\d+)*[a-z]?|[ivxlcdm]+(?:[-–—.][ivxlcdm]+)*[a-z]?)",
+    re.IGNORECASE,
+)
 _CAPTION_FLAG = "_caption_attached"
 _TOKEN_PATTERN = re.compile(r"\S+")
 _HEADING_STYLE_FLAVORS = frozenset({"bold", "italic", "small_caps", "caps", "uppercase"})
@@ -1115,8 +1119,33 @@ def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
 
 
 def _looks_like_caption(text: str) -> bool:
-    stripped = text.lstrip().lower()
-    return any(stripped.startswith(prefix) for prefix in _CAPTION_PREFIXES)
+    stripped = text.lstrip()
+    lower = stripped.lower()
+    prefix = next(
+        (candidate for candidate in _CAPTION_PREFIXES if lower.startswith(candidate)),
+        None,
+    )
+    if not prefix:
+        return False
+    remainder = stripped[len(prefix) :].lstrip()
+    if not remainder:
+        return False
+    label_match = _CAPTION_LABEL_RE.match(remainder)
+    if not label_match:
+        return False
+    tail = remainder[label_match.end() :].lstrip()
+    if not tail:
+        return False
+    head = tail[0]
+    if head in '.:()"“”':
+        return True
+    if head in "–—":
+        return True
+    if head == "-":
+        if len(tail) == 1:
+            return True
+        return not tail[1].isalnum()
+    return False
 
 
 def _contains_caption_line(text: str) -> bool:
