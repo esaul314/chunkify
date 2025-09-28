@@ -24,6 +24,7 @@ import pytest
 
 from pdf_chunker.adapters.io_pdf import read
 from pdf_chunker.framework import Artifact
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.passes.chunk_options import SplitOptions
 from pdf_chunker.passes.chunk_pipeline import (
     attach_headings as attach_headings_pipeline,
@@ -115,6 +116,23 @@ def _metas(items: Iterable[dict]) -> list[dict]:
     return [item.get("meta", {}) for item in items]
 
 
+def _chunk_list_kinds(items: Iterable[dict]) -> list[str]:
+    return [
+        meta.get("list_kind")
+        for meta in _metas(items)
+        if isinstance(meta.get("list_kind"), str) and meta.get("list_kind")
+    ]
+
+
+def _textual_list_kind(text: str) -> str | None:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if any(starts_with_bullet(line) for line in lines):
+        return "bullet"
+    if any(starts_with_number(line) for line in lines):
+        return "numbered"
+    return None
+
+
 def _pdf(path: str) -> dict:
     return read(path)
 
@@ -202,13 +220,22 @@ def test_sample_book_list_metadata() -> None:
     assert _metas(refactored_items) == _metas(legacy_items)
     assert refactored_metrics == legacy_metrics
 
-    kinds = {meta.get("list_kind") for meta in _metas(legacy_items) if meta.get("list_kind")}
-    assert kinds == {"bullet"}
-    assert kinds == {
-        meta.get("list_kind")
+    legacy_kinds = _chunk_list_kinds(legacy_items)
+    refactored_kinds = _chunk_list_kinds(refactored_items)
+
+    assert refactored_kinds, "expected list metadata to survive"
+    assert legacy_kinds == refactored_kinds
+    assert set(refactored_kinds) == {"bullet"}
+    assert all(
+        meta.get("block_type") == "list_item"
         for meta in _metas(refactored_items)
         if meta.get("list_kind")
-    }
+    )
+    assert all(
+        _textual_list_kind(item.get("text", "")) == meta.get("list_kind")
+        for item, meta in zip(refactored_items, _metas(refactored_items))
+        if meta.get("list_kind") in {"bullet", "numbered"}
+    )
 
 
 @pytest.mark.usefixtures("_nltk_data")

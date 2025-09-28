@@ -347,40 +347,71 @@ def _normalize_sequence(value: Any) -> tuple[Any, ...]:
     return (value,)
 
 
-def _merge_styled_list_block(primary: Block, secondary: Block) -> Block:
-    base = {**primary}
-    base_text = str(base.get("text", ""))
-    secondary_text = str(secondary.get("text", ""))
-    merged_text = _merge_styled_list_text(base_text, secondary_text)
-    inline_styles = tuple(
-        chain(
-            _normalize_sequence(base.get("inline_styles")),
-            _normalize_sequence(secondary.get("inline_styles")),
-        )
-    )
-    source_blocks = tuple(
-        chain(
-            _normalize_sequence(base.get("source_blocks")),
-            _normalize_sequence(secondary.get("source_blocks")),
-        )
-    )
-    merged = {
-        **base,
-        "text": merged_text,
-        "list_kind": base.get("list_kind")
-        or secondary.get("list_kind")
-        or _STYLED_LIST_KIND,
+def _chain_sequences(*values: Any) -> tuple[Any, ...]:
+    return tuple(chain.from_iterable(_normalize_sequence(value) for value in values))
+
+
+def _without_keys(mapping: Mapping[str, Any], keys: Iterable[str]) -> dict[str, Any]:
+    drop = frozenset(keys)
+    return {k: v for k, v in mapping.items() if k not in drop}
+
+
+def _with_optional_tuple(
+    mapping: Mapping[str, Any], key: str, values: tuple[Any, ...]
+) -> dict[str, Any]:
+    if values:
+        return {**mapping, key: values}
+    return {k: v for k, v in mapping.items() if k != key}
+
+
+@dataclass(frozen=True)
+class _BlockEnvelope:
+    block_type: str
+    list_kind: str | None = None
+
+
+def _coalesce_list_kind(blocks: Iterable[Block]) -> str | None:
+    kinds = {block.get("list_kind") for block in blocks if block.get("list_kind")}
+    return next(iter(kinds)) if len(kinds) == 1 else None
+
+
+def _resolve_envelope(
+    blocks: Iterable[Block], *, default_list_kind: str | None = None
+) -> _BlockEnvelope:
+    sequence = tuple(blocks)
+    kind = _coalesce_list_kind(sequence) or default_list_kind
+    block_type = _coalesce_block_type(sequence, list_kind=kind)
+    return _BlockEnvelope(block_type, kind)
+
+
+def _apply_envelope(
+    base: Mapping[str, Any], text: str, envelope: _BlockEnvelope
+) -> Block:
+    payload = {
+        **_without_keys(base, {"text", "list_kind"}),
+        "text": text,
+        "type": envelope.block_type,
     }
-    if inline_styles:
-        merged["inline_styles"] = inline_styles
-    else:
-        merged.pop("inline_styles", None)
-    if source_blocks:
-        merged["source_blocks"] = source_blocks
-    else:
-        merged.pop("source_blocks", None)
-    merged.pop("bbox", None)
-    return merged
+    return {**payload, "list_kind": envelope.list_kind} if envelope.list_kind else payload
+
+
+def _merge_styled_list_block(primary: Block, secondary: Block) -> Block:
+    merged_text = _merge_styled_list_text(
+        str(primary.get("text", "")), str(secondary.get("text", ""))
+    )
+    envelope = _resolve_envelope(
+        (primary, secondary), default_list_kind=_STYLED_LIST_KIND
+    )
+    merged = _apply_envelope(primary, merged_text, envelope)
+    inline_styles = _chain_sequences(
+        primary.get("inline_styles"), secondary.get("inline_styles")
+    )
+    source_blocks = _chain_sequences(
+        primary.get("source_blocks"), secondary.get("source_blocks")
+    )
+    without_bbox = _without_keys(merged, {"bbox"})
+    with_styles = _with_optional_tuple(without_bbox, "inline_styles", inline_styles)
+    return _with_optional_tuple(with_styles, "source_blocks", source_blocks)
 
 
 def _merge_styled_list_records(
@@ -631,8 +662,13 @@ def _stitch_block_continuations(
     return reduce(_consume, seq, [])
 
 
-def _coalesce_block_type(blocks: Iterable[Block]) -> str:
+def _coalesce_block_type(
+    blocks: Iterable[Block], *, list_kind: str | None = None
+) -> str:
     """Return the merged block ``type`` for ``blocks``."""
+
+    if list_kind:
+        return "list_item"
 
     types = tuple(filter(None, (block.get("type") for block in blocks)))
     if not types:
@@ -648,21 +684,11 @@ def _coalesce_block_type(blocks: Iterable[Block]) -> str:
     return non_heading[0]
 
 
-def _coalesce_list_kind(blocks: Iterable[Block]) -> str | None:
-    """Return a stable ``list_kind`` shared by ``blocks`` when present."""
-
-    kinds = {block.get("list_kind") for block in blocks if block.get("list_kind")}
-    return next(iter(kinds)) if len(kinds) == 1 else None
-
-
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
     blocks = tuple(block for _, block, _ in records)
+    envelope = _resolve_envelope(blocks)
     first = blocks[0] if blocks else {}
-    base = {k: v for k, v in first.items() if k not in {"text", "list_kind"}}
-    block_type = _coalesce_block_type(blocks)
-    list_kind = _coalesce_list_kind(blocks)
-    merged = {**base, "type": block_type, "text": text}
-    return {**merged, "list_kind": list_kind} if list_kind else merged
+    return _apply_envelope(first, text, envelope)
 
 
 def _with_chunk_index(block: Block, index: int) -> Block:
