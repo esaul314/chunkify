@@ -137,13 +137,20 @@ def _chunk_meta(chunk: Chunk) -> Mapping[str, Any]:
     return legacy if isinstance(legacy, Mapping) else {}
 
 
+def _meta_list_kind(meta: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(meta, Mapping):
+        return None
+    kind = meta.get("list_kind")
+    return kind if isinstance(kind, str) and kind else None
+
+
 def _meta_is_list(meta: Mapping[str, Any] | None) -> bool:
     if not isinstance(meta, Mapping):
         return False
-    if meta.get("block_type") == "list_item":
+    block_type = meta.get("block_type")
+    if block_type == "list_item":
         return True
-    kind = meta.get("list_kind")
-    return isinstance(kind, str) and bool(kind)
+    return block_type in {None, ""} and _meta_list_kind(meta) is not None
 
 
 def _chunk_is_list(chunk: Chunk) -> bool:
@@ -379,8 +386,8 @@ def _resolve_envelope(
     blocks: Iterable[Block], *, default_list_kind: str | None = None
 ) -> _BlockEnvelope:
     sequence = tuple(blocks)
+    block_type = _coalesce_block_type(sequence)
     kind = _coalesce_list_kind(sequence) or default_list_kind
-    block_type = _coalesce_block_type(sequence, list_kind=kind)
     return _BlockEnvelope(block_type, kind)
 
 
@@ -681,26 +688,25 @@ def _stitch_block_continuations(
     return reduce(_consume, seq, [])
 
 
-def _coalesce_block_type(
-    blocks: Iterable[Block], *, list_kind: str | None = None
-) -> str:
+def _coalesce_block_type(blocks: Iterable[Block]) -> str:
     """Return the merged block ``type`` for ``blocks``."""
 
-    if list_kind:
+    types = tuple(
+        block.get("type")
+        for block in blocks
+        if isinstance(block, Mapping) and block.get("type")
+    )
+    candidates = tuple(t for t in types if t != "heading")
+    if not candidates:
+        return "paragraph"
+    if all(t == "list_item" for t in candidates):
         return "list_item"
-
-    types = tuple(filter(None, (block.get("type") for block in blocks)))
-    if not types:
-        return "paragraph"
-    non_heading = tuple(t for t in types if t != "heading")
-    if not non_heading:
-        return "paragraph"
-    unique = {t for t in non_heading}
+    unique = frozenset(candidates)
     if len(unique) == 1:
-        return next(iter(unique))
+        return candidates[0]
     if "list_item" in unique:
-        return "list_item" if len(unique - {"list_item"}) == 0 else "paragraph"
-    return non_heading[0]
+        return "paragraph"
+    return candidates[0]
 
 
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
