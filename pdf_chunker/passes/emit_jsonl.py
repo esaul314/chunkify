@@ -459,6 +459,21 @@ def _contains(haystack: str, needle: str) -> bool:
     return bool(needle and needle in haystack)
 
 
+def _contains_caption_line(text: str) -> bool:
+    lines = tuple(line.strip().lower() for line in text.splitlines())
+    return any(line.startswith(prefix) for prefix in _CAPTION_PREFIXES for line in lines)
+
+
+def _caption_overlap(prev: str, curr: str, prefix: str) -> bool:
+    snippet = prefix.strip()
+    if not snippet:
+        return False
+    first_line = _first_non_empty_line(curr).strip()
+    if not first_line or not first_line.lower().startswith(snippet.lower()):
+        return False
+    return _contains_caption_line(prev)
+
+
 def _overlap_len(prev_lower: str, curr_lower: str) -> int:
     length = min(len(prev_lower), len(curr_lower))
     return next(
@@ -511,6 +526,8 @@ def _trim_overlap(prev: str, curr: str) -> str:
     overlap = _overlap_len(prev_lower, curr_lower)
     if overlap and overlap < len(curr) * 0.9:
         prefix = curr[:overlap]
+        if _caption_overlap(prev, curr, prefix):
+            return curr
         prev_index = len(prev) - overlap
         prev_char = prev[prev_index - 1] if prev_index > 0 else ""
         next_non_space = next((ch for ch in curr[overlap:] if not ch.isspace()), "")
