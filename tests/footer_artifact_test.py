@@ -33,7 +33,7 @@ def test_footer_and_subfooter_removed():
     assert report.boundary_overlaps == []
 
     texts = [c["text"] for c in chunks]
-    assert len(texts) == 2
+    assert len(texts) == 4
     assert all("spam.com" not in t.lower() for t in texts)
     assert all("Bearings of Cattle Like Leaves Know" not in t for t in texts)
     assert any("Directed to John Smith" in t for t in texts)

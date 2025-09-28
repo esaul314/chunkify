@@ -42,8 +42,12 @@ from pdf_chunker.passes.split_semantic import (
     _block_text,
     _collapse_records,
     _inject_continuation_context,
+    _merge_styled_list_records,
     _merge_blocks,
+    _merge_record_block,
     _merge_heading_texts,
+    _restore_overlap_words,
+    _split_inline_heading_records,
     _stitch_block_continuations,
     _get_split_fn,
     _is_heading,
@@ -70,12 +74,14 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         fold=_merge_blocks,
         split_fn=split_fn,
     )
+    styled = _split_inline_heading_records(records)
     headed = attach_headings_pipeline(
-        records,
+        styled,
         is_heading=_is_heading,
         merge_block_text=_merge_heading_texts,
     )
-    stitched = _stitch_block_continuations(headed, limit)
+    merged_lists = _merge_styled_list_records(headed)
+    stitched = _stitch_block_continuations(merged_lists, limit)
     collapsed = _collapse_records(stitched, options, limit)
     build_meta = partial(
         build_chunk_with_meta,
@@ -87,7 +93,8 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         build_plain=build_chunk,
         build_with_meta=build_meta,
     )
-    items = list(_inject_continuation_context(base_chunks, limit))
+    overlap = options.overlap if options is not None else DEFAULT_SPLITTER.overlap
+    items = list(_inject_continuation_context(base_chunks, limit, overlap))
     return items, {"chunks": len(items), **metric_fn()}
 
 
@@ -122,6 +129,25 @@ def test_merge_heading_texts_inserts_blank_line() -> None:
     )
 
 
+def test_split_inline_heading_records_promotes_styled_list() -> None:
+    block = {
+        "text": "Focus Body text remains intact for testing scenarios.",
+        "type": "paragraph",
+        "inline_styles": [{"start": 0, "end": 5, "style": "italic"}],
+    }
+    records = list(_split_inline_heading_records([(1, block, block["text"])]))
+
+    assert len(records) == 2
+    _, heading_block, heading_text = records[0]
+    assert heading_block["type"] == "heading"
+    assert heading_text == "Focus"
+
+    _, body_block, body_text = records[1]
+    assert body_block["type"] == "list_item"
+    assert body_block.get("list_kind") == "styled"
+    assert body_text.startswith("Body text remains")
+
+
 @pytest.mark.usefixtures("_nltk_data")
 def test_platform_eng_parity() -> None:
     pytest.importorskip("fitz")
@@ -137,11 +163,32 @@ def test_platform_eng_parity() -> None:
     continuation = "ownership of operating the application's infrastructure"
     assert any(continuation in chunk for chunk in _texts(legacy_items))
 
+    chapter_reference = "Chapter 10.\n\nWrapping Up"
+    assert any(chapter_reference in chunk for chunk in _texts(legacy_items))
+    assert any(chapter_reference in chunk for chunk in _texts(refactored_items))
+
     list_meta = [meta for meta in _metas(legacy_items) if meta.get("list_kind")]
     assert list_meta, "expected list metadata to be present"
     assert list_meta == [
         meta for meta in _metas(refactored_items) if meta.get("list_kind")
     ]
+
+    assert any(
+        "Leverage\n\nCore to the value" in text for text in _texts(refactored_items)
+    )
+
+    platform_item = next(
+        item for item in refactored_items if "Platform\n\nWe use" in item["text"]
+    )
+    assert platform_item["meta"].get("list_kind")
+
+    list_chunk = next(
+        text
+        for text in _texts(refactored_items)
+        if "Treat building blocks as foundational." in text
+    )
+    assert "Blocks are composable." in list_chunk
+    assert "\n\nBlocks are composable." in list_chunk
 
 
 def test_sample_book_list_metadata() -> None:
@@ -182,3 +229,38 @@ def test_platform_eng_figure_caption_retains_label() -> None:
     assert not starters, "caption should not start a fresh chunk"
     combined = "seen in Figure 1-1.\n\nFigure 1-1. The over-general swamp"
     assert any(combined in text for text in texts), "caption should follow its callout"
+
+
+def test_restore_overlap_words_prefers_minimal_prefix() -> None:
+    chunks = [
+        "A car-load of drovers and their wives",  # previous chunk tail
+        "their wives kept singing through the town",  # leading words missing "and"
+    ]
+    restored = _restore_overlap_words(chunks, overlap=3)
+    assert restored[1].startswith("and their wives kept"), restored[1]
+    assert "their wives their wives" not in restored[1]
+
+
+def test_restore_overlap_words_drops_duplicate_prefix() -> None:
+    chunks = [
+        "A car-load of drovers, too, in the midst, on a level with their droves now.",
+        (
+            "A car-load of drovers, too, in the midst, on a level with their droves now. "
+            "But their dogs, where are they"
+        ),
+    ]
+    restored = _restore_overlap_words(chunks, overlap=8)
+    assert "But their dogs, where are they" in restored[1]
+    assert restored[1].count("A car-load of drovers") <= 1
+
+
+def test_merge_record_block_preserves_list_kind_in_mixed_merge() -> None:
+    list_block = {"type": "list_item", "text": "• First", "list_kind": "bullet"}
+    paragraph_block = {"type": "paragraph", "text": "Second"}
+    records = [
+        (1, list_block, list_block["text"]),
+        (1, paragraph_block, paragraph_block["text"]),
+    ]
+    merged = _merge_record_block(records, "\n\n".join(block for _, _, block in records))
+    assert merged.get("type") == "paragraph"
+    assert merged.get("list_kind") == "bullet"

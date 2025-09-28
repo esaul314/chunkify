@@ -8,6 +8,8 @@ metadata so downstream passes can enrich and emit JSONL rows.
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
@@ -16,6 +18,7 @@ from math import ceil
 from typing import Any, TypedDict
 
 from pdf_chunker.framework import Artifact, Pass, register
+from pdf_chunker.inline_styles import InlineStyleSpan
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.passes.chunk_options import (
     SplitMetrics,
@@ -57,6 +60,9 @@ _CAPTION_PREFIXES = (
     "diagram",
 )
 _CAPTION_FLAG = "_caption_attached"
+_TOKEN_PATTERN = re.compile(r"\S+")
+_HEADING_STYLE_FLAVORS = frozenset({"bold", "italic", "small_caps", "caps", "uppercase"})
+_STYLED_LIST_KIND = "styled"
 
 
 def _span_attr(span: Any, name: str, default: Any = None) -> Any:
@@ -90,6 +96,262 @@ def _span_style(span: Any) -> str:
 def _span_attrs(span: Any) -> Mapping[str, Any] | None:
     attrs = _span_attr(span, "attrs")
     return attrs if isinstance(attrs, Mapping) else None
+
+
+def _is_heading_style_span(span: Any) -> bool:
+    return _span_style(span).lower() in _HEADING_STYLE_FLAVORS
+
+
+def _remap_span(
+    span: Any, start: int, end: int, limit: int
+) -> InlineStyleSpan | dict[str, Any] | None:
+    bounded_start = max(0, min(start, limit))
+    bounded_end = max(bounded_start, min(end, limit))
+    if bounded_end <= bounded_start:
+        return None
+    if isinstance(span, InlineStyleSpan):
+        return replace(span, start=bounded_start, end=bounded_end)
+    remapped: dict[str, Any] = {
+        "start": bounded_start,
+        "end": bounded_end,
+        "style": _span_style(span),
+    }
+    confidence = _span_attr(span, "confidence")
+    if confidence is not None:
+        remapped["confidence"] = confidence
+    attrs = _span_attrs(span)
+    if attrs:
+        remapped["attrs"] = attrs
+    return remapped
+
+
+def _leading_heading_candidate(text: str, styles: Iterable[Any]) -> tuple[int, int] | None:
+    if not text:
+        return None
+    length = len(text)
+    leading_ws = len(text) - len(text.lstrip())
+    candidates = [
+        bounds
+        for span in styles
+        if _is_heading_style_span(span)
+        and (bounds := _span_bounds(span, length)) is not None
+        and bounds[0] <= leading_ws
+        and bounds[1] < length
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda pair: pair[1])
+
+
+def _next_non_whitespace(text: str, index: int) -> str | None:
+    for char in text[index:]:
+        if not char.isspace():
+            return char
+    return None
+
+
+def _trimmed_segment(segment: str) -> tuple[str, int]:
+    stripped_lead = segment.lstrip()
+    lead_trim = len(segment) - len(stripped_lead)
+    trimmed = stripped_lead.rstrip()
+    return trimmed, lead_trim
+
+
+def _heading_styles(
+    styles: Iterable[Any],
+    text_length: int,
+    cutoff: int,
+    lead_trim: int,
+    heading_limit: int,
+) -> tuple[InlineStyleSpan | dict[str, Any], ...]:
+    return tuple(
+        filter(
+            None,
+            (
+                _remap_span(
+                    span,
+                    max(bounds[0], 0) - lead_trim,
+                    min(bounds[1], cutoff) - lead_trim,
+                    heading_limit,
+                )
+                for span in styles
+                if (bounds := _span_bounds(span, text_length)) is not None
+                and bounds[0] < cutoff
+            ),
+        )
+    )
+
+
+def _body_styles(
+    styles: Iterable[Any],
+    text_length: int,
+    offset: int,
+    body_limit: int,
+) -> tuple[InlineStyleSpan | dict[str, Any], ...]:
+    return tuple(
+        filter(
+            None,
+            (
+                _remap_span(
+                    span,
+                    max(bounds[0], offset) - offset,
+                    max(bounds[1], offset) - offset,
+                    body_limit,
+                )
+                for span in styles
+                if (bounds := _span_bounds(span, text_length)) is not None
+                and bounds[1] > offset
+            ),
+        )
+    )
+
+
+def _split_inline_heading(block: Block, text: str) -> tuple[Block, Block] | None:
+    if not text or block.get("type") not in {None, "paragraph"}:
+        return None
+    styles = tuple(block.get("inline_styles") or ())
+    if not styles:
+        return None
+    candidate = _leading_heading_candidate(text, styles)
+    if candidate is None:
+        return None
+    _, end = candidate
+    prefix = text[:end]
+    suffix = text[end:]
+    heading_text, heading_lead_trim = _trimmed_segment(prefix)
+    body_text = suffix.lstrip()
+    if not heading_text or not body_text:
+        return None
+    if len(heading_text.split()) > 6:
+        return None
+    if len(body_text.split()) < 5:
+        return None
+    trailer = _next_non_whitespace(text, end)
+    if trailer is None or trailer in ",;:-–—" or trailer.islower():
+        return None
+    body_lead_trim = len(suffix) - len(body_text)
+    text_length = len(text)
+    heading_limit = len(heading_text)
+    body_offset = end + body_lead_trim
+    body_limit = len(body_text)
+    heading_styles = _heading_styles(
+        styles,
+        text_length,
+        end,
+        heading_lead_trim,
+        heading_limit,
+    )
+    body_styles = _body_styles(styles, text_length, body_offset, body_limit)
+    base = {key: value for key, value in dict(block).items() if key != "text"}
+    base.pop("inline_styles", None)
+    heading_block = {
+        **{k: v for k, v in base.items() if k != "list_kind"},
+        "type": "heading",
+        "text": heading_text,
+    }
+    if heading_styles:
+        heading_block["inline_styles"] = heading_styles
+    body_block = {
+        **base,
+        "type": "list_item",
+        "list_kind": base.get("list_kind") or _STYLED_LIST_KIND,
+        "text": body_text,
+    }
+    if body_styles:
+        body_block["inline_styles"] = body_styles
+    return heading_block, body_block
+
+
+def _split_inline_heading_records(
+    records: Iterable[tuple[int, Block, str]]
+) -> Iterator[tuple[int, Block, str]]:
+    for page, block, text in records:
+        split = _split_inline_heading(block, text)
+        if not split:
+            yield page, block, text
+            continue
+        heading_block, body_block = split
+        yield page, heading_block, heading_block.get("text", "")
+        yield page, body_block, body_block.get("text", "")
+
+
+def _merge_styled_list_text(first: str, second: str) -> str:
+    lead = first.rstrip()
+    tail = second.lstrip()
+    if not lead:
+        return tail
+    if not tail:
+        return lead
+    return f"{lead}\n\n{tail}"
+
+
+def _normalize_sequence(value: Any) -> tuple[Any, ...]:
+    if not value:
+        return ()
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, list):
+        return tuple(value)
+    return (value,)
+
+
+def _merge_styled_list_block(primary: Block, secondary: Block) -> Block:
+    base = {**primary}
+    base_text = str(base.get("text", ""))
+    secondary_text = str(secondary.get("text", ""))
+    merged_text = _merge_styled_list_text(base_text, secondary_text)
+    inline_styles = tuple(
+        chain(
+            _normalize_sequence(base.get("inline_styles")),
+            _normalize_sequence(secondary.get("inline_styles")),
+        )
+    )
+    source_blocks = tuple(
+        chain(
+            _normalize_sequence(base.get("source_blocks")),
+            _normalize_sequence(secondary.get("source_blocks")),
+        )
+    )
+    merged = {
+        **base,
+        "text": merged_text,
+        "list_kind": base.get("list_kind")
+        or secondary.get("list_kind")
+        or _STYLED_LIST_KIND,
+    }
+    if inline_styles:
+        merged["inline_styles"] = inline_styles
+    else:
+        merged.pop("inline_styles", None)
+    if source_blocks:
+        merged["source_blocks"] = source_blocks
+    else:
+        merged.pop("source_blocks", None)
+    merged.pop("bbox", None)
+    return merged
+
+
+def _merge_styled_list_records(
+    records: Iterable[tuple[int, Block, str]]
+) -> Iterator[tuple[int, Block, str]]:
+    pending: tuple[int, Block, str] | None = None
+    for page, block, text in records:
+        if block.get("list_kind") == _STYLED_LIST_KIND:
+            block_copy = dict(block)
+            if pending is None:
+                pending = (page, block_copy, text)
+                continue
+            pending_page, pending_block, pending_text = pending
+            merged_block = _merge_styled_list_block(pending_block, block_copy)
+            merged_text = _merge_styled_list_text(pending_text, text)
+            pending = (min(pending_page, page), merged_block, merged_text)
+            continue
+        if pending is not None:
+            yield pending
+            pending = None
+        yield page, block, text
+    if pending is not None:
+        yield pending
 
 
 def _collect_superscripts(
@@ -151,21 +413,102 @@ def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
     if overlap <= 0:
         return chunks
     restored: list[str] = []
-    previous: tuple[str, ...] = ()
+    previous_words: tuple[str, ...] = ()
+    previous_text = ""
 
     for chunk in chunks:
+        updated = chunk
         words = tuple(chunk.split())
-        if previous:
-            window = min(overlap, len(previous))
-            prefix = words[:window]
-            overlap_words = previous[-window:]
-            if overlap_words and tuple(prefix) != overlap_words:
-                words = (*overlap_words, *words)
-                chunk = " ".join(words)
-        restored.append(chunk)
-        previous = words
+        prefilled = False
+
+        if previous_words:
+            window = min(overlap, len(previous_words))
+            if window:
+                overlap_words = tuple(previous_words[-window:])
+                match_limit = min(window, len(words))
+                matched = next(
+                    (
+                        size
+                        for size in range(match_limit, 0, -1)
+                        if tuple(overlap_words[-size:]) == tuple(words[:size])
+                    ),
+                    0,
+                )
+                missing_count = window - matched
+                if missing_count > 0 and overlap_words:
+                    prefix = " ".join(overlap_words[:missing_count])
+                    if prefix:
+                        glue = " " if updated and not updated[0].isspace() else ""
+                        updated = f"{prefix}{glue}{updated}"
+                        prefilled = True
+                if not prefilled:
+                    updated = _trim_sentence_prefix(previous_text, updated)
+
+        restored.append(updated)
+        previous_words = tuple(updated.split())
+        previous_text = updated
 
     return restored
+
+
+def _trim_sentence_prefix(previous_text: str, text: str) -> str:
+    if not previous_text or not text:
+        return text
+    sentence = _last_sentence(previous_text)
+    if not sentence:
+        return text
+    candidate = sentence.strip()
+    if not candidate or candidate[-1] not in {".", "?", "!"}:
+        return text
+    if re.search(r"Chapter\s+\d+", candidate):
+        return text
+    if not text.startswith(candidate):
+        return text
+    remainder = text[len(candidate) :]
+    if not remainder or not remainder.strip():
+        return text
+    match = re.search(r"((?:Chapter|Section|Part)\s+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)\.?$", candidate)
+    preserved = match.group(0) if match else ""
+    leading_space = remainder.startswith(" ")
+    gap = remainder[1:] if leading_space else remainder
+    if preserved:
+        if gap.startswith("\n"):
+            return f"{preserved}{gap}"
+        spacer = "" if not gap or gap[0].isspace() else " "
+        return f"{preserved}{spacer}{gap}"
+    return gap
+
+
+def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
+    if overlap <= 0 or not prev_text or not text:
+        return text
+    previous_words = tuple(prev_text.split())
+    current_words = tuple(text.split())
+    window = min(overlap, len(previous_words))
+    if not window:
+        return text
+    match_limit = min(window, len(current_words))
+    matched = next(
+        (
+            size
+            for size in range(match_limit, 0, -1)
+            if tuple(previous_words[-size:]) == current_words[:size]
+        ),
+        0,
+    )
+    if not matched or len(current_words) <= matched:
+        return text
+    if matched < window:
+        return text
+    overlap_segment = " ".join(current_words[:matched]).strip()
+    if overlap_segment and overlap_segment[-1] in {".", "?", "!"}:
+        matches = list(_TOKEN_PATTERN.finditer(text))
+        if len(matches) >= matched:
+            cut = matches[matched - 1].end()
+            remainder = text[cut:]
+            return remainder.lstrip(" ")
+        return ""
+    return text
 
 
 def _promote_inline_heading(block: Block, text: str) -> Block:
@@ -259,7 +602,7 @@ def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Blo
     first = blocks[0] if blocks else {}
     base = {k: v for k, v in first.items() if k not in {"text", "list_kind"}}
     block_type = _coalesce_block_type(blocks)
-    list_kind = _coalesce_list_kind(blocks) if block_type == "list_item" else None
+    list_kind = _coalesce_list_kind(blocks)
     merged = {**base, "type": block_type, "text": text}
     return {**merged, "list_kind": list_kind} if list_kind else merged
 
@@ -546,12 +889,13 @@ def _merge_blocks(
 def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]]:
     """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
-    return pipeline_merge_adjacent_blocks(
+    merged = pipeline_merge_adjacent_blocks(
         pipeline_iter_blocks(doc),
         text_of=_block_text,
         fold=_merge_blocks,
         split_fn=split_fn,
     )
+    return _split_inline_heading_records(merged)
 
 
 def _is_heading(block: Block) -> bool:
@@ -701,10 +1045,12 @@ def _chunk_items(
     filename = doc.get("source_path")
     limit = options.compute_limit() if options is not None else None
     merged = _stitch_block_continuations(
-        pipeline_attach_headings(
-            _block_texts(doc, split_fn),
-            is_heading=_is_heading,
-            merge_block_text=_merge_heading_texts,
+        _merge_styled_list_records(
+            pipeline_attach_headings(
+                _block_texts(doc, split_fn),
+                is_heading=_is_heading,
+                merge_block_text=_merge_heading_texts,
+            )
         ),
         limit,
     )
@@ -718,12 +1064,23 @@ def _chunk_items(
     )
 
 
-def _inject_continuation_context(items: Iterable[Chunk], limit: int | None) -> Iterator[Chunk]:
+def _inject_continuation_context(
+    items: Iterable[Chunk], limit: int | None, overlap: int
+) -> Iterator[Chunk]:
     prev_text: str | None = None
     for item in items:
-        text = item.get("text", "")
+        original = item.get("text", "")
+        trimmed = (
+            _trim_boundary_overlap(prev_text, original, overlap)
+            if prev_text is not None
+            else original
+        )
+        text = trimmed
+        was_trimmed = text != original
+        if was_trimmed:
+            item = {**item, "text": text}
         lead = text.lstrip()
-        if prev_text is None or not lead or not _is_continuation_lead(lead):
+        if prev_text is None or not lead or was_trimmed or not _is_continuation_lead(lead):
             prev_text = text
             yield item
             continue
@@ -773,7 +1130,11 @@ class _SplitSemanticPass:
             self.generate_metadata,
             options=options,
         )
-        items = list(_inject_continuation_context(chunk_records, limit))
+        items = list(
+            _inject_continuation_context(
+                chunk_records, limit, options.overlap if options else self.overlap
+            )
+        )
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
