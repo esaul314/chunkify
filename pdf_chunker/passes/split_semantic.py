@@ -275,6 +275,85 @@ def _split_inline_heading_records(
         yield page, body_block, body_block.get("text", "")
 
 
+def _merge_styled_list_text(first: str, second: str) -> str:
+    lead = first.rstrip()
+    tail = second.lstrip()
+    if not lead:
+        return tail
+    if not tail:
+        return lead
+    return f"{lead}\n\n{tail}"
+
+
+def _normalize_sequence(value: Any) -> tuple[Any, ...]:
+    if not value:
+        return ()
+    if isinstance(value, tuple):
+        return value
+    if isinstance(value, list):
+        return tuple(value)
+    return (value,)
+
+
+def _merge_styled_list_block(primary: Block, secondary: Block) -> Block:
+    base = {**primary}
+    base_text = str(base.get("text", ""))
+    secondary_text = str(secondary.get("text", ""))
+    merged_text = _merge_styled_list_text(base_text, secondary_text)
+    inline_styles = tuple(
+        chain(
+            _normalize_sequence(base.get("inline_styles")),
+            _normalize_sequence(secondary.get("inline_styles")),
+        )
+    )
+    source_blocks = tuple(
+        chain(
+            _normalize_sequence(base.get("source_blocks")),
+            _normalize_sequence(secondary.get("source_blocks")),
+        )
+    )
+    merged = {
+        **base,
+        "text": merged_text,
+        "list_kind": base.get("list_kind")
+        or secondary.get("list_kind")
+        or _STYLED_LIST_KIND,
+    }
+    if inline_styles:
+        merged["inline_styles"] = inline_styles
+    else:
+        merged.pop("inline_styles", None)
+    if source_blocks:
+        merged["source_blocks"] = source_blocks
+    else:
+        merged.pop("source_blocks", None)
+    merged.pop("bbox", None)
+    return merged
+
+
+def _merge_styled_list_records(
+    records: Iterable[tuple[int, Block, str]]
+) -> Iterator[tuple[int, Block, str]]:
+    pending: tuple[int, Block, str] | None = None
+    for page, block, text in records:
+        if block.get("list_kind") == _STYLED_LIST_KIND:
+            block_copy = dict(block)
+            if pending is None:
+                pending = (page, block_copy, text)
+                continue
+            pending_page, pending_block, pending_text = pending
+            merged_block = _merge_styled_list_block(pending_block, block_copy)
+            merged_text = _merge_styled_list_text(pending_text, text)
+            pending = (min(pending_page, page), merged_block, merged_text)
+            continue
+        if pending is not None:
+            yield pending
+            pending = None
+        yield page, block, text
+    if pending is not None:
+        yield pending
+
+
 def _collect_superscripts(
     block: Block, text: str
 ) -> tuple[list[dict[str, str]], tuple[tuple[int, int], ...]]:
@@ -966,10 +1045,12 @@ def _chunk_items(
     filename = doc.get("source_path")
     limit = options.compute_limit() if options is not None else None
     merged = _stitch_block_continuations(
-        pipeline_attach_headings(
-            _block_texts(doc, split_fn),
-            is_heading=_is_heading,
-            merge_block_text=_merge_heading_texts,
+        _merge_styled_list_records(
+            pipeline_attach_headings(
+                _block_texts(doc, split_fn),
+                is_heading=_is_heading,
+                merge_block_text=_merge_heading_texts,
+            )
         ),
         limit,
     )

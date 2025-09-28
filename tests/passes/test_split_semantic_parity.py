@@ -42,6 +42,7 @@ from pdf_chunker.passes.split_semantic import (
     _block_text,
     _collapse_records,
     _inject_continuation_context,
+    _merge_styled_list_records,
     _merge_blocks,
     _merge_record_block,
     _merge_heading_texts,
@@ -79,7 +80,8 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         is_heading=_is_heading,
         merge_block_text=_merge_heading_texts,
     )
-    stitched = _stitch_block_continuations(headed, limit)
+    merged_lists = _merge_styled_list_records(headed)
+    stitched = _stitch_block_continuations(merged_lists, limit)
     collapsed = _collapse_records(stitched, options, limit)
     build_meta = partial(
         build_chunk_with_meta,
@@ -179,6 +181,14 @@ def test_platform_eng_parity() -> None:
         item for item in refactored_items if "Platform\n\nWe use" in item["text"]
     )
     assert platform_item["meta"].get("list_kind")
+
+    list_chunk = next(
+        text
+        for text in _texts(refactored_items)
+        if "Treat building blocks as foundational." in text
+    )
+    assert "Blocks are composable." in list_chunk
+    assert "\n\nBlocks are composable." in list_chunk
 
 
 def test_sample_book_list_metadata() -> None:
