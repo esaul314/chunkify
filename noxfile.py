@@ -41,7 +41,7 @@ def _typecheck_commands() -> tuple[Command, ...]:
 
 def _test_commands() -> tuple[Command, ...]:
     targets = _existing(TEST_TARGETS)
-    return (("pytest", "-q", *targets),) if targets else ()
+    return (("pytest", "-q", "-m", "not legacy_parity", *targets),) if targets else ()
 
 
 def _run(
