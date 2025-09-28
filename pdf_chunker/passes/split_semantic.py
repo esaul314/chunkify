@@ -613,6 +613,8 @@ def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
     matched = _overlap_window(previous_words, current_words, window)
     if not matched or len(current_words) <= matched:
         return text
+    if _looks_like_caption(text):
+        return text
     overlap_segment = _overlap_text(current_words, matched)
     if not _should_trim_overlap(overlap_segment):
         return text
