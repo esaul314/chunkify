@@ -854,10 +854,11 @@ def _collapse_records(
     running_words = 0
     running_dense = 0
     start_index: int | None = None
-    overflow_buffer = False
 
-    def emit() -> Iterator[tuple[int, Block, str]]:
-        nonlocal buffer, running_words, running_dense, start_index, overflow_buffer
+    def emit(
+        *, overflow: bool = False
+    ) -> Iterator[tuple[int, Block, str]]:
+        nonlocal buffer, running_words, running_dense, start_index
         if not buffer:
             return
         first_index = start_index if start_index is not None else 0
@@ -873,9 +874,9 @@ def _collapse_records(
                 overlap=overlap,
                 resolved_limit=resolved_limit,
                 hard_limit=hard_limit,
-                overflow=overflow_buffer,
+                overflow=overflow,
             )
-        buffer, running_words, running_dense, start_index, overflow_buffer = [], 0, 0, None, False
+        buffer, running_words, running_dense, start_index = [], 0, 0, None
 
     for idx, record in enumerate(seq):
         page, block, text = record
@@ -909,9 +910,9 @@ def _collapse_records(
                 if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
                     yield from emit()
                 else:
-                    overflow_buffer = True
+                    yield from emit(overflow=True)
             elif exceeds_soft:
-                overflow_buffer = True
+                yield from emit(overflow=True)
         if not buffer:
             start_index = idx
             running_words, running_dense = word_count, dense_count
