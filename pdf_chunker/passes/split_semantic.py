@@ -14,7 +14,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
-from itertools import chain
+from itertools import accumulate, chain
 from math import ceil
 from typing import Any, TypedDict
 
@@ -562,36 +562,55 @@ def _trim_sentence_prefix(previous_text: str, text: str) -> str:
     return gap
 
 
-def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
-    if overlap <= 0 or not prev_text or not text:
-        return text
-    previous_words = tuple(prev_text.split())
-    current_words = tuple(text.split())
-    window = min(overlap, len(previous_words))
-    if not window:
-        return text
-    match_limit = min(window, len(current_words))
-    matched = next(
+def _split_words(text: str) -> tuple[str, ...]:
+    return tuple(text.split())
+
+
+def _overlap_window(
+    prev_words: tuple[str, ...], current_words: tuple[str, ...], limit: int
+) -> int:
+    match_limit = min(limit, len(prev_words), len(current_words))
+    return next(
         (
             size
             for size in range(match_limit, 0, -1)
-            if tuple(previous_words[-size:]) == current_words[:size]
+            if prev_words[-size:] == current_words[:size]
         ),
         0,
     )
+
+
+def _overlap_text(words: tuple[str, ...], size: int) -> str:
+    return " ".join(words[:size]).strip()
+
+
+def _should_trim_overlap(segment: str) -> bool:
+    return bool(segment) and segment[-1] in {".", "?", "!"}
+
+
+def _trim_tokens(text: str, count: int) -> str:
+    matches = list(_TOKEN_PATTERN.finditer(text))
+    if len(matches) >= count:
+        cut = matches[count - 1].end()
+        return text[cut:].lstrip(" ")
+    return ""
+
+
+def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
+    if overlap <= 0 or not prev_text or not text:
+        return text
+    previous_words = _split_words(prev_text)
+    current_words = _split_words(text)
+    window = min(overlap, len(previous_words))
+    if not window:
+        return text
+    matched = _overlap_window(previous_words, current_words, window)
     if not matched or len(current_words) <= matched:
         return text
-    if matched < window:
+    overlap_segment = _overlap_text(current_words, matched)
+    if not _should_trim_overlap(overlap_segment):
         return text
-    overlap_segment = " ".join(current_words[:matched]).strip()
-    if overlap_segment and overlap_segment[-1] in {".", "?", "!"}:
-        matches = list(_TOKEN_PATTERN.finditer(text))
-        if len(matches) >= matched:
-            cut = matches[matched - 1].end()
-            remainder = text[cut:]
-            return remainder.lstrip(" ")
-        return ""
-    return text
+    return _trim_tokens(text, matched)
 
 
 def _promote_inline_heading(block: Block, text: str) -> Block:
@@ -695,6 +714,114 @@ def _with_chunk_index(block: Block, index: int) -> Block:
     return {**block, "_chunk_start_index": index}
 
 
+def _effective_counts(text: str) -> tuple[int, int, int]:
+    """Return word, dense token, and effective totals for ``text``."""
+    words = _split_words(text)
+    word_count = len(words)
+    char_total = sum(len(token) for token in words)
+    dense_total = int(ceil(char_total / _AVERAGE_CHARS_PER_TOKEN)) if char_total else 0
+    if word_count <= 1 and text:
+        dense_total = max(dense_total, len(text))
+    effective_total = max(word_count, dense_total)
+    return word_count, dense_total, effective_total
+
+
+def _colon_bullet_boundary(prev_text: str, block: Block, text: str) -> bool:
+    return prev_text.rstrip().endswith(":") and _starts_list_like(block, text)
+
+
+def _split_colon_bullet_segments(
+    buffer: Iterable[tuple[int, Block, str]]
+) -> tuple[tuple[tuple[int, Block, str], ...], ...]:
+    """Return ``buffer`` sliced so colon-prefixed bullets anchor a new segment."""
+    def _append_segment(
+        acc: tuple[tuple[tuple[int, Block, str], ...], ...],
+        record: tuple[int, Block, str],
+    ) -> tuple[tuple[tuple[int, Block, str], ...], ...]:
+        if not acc:
+            return ((record,),)
+        previous = acc[-1]
+        prev_text = previous[-1][2]
+        if _colon_bullet_boundary(prev_text, record[1], record[2]):
+            prefix = previous[:-1]
+            colon_record = previous[-1]
+            head = acc[:-1]
+            head = (*head, prefix) if prefix else head
+            return (*head, (colon_record, record))
+        return (*acc[:-1], previous + (record,))
+
+    return reduce(_append_segment, buffer, tuple())
+
+
+def _apply_overlap_within_segment(
+    segment: tuple[tuple[int, Block, str], ...], overlap: int
+) -> tuple[tuple[int, Block, str], ...]:
+    """Apply boundary trimming within ``segment`` before joining blocks."""
+    if overlap <= 0 or len(segment) <= 1:
+        return segment
+
+    def _merge(
+        acc: tuple[tuple[int, Block, str], ...],
+        record: tuple[int, Block, str],
+    ) -> tuple[tuple[int, Block, str], ...]:
+        prev_text = acc[-1][2]
+        trimmed = _trim_boundary_overlap(prev_text, record[2], overlap)
+        updated = (record[0], record[1], trimmed)
+        return acc + (updated,)
+
+    return reduce(_merge, segment[1:], (segment[0],))
+
+
+def _segment_totals(segment: tuple[tuple[int, Block, str], ...]) -> tuple[int, int, int]:
+    totals = tuple(_effective_counts(text) for _, _, text in segment)
+    words = sum(count for count, _, _ in totals)
+    dense = sum(count for _, count, _ in totals)
+    return words, dense, max(words, dense)
+
+
+def _emit_individual_records(
+    segment: tuple[tuple[int, Block, str], ...], start_index: int
+) -> tuple[tuple[int, Block, str], ...]:
+    return tuple(
+        (
+            page,
+            _with_chunk_index(block, start_index + offset),
+            text,
+        )
+        for offset, (page, block, text) in enumerate(segment)
+    )
+
+
+def _emit_segment_records(
+    segment: tuple[tuple[int, Block, str], ...],
+    *,
+    start_index: int,
+    overlap: int,
+    resolved_limit: int | None,
+    hard_limit: int | None,
+    overflow: bool,
+) -> tuple[tuple[int, Block, str], ...]:
+    """Emit ``segment`` as merged or individual records respecting limits."""
+    if not segment:
+        return tuple()
+    if overflow or len(segment) == 1:
+        return _emit_individual_records(segment, start_index)
+    words, dense, effective = _segment_totals(segment)
+    exceeds_soft = resolved_limit is not None and effective > resolved_limit
+    exceeds_hard = hard_limit is not None and effective > hard_limit
+    if exceeds_soft or exceeds_hard:
+        return _emit_individual_records(segment, start_index)
+    trimmed = _apply_overlap_within_segment(segment, overlap)
+    joined = "\n\n".join(
+        part.strip() for _, _, part in trimmed if part.strip()
+    ).strip()
+    if not joined or len(joined) > SOFT_LIMIT:
+        return _emit_individual_records(segment, start_index)
+    merged = _merge_record_block(list(trimmed), joined)
+    first_page = trimmed[0][0]
+    return ((first_page, _with_chunk_index(merged, start_index), joined),)
+
+
 def _collapse_records(
     records: Iterable[tuple[int, Block, str]],
     options: SplitOptions | None = None,
@@ -716,50 +843,32 @@ def _collapse_records(
         hard_limit = options.chunk_size
     elif resolved_limit is not None and resolved_limit > 0:
         hard_limit = resolved_limit
+    overlap = options.overlap if options is not None else 0
     buffer: list[tuple[int, Block, str]] = []
     running_words = 0
     running_dense = 0
     start_index: int | None = None
     overflow_buffer = False
 
-    def _effective_counts(text: str) -> tuple[int, int, int]:
-        words = tuple(text.split())
-        word_count = len(words)
-        char_total = sum(len(token) for token in words)
-        dense_total = int(ceil(char_total / _AVERAGE_CHARS_PER_TOKEN)) if char_total else 0
-        if word_count <= 1 and text:
-            dense_total = max(dense_total, len(text))
-        effective_total = max(word_count, dense_total)
-        return word_count, dense_total, effective_total
-
     def emit() -> Iterator[tuple[int, Block, str]]:
         nonlocal buffer, running_words, running_dense, start_index, overflow_buffer
         if not buffer:
             return
         first_index = start_index if start_index is not None else 0
-        if len(buffer) == 1:
-            page, block, text = buffer[0]
-            yield page, _with_chunk_index(block, first_index), text
-        else:
-            effective_total = max(running_words, running_dense)
-            exceeds_soft = (
-                resolved_limit is not None and effective_total > resolved_limit
+        frozen = tuple(buffer)
+        segments = _split_colon_bullet_segments(frozen) or (frozen,)
+        offsets = tuple(
+            chain((0,), accumulate(len(segment) for segment in segments[:-1]))
+        )
+        for offset, segment in zip(offsets, segments):
+            yield from _emit_segment_records(
+                segment,
+                start_index=first_index + offset,
+                overlap=overlap,
+                resolved_limit=resolved_limit,
+                hard_limit=hard_limit,
+                overflow=overflow_buffer,
             )
-            exceeds_hard = (
-                hard_limit is not None and effective_total > hard_limit
-            )
-            exceeds = (exceeds_soft or exceeds_hard) and not overflow_buffer
-            if exceeds:
-                for offset, (page, block, text) in enumerate(buffer):
-                    yield page, _with_chunk_index(block, first_index + offset), text
-            else:
-                joined = "\n\n".join(part.strip() for _, _, part in buffer if part.strip()).strip()
-                if not joined or len(joined) > SOFT_LIMIT:
-                    for offset, (page, block, text) in enumerate(buffer):
-                        yield page, _with_chunk_index(block, first_index + offset), text
-                else:
-                    merged = _merge_record_block(buffer, joined)
-                    yield buffer[0][0], _with_chunk_index(merged, first_index), joined
         buffer, running_words, running_dense, start_index, overflow_buffer = [], 0, 0, None, False
 
     for idx, record in enumerate(seq):
@@ -774,7 +883,10 @@ def _collapse_records(
             yield page, _with_chunk_index(block, idx), text
             continue
         if buffer and _starts_list_like(block, text):
-            if not buffer[-1][2].rstrip().endswith(":"):
+            _, prev_block, prev_text = buffer[-1]
+            if not prev_text.rstrip().endswith(":") and not _starts_list_like(
+                prev_block, prev_text
+            ):
                 yield from emit()
         if buffer:
             projected_words = running_words + word_count
