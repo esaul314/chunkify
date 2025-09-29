@@ -143,7 +143,7 @@ def test_merge_heading_texts_inserts_blank_line() -> None:
     merged = _merge_heading_texts(headings, body)
     assert (
         merged
-        == "CHAPTER 1\nWhy Platform Engineering Is Becoming Essential\n\nPlatform teams accelerate delivery."
+        == "CHAPTER 1\nWhy Platform Engineering Is Becoming Essential\nPlatform teams accelerate delivery."
     )
 
 

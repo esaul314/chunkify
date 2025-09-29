@@ -21,7 +21,7 @@ def test_heading_followed_by_paragraph():
         {"text": "Body text", "type": "paragraph"},
     ]
     chunks = _run(blocks)
-    assert [c["text"] for c in chunks] == ["Heading\n\nBody text"]
+    assert [c["text"] for c in chunks] == ["Heading\nBody text"]
 
 
 def test_heading_followed_by_list_item():
@@ -30,7 +30,7 @@ def test_heading_followed_by_list_item():
         {"text": "Bullet", "type": "list_item", "list_kind": "bullet"},
     ]
     chunks = _run(blocks)
-    assert [c["text"] for c in chunks] == ["Intro\n\nBullet"]
+    assert [c["text"] for c in chunks] == ["Intro\nBullet"]
 
 
 def test_terminal_heading_discarded():

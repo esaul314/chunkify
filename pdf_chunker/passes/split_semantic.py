@@ -1527,11 +1527,12 @@ def _normalized_heading_lines(headings: Iterable[str]) -> tuple[str, ...]:
 def _heading_body_separator(heading_block: str) -> str:
     """Return the separator inserted between heading text and body."""
 
-    # Preserve a blank line after headings so body paragraphs never start
-    # immediately after the heading text. This mirrors the legacy splitter's
-    # formatting and keeps parity expectations like the "Leverage" section in
-    # ``platform-eng-excerpt.pdf`` intact.
-    return "\n\n"
+    # LoRA fine-tuning and RAG retrieval benefit from compact, predictable
+    # whitespace so heading tokens stay adjacent to their descriptive body
+    # text without introducing gratuitous padding. A single newline keeps the
+    # visual separation while avoiding the blank line that previously doubled
+    # the token cost.
+    return "\n"
 
 
 def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
