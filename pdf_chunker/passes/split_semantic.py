@@ -561,7 +561,7 @@ def _trim_sentence_prefix(previous_text: str, text: str) -> str:
     remainder = text[len(candidate) :]
     if not remainder or not remainder.strip():
         return text
-    match = re.search(r"((?:Chapter|Section|Part)\s+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)\.?$", candidate)
+    match = re.search(r"((?:Chapter|Section|Part)\s+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)\.?$", candidate)  # noqa: E501
     preserved = match.group(0) if match else ""
     leading_space = remainder.startswith(" ")
     gap = remainder[1:] if leading_space else remainder
