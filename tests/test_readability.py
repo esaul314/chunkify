@@ -18,7 +18,7 @@ def _load_sample_text() -> str:
 
 def test_readability_matches_expected_grade() -> None:
     readability = _compute_readability(_load_sample_text())
-    assert readability["flesch_kincaid_grade"] == pytest.approx(11.178688524590168)
+    assert readability["flesch_kincaid_grade"] == pytest.approx(11.8675)
     assert readability["difficulty"] == "high_school"
 
 

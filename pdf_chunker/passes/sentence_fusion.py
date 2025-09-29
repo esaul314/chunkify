@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from dataclasses import dataclass
 from math import ceil
 from functools import reduce
 from numbers import Real
@@ -75,6 +76,67 @@ class _MergeDecision(NamedTuple):
     allowed: bool
     allow_overflow: bool
     dense_fragments: bool
+
+
+@dataclass(frozen=True)
+class _BudgetView:
+    """Summarise merge budget tolerance for the current fragment pair."""
+
+    budget: _MergeBudget
+    target_limit: int | None
+    dense_fragments: bool
+    sentence_completion_pending: bool
+
+    @property
+    def overflow_required(self) -> bool:
+        limit = self.target_limit
+        return limit is not None and self.budget.effective_total > limit
+
+    @property
+    def dense_overflow_safe(self) -> bool:
+        hard = self.budget.hard_limit
+        return (
+            self.sentence_completion_pending
+            and hard is not None
+            and self.budget.word_total <= hard
+        )
+
+    @property
+    def within_hard_limit(self) -> bool:
+        hard = self.budget.hard_limit
+        if hard is None:
+            return True
+        if self.budget.effective_total <= hard:
+            return True
+        return self.dense_overflow_safe
+
+    def allow_overflow(self) -> bool:
+        if not self.overflow_required:
+            return False
+        if not self.within_hard_limit:
+            return False
+        if self.dense_fragments and not (
+            self.sentence_completion_pending
+            or (
+                self.budget.hard_limit is not None
+                and self.budget.effective_total <= self.budget.hard_limit
+            )
+        ):
+            return False
+        return True
+
+    def violates(self) -> bool:
+        if not self.within_hard_limit:
+            return True
+        limit = self.budget.limit
+        if limit is None or self.budget.effective_total <= limit:
+            return False
+        if self.allow_overflow():
+            return False
+        hard = self.budget.hard_limit
+        if hard is not None and self.budget.effective_total <= hard:
+            return False
+        return not self.dense_fragments
 
 
 def _derive_merge_budget(
@@ -164,27 +226,6 @@ def _merge_sentence_fragments(
 
         return not dense_fragments
 
-    def _allow_sentence_overflow(
-        previous: str,
-        prev_words: tuple[str, ...],
-        current_words: tuple[str, ...],
-        *,
-        budget: _MergeBudget,
-        dense_fragments: bool,
-    ) -> bool:
-        cap = target_limit if target_limit is not None else budget.hard_limit
-        return all(
-            condition
-            for condition in (
-                cap is not None,
-                not dense_fragments,
-                bool(prev_words),
-                bool(current_words),
-                len(prev_words) >= (cap or 0) if cap is not None else False,
-                not _ENDS_SENTENCE.search(previous.rstrip()),
-            )
-        )
-
     def _assess_merge(
         previous: str,
         current: str,
@@ -204,16 +245,20 @@ def _merge_sentence_fragments(
         if prev_words and prev_words[-1] == first_word:
             return _MergeDecision(False, False, False)
         dense_fragments = _is_dense_fragment(prev_words, current_words)
-        allow_overflow = _allow_sentence_overflow(
-            previous,
-            prev_words,
-            current_words,
+        previous_ends_sentence = bool(_ENDS_SENTENCE.search(previous.rstrip()))
+        current_completes_sentence = bool(
+            _ENDS_SENTENCE.search(current.rstrip())
+        )
+        view = _BudgetView(
             budget=budget,
+            target_limit=target_limit,
             dense_fragments=dense_fragments,
+            sentence_completion_pending=(
+                current_completes_sentence and not previous_ends_sentence
+            ),
         )
-        budget_violation = _violates_budget(
-            budget, dense_fragments=dense_fragments
-        )
+        allow_overflow = view.allow_overflow()
+        budget_violation = view.violates()
         if budget_violation and not allow_overflow:
             return _MergeDecision(False, False, dense_fragments)
         if target_limit is not None and budget.effective_total > target_limit:
