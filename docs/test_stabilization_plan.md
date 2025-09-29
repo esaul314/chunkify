@@ -1,71 +1,49 @@
 # Test Stabilization Plan
 
-The regression suite highlights a cluster of semantic-splitting and snapshot
-issues. This plan prioritizes fixes so functional regressions land before we
-refresh any goldens.
+## Completed Work
+* Restored whitespace-preserving chunk slices by recording word spans, slicing windows, and applying footer pruning without mutating the splitter, keeping `_split_text_into_chunks` pure and reusable.【F:pdf_chunker/splitter.py†L501-L606】
+* Isolated footer bullets and dense segments through `_record_trailing_footer_lines`, `_record_is_footer_candidate`, and the reworked `_collapse_records`, so merge decisions flow through functional helpers instead of inline mutation.【F:pdf_chunker/passes/split_semantic.py†L760-L1040】
+* Tightened list heuristics with whitespace-aware bullet and number detectors, reducing spurious matches while keeping list metadata propagation intact.【F:pdf_chunker/passes/list_detect.py†L17-L183】
+* Centralized sentence-fusion budgets in `_BudgetView` so soft-limit overflow and dense fragment handling rely on deterministic, testable dataclasses.【F:pdf_chunker/passes/sentence_fusion.py†L63-L199】
+* Updated readability utilities to treat acronyms deterministically, feed syllable counts through CMU/Pyphen fallbacks, and return structured difficulty metadata.【F:pdf_chunker/utils.py†L100-L178】
 
-## 1. Restore chunk splitting invariants
-- **Why**: `_split_text_into_chunks` now strips leading/trailing whitespace and
-  rewraps bullet cleanup directly inside the splitter, which erases spacing and
-  breaks the property-based invariants that compare cleaned inputs with the
-  splitter round-trip.【F:pdf_chunker/splitter.py†L528-L563】【F:tests/property_based_text_test.py†L43-L59】
-- **What**: Re-introduce whitespace-preserving token joins and keep the splitter
-  focused on windowing logic. Extract bullet-footer filtering into a helper that
-  operates on the detokenized text while retaining exact inter-token spacing.
-- **How**: Build a pure composable helper that trims only artifact lines,
-  delegate it from the splitter via functional composition, and cover the fix
-  with the failing Hypothesis tests plus `splitter_transform_test.py`.
+## Current Status (2025-09-29)
+* `nox -s lint` fails because `black --check` wants to reformat `pdf_chunker/passes/split_semantic.py` even though the logic is pure.【61c927†L1-L8】
+* `nox -s typecheck` succeeds with no mypy issues.【428704†L1-L4】
+* `nox -s tests` fails on eight assertions covering footer joins, numbered-list formatting, CLI overrides, sentence-boundary guarantees, parity, and stale goldens.【0c3fcc†L1-L420】
 
-## 2. Stabilize footer chunk boundaries
-- **Why**: `_collapse_records` merges footer bullets into nearby prose because
-  `_starts_list_like` flags any bullet/number marker, causing footer segments to
-  share buffers even when previous text ends cleanly. This collapses footer
-  chunks that should remain isolated, violating `footer_artifact_test` counts and
-  footer scrubbing assertions.【F:pdf_chunker/passes/split_semantic.py†L931-L1018】【F:pdf_chunker/passes/split_semantic.py†L1101-L1118】【F:tests/footer_artifact_test.py†L14-L63】
-- **What**: Filter footer-style bullet runs before merge emission so genuine
-  footers flush the buffer while real list bodies continue to fuse.
-- **How**: Add a pure footer-detection predicate (re-using
-  `page_artifacts._drop_trailing_bullet_footers` heuristics) inside
-  `_collapse_records` and guard it with the footer regression tests.
+## Next Steps to Reach Green
+1. **Restore lint compliance**  
+   • **Why**: `black --check` blocks the lint session on `pdf_chunker/passes/split_semantic.py`, preventing CI sign-off.【61c927†L1-L8】  
+   • **What**: Reformat the module (or refactor long expressions into smaller helpers) so the file satisfies Black without altering functional semantics.  
+   • **How**: Extract nested comprehensions inside `_collapse_records` and `_emit_segment_records` into named pure helpers before running `black --check` again to confirm.【F:pdf_chunker/passes/split_semantic.py†L819-L1040】
 
-## 3. Tighten list detection negatives
-- **Why**: `is_bullet_list_pair` and `is_numbered_list_pair` accept random text
-  whenever a colon precedes a hyphen or numbers appear later in the string,
-  leading to false positives in the property suite.【F:pdf_chunker/passes/list_detect.py†L17-L105】【F:tests/list_detection_edge_case_test.py†L31-L99】
-- **What**: Demand stronger evidence (marker plus delimiter spacing or prior
-  context) before classifying continuations.
-- **How**: Introduce focused predicates for inline markers and require either a
-  confirmed list item on the current line or a colon followed by an actual list
-  marker. Validate with the property tests and targeted list metadata checks.
+2. **Rejoin footer sentences without reintroducing bullets**  
+   • **Why**: `test_footer_newlines_joined` now finds the footer bullet marker instead of the expected joined prose, signalling that `_record_trailing_footer_lines` is flushing too aggressively.【4b2fc6†L9-L23】【0c3fcc†L1-L120】  
+   • **What**: Refine the footer candidate predicate so we only split when every trailing line is an artifact, preserving legitimate paragraph joins.  
+   • **How**: Compute footer suffixes via `_record_trailing_footer_lines`, then merge adjacent narrative segments through a pure filter before `emit()` executes, keeping the helper composable and test-covered.【F:pdf_chunker/passes/split_semantic.py†L760-L1040】
 
-## 4. Finish sentence fusion override handling
-- **Why**: `_merge_sentence_fragments` still rejects merges when small chunk
-  overrides trigger strict budgets even though the trailing fragment completes a
-  sentence, so mid-sentence guards fail the override tests.【F:pdf_chunker/passes/sentence_fusion.py†L124-L333】【F:tests/semantic_chunking_test.py†L82-L231】
-- **What**: Allow limited overflow when punctuation is pending and the hard cap
-  still permits the merge, while keeping tiny chunk overrides from merging
-  endlessly.
-- **How**: Reshape the budget decision helper into a dataclass-driven flow that
-  evaluates overflow and dense-fragment constraints deterministically, then
-  extend the failing override test to assert the new edge case.
+3. **Collapse blank lines in numbered list merges**  
+   • **Why**: `test_numbered_list_merge_collapses_blank_lines` expects `"1. first\n2. second"`, but the current splitter preserves the empty line introduced by `_split_list_record`.【ee137d†L28-L33】【0c3fcc†L226-L320】  
+   • **What**: Normalize double newlines when we stitch numbered list fragments so adjacent items render contiguously.  
+   • **How**: Add a pure newline-collapsing helper inside the semantic chunker merge path (likely `_merge_record_block` or `_apply_overlap_within_segment`) and assert the behavior with the existing regression test.【F:pdf_chunker/passes/split_semantic.py†L819-L1040】
 
-## 5. Re-align golden JSONL outputs
-- **Why**: The CLI and sample PDF goldens assume the old chunk counts and text
-  scaffolding; once the semantic fixes land, the expectations will drift until
-  snapshots update. Tests like `epub_cli_regression_test` already pin specific
-  chunk IDs, lengths, and prose scaffolding.【F:tests/epub_cli_regression_test.py†L30-L121】
-- **What**: Rerun the EPUB and PDF conversions using the approved `--approve`
-  workflow to regenerate goldens if and only if the new outputs match the
-  intended semantics.
-- **How**: Drive the adapters/CLI commands, capture the regenerated JSONL, and
-  update only the snapshot fixtures alongside a recorded command log.
+4. **Reassert CLI overrides and sentence boundaries**  
+   • **Why**: The CLI override harness only returns a single chunk and sentences still start mid-stream, failing `test_cli_flags_affect_split_semantic` and `test_no_chunk_starts_mid_sentence`.【b2a355†L26-L61】【746003†L58-L65】【0c3fcc†L226-L420】  
+   • **What**: Ensure `_get_split_fn` respects override parameters when wrapping `semantic_chunker` and that `_merge_sentence_fragments` never yields a chunk beginning inside an unfinished sentence.  
+   • **How**: Thread the override chunk size into `_soft_segments` and adjust `_merge_sentence_fragments`' overflow logic so punctuation gating forces a boundary before we emit the next window, validating with the targeted tests.【F:pdf_chunker/passes/split_semantic.py†L819-L1040】【F:pdf_chunker/passes/sentence_fusion.py†L142-L199】
 
-## 6. Reconcile readability expectations
-- **Why**: The readability test pins an exact Flesch–Kincaid grade and difficulty
-  tier from the first PDF golden chunk, so any upstream text change must either
-  keep `_compute_readability` aligned or refresh the expectation.【F:pdf_chunker/utils.py†L116-L132】【F:tests/test_readability.py†L11-L27】
-- **What**: Compare the new first chunk after semantic fixes with the golden and
-  adjust `_compute_readability` rounding/tier logic if necessary.
-- **How**: Prefer deterministic adjustments inside `_compute_readability` and
-  confirm with `test_readability.py`; only refresh the fixture if the new chunk
-  text truly changes the grade.
+5. **Recover platform-eng parity before refreshing goldens**  
+   • **Why**: `test_platform_eng_parity` compares the refactored pipeline with the legacy splitter and currently reports text/meta drift, so downstream golden updates would lock in incorrect behavior.【3a8168†L1-L113】【0c3fcc†L311-L420】  
+   • **What**: Diff the manual pipeline against `_SplitSemanticPass` to locate the first divergent chunk, then reconcile list merging and continuation stitching until texts, metadata, and metrics match.  
+   • **How**: Use `_record_is_footer_candidate` instrumentation to trace buffer flushes, adjust `_split_colon_bullet_segments` or `_maybe_merge_dense_page` as needed, and rerun the parity test once the sequences align.【F:pdf_chunker/passes/split_semantic.py†L819-L1040】
+
+6. **Re-align regression goldens once semantics hold**  
+   • **Why**: The PDF and EPUB conversion tests differ because readability scores and chunk ordering changed; refreshing now would mask functional regressions.【2e9bed†L19-L42】【c32204†L13-L52】【3b0ae4†L12-L28】【0c3fcc†L1-L200】  
+   • **What**: After stabilizing footer/list/override behavior, rerun the approved refresh script (`python scripts/refresh_goldens.py --approve`) to update `pdf.jsonl`, `epub.jsonl`, and `tiny.jsonl`.  
+   • **How**: Capture before/after chunk diffs, document the command in the test log, and ensure the readability metadata produced by `_compute_readability` matches expectations before committing.【F:pdf_chunker/utils.py†L139-L178】
+
+7. **Perform an end-to-end verification sweep**  
+   • **Why**: Once the targeted fixes land, we must prove `nox -s lint`, `nox -s typecheck`, and `nox -s tests` all pass to close the stabilization effort.【61c927†L1-L8】【428704†L1-L4】【0c3fcc†L1-L420】  
+   • **What**: Run the full nox matrix and spot-check CLI output on `platform-eng-excerpt.pdf` to ensure parity persists outside the unit suite.  
+   • **How**: Execute the mandated nox sessions plus a CLI dry run, capturing logs for the next agent and leaving the pipeline ready for final approval per guardrails.【F:pdf_chunker/passes/split_semantic.py†L819-L1040】
