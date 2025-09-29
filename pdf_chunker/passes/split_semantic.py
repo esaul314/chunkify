@@ -1525,8 +1525,14 @@ def _normalized_heading_lines(headings: Iterable[str]) -> tuple[str, ...]:
 
 
 def _heading_body_separator(heading_block: str) -> str:
-    # Single-line headings get one newline; multi-line headings keep a blank line.
-    return "\n\n" if "\n" in heading_block else "\n"
+    """Return the separator inserted between heading text and body."""
+
+    # LoRA fine-tuning and RAG retrieval benefit from compact, predictable
+    # whitespace so heading tokens stay adjacent to their descriptive body
+    # text without introducing gratuitous padding. A single newline keeps the
+    # visual separation while avoiding the blank line that previously doubled
+    # the token cost.
+    return "\n"
 
 
 def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
