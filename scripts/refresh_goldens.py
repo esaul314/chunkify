@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pdf_chunker.core import process_document
+from pdf_chunker.cli import _cli_overrides, _core_helpers
+from pdf_chunker.config import load_spec
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_DIR = ROOT / "tests" / "golden" / "expected"
@@ -36,9 +37,23 @@ _SPEC: dict[str, tuple[Path, str, Callable[[Path, Path], Path]]] = {
 }
 
 
-def _chunks(path: Path) -> Iterable[dict[str, object]]:
-    return process_document(
-        str(path), chunk_size=1000, overlap=0, generate_metadata=True, ai_enrichment=False
+def _chunks(path: Path, dest: Path) -> Iterable[dict[str, object]]:
+    input_artifact, run_convert, _ = _core_helpers(False)
+    overrides = _cli_overrides(
+        out=dest,
+        chunk_size=1000,
+        overlap=0,
+        enrich=False,
+        exclude_pages=None,
+        no_metadata=False,
+    )
+    spec = load_spec(ROOT / "pipeline.yaml", overrides=overrides)
+    dest.unlink(missing_ok=True)
+    run_convert(input_artifact(str(path), spec), spec)
+    return (
+        json.loads(line)
+        for line in dest.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     )
 
 
@@ -64,8 +79,10 @@ def _refresh(kind: str, approve: bool, tmp: Path) -> str | None:
     except Exception as exc:  # pragma: no cover
         return f"{kind}: materialization failed: {exc}"
     try:
+        out_path = tmp / f"{kind}_cli.jsonl"
+        chunks = _chunks(inp, out_path)
         new_path = tmp / f"{kind}.jsonl"
-        new_path.write_text(_jsonl(_chunks(inp)), encoding="utf-8")
+        new_path.write_text(_jsonl(chunks), encoding="utf-8")
     except Exception as exc:  # pragma: no cover
         return f"{kind}: generation failed: {exc}"
     target = GOLDEN_DIR / f"{kind}.jsonl"
