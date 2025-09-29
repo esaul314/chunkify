@@ -17,16 +17,20 @@ from pdf_chunker.framework import Artifact, register
 BULLET_CHARS = "*•◦▪‣·●◉○‧"
 BULLET_CHARS_ESC = re.escape(BULLET_CHARS)
 HYPHEN_BULLET_PREFIX = "- "
-NUMBERED_RE = re.compile(r"\s*\d+[.)]")
+LEADING_BULLET_RE = re.compile(rf"^\s*(?:[{BULLET_CHARS_ESC}]\s+)")
+LEADING_HYPHEN_RE = re.compile(r"^\s*-\s+")
+INLINE_COLON_BULLET_RE = re.compile(
+    rf":\s*(?:[{BULLET_CHARS_ESC}]\s+|-\s+)"
+)
+NUMBERED_RE = re.compile(r"\s*\d+[.)]\s+")
 
 
 def starts_with_bullet(text: str) -> bool:
     """Return True if ``text`` begins with a bullet marker or hyphen bullet."""
 
-    stripped = text.lstrip()
-    return stripped.startswith(tuple(BULLET_CHARS)) or stripped.startswith(
-        HYPHEN_BULLET_PREFIX
-    )  # noqa: E501
+    return bool(
+        LEADING_BULLET_RE.match(text) or LEADING_HYPHEN_RE.match(text)
+    )
 
 
 def _last_non_empty_line(text: str) -> str:
@@ -75,7 +79,7 @@ def colon_leads_bullet_list(text: str) -> bool:
     """Return True when a trailing colon signals an inline bullet leader."""
 
     stripped = text.rstrip()
-    inline_marker = bool(re.search(rf":\s*(?:[{BULLET_CHARS_ESC}]|-)", text))
+    inline_marker = bool(INLINE_COLON_BULLET_RE.search(text))
     has_bullet = _block_contains_bullet_marker(text)
     return inline_marker or (stripped.endswith(":") and has_bullet)
 
