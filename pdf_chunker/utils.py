@@ -61,6 +61,31 @@ def _list_words(text: str, *, lowercase: bool = False) -> list[str]:
     return [w.lower() for w in words] if lowercase else words
 
 
+def _normalize_sentence_boundaries(text: str) -> str:
+    lines = text.splitlines()
+    if len(lines) <= 1:
+        return text
+
+    def _needs_sentence_break(current: str, nxt: str) -> bool:
+        current_stripped = current.strip()
+        next_stripped = nxt.lstrip()
+        if not current_stripped or not next_stripped:
+            return False
+        if current_stripped.endswith((".", "!", "?")):
+            return False
+        if _count_words(current_stripped) <= 2:
+            return False
+        first_char = next_stripped[0]
+        return first_char.isalpha() and first_char.isupper()
+
+    return "".join(
+        f"{line}{'. \n' if _needs_sentence_break(line, lines[index + 1]) else '\n'}"
+        if index < len(lines) - 1
+        else line
+        for index, line in enumerate(lines)
+    )
+
+
 def _count_words(text: str) -> int:
     return len(_list_words(text))
 
@@ -68,24 +93,44 @@ def _count_words(text: str) -> int:
 def _count_sentences(text: str) -> int:
     if not text:
         return 0
-    sentences = _RE_SENTENCE.findall(text)
+    normalized = _normalize_sentence_boundaries(text)
+    sentences = _RE_SENTENCE.findall(normalized)
     if not sentences:
         return 0
     ignore = sum(1 for sentence in sentences if _count_words(sentence) <= 2)
     return max(1, len(sentences) - ignore)
 
 
+def _is_acronym(word: str) -> bool:
+    letters = [char for char in word if char.isalpha()]
+    return len(letters) > 1 and all(char.isupper() for char in letters)
+
+
+def _syllables_from_cmudict(
+    word: str, cmu_dict: dict[str, list[list[str]]] | None
+) -> int | None:
+    if not cmu_dict:
+        return None
+    pronunciations = cmu_dict.get(word.lower())
+    if not pronunciations:
+        return None
+    return sum(1 for phone in pronunciations[0] if phone[-1].isdigit())
+
+
 def _count_syllables(text: str, lang: str = _READABILITY_LANG) -> int:
-    words = _list_words(text, lowercase=True)
+    words = _list_words(text)
     if not words:
         return 0
     cmu_dict = _get_cmudict(lang)
     hyphenator = _get_pyphen(lang)
     return sum(
         (
-            sum(1 for phone in cmu_dict[word][0] if phone[-1].isdigit())
-            if cmu_dict and word in cmu_dict and cmu_dict[word]
-            else len(hyphenator.positions(word)) + 1
+            1
+            if _is_acronym(word)
+            else (
+                _syllables_from_cmudict(word, cmu_dict)
+                or len(hyphenator.positions(word.lower())) + 1
+            )
         )
         for word in words
     )

@@ -213,6 +213,15 @@ def test_sentence_merge_respects_small_chunk_capacity() -> None:
     assert len(merged) > 1
     assert len(merged[0].split()) <= 5
 
+    dense_tail = ["Alphabeta", "gamma delta."]
+    merged_dense = _merge_sentence_fragments(
+        dense_tail,
+        chunk_size=3,
+        overlap=0,
+        min_chunk_size=None,
+    )
+    assert merged_dense == ["Alphabeta gamma delta."]
+
 
 def test_sentence_merge_large_chunks_respect_hard_cap() -> None:
     """Large chunk configurations still merge up to their hard cap."""
