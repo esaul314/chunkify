@@ -774,6 +774,108 @@ def _record_is_footer_candidate(record: tuple[int, Block, str]) -> bool:
     return bool(_record_trailing_footer_lines(record))
 
 
+def _trim_footer_suffix(text: str, suffix: tuple[str, ...]) -> str:
+    """Return ``text`` with trailing ``suffix`` bullet lines removed."""
+
+    if not suffix:
+        return text
+    lines = text.splitlines()
+    if not lines:
+        return text
+    trimmed = list(lines)
+    suffix_lines = tuple(line.strip() for line in suffix if line.strip())
+    if not suffix_lines:
+        return text
+    index = len(trimmed) - 1
+    for candidate in reversed(suffix_lines):
+        while index >= 0 and not trimmed[index].strip():
+            trimmed.pop()
+            index -= 1
+        if index < 0:
+            return text
+        if trimmed[index].strip() != candidate:
+            return text
+        trimmed.pop()
+        index -= 1
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+    return "\n".join(trimmed)
+
+
+def _strip_footer_suffix(
+    record: tuple[int, Block, str]
+) -> tuple[int, Block, str] | None:
+    """Return ``record`` without footer bullets or ``None`` if empty."""
+
+    page, block, text = record
+    suffix = _record_trailing_footer_lines(record)
+    if not suffix:
+        return record
+    trimmed = _trim_footer_suffix(text, suffix)
+    if trimmed == text:
+        return record
+    if not trimmed.strip():
+        return None
+    updated_block: Block = block
+    if isinstance(block, Mapping):
+        updated = dict(block)
+        updated["text"] = trimmed
+        updated_block = cast(Block, updated)
+    return page, updated_block, trimmed
+
+
+def _is_footer_artifact_record(
+    previous: tuple[int, Block, str],
+    current: tuple[int, Block, str],
+) -> bool:
+    """Return ``True`` when ``current`` resembles a stray footer list."""
+
+    prev_page, prev_block, prev_text = previous
+    page, block, text = current
+    if page != prev_page:
+        return False
+    stripped_lines = tuple(
+        line.strip() for line in text.splitlines() if line.strip()
+    )
+    if not stripped_lines or len(stripped_lines) > 2:
+        return False
+    if not all(
+        starts_with_bullet(line) or starts_with_number(line)
+        for line in stripped_lines
+    ):
+        return False
+    word_total = sum(len(line.split()) for line in stripped_lines)
+    if word_total > 20:
+        return False
+    width = None
+    if isinstance(block, Mapping):
+        bbox = block.get("bbox")
+        if isinstance(bbox, tuple) and len(bbox) == 4:
+            try:
+                width = float(bbox[2]) - float(bbox[0])
+            except (TypeError, ValueError):
+                width = None
+    if width is not None and width > 260:
+        return False
+    return not _starts_list_like(prev_block, prev_text)
+
+
+def _strip_footer_suffixes(
+    records: Iterable[tuple[int, Block, str]]
+) -> tuple[tuple[int, Block, str], ...]:
+    """Remove footer suffix bullets from ``records``."""
+
+    cleaned: list[tuple[int, Block, str]] = []
+    for record in records:
+        trimmed = _strip_footer_suffix(record)
+        if trimmed is None:
+            continue
+        if cleaned and _is_footer_artifact_record(cleaned[-1], trimmed):
+            continue
+        cleaned.append(trimmed)
+    return tuple(cleaned)
+
+
 def _should_emit_list_boundary(
     previous: tuple[int, Block, str], block: Block, text: str
 ) -> bool:
@@ -982,6 +1084,9 @@ def _collapse_records(
     limit: int | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
     seq = list(records)
+    seq = list(_strip_footer_suffixes(seq))
+    if not seq:
+        return
     resolved_limit = (
         limit
         if limit is not None
