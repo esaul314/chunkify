@@ -223,6 +223,30 @@ def _merge_numbered_list_chunks(chunks: List[str]) -> List[str]:
     return merged
 
 
+def _collapse_numbered_list_spacing(text: str) -> str:
+    """Collapse blank lines between sequential numbered items."""
+
+    if "\n\n" not in text:
+        return text
+    lines = tuple(text.splitlines())
+    if len(lines) <= 2:
+        return text
+
+    def _is_numbered(line: str) -> bool:
+        stripped = line.lstrip()
+        return bool(stripped) and _starting_number(stripped) is not None
+
+    filtered = tuple(
+        line
+        for index, line in enumerate(lines)
+        if line.strip()
+        or index == 0
+        or index == len(lines) - 1
+        or not (_is_numbered(lines[index - 1]) and _is_numbered(lines[index + 1]))
+    )
+    return "\n".join(filtered)
+
+
 def _extract_bullet_tail(lines: List[str]) -> Tuple[List[str], List[str]]:
     """Split lines into non-bullet head and trailing bullet block."""
     idx = len(lines)
@@ -868,6 +892,9 @@ def semantic_chunker(
     # Rebalance bullet lists and attach standalone list chunks
     bullet_chunks = _rebalance_bullet_chunks(numbered_chunks)
     list_chunks = _merge_standalone_lists(bullet_chunks)
+    list_chunks = [
+        _collapse_numbered_list_spacing(chunk) for chunk in list_chunks
+    ]
 
     # Final statistics
     final_short_count = sum(1 for chunk in list_chunks if len(chunk.split()) <= short_threshold)

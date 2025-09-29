@@ -979,8 +979,35 @@ def _enumerate_segments(
     return tuple(zip(offsets, segments, strict=False))
 
 
+def _collapse_numbered_list_spacing(text: str) -> str:
+    """Collapse blank lines between numbered items while preserving others."""
+
+    if "\n\n" not in text:
+        return text
+    lines = tuple(text.splitlines())
+    if len(lines) <= 2:
+        return text
+
+    def _is_numbered(line: str) -> bool:
+        stripped = line.lstrip()
+        return bool(stripped) and starts_with_number(stripped)
+
+    def _keep(index_line: tuple[int, str]) -> bool:
+        index, line = index_line
+        if line.strip():
+            return True
+        if index == 0 or index == len(lines) - 1:
+            return True
+        prev_line, next_line = lines[index - 1], lines[index + 1]
+        return not (_is_numbered(prev_line) and _is_numbered(next_line))
+
+    filtered = tuple(line for index, line in enumerate(lines) if _keep((index, line)))
+    return "\n".join(filtered)
+
+
 def _join_record_texts(records: Iterable[tuple[int, Block, str]]) -> str:
-    return "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
+    joined = "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
+    return _collapse_numbered_list_spacing(joined) if joined else joined
 
 
 def _apply_overlap_within_segment(
