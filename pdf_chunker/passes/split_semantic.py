@@ -71,6 +71,8 @@ _TOKEN_PATTERN = re.compile(r"\S+")
 _HEADING_STYLE_FLAVORS = frozenset({"bold", "italic", "small_caps", "caps", "uppercase"})
 _STYLED_LIST_KIND = "styled"
 
+# fmt: off
+
 
 def _span_attr(span: Any, name: str, default: Any = None) -> Any:
     if isinstance(span, Mapping):
@@ -772,6 +774,17 @@ def _record_is_footer_candidate(record: tuple[int, Block, str]) -> bool:
     return bool(_record_trailing_footer_lines(record))
 
 
+def _should_emit_list_boundary(
+    previous: tuple[int, Block, str], block: Block, text: str
+) -> bool:
+    _, prev_block, prev_text = previous
+    if prev_text.rstrip().endswith(":"):
+        return False
+    if _starts_list_like(prev_block, prev_text):
+        return False
+    return not _record_is_footer_candidate(previous)
+
+
 def _list_tail_split_index(text: str) -> int | None:
     """Return the index where a list block transitions into narrative text."""
 
@@ -841,6 +854,33 @@ def _split_colon_bullet_segments(
     return reduce(_append_segment, buffer, tuple())
 
 
+def _expand_segment_records(
+    segment: tuple[tuple[int, Block, str], ...]
+) -> tuple[tuple[int, Block, str], ...]:
+    expanded = tuple(chain.from_iterable(_split_list_record(record) for record in segment))
+    return expanded if expanded else segment
+
+
+def _segment_offsets(
+    segments: tuple[tuple[tuple[int, Block, str], ...], ...]
+) -> tuple[int, ...]:
+    if not segments:
+        return tuple()
+    counts = accumulate(len(segment) for segment in segments[:-1])
+    return tuple(chain((0,), counts))
+
+
+def _enumerate_segments(
+    segments: tuple[tuple[tuple[int, Block, str], ...], ...]
+) -> tuple[tuple[int, tuple[tuple[int, Block, str], ...]], ...]:
+    offsets = _segment_offsets(segments)
+    return tuple(zip(offsets, segments, strict=False))
+
+
+def _join_record_texts(records: Iterable[tuple[int, Block, str]]) -> str:
+    return "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
+
+
 def _apply_overlap_within_segment(
     segment: tuple[tuple[int, Block, str], ...], overlap: int
 ) -> tuple[tuple[int, Block, str], ...]:
@@ -892,10 +932,7 @@ def _emit_segment_records(
     """Emit ``segment`` as merged or individual records respecting limits."""
     if not segment:
         return tuple()
-    expanded = tuple(
-        chain.from_iterable(_split_list_record(record) for record in segment)
-    )
-    segment = expanded if expanded else segment
+    segment = _expand_segment_records(segment)
     words, dense, effective = _segment_totals(segment)
     exceeds_soft = resolved_limit is not None and effective > resolved_limit
     exceeds_hard = hard_limit is not None and effective > hard_limit
@@ -906,9 +943,7 @@ def _emit_segment_records(
     if exceeds_soft or exceeds_hard:
         return _emit_individual_records(segment, start_index)
     trimmed = _apply_overlap_within_segment(segment, overlap)
-    joined = "\n\n".join(
-        part.strip() for _, _, part in trimmed if part.strip()
-    ).strip()
+    joined = _join_record_texts(trimmed)
     if not joined or len(joined) > SOFT_LIMIT:
         return _emit_individual_records(segment, start_index)
     merged = _merge_record_block(list(trimmed), joined)
@@ -934,9 +969,7 @@ def _maybe_merge_dense_page(
     word_total = sum(_effective_counts(text)[0] for _, _, text in sequence)
     if limit is not None and word_total <= limit:
         return sequence
-    merged_text = "\n\n".join(
-        part.strip() for _, _, part in sequence if part.strip()
-    ).strip()
+    merged_text = _join_record_texts(sequence)
     if not merged_text:
         return sequence
     merged_block = _merge_record_block(list(sequence), merged_text)
@@ -980,10 +1013,7 @@ def _collapse_records(
         first_index = start_index if start_index is not None else 0
         frozen = tuple(buffer)
         segments = _split_colon_bullet_segments(frozen) or (frozen,)
-        offsets = tuple(
-            chain((0,), accumulate(len(segment) for segment in segments[:-1]))
-        )
-        for offset, segment in zip(offsets, segments, strict=False):
+        for offset, segment in _enumerate_segments(segments):
             produced = _emit_segment_records(
                 segment,
                 start_index=first_index + offset,
@@ -1010,12 +1040,12 @@ def _collapse_records(
             emit()
             outputs.append((page, _with_chunk_index(block, idx), text))
             continue
-        if buffer and _starts_list_like(block, text):
-            _, prev_block, prev_text = buffer[-1]
-            if not prev_text.rstrip().endswith(":") and not _starts_list_like(
-                prev_block, prev_text
-            ) and not _record_is_footer_candidate(buffer[-1]):
-                emit()
+        if (
+            buffer
+            and _starts_list_like(block, text)
+            and _should_emit_list_boundary(buffer[-1], block, text)
+        ):
+            emit()
         if buffer:
             projected_words = running_words + word_count
             projected_dense = running_dense + dense_count
@@ -1544,3 +1574,5 @@ def make_splitter(**opts: Any) -> _SplitSemanticPass:
 
 
 split_semantic: Pass = register(make_splitter())
+
+# fmt: on
