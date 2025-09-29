@@ -375,7 +375,41 @@ def _merge_sentence_fragments(
     )
 
     stitch_limit = hard_limit if hard_limit is not None else target_limit
-    return _stitch_continuation_heads([text for text, _ in merged], stitch_limit)
+    texts = [text for text, _ in merged]
+    coalesced = _coalesce_sentence_runs(texts)
+    return _stitch_continuation_heads(coalesced, stitch_limit)
+
+
+def _coalesce_sentence_runs(chunks: Iterable[str]) -> list[str]:
+    def _combine(parts: tuple[str, ...]) -> str:
+        return " ".join(segment.strip() for segment in parts if segment.strip()).strip()
+
+    def _flush(acc: list[str], buffer: tuple[str, ...]) -> list[str]:
+        if not buffer:
+            return acc
+        if len(buffer) == 1:
+            return [*acc, buffer[0]]
+        has_sentence_end = any(
+            _ENDS_SENTENCE.search(part.rstrip()) for part in buffer if part
+        )
+        if not has_sentence_end:
+            return [*acc, *buffer]
+        combined = _combine(buffer)
+        return [*acc, combined] if combined else acc
+
+    def _consume(state: tuple[list[str], tuple[str, ...]], chunk: str) -> tuple[list[str], tuple[str, ...]]:
+        acc, buffer = state
+        updated_buffer = (*buffer, chunk)
+        if _ENDS_SENTENCE.search(chunk.rstrip()):
+            return _flush(acc, updated_buffer), ()
+        return acc, updated_buffer
+
+    merged, pending = reduce(
+        _consume,
+        chunks,
+        ([], ()),
+    )
+    return _flush(merged, pending)
 
 
 def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str]:

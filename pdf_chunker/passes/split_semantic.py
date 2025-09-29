@@ -489,18 +489,35 @@ def _collect_superscripts(
     return anchors, spans
 
 
-def _soft_segments(text: str, max_size: int = SOFT_LIMIT) -> list[str]:
-    """Split ``text`` into segments of at most ``max_size`` characters."""
+def _segment_char_limit(chunk_size: int | None) -> int:
+    """Return a soft-segmentation character limit for ``chunk_size``."""
+
+    if chunk_size is None or chunk_size <= 0:
+        return SOFT_LIMIT
+    estimated = int(ceil(chunk_size * _AVERAGE_CHARS_PER_TOKEN))
+    return min(SOFT_LIMIT, max(1, estimated))
+
+
+def _soft_segments(
+    text: str, *, max_chars: int | None = None
+) -> list[str]:
+    """Split ``text`` into segments of at most ``max_chars`` characters."""
+
+    limit = SOFT_LIMIT if max_chars is None or max_chars <= 0 else min(max_chars, SOFT_LIMIT)
 
     def _split(chunk: str) -> Iterator[str]:
-        if len(chunk) <= max_size:
-            yield chunk.strip()
+        if len(chunk) <= limit:
+            trimmed = chunk.strip()
+            if trimmed:
+                yield trimmed
             return
-        cut = chunk.rfind(" ", 0, max_size)
-        head = chunk[: cut if cut != -1 else max_size].strip()
+        cut = chunk.rfind(" ", 0, limit)
+        head = chunk[: cut if cut != -1 else limit].strip()
         tail = chunk[len(head) :].lstrip()
-        yield head
-        yield from _split(tail)
+        if head:
+            yield head
+        if tail:
+            yield from _split(tail)
 
     return list(_split(text))
 
@@ -1096,6 +1113,8 @@ def _maybe_merge_dense_page(
     if dense_total > options.chunk_size:
         return sequence
     word_total = sum(_effective_counts(text)[0] for _, _, text in sequence)
+    if word_total > options.chunk_size > 0:
+        return sequence
     if limit is not None and word_total <= limit:
         return sequence
     merged_text = _join_record_texts(sequence)
@@ -1231,6 +1250,7 @@ def _get_split_fn(
     """Return a semantic splitter enforcing size limits and collecting metrics."""
 
     soft_hits = 0
+    char_limit = _segment_char_limit(chunk_size)
 
     try:
         from pdf_chunker.splitter import semantic_chunker
@@ -1251,7 +1271,7 @@ def _get_split_fn(
 
             def _soften(segment: str) -> list[str]:
                 nonlocal soft_hits
-                splits = _soft_segments(segment)
+                splits = _soft_segments(segment, max_chars=char_limit)
                 if len(splits) > 1:
                     soft_hits += 1
                 return splits
@@ -1270,7 +1290,7 @@ def _get_split_fn(
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
-            raw = _soft_segments(text)
+            raw = _soft_segments(text, max_chars=char_limit)
             final = _merge_sentence_fragments(
                 raw,
                 chunk_size=chunk_size,
