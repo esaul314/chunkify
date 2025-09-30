@@ -1089,6 +1089,7 @@ def _segment_totals(segment: tuple[tuple[int, Block, str], ...]) -> tuple[int, i
 
 
 def _resolved_limit(options: SplitOptions | None, limit: int | None) -> int | None:
+    candidate: int | None
     if limit is not None:
         candidate = limit
     elif options is not None:
