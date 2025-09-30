@@ -1057,9 +1057,15 @@ def _collapse_numbered_list_spacing(text: str) -> str:
     return "\n".join(filtered)
 
 
+def _normalize_numbered_list_text(text: str) -> str:
+    """Normalize numbered list spacing without altering other content."""
+
+    return _collapse_numbered_list_spacing(text) if text else text
+
+
 def _join_record_texts(records: Iterable[tuple[int, Block, str]]) -> str:
     joined = "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
-    return _collapse_numbered_list_spacing(joined) if joined else joined
+    return _normalize_numbered_list_text(joined) if joined else joined
 
 
 def _apply_overlap_within_segment(
@@ -1162,7 +1168,7 @@ def _emit_individual_records(
         (
             page,
             _with_chunk_index(block, start_index + offset),
-            text,
+            _normalize_numbered_list_text(text),
         )
         for offset, (page, block, text) in enumerate(segment)
     )
