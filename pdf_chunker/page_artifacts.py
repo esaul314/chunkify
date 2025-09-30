@@ -92,6 +92,36 @@ def _bullet_body(text: str) -> str:
     return without_marker.strip(" -\u2022*.")
 
 
+def _looks_like_question_footer_body(body: str) -> bool:
+    """Return ``True`` when ``body`` resembles a question-style footer."""
+
+    if not body:
+        return False
+    stripped = body.strip()
+    if not stripped.endswith("?"):
+        return False
+    question_count = stripped.count("?")
+    if not question_count:
+        return False
+    tokens = tuple(re.findall(r"[A-Za-z0-9']+", stripped))
+    if not tokens:
+        return False
+    return len(tokens) <= 24
+
+
+def _looks_like_paragraph_footer_body(body: str) -> bool:
+    """Return ``True`` for bullet bodies that resemble paragraph fragments."""
+
+    if not body:
+        return False
+    stripped = body.strip()
+    tokens = tuple(re.findall(r"[A-Za-z0-9']+", stripped))
+    if len(tokens) < 20:
+        return False
+    sentence_count = sum(1 for segment in re.split(r"[.!?]+", stripped) if segment.strip())
+    return sentence_count >= 2 or len(tokens) >= 25
+
+
 def _question_footer_token_stats(body: str) -> tuple[int, int]:
     """Return ``(total_tokens, long_tokens)`` for ``body``."""
 
@@ -171,27 +201,65 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     if not trailing:
         return lines
 
-    bodies = [(_bullet_body(line), pos) for pos, line in trailing]
+    trailing_info = tuple(
+        (pos, line, _bullet_body(line)) for pos, line in trailing
+    )
     previous = _first_non_empty_line(
         lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1)
     )
 
-    def _should_prune(body: str) -> bool:
-        return not body or _footer_bullet_signals(body, previous)
-
-    after_idx = trailing[-1][0] + 1
+    after_idx = trailing_info[-1][0] + 1
     after_line = lines[after_idx] if after_idx < len(lines) else ""
-    trailing_count = len(trailing)
+    trailing_count = len(trailing_info)
+    last_idx = trailing_info[0][0]
+    ends_document = last_idx == len(lines) - 1
+
+    question_footer = all(
+        _looks_like_question_footer_body(body) for _, _, body in trailing_info
+    )
+    previous_line = previous.strip()
+    allows_paragraph_footer = (not previous_line) or previous_line.endswith(":")
+    body_footer_signal = any(
+        _footer_bullet_signals(body)
+        for _, _, body in trailing_info
+        if body
+    )
+    surrounding_footer_signal = _footer_bullet_signals(after_line, previous)
+    paragraph_footer = (
+        allows_paragraph_footer
+        and ends_document
+        and trailing_count >= 3
+        and all(_looks_like_paragraph_footer_body(body) for _, _, body in trailing_info)
+        and (body_footer_signal or surrounding_footer_signal)
+    )
+
+    def _should_prune(line: str, body: str, pos: int) -> bool:
+        base_signals = (
+            not body,
+            _footer_bullet_signals(body, previous),
+            _is_question_bullet_footer(line, pos),
+        )
+        question_signal = question_footer and _looks_like_question_footer_body(body)
+        paragraph_signal = paragraph_footer and _looks_like_paragraph_footer_body(body)
+        return any((*base_signals, question_signal, paragraph_signal))
+
     context_allows = any(
         (
             _looks_like_shipping_footer(after_line),
-            _footer_bullet_signals(after_line, previous),
+            surrounding_footer_signal,
             _header_invites_footer(previous, trailing_count),
+            body_footer_signal,
         )
     )
+    if question_footer or paragraph_footer:
+        context_allows = True
 
-    removals = [pos for body, pos in bodies if _should_prune(body)]
-    if len(removals) != len(bodies) or not context_allows:
+    removals = [
+        pos
+        for pos, line, body in trailing_info
+        if _should_prune(line, body, pos)
+    ]
+    if len(removals) != len(trailing_info) or not context_allows:
         return lines
 
     keep_indices = set(removals)

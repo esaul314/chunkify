@@ -67,6 +67,33 @@ def test_trailing_bullet_footer_dropped_from_lines():
     assert _drop_trailing_bullet_footers(lines) == ["Community Updates:"]
 
 
+def test_long_paragraph_bullet_list_preserved():
+    lines = [
+        "Manage or avoid these bottlenecks:",
+        (
+            "• Build resilient systems that can adapt quickly when requirements change "
+            "and teams need support across functions while leadership realigns "
+            "priorities for emerging opportunities that keep arriving unexpectedly."
+        ),
+        (
+            "• Share historical context so everyone understands why legacy processes exist "
+            "even when they seem inefficient today because previous incidents informed "
+            "guardrails that cannot be discarded lightly regardless of pressure."
+        ),
+        (
+            "• Rotate responsibilities to spread specialized knowledge instead of letting it "
+            "concentrate in only one or two experts because continuity planning requires "
+            "multiple capable owners for each surface area especially in crises."
+        ),
+        (
+            "• Document mitigations in collaborative tools so newcomers can learn patterns "
+            "without waiting for a mentor to be free and to provide searchable breadcrumbs "
+            "when emergencies demand rapid onboarding under severe time limits."
+        ),
+    ]
+    assert _drop_trailing_bullet_footers(lines) == lines
+
+
 def test_inline_footnote_removed():
     sample = "Some text\n1 Footnote text.\nNext line"
     cleaned = remove_page_artifact_lines(sample, 1)

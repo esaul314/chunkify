@@ -766,29 +766,47 @@ def _record_is_list_like(record: tuple[int, Block, str]) -> bool:
     return _starts_list_like(block, text)
 
 
-def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, ...]:
-    """Return trailing bullet lines that heuristically resemble footers."""
+def _footer_suffix_lines(text: str) -> tuple[str, ...]:
+    """Return stripped trailing bullet lines that look like footer artifacts."""
 
-    _, block, text = record
-    if not _starts_list_like(block, text):
-        return tuple()
     lines = tuple(line.strip() for line in text.splitlines() if line.strip())
     if not lines:
         return tuple()
-    pruned = _drop_trailing_bullet_footers(list(lines))
+    pruned = tuple(_drop_trailing_bullet_footers(list(lines)))
     if len(pruned) == len(lines):
         return tuple()
-    tail = lines[len(pruned) :]
+    suffix = lines[len(pruned) :]
     bullet_like = tuple(
         line
-        for line in tail
+        for line in suffix
         if starts_with_bullet(line) or starts_with_number(line)
     )
-    return bullet_like if len(bullet_like) == len(tail) else tuple()
+    return bullet_like if len(bullet_like) == len(suffix) else tuple()
+
+
+def _trimmed_footer_text(text: str) -> tuple[str, tuple[str, ...]]:
+    """Return ``text`` trimmed of footer bullets alongside the suffix."""
+
+    suffix = _footer_suffix_lines(text)
+    if not suffix:
+        return text, tuple()
+    trimmed = _trim_footer_suffix(text, suffix)
+    if trimmed == text:
+        return text, tuple()
+    return trimmed, suffix
+
+
+def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, ...]:
+    """Return trailing bullet lines that heuristically resemble footers."""
+
+    _, _block, text = record
+    return _footer_suffix_lines(text)
 
 
 def _record_is_footer_candidate(record: tuple[int, Block, str]) -> bool:
-    return bool(_record_trailing_footer_lines(record))
+    text = record[2]
+    trimmed, suffix = _trimmed_footer_text(text)
+    return bool(suffix and trimmed.strip())
 
 
 def _trim_footer_suffix(text: str, suffix: tuple[str, ...]) -> str:
@@ -825,11 +843,8 @@ def _strip_footer_suffix(
     """Return ``record`` without footer bullets or ``None`` if empty."""
 
     page, block, text = record
-    suffix = _record_trailing_footer_lines(record)
+    trimmed, suffix = _trimmed_footer_text(text)
     if not suffix:
-        return record
-    trimmed = _trim_footer_suffix(text, suffix)
-    if trimmed == text:
         return record
     if not trimmed.strip():
         return None
@@ -1054,6 +1069,7 @@ def _segment_totals(segment: tuple[tuple[int, Block, str], ...]) -> tuple[int, i
 
 
 def _resolved_limit(options: SplitOptions | None, limit: int | None) -> int | None:
+    candidate: int | None
     if limit is not None:
         candidate = limit
     elif options is not None:
