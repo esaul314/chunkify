@@ -1053,6 +1053,72 @@ def _segment_totals(segment: tuple[tuple[int, Block, str], ...]) -> tuple[int, i
     return words, dense, max(words, dense)
 
 
+def _resolved_limit(options: SplitOptions | None, limit: int | None) -> int | None:
+    if limit is not None:
+        candidate = limit
+    elif options is not None:
+        candidate = options.compute_limit()
+    else:
+        candidate = None
+    if candidate is None or candidate <= 0:
+        return None
+    return candidate
+
+
+def _hard_limit(options: SplitOptions | None, resolved_limit: int | None) -> int | None:
+    if options is not None and options.chunk_size > 0:
+        return options.chunk_size
+    return resolved_limit
+
+
+def _overlap_value(options: SplitOptions | None) -> int:
+    return options.overlap if options is not None else 0
+
+
+def _emit_buffer_segments(
+    buffer: tuple[tuple[int, Block, str], ...],
+    *,
+    start_index: int,
+    overlap: int,
+    resolved_limit: int | None,
+    hard_limit: int | None,
+    overflow: bool,
+) -> tuple[tuple[int, Block, str], ...]:
+    if not buffer:
+        return tuple()
+    segments = _split_colon_bullet_segments(buffer) or (buffer,)
+    enumerated = _enumerate_segments(segments)
+    return tuple(
+        emission
+        for offset, segment in enumerated
+        for emission in _emit_segment_records(
+            segment,
+            start_index=start_index + offset,
+            overlap=overlap,
+            resolved_limit=resolved_limit,
+            hard_limit=hard_limit,
+            overflow=overflow,
+        )
+    )
+
+
+def _merged_segment_record(
+    segment: tuple[tuple[int, Block, str], ...],
+    *,
+    start_index: int,
+    overlap: int,
+) -> tuple[int, Block, str] | None:
+    trimmed = _apply_overlap_within_segment(segment, overlap)
+    if not trimmed:
+        return None
+    joined = _join_record_texts(trimmed)
+    if not joined or len(joined) > SOFT_LIMIT:
+        return None
+    merged = _merge_record_block(list(trimmed), joined)
+    first_page = trimmed[0][0]
+    return first_page, _with_chunk_index(merged, start_index), joined
+
+
 def _emit_individual_records(
     segment: tuple[tuple[int, Block, str], ...], start_index: int
 ) -> tuple[tuple[int, Block, str], ...]:
@@ -1082,19 +1148,19 @@ def _emit_segment_records(
     words, dense, effective = _segment_totals(segment)
     exceeds_soft = resolved_limit is not None and effective > resolved_limit
     exceeds_hard = hard_limit is not None and effective > hard_limit
-    if overflow and not exceeds_soft and not exceeds_hard:
-        overflow = False
-    if overflow or len(segment) == 1:
+    overflow_active = overflow and (exceeds_soft or exceeds_hard)
+    if overflow_active or len(segment) == 1:
         return _emit_individual_records(segment, start_index)
     if exceeds_soft or exceeds_hard:
         return _emit_individual_records(segment, start_index)
-    trimmed = _apply_overlap_within_segment(segment, overlap)
-    joined = _join_record_texts(trimmed)
-    if not joined or len(joined) > SOFT_LIMIT:
+    merged = _merged_segment_record(
+        segment,
+        start_index=start_index,
+        overlap=overlap,
+    )
+    if merged is None:
         return _emit_individual_records(segment, start_index)
-    merged = _merge_record_block(list(trimmed), joined)
-    first_page = trimmed[0][0]
-    return ((first_page, _with_chunk_index(merged, start_index), joined),)
+    return (merged,)
 
 
 def _maybe_merge_dense_page(
@@ -1133,22 +1199,14 @@ def _collapse_records(
     seq = list(_strip_footer_suffixes(seq))
     if not seq:
         return
-    resolved_limit = (
-        limit
-        if limit is not None
-        else (options.compute_limit() if options is not None else None)
-    )
-    if resolved_limit is None or resolved_limit <= 0:
+    resolved_limit = _resolved_limit(options, limit)
+    if resolved_limit is None:
         for idx, (page, block, text) in enumerate(seq):
             yield page, _with_chunk_index(block, idx), text
         return
 
-    hard_limit = None
-    if options is not None and options.chunk_size > 0:
-        hard_limit = options.chunk_size
-    elif resolved_limit is not None and resolved_limit > 0:
-        hard_limit = resolved_limit
-    overlap = options.overlap if options is not None else 0
+    hard_limit = _hard_limit(options, resolved_limit)
+    overlap = _overlap_value(options)
     buffer: list[tuple[int, Block, str]] = []
     running_words = 0
     running_dense = 0
@@ -1162,18 +1220,15 @@ def _collapse_records(
         if not buffer:
             return
         first_index = start_index if start_index is not None else 0
-        frozen = tuple(buffer)
-        segments = _split_colon_bullet_segments(frozen) or (frozen,)
-        for offset, segment in _enumerate_segments(segments):
-            produced = _emit_segment_records(
-                segment,
-                start_index=first_index + offset,
-                overlap=overlap,
-                resolved_limit=resolved_limit,
-                hard_limit=hard_limit,
-                overflow=overflow,
-            )
-            outputs.extend(produced)
+        produced = _emit_buffer_segments(
+            tuple(buffer),
+            start_index=first_index,
+            overlap=overlap,
+            resolved_limit=resolved_limit,
+            hard_limit=hard_limit,
+            overflow=overflow,
+        )
+        outputs.extend(produced)
         buffer, running_words, running_dense, start_index = [], 0, 0, None
 
     for idx, record in enumerate(seq):
