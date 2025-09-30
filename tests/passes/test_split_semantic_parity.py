@@ -133,6 +133,29 @@ def _textual_list_kind(text: str) -> str | None:
     return None
 
 
+def _find_chunk(items: Iterable[dict], *needles: str) -> dict:
+    """Return the first chunk whose text contains all ``needles``."""
+
+    match = next(
+        (
+            item
+            for item in items
+            if all(needle in item.get("text", "") for needle in needles)
+        ),
+        None,
+    )
+    if match is None:
+        joined = ", ".join(needles) or "<any>"
+        raise AssertionError(f"expected chunk containing: {joined}")
+    return match
+
+
+def _find_chunk_text(items: Iterable[dict], *needles: str) -> str:
+    """Return the text of the first chunk containing all ``needles``."""
+
+    return _find_chunk(items, *needles).get("text", "")
+
+
 def _pdf(path: str) -> dict:
     return read(path)
 
@@ -191,14 +214,23 @@ def test_platform_eng_parity() -> None:
         meta for meta in _metas(refactored_items) if meta.get("list_kind")
     ]
 
-    assert any(
-        "Leverage\n\nCore to the value" in text for text in _texts(refactored_items)
+    leverage_chunk = _find_chunk(refactored_items, "Leverage", "Core to the value")
+    leverage_text = leverage_chunk["text"]
+    assert leverage_text == _find_chunk_text(
+        legacy_items, "Leverage", "Core to the value"
     )
+    assert "Leverage\nCore to the value" in leverage_text
+    assert "Leverage\n\nCore to the value" not in leverage_text
 
-    platform_item = next(
-        item for item in refactored_items if "Platform\n\nWe use" in item["text"]
+    platform_chunk = _find_chunk(
+        refactored_items,
+        "Platform",
+        "We use Evan Bottcher's definition",
     )
-    assert platform_item["meta"].get("list_kind")
+    assert platform_chunk["meta"].get("list_kind")
+    platform_text = platform_chunk["text"]
+    assert "Platform\nWe use" in platform_text
+    assert "Platform\n\nWe use" not in platform_text
 
     list_chunk = next(
         text
