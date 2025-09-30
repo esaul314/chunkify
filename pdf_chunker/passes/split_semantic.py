@@ -20,7 +20,12 @@ from typing import Any, TypedDict, cast
 from pdf_chunker.framework import Artifact, Pass, register
 from pdf_chunker.inline_styles import InlineStyleSpan
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
-from pdf_chunker.page_artifacts import _drop_trailing_bullet_footers
+from pdf_chunker.page_artifacts import (
+    _bullet_body,
+    _drop_trailing_bullet_footers,
+    _footer_bullet_signals,
+    _header_invites_footer,
+)
 from pdf_chunker.passes.chunk_options import (
     SplitMetrics,
     SplitOptions,
@@ -766,6 +771,39 @@ def _record_is_list_like(record: tuple[int, Block, str]) -> bool:
     return _starts_list_like(block, text)
 
 
+def _previous_non_empty_line(lines: tuple[str, ...]) -> str:
+    return next((line for line in reversed(lines) if line.strip()), "")
+
+
+def _footer_context_allows(previous_line: str, trailing_count: int) -> bool:
+    return any(
+        (
+            _footer_bullet_signals("", previous_line),
+            _header_invites_footer(previous_line, trailing_count),
+        )
+    )
+
+
+def _footer_line_is_artifact(line: str, previous_line: str) -> bool:
+    body = _bullet_body(line)
+    return not body or _footer_bullet_signals(body, previous_line)
+
+
+def _resolve_footer_suffix(lines: tuple[str, ...]) -> tuple[str, ...]:
+    pruned = tuple(_drop_trailing_bullet_footers(list(lines)))
+    if len(pruned) == len(lines):
+        return tuple()
+    suffix = lines[len(pruned) :]
+    if not suffix:
+        return tuple()
+    previous_line = _previous_non_empty_line(pruned)
+    if not _footer_context_allows(previous_line, len(suffix)):
+        return tuple()
+    if not all(_footer_line_is_artifact(line, previous_line) for line in suffix):
+        return tuple()
+    return suffix
+
+
 def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, ...]:
     """Return trailing bullet lines that heuristically resemble footers."""
 
@@ -775,16 +813,13 @@ def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, 
     lines = tuple(line.strip() for line in text.splitlines() if line.strip())
     if not lines:
         return tuple()
-    pruned = _drop_trailing_bullet_footers(list(lines))
-    if len(pruned) == len(lines):
-        return tuple()
-    tail = lines[len(pruned) :]
+    suffix = _resolve_footer_suffix(lines)
     bullet_like = tuple(
         line
-        for line in tail
+        for line in suffix
         if starts_with_bullet(line) or starts_with_number(line)
     )
-    return bullet_like if len(bullet_like) == len(tail) else tuple()
+    return bullet_like if bullet_like == suffix else tuple()
 
 
 def _record_is_footer_candidate(record: tuple[int, Block, str]) -> bool:
@@ -1054,6 +1089,7 @@ def _segment_totals(segment: tuple[tuple[int, Block, str], ...]) -> tuple[int, i
 
 
 def _resolved_limit(options: SplitOptions | None, limit: int | None) -> int | None:
+    candidate: int | None
     if limit is not None:
         candidate = limit
     elif options is not None:
