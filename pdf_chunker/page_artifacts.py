@@ -219,11 +219,18 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     )
     previous_line = previous.strip()
     allows_paragraph_footer = (not previous_line) or previous_line.endswith(":")
+    body_footer_signal = any(
+        _footer_bullet_signals(body)
+        for _, _, body in trailing_info
+        if body
+    )
+    surrounding_footer_signal = _footer_bullet_signals(after_line, previous)
     paragraph_footer = (
         allows_paragraph_footer
         and ends_document
         and trailing_count >= 3
         and all(_looks_like_paragraph_footer_body(body) for _, _, body in trailing_info)
+        and (body_footer_signal or surrounding_footer_signal)
     )
 
     def _should_prune(line: str, body: str, pos: int) -> bool:
@@ -239,8 +246,9 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     context_allows = any(
         (
             _looks_like_shipping_footer(after_line),
-            _footer_bullet_signals(after_line, previous),
+            surrounding_footer_signal,
             _header_invites_footer(previous, trailing_count),
+            body_footer_signal,
         )
     )
     if question_footer or paragraph_footer:
