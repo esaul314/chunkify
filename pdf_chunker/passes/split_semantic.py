@@ -519,24 +519,26 @@ def _soft_segments(
         if not trimmed:
             return
 
-        words = tuple(trimmed.split())
-        if word_limit is not None and len(words) > word_limit:
-            head_words = words[:word_limit]
-            tail_words = words[word_limit:]
-            head = " ".join(head_words)
-            tail = " ".join(tail_words)
-            yield from _split(head)
-            if tail:
-                yield from _split(tail)
-            return
+        if word_limit is not None:
+            tokens = tuple(_TOKEN_PATTERN.finditer(trimmed))
+            if len(tokens) > word_limit:
+                split_index = tokens[word_limit - 1].end()
+                head = trimmed[:split_index]
+                tail = trimmed[split_index:]
+                if head:
+                    yield from _split(head)
+                if tail:
+                    yield from _split(tail)
+                return
 
         if len(trimmed) <= limit:
             yield trimmed
             return
 
         pivot = trimmed.rfind(" ", 0, limit)
-        head = trimmed[: pivot if pivot != -1 else limit].strip()
-        tail = trimmed[pivot if pivot != -1 else limit :].lstrip()
+        boundary = pivot if pivot != -1 else limit
+        head = trimmed[:boundary]
+        tail = trimmed[boundary:]
         if head:
             yield from _split(head)
         if tail:

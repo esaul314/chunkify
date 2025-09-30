@@ -4,7 +4,11 @@ from pdf_chunker.cli import _cli_overrides
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import run_convert
 from pdf_chunker.framework import Artifact
-from pdf_chunker.passes.split_semantic import _collapse_records, split_semantic
+from pdf_chunker.passes.split_semantic import (
+    _collapse_records,
+    _soft_segments,
+    split_semantic,
+)
 
 
 def _observed_overlap(first: list[str], second: list[str]) -> int:
@@ -165,3 +169,11 @@ def test_collapse_records_does_not_span_pages() -> None:
     assert collapsed[0][2].split() == ["alpha", "beta"]
     assert collapsed[1][2] == "gamma"
     assert collapsed[1][1]["source"]["page"] == 2
+
+
+def test_soft_segments_retains_internal_newlines_under_word_budget() -> None:
+    text = "1. First item\n2. Second item\n3. Third item"
+
+    segments = _soft_segments(text, max_chars=40, max_words=4)
+
+    assert "\n2." in segments[0]
