@@ -11,6 +11,7 @@
 * `nox -s lint` fails because `black --check` wants to reformat `pdf_chunker/passes/split_semantic.py` even though the logic is pure.【61c927†L1-L8】
 * `nox -s typecheck` succeeds with no mypy issues.【428704†L1-L4】
 * `nox -s tests` fails on eight assertions covering footer joins, numbered-list formatting, CLI overrides, sentence-boundary guarantees, parity, and stale goldens.【0c3fcc†L1-L420】
+* Golden fixtures verified via `python scripts/refresh_goldens.py --approve`; script reported all targets up-to-date without rewriting fixtures.【157e4c†L1-L4】
 
 ## Next Steps to Reach Green
 1. **Restore lint compliance**  
