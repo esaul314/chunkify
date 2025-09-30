@@ -504,23 +504,41 @@ def _segment_char_limit(chunk_size: int | None) -> int:
 
 
 def _soft_segments(
-    text: str, *, max_chars: int | None = None
+    text: str,
+    *,
+    max_chars: int | None = None,
+    max_words: int | None = None,
 ) -> list[str]:
-    """Split ``text`` into segments of at most ``max_chars`` characters."""
+    """Split ``text`` while honouring character and word ceilings."""
 
     limit = SOFT_LIMIT if max_chars is None or max_chars <= 0 else min(max_chars, SOFT_LIMIT)
+    word_limit = max_words if max_words is not None and max_words > 0 else None
 
     def _split(chunk: str) -> Iterator[str]:
-        if len(chunk) <= limit:
-            trimmed = chunk.strip()
-            if trimmed:
-                yield trimmed
+        trimmed = chunk.strip()
+        if not trimmed:
             return
-        cut = chunk.rfind(" ", 0, limit)
-        head = chunk[: cut if cut != -1 else limit].strip()
-        tail = chunk[len(head) :].lstrip()
+
+        words = tuple(trimmed.split())
+        if word_limit is not None and len(words) > word_limit:
+            head_words = words[:word_limit]
+            tail_words = words[word_limit:]
+            head = " ".join(head_words)
+            tail = " ".join(tail_words)
+            yield from _split(head)
+            if tail:
+                yield from _split(tail)
+            return
+
+        if len(trimmed) <= limit:
+            yield trimmed
+            return
+
+        pivot = trimmed.rfind(" ", 0, limit)
+        head = trimmed[: pivot if pivot != -1 else limit].strip()
+        tail = trimmed[pivot if pivot != -1 else limit :].lstrip()
         if head:
-            yield head
+            yield from _split(head)
         if tail:
             yield from _split(tail)
 
@@ -1368,7 +1386,11 @@ def _get_split_fn(
 
             def _soften(segment: str) -> list[str]:
                 nonlocal soft_hits
-                splits = _soft_segments(segment, max_chars=char_limit)
+                splits = _soft_segments(
+                    segment,
+                    max_chars=char_limit,
+                    max_words=chunk_size,
+                )
                 if len(splits) > 1:
                     soft_hits += 1
                 return splits
@@ -1387,7 +1409,11 @@ def _get_split_fn(
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
-            raw = _soft_segments(text, max_chars=char_limit)
+            raw = _soft_segments(
+                text,
+                max_chars=char_limit,
+                max_words=chunk_size,
+            )
             final = _merge_sentence_fragments(
                 raw,
                 chunk_size=chunk_size,
