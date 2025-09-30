@@ -330,6 +330,9 @@ def _merge_sentence_fragments(
             trimmed_words,
             budget,
         )
+        pending_sentence = bool(
+            prev_text and not _ENDS_SENTENCE.search(prev_text.rstrip())
+        )
         if not decision.allowed:
             if trimmed_words != words:
                 return _append(acc, trimmed_text, trimmed_words)
@@ -337,6 +340,12 @@ def _merge_sentence_fragments(
 
         dense_fragments = decision.dense_fragments
         exceeds_limit = _violates_budget(budget, dense_fragments=dense_fragments)
+        if exceeds_limit and not decision.allow_overflow and pending_sentence:
+            decision = _MergeDecision(decision.allowed, True, dense_fragments)
+            dense_fragments = decision.dense_fragments
+            exceeds_limit = _violates_budget(
+                budget, dense_fragments=dense_fragments
+            )
         if exceeds_limit and not decision.allow_overflow:
             adjusted = (
                 _rebalance_overflow(prev_text, prev_words, trimmed_text, _target_limit_from(budget))
