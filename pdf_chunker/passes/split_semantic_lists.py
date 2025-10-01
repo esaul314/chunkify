@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from itertools import chain
 from typing import Any
 
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.passes.split_semantic_inline import _span_attrs
 
 Block = dict[str, Any]
@@ -48,6 +49,63 @@ def _block_list_kind(block: Mapping[str, Any]) -> str | None:
         return declared
     inline = _inline_list_kinds(block)
     return next(iter(inline), None)
+
+
+def _leading_list_kind(text: str) -> str | None:
+    lines = (line.lstrip() for line in text.splitlines())
+    first = next((line for line in lines if line), "")
+    if starts_with_bullet(first):
+        return "bullet"
+    if starts_with_number(first):
+        return "numbered"
+    return None
+
+
+def _infer_list_kind(text: str) -> str | None:
+    if starts_with_bullet(text):
+        return "bullet"
+    if starts_with_number(text):
+        return "numbered"
+    lines = tuple(line.lstrip() for line in text.splitlines())
+    if any(starts_with_bullet(line) for line in lines):
+        return "bullet"
+    if any(starts_with_number(line) for line in lines):
+        return "numbered"
+    return None
+
+
+def _list_line_ratio(text: str) -> tuple[int, int]:
+    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+    if not lines:
+        return 0, 0
+    list_lines = sum(
+        1 for line in lines if starts_with_bullet(line) or starts_with_number(line)
+    )
+    return list_lines, len(lines)
+
+
+def _tag_list(block: Block) -> Block:
+    text = block.get("text", "")
+    block_type = block.get("type")
+    existing_kind = block.get("list_kind")
+
+    if block_type == "list_item":
+        if existing_kind:
+            return block
+        inferred = _infer_list_kind(text)
+        return {**block, "list_kind": inferred} if inferred else block
+
+    leading_kind = _leading_list_kind(text)
+    if not leading_kind:
+        inferred = _infer_list_kind(text)
+        if not inferred:
+            return block
+        list_lines, total_lines = _list_line_ratio(text)
+        if total_lines and (list_lines * 2) >= total_lines:
+            return {**block, "type": "list_item", "list_kind": inferred}
+        return block
+
+    return {**block, "type": "list_item", "list_kind": leading_kind}
 
 
 def _merge_styled_list_text(first: str, second: str) -> str:

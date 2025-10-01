@@ -55,7 +55,6 @@ from pdf_chunker.passes.split_semantic_inline import (
     _heading_styles,
     _leading_heading_candidate,
     _next_non_whitespace,
-    _span_attrs,
     _span_bounds,
     _span_style,
     _trimmed_segment,
@@ -73,13 +72,17 @@ from pdf_chunker.passes.split_semantic_lists import (
     _merge_styled_list_records,
     _resolve_envelope,
 )
-from pdf_chunker.text_cleaning import STOPWORDS
-from pdf_chunker.utils import _build_metadata
+from pdf_chunker.passes.split_semantic_metadata import (
+    Chunk,
+    _chunk_meta,
+    _merge_heading_texts,
+    _meta_is_list,
+    build_chunk,
+    build_chunk_with_meta,
+)
 
 logger = logging.getLogger(__name__)
 
-_STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
-_FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
 _TOKEN_PATTERN = re.compile(r"\S+")
 
 
@@ -88,34 +91,6 @@ def _warn_stitching_issue(message: str, *, page: int | None = None) -> None:
         return
     detail = f"{message} (page={page})" if page is not None else message
     logger.warning("split_semantic: %s", detail)
-
-
-def _chunk_meta(chunk: Chunk) -> Mapping[str, Any]:
-    meta = chunk.get("meta")
-    if isinstance(meta, Mapping):
-        return meta
-    legacy = chunk.get("metadata")
-    return legacy if isinstance(legacy, Mapping) else {}
-
-
-def _meta_list_kind(meta: Mapping[str, Any] | None) -> str | None:
-    if not isinstance(meta, Mapping):
-        return None
-    kind = meta.get("list_kind")
-    return kind if isinstance(kind, str) and kind else None
-
-
-def _meta_is_list(meta: Mapping[str, Any] | None) -> bool:
-    if not isinstance(meta, Mapping):
-        return False
-    block_type = meta.get("block_type")
-    if block_type == "list_item":
-        return True
-    return block_type in {None, ""} and _meta_list_kind(meta) is not None
-
-
-def _chunk_is_list(chunk: Chunk) -> bool:
-    return _meta_is_list(_chunk_meta(chunk))
 
 
 def _split_inline_heading(block: Block, text: str) -> tuple[Block, Block] | None:
@@ -185,42 +160,6 @@ def _split_inline_heading_records(
         heading_block, body_block = split
         yield page, heading_block, heading_block.get("text", "")
         yield page, body_block, body_block.get("text", "")
-
-
-def _collect_superscripts(
-    block: Block, text: str
-) -> tuple[list[dict[str, str]], tuple[tuple[int, int], ...]]:
-    if not text:
-        return [], ()
-    limit = len(text)
-
-    def _normalize(span: Any) -> tuple[dict[str, str], tuple[int, int]] | None:
-        if _span_style(span) != "superscript":
-            return None
-        bounds = _span_bounds(span, limit)
-        if bounds is None:
-            return None
-        start, end = bounds
-        raw = text[start:end]
-        snippet = raw.strip()
-        if not snippet or text[end:].strip() not in _FOOTNOTE_TAILS:
-            return None
-        attrs = _span_attrs(span)
-        note_id = attrs.get("note_id") if attrs else None
-        focus = raw.find(snippet)
-        span_start = start + (focus if focus >= 0 else 0)
-        span_end = span_start + len(snippet)
-        public = {"text": snippet, **({"note_id": note_id} if note_id else {})}
-        return public, (span_start, span_end)
-
-    entries = tuple(
-        entry
-        for entry in (_normalize(span) for span in tuple(block.get("inline_styles") or ()))
-        if entry
-    )
-    anchors = [public for public, _ in entries]
-    spans = tuple(span for _, span in entries if span[0] < span[1])
-    return anchors, spans
 
 
 def _segment_char_limit(chunk_size: int | None) -> int:
@@ -1030,7 +969,6 @@ def _collapse_records(
 
 Doc = dict[str, Any]
 Block = dict[str, Any]
-Chunk = dict[str, Any]
 SplitFn = Callable[[str], list[str]]
 MetricFn = Callable[[], dict[str, int | bool]]
 
@@ -1192,145 +1130,6 @@ def _is_heading(block: Block) -> bool:
     """Return ``True`` when ``block`` represents a heading."""
 
     return block.get("type") == "heading"
-
-
-def _leading_list_kind(text: str) -> str | None:
-    """Return list kind inferred from the first non-empty line of ``text``."""
-
-    lines = (line.lstrip() for line in text.splitlines())
-    first = next((line for line in lines if line), "")
-    if starts_with_bullet(first):
-        return "bullet"
-    if starts_with_number(first):
-        return "numbered"
-    return None
-
-
-def _infer_list_kind(text: str) -> str | None:
-    """Return list kind when any line resembles a bullet or numbered item."""
-
-    if starts_with_bullet(text):
-        return "bullet"
-    if starts_with_number(text):
-        return "numbered"
-    lines = tuple(line.lstrip() for line in text.splitlines())
-    if any(starts_with_bullet(line) for line in lines):
-        return "bullet"
-    if any(starts_with_number(line) for line in lines):
-        return "numbered"
-    return None
-
-
-def _list_line_ratio(text: str) -> tuple[int, int]:
-    """Return count of list-like lines vs total non-empty lines."""
-
-    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-    if not lines:
-        return 0, 0
-    list_lines = sum(1 for line in lines if starts_with_bullet(line) or starts_with_number(line))
-    return list_lines, len(lines)
-
-
-def _tag_list(block: Block) -> Block:
-    """Return ``block`` with list metadata inferred when appropriate."""
-
-    text = block.get("text", "")
-    block_type = block.get("type")
-    existing_kind = block.get("list_kind")
-
-    if block_type == "list_item":
-        if existing_kind:
-            return block
-        inferred = _infer_list_kind(text)
-        return {**block, "list_kind": inferred} if inferred else block
-
-    leading_kind = _leading_list_kind(text)
-    if not leading_kind:
-        inferred = _infer_list_kind(text)
-        if not inferred:
-            return block
-        list_lines, total_lines = _list_line_ratio(text)
-        if total_lines and (list_lines * 2) >= total_lines:
-            return {**block, "type": "list_item", "list_kind": inferred}
-        return block
-
-    return {**block, "type": "list_item", "list_kind": leading_kind}
-
-
-def _normalize_bullet_tail(tail: str) -> str:
-    if not tail:
-        return ""
-    head, *rest = tail.split(" ", 1)
-    normalized = head.lower() if head in _STOPWORD_TITLES else head
-    return f"{normalized} {rest[0]}".strip() if rest and rest[0] else normalized
-
-
-def _normalized_heading_lines(headings: Iterable[str]) -> tuple[str, ...]:
-    return tuple(stripped for heading in headings if heading and (stripped := heading.strip()))
-
-
-def _heading_body_separator(heading_block: str) -> str:
-    """Return the separator inserted between heading text and body."""
-
-    # LoRA fine-tuning and RAG retrieval benefit from compact, predictable
-    # whitespace so heading tokens stay adjacent to their descriptive body
-    # text without introducing gratuitous padding. A single newline keeps the
-    # visual separation while avoiding the blank line that previously doubled
-    # the token cost.
-    return "\n"
-
-
-def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
-    normalized_headings = _normalized_heading_lines(headings)
-    if any(starts_with_bullet(h.lstrip()) for h in normalized_headings):
-        lead = " ".join(h.rstrip() for h in normalized_headings).rstrip()
-        tail = _normalize_bullet_tail(body.lstrip()) if body else ""
-        return f"{lead} {tail}".strip()
-
-    heading_block = "\n".join(normalized_headings)
-    body_text = body.strip() if body else ""
-
-    if not heading_block:
-        return body_text
-    if not body_text:
-        return heading_block
-
-    separator = _heading_body_separator(heading_block)
-    return f"{heading_block}{separator}{body_text}"
-
-
-def _with_source(block: Block, page: int, filename: str | None) -> Block:
-    """Attach ``filename`` and ``page`` as a ``source`` entry when absent."""
-
-    existing = block.get("source") or {}
-    source = {**{"filename": filename, "page": page}, **existing}
-    return {**block, "source": {k: v for k, v in source.items() if v is not None}}
-
-
-def build_chunk(text: str) -> Chunk:
-    """Return chunk payload containing only ``text``."""
-
-    return {"text": text}
-
-
-def build_chunk_with_meta(
-    text: str, block: Block, page: int, filename: str | None, index: int
-) -> Chunk:
-    """Return chunk payload enriched with metadata."""
-    annotated = _tag_list(block)
-    start_index = annotated.pop("_chunk_start_index", None)
-    chunk_index = start_index if isinstance(start_index, int) else index
-    metadata = _build_metadata(
-        text,
-        _with_source(annotated, page, filename),
-        chunk_index,
-        {},
-    )
-    anchors, spans = _collect_superscripts(annotated, text)
-    if anchors:
-        metadata["footnote_anchors"] = anchors
-    chunk = {"text": text, "meta": metadata}
-    return {**chunk, "_footnote_spans": spans} if spans else chunk
 
 
 def _chunk_items(
