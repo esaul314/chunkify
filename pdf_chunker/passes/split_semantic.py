@@ -18,7 +18,6 @@ from math import ceil
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
-from pdf_chunker.inline_styles import InlineStyleSpan
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.page_artifacts import (
     _bullet_body,
@@ -51,86 +50,46 @@ from pdf_chunker.passes.sentence_fusion import (
     _last_sentence,
     _merge_sentence_fragments,
 )
-from pdf_chunker.text_cleaning import STOPWORDS
-from pdf_chunker.utils import _build_metadata
+from pdf_chunker.passes.split_semantic_inline import (
+    _body_styles,
+    _heading_styles,
+    _leading_heading_candidate,
+    _next_non_whitespace,
+    _span_bounds,
+    _span_style,
+    _trimmed_segment,
+)
+from pdf_chunker.passes.split_semantic_lists import (
+    _STYLED_LIST_KIND,
+    _append_caption,
+    _apply_envelope,
+    _block_list_kind,
+    _BlockEnvelope,
+    _contains_caption_line,
+    _has_caption,
+    _looks_like_caption,
+    _mark_caption,
+    _merge_styled_list_records,
+    _resolve_envelope,
+)
+from pdf_chunker.passes.split_semantic_metadata import (
+    Chunk,
+    _chunk_meta,
+    _merge_heading_texts,
+    _meta_is_list,
+    build_chunk,
+    build_chunk_with_meta,
+)
+
+Doc = dict[str, Any]
+Block = dict[str, Any]
+Record = tuple[int, Block, str]
+SplitFn = Callable[[str], list[str]]
+MetricFn = Callable[[], dict[str, int | bool]]
 
 logger = logging.getLogger(__name__)
 
-_STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
-_FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
-_CAPTION_PREFIXES = (
-    "figure",
-    "fig.",
-    "table",
-    "tbl.",
-    "image",
-    "img.",
-    "diagram",
-)
-_CAPTION_LABEL_RE = re.compile(
-    r"(?:\d+(?:[-–—.]\d+)*[a-z]?|[ivxlcdm]+(?:[-–—.][ivxlcdm]+)*[a-z]?)",
-    re.IGNORECASE,
-)
-_CAPTION_FLAG = "_caption_attached"
 _TOKEN_PATTERN = re.compile(r"\S+")
-_HEADING_STYLE_FLAVORS = frozenset({"bold", "italic", "small_caps", "caps", "uppercase"})
-_STYLED_LIST_KIND = "styled"
-
-# fmt: off
-
-
-def _span_attr(span: Any, name: str, default: Any = None) -> Any:
-    if isinstance(span, Mapping):
-        return span.get(name, default)
-    return getattr(span, name, default)
-
-
-def _span_bounds(
-    span: Any, limit: int
-) -> tuple[int, int] | None:
-    try:
-        start_raw = _span_attr(span, "start")
-        end_raw = _span_attr(span, "end", start_raw)
-        if start_raw is None or end_raw is None:
-            return None
-        start = max(0, min(limit, int(start_raw)))
-        end = max(start, min(limit, int(end_raw)))
-    except (TypeError, ValueError):
-        return None
-    if end <= start:
-        return None
-    return start, end
-
-
-def _span_style(span: Any) -> str:
-    style = _span_attr(span, "style", "")
-    return str(style or "")
-
-
-def _span_attrs(span: Any) -> Mapping[str, Any] | None:
-    attrs = _span_attr(span, "attrs")
-    return attrs if isinstance(attrs, Mapping) else None
-
-
-def _inline_list_kinds(block: Mapping[str, Any]) -> tuple[str, ...]:
-    styles = tuple(block.get("inline_styles") or ())
-    return tuple(
-        attrs["list_kind"]
-        for attrs in (_span_attrs(span) for span in styles)
-        if isinstance(attrs, Mapping)
-        and isinstance(attrs.get("list_kind"), str)
-        and attrs["list_kind"]
-    )
-
-
-def _block_list_kind(block: Block) -> str | None:
-    if not isinstance(block, Mapping):
-        return None
-    declared = block.get("list_kind")
-    if isinstance(declared, str) and declared:
-        return declared
-    inline = _inline_list_kinds(block)
-    return next(iter(inline), None)
 
 
 def _warn_stitching_issue(message: str, *, page: int | None = None) -> None:
@@ -138,142 +97,6 @@ def _warn_stitching_issue(message: str, *, page: int | None = None) -> None:
         return
     detail = f"{message} (page={page})" if page is not None else message
     logger.warning("split_semantic: %s", detail)
-
-
-def _chunk_meta(chunk: Chunk) -> Mapping[str, Any]:
-    meta = chunk.get("meta")
-    if isinstance(meta, Mapping):
-        return meta
-    legacy = chunk.get("metadata")
-    return legacy if isinstance(legacy, Mapping) else {}
-
-
-def _meta_list_kind(meta: Mapping[str, Any] | None) -> str | None:
-    if not isinstance(meta, Mapping):
-        return None
-    kind = meta.get("list_kind")
-    return kind if isinstance(kind, str) and kind else None
-
-
-def _meta_is_list(meta: Mapping[str, Any] | None) -> bool:
-    if not isinstance(meta, Mapping):
-        return False
-    block_type = meta.get("block_type")
-    if block_type == "list_item":
-        return True
-    return block_type in {None, ""} and _meta_list_kind(meta) is not None
-
-
-def _chunk_is_list(chunk: Chunk) -> bool:
-    return _meta_is_list(_chunk_meta(chunk))
-
-
-def _is_heading_style_span(span: Any) -> bool:
-    return _span_style(span).lower() in _HEADING_STYLE_FLAVORS
-
-
-def _remap_span(
-    span: Any, start: int, end: int, limit: int
-) -> InlineStyleSpan | dict[str, Any] | None:
-    bounded_start = max(0, min(start, limit))
-    bounded_end = max(bounded_start, min(end, limit))
-    if bounded_end <= bounded_start:
-        return None
-    if isinstance(span, InlineStyleSpan):
-        return replace(span, start=bounded_start, end=bounded_end)
-    remapped: dict[str, Any] = {
-        "start": bounded_start,
-        "end": bounded_end,
-        "style": _span_style(span),
-    }
-    confidence = _span_attr(span, "confidence")
-    if confidence is not None:
-        remapped["confidence"] = confidence
-    attrs = _span_attrs(span)
-    if attrs:
-        remapped["attrs"] = attrs
-    return remapped
-
-
-def _leading_heading_candidate(text: str, styles: Iterable[Any]) -> tuple[int, int] | None:
-    if not text:
-        return None
-    length = len(text)
-    leading_ws = len(text) - len(text.lstrip())
-    candidates = [
-        bounds
-        for span in styles
-        if _is_heading_style_span(span)
-        and (bounds := _span_bounds(span, length)) is not None
-        and bounds[0] <= leading_ws
-        and bounds[1] < length
-    ]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda pair: pair[1])
-
-
-def _next_non_whitespace(text: str, index: int) -> str | None:
-    for char in text[index:]:
-        if not char.isspace():
-            return char
-    return None
-
-
-def _trimmed_segment(segment: str) -> tuple[str, int]:
-    stripped_lead = segment.lstrip()
-    lead_trim = len(segment) - len(stripped_lead)
-    trimmed = stripped_lead.rstrip()
-    return trimmed, lead_trim
-
-
-def _heading_styles(
-    styles: Iterable[Any],
-    text_length: int,
-    cutoff: int,
-    lead_trim: int,
-    heading_limit: int,
-) -> tuple[InlineStyleSpan | dict[str, Any], ...]:
-    return tuple(
-        filter(
-            None,
-            (
-                _remap_span(
-                    span,
-                    max(bounds[0], 0) - lead_trim,
-                    min(bounds[1], cutoff) - lead_trim,
-                    heading_limit,
-                )
-                for span in styles
-                if (bounds := _span_bounds(span, text_length)) is not None
-                and bounds[0] < cutoff
-            ),
-        )
-    )
-
-
-def _body_styles(
-    styles: Iterable[Any],
-    text_length: int,
-    offset: int,
-    body_limit: int,
-) -> tuple[InlineStyleSpan | dict[str, Any], ...]:
-    return tuple(
-        filter(
-            None,
-            (
-                _remap_span(
-                    span,
-                    max(bounds[0], offset) - offset,
-                    max(bounds[1], offset) - offset,
-                    body_limit,
-                )
-                for span in styles
-                if (bounds := _span_bounds(span, text_length)) is not None
-                and bounds[1] > offset
-            ),
-        )
-    )
 
 
 def _split_inline_heading(block: Block, text: str) -> tuple[Block, Block] | None:
@@ -333,7 +156,7 @@ def _split_inline_heading(block: Block, text: str) -> tuple[Block, Block] | None
 
 
 def _split_inline_heading_records(
-    records: Iterable[tuple[int, Block, str]]
+    records: Iterable[tuple[int, Block, str]],
 ) -> Iterator[tuple[int, Block, str]]:
     for page, block, text in records:
         split = _split_inline_heading(block, text)
@@ -343,155 +166,6 @@ def _split_inline_heading_records(
         heading_block, body_block = split
         yield page, heading_block, heading_block.get("text", "")
         yield page, body_block, body_block.get("text", "")
-
-
-def _merge_styled_list_text(first: str, second: str) -> str:
-    lead = first.rstrip()
-    tail = second.lstrip()
-    if not lead:
-        return tail
-    if not tail:
-        return lead
-    return f"{lead}\n\n{tail}"
-
-
-def _normalize_sequence(value: Any) -> tuple[Any, ...]:
-    if not value:
-        return ()
-    if isinstance(value, tuple):
-        return value
-    if isinstance(value, list):
-        return tuple(value)
-    return (value,)
-
-
-def _chain_sequences(*values: Any) -> tuple[Any, ...]:
-    return tuple(chain.from_iterable(_normalize_sequence(value) for value in values))
-
-
-def _without_keys(mapping: Mapping[str, Any], keys: Iterable[str]) -> dict[str, Any]:
-    drop = frozenset(keys)
-    return {k: v for k, v in mapping.items() if k not in drop}
-
-
-def _with_optional_tuple(
-    mapping: Mapping[str, Any], key: str, values: tuple[Any, ...]
-) -> dict[str, Any]:
-    if values:
-        return {**mapping, key: values}
-    return {k: v for k, v in mapping.items() if k != key}
-
-
-@dataclass(frozen=True)
-class _BlockEnvelope:
-    block_type: str
-    list_kind: str | None = None
-
-
-def _coalesce_list_kind(blocks: Iterable[Block]) -> str | None:
-    kinds = {block.get("list_kind") for block in blocks if block.get("list_kind")}
-    return next(iter(kinds)) if len(kinds) == 1 else None
-
-
-def _resolve_envelope(
-    blocks: Iterable[Block], *, default_list_kind: str | None = None
-) -> _BlockEnvelope:
-    sequence = tuple(blocks)
-    block_type = _coalesce_block_type(sequence)
-    kind = _coalesce_list_kind(sequence) or default_list_kind
-    return _BlockEnvelope(block_type, kind)
-
-
-def _apply_envelope(
-    base: Mapping[str, Any], text: str, envelope: _BlockEnvelope
-) -> Block:
-    payload = {
-        **_without_keys(base, {"text", "list_kind"}),
-        "text": text,
-        "type": envelope.block_type,
-    }
-    return {**payload, "list_kind": envelope.list_kind} if envelope.list_kind else payload
-
-
-def _merge_styled_list_block(primary: Block, secondary: Block) -> Block:
-    merged_text = _merge_styled_list_text(
-        str(primary.get("text", "")), str(secondary.get("text", ""))
-    )
-    envelope = _resolve_envelope(
-        (primary, secondary), default_list_kind=_STYLED_LIST_KIND
-    )
-    merged = _apply_envelope(primary, merged_text, envelope)
-    inline_styles = _chain_sequences(
-        primary.get("inline_styles"), secondary.get("inline_styles")
-    )
-    source_blocks = _chain_sequences(
-        primary.get("source_blocks"), secondary.get("source_blocks")
-    )
-    without_bbox = _without_keys(merged, {"bbox"})
-    with_styles = _with_optional_tuple(without_bbox, "inline_styles", inline_styles)
-    return _with_optional_tuple(with_styles, "source_blocks", source_blocks)
-
-
-def _merge_styled_list_records(
-    records: Iterable[tuple[int, Block, str]]
-) -> Iterator[tuple[int, Block, str]]:
-    pending: tuple[int, Block, str] | None = None
-    for page, block, text in records:
-        if block.get("list_kind") == _STYLED_LIST_KIND:
-            block_copy = dict(block)
-            if pending is None:
-                pending = (page, block_copy, text)
-                continue
-            pending_page, pending_block, pending_text = pending
-            merged_block = _merge_styled_list_block(pending_block, block_copy)
-            merged_text = _merge_styled_list_text(pending_text, text)
-            pending = (min(pending_page, page), merged_block, merged_text)
-            continue
-        if pending is not None:
-            yield pending
-            pending = None
-        yield page, block, text
-    if pending is not None:
-        yield pending
-
-
-def _collect_superscripts(
-    block: Block, text: str
-) -> tuple[list[dict[str, str]], tuple[tuple[int, int], ...]]:
-    if not text:
-        return [], ()
-    limit = len(text)
-
-    def _normalize(span: Any) -> tuple[dict[str, str], tuple[int, int]] | None:
-        if _span_style(span) != "superscript":
-            return None
-        bounds = _span_bounds(span, limit)
-        if bounds is None:
-            return None
-        start, end = bounds
-        raw = text[start:end]
-        snippet = raw.strip()
-        if not snippet or text[end:].strip() not in _FOOTNOTE_TAILS:
-            return None
-        attrs = _span_attrs(span)
-        note_id = attrs.get("note_id") if attrs else None
-        focus = raw.find(snippet)
-        span_start = start + (focus if focus >= 0 else 0)
-        span_end = span_start + len(snippet)
-        public = {"text": snippet, **({"note_id": note_id} if note_id else {})}
-        return public, (span_start, span_end)
-
-    entries = tuple(
-        entry
-        for entry in (
-            _normalize(span)
-            for span in tuple(block.get("inline_styles") or ())
-        )
-        if entry
-    )
-    anchors = [public for public, _ in entries]
-    spans = tuple(span for _, span in entries if span[0] < span[1])
-    return anchors, spans
 
 
 def _segment_char_limit(chunk_size: int | None) -> int:
@@ -605,7 +279,9 @@ def _trim_sentence_prefix(previous_text: str, text: str) -> str:
     remainder = text[len(candidate) :]
     if not remainder or not remainder.strip():
         return text
-    match = re.search(r"((?:Chapter|Section|Part)\s+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)\.?$", candidate)  # noqa: E501
+    match = re.search(
+        r"((?:Chapter|Section|Part)\s+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)\.?$", candidate
+    )  # noqa: E501
     preserved = match.group(0) if match else ""
     leading_space = remainder.startswith(" ")
     gap = remainder[1:] if leading_space else remainder
@@ -621,16 +297,10 @@ def _split_words(text: str) -> tuple[str, ...]:
     return tuple(text.split())
 
 
-def _overlap_window(
-    prev_words: tuple[str, ...], current_words: tuple[str, ...], limit: int
-) -> int:
+def _overlap_window(prev_words: tuple[str, ...], current_words: tuple[str, ...], limit: int) -> int:
     match_limit = min(limit, len(prev_words), len(current_words))
     return next(
-        (
-            size
-            for size in range(match_limit, 0, -1)
-            if prev_words[-size:] == current_words[:size]
-        ),
+        (size for size in range(match_limit, 0, -1) if prev_words[-size:] == current_words[:size]),
         0,
     )
 
@@ -697,9 +367,7 @@ def _promote_inline_heading(block: Block, text: str) -> Block:
     if word_limit > 12:
         return block
 
-    if any(
-        _covers_entire(style) and _is_heading_style(style) for style in styles
-    ):
+    if any(_covers_entire(style) and _is_heading_style(style) for style in styles):
         return {**block, "type": "heading"}
 
     return block
@@ -736,27 +404,6 @@ def _stitch_block_continuations(
         return [*acc, (page, block, enriched)]
 
     return reduce(_consume, seq, [])
-
-
-def _coalesce_block_type(blocks: Iterable[Block]) -> str:
-    """Return the merged block ``type`` for ``blocks``."""
-
-    types = tuple(
-        block.get("type")
-        for block in blocks
-        if isinstance(block, Mapping) and block.get("type")
-    )
-    candidates = tuple(t for t in types if t != "heading")
-    if not candidates:
-        return "paragraph"
-    if all(t == "list_item" for t in candidates):
-        return "list_item"
-    unique = frozenset(candidates)
-    if len(unique) == 1:
-        return cast(str, candidates[0])
-    if "list_item" in unique:
-        return "paragraph"
-    return cast(str, candidates[0])
 
 
 def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
@@ -835,9 +482,7 @@ def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, 
         return tuple()
     suffix = _resolve_footer_suffix(lines)
     bullet_like = tuple(
-        line
-        for line in suffix
-        if starts_with_bullet(line) or starts_with_number(line)
+        line for line in suffix if starts_with_bullet(line) or starts_with_number(line)
     )
     return bullet_like if bullet_like == suffix else tuple()
 
@@ -874,9 +519,7 @@ def _trim_footer_suffix(text: str, suffix: tuple[str, ...]) -> str:
     return "\n".join(trimmed)
 
 
-def _strip_footer_suffix(
-    record: tuple[int, Block, str]
-) -> tuple[int, Block, str] | None:
+def _strip_footer_suffix(record: tuple[int, Block, str]) -> tuple[int, Block, str] | None:
     """Return ``record`` without footer bullets or ``None`` if empty."""
 
     page, block, text = record
@@ -906,15 +549,10 @@ def _is_footer_artifact_record(
     page, block, text = current
     if page != prev_page:
         return False
-    stripped_lines = tuple(
-        line.strip() for line in text.splitlines() if line.strip()
-    )
+    stripped_lines = tuple(line.strip() for line in text.splitlines() if line.strip())
     if not stripped_lines or len(stripped_lines) > 2:
         return False
-    if not all(
-        starts_with_bullet(line) or starts_with_number(line)
-        for line in stripped_lines
-    ):
+    if not all(starts_with_bullet(line) or starts_with_number(line) for line in stripped_lines):
         return False
     word_total = sum(len(line.split()) for line in stripped_lines)
     if word_total > 20:
@@ -933,7 +571,7 @@ def _is_footer_artifact_record(
 
 
 def _strip_footer_suffixes(
-    records: Iterable[tuple[int, Block, str]]
+    records: Iterable[tuple[int, Block, str]],
 ) -> tuple[tuple[int, Block, str], ...]:
     """Remove footer suffix bullets from ``records``."""
 
@@ -948,9 +586,7 @@ def _strip_footer_suffixes(
     return tuple(cleaned)
 
 
-def _should_emit_list_boundary(
-    previous: tuple[int, Block, str], block: Block, text: str
-) -> bool:
+def _should_emit_list_boundary(previous: tuple[int, Block, str], block: Block, text: str) -> bool:
     _, prev_block, prev_text = previous
     if prev_text.rstrip().endswith(":"):
         return False
@@ -985,9 +621,7 @@ def _list_tail_split_index(text: str) -> int | None:
     return None
 
 
-def _split_list_record(
-    record: tuple[int, Block, str]
-) -> tuple[tuple[int, Block, str], ...]:
+def _split_list_record(record: tuple[int, Block, str]) -> tuple[tuple[int, Block, str], ...]:
     page, block, text = record
     split_at = _list_tail_split_index(text)
     if split_at is None:
@@ -1004,9 +638,10 @@ def _split_list_record(
 
 
 def _split_colon_bullet_segments(
-    buffer: Iterable[tuple[int, Block, str]]
+    buffer: Iterable[tuple[int, Block, str]],
 ) -> tuple[tuple[tuple[int, Block, str], ...], ...]:
     """Return ``buffer`` sliced so colon-prefixed bullets anchor a new segment."""
+
     def _append_segment(
         acc: tuple[tuple[tuple[int, Block, str], ...], ...],
         record: tuple[int, Block, str],
@@ -1029,15 +664,13 @@ def _split_colon_bullet_segments(
 
 
 def _expand_segment_records(
-    segment: tuple[tuple[int, Block, str], ...]
+    segment: tuple[tuple[int, Block, str], ...],
 ) -> tuple[tuple[int, Block, str], ...]:
     expanded = tuple(chain.from_iterable(_split_list_record(record) for record in segment))
     return expanded if expanded else segment
 
 
-def _segment_offsets(
-    segments: tuple[tuple[tuple[int, Block, str], ...], ...]
-) -> tuple[int, ...]:
+def _segment_offsets(segments: tuple[tuple[tuple[int, Block, str], ...], ...]) -> tuple[int, ...]:
     if not segments:
         return tuple()
     counts = accumulate(len(segment) for segment in segments[:-1])
@@ -1045,7 +678,7 @@ def _segment_offsets(
 
 
 def _enumerate_segments(
-    segments: tuple[tuple[tuple[int, Block, str], ...], ...]
+    segments: tuple[tuple[tuple[int, Block, str], ...], ...],
 ) -> tuple[tuple[int, tuple[tuple[int, Block, str], ...]], ...]:
     offsets = _segment_offsets(segments)
     return tuple(zip(offsets, segments, strict=False))
@@ -1252,105 +885,147 @@ def _maybe_merge_dense_page(
     return ((sequence[0][0], merged_block, merged_text),)
 
 
+@dataclass(frozen=True)
+class _CollapseEmitter:
+    resolved_limit: int | None
+    hard_limit: int | None
+    overlap: int
+    buffer: tuple[Record, ...] = tuple()
+    running_words: int = 0
+    running_dense: int = 0
+    start_index: int | None = None
+    outputs: tuple[Record, ...] = tuple()
+
+    def append(
+        self,
+        idx: int,
+        record: Record,
+        counts: tuple[int, int, int],
+    ) -> _CollapseEmitter:
+        start_index = self.start_index if self.buffer else idx
+        words = self.running_words + counts[0] if self.buffer else counts[0]
+        dense = self.running_dense + counts[1] if self.buffer else counts[1]
+        return replace(
+            self,
+            buffer=self.buffer + (record,),
+            running_words=words,
+            running_dense=dense,
+            start_index=start_index,
+        )
+
+    def flush(self, *, overflow: bool = False) -> _CollapseEmitter:
+        if not self.buffer:
+            return self
+        first_index = self.start_index if self.start_index is not None else 0
+        produced = _emit_buffer_segments(
+            self.buffer,
+            start_index=first_index,
+            overlap=self.overlap,
+            resolved_limit=self.resolved_limit,
+            hard_limit=self.hard_limit,
+            overflow=overflow,
+        )
+        return replace(
+            self,
+            buffer=tuple(),
+            running_words=0,
+            running_dense=0,
+            start_index=None,
+            outputs=self.outputs + produced,
+        )
+
+    def emit_single(self, idx: int, record: Record) -> _CollapseEmitter:
+        page, block, text = record
+        entry: Record = (page, _with_chunk_index(block, idx), text)
+        return replace(self, outputs=self.outputs + (entry,))
+
+
+def _page_or_footer_boundary(buffer: tuple[Record, ...], record: Record) -> bool:
+    if not buffer:
+        return False
+    prev_page, _, _ = buffer[-1]
+    page, _, _ = record
+    if prev_page != page:
+        return True
+    prev_is_footer = _record_is_footer_candidate(buffer[-1])
+    current_is_footer = _record_is_footer_candidate(record)
+    return (current_is_footer != prev_is_footer) and (current_is_footer or prev_is_footer)
+
+
+def _projected_overflow(
+    state: _CollapseEmitter,
+    block: Block,
+    text: str,
+    counts: tuple[int, int, int],
+) -> str | None:
+    words = state.running_words + counts[0]
+    dense = state.running_dense + counts[1]
+    effective = max(words, dense)
+    exceeds_soft = state.resolved_limit is not None and effective > state.resolved_limit
+    exceeds_hard = state.hard_limit is not None and effective > state.hard_limit
+    if exceeds_hard:
+        last_text = state.buffer[-1][2].rstrip()
+        if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
+            return "flush"
+        return "overflow"
+    if exceeds_soft:
+        return "overflow"
+    return None
+
+
+def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _CollapseEmitter:
+    idx, record = item
+    _, block, text = record
+    counts = _effective_counts(text)
+    _, _, effective = counts
+    if _page_or_footer_boundary(state.buffer, record):
+        state = state.flush()
+    if (state.resolved_limit is not None and effective > state.resolved_limit) or (
+        state.hard_limit is not None and effective > state.hard_limit
+    ):
+        return state.flush().emit_single(idx, record)
+    if (
+        state.buffer
+        and _starts_list_like(block, text)
+        and _should_emit_list_boundary(state.buffer[-1], block, text)
+    ):
+        state = state.flush()
+    if state.buffer:
+        overflow_action = _projected_overflow(state, block, text, counts)
+        if overflow_action is not None:
+            state = state.flush(overflow=overflow_action == "overflow")
+    return state.append(idx, record, counts)
+
+
 def _collapse_records(
     records: Iterable[tuple[int, Block, str]],
     options: SplitOptions | None = None,
     limit: int | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
-    seq = list(records)
-    seq = list(_strip_footer_suffixes(seq))
+    seq = tuple(_strip_footer_suffixes(tuple(records)))
     if not seq:
         return
     resolved_limit = _resolved_limit(options, limit)
     if resolved_limit is None:
-        for idx, (page, block, text) in enumerate(seq):
-            yield page, _with_chunk_index(block, idx), text
+        yield from (
+            (page, _with_chunk_index(block, idx), text)
+            for idx, (page, block, text) in enumerate(seq)
+        )
         return
 
     hard_limit = _hard_limit(options, resolved_limit)
     overlap = _overlap_value(options)
-    buffer: list[tuple[int, Block, str]] = []
-    running_words = 0
-    running_dense = 0
-    start_index: int | None = None
-    outputs: list[tuple[int, Block, str]] = []
-
-    def emit(
-        *, overflow: bool = False
-    ) -> None:
-        nonlocal buffer, running_words, running_dense, start_index
-        if not buffer:
-            return
-        first_index = start_index if start_index is not None else 0
-        produced = _emit_buffer_segments(
-            tuple(buffer),
-            start_index=first_index,
-            overlap=overlap,
-            resolved_limit=resolved_limit,
-            hard_limit=hard_limit,
-            overflow=overflow,
-        )
-        outputs.extend(produced)
-        buffer, running_words, running_dense, start_index = [], 0, 0, None
-
-    for idx, record in enumerate(seq):
-        page, block, text = record
-        is_footer = _record_is_footer_candidate(record)
-        if buffer:
-            prev_page = buffer[-1][0]
-            prev_is_footer = _record_is_footer_candidate(buffer[-1])
-            if prev_page != page or (is_footer != prev_is_footer and (is_footer or prev_is_footer)):
-                emit()
-        word_count, dense_count, effective_count = _effective_counts(text)
-        if (resolved_limit is not None and effective_count > resolved_limit) or (
-            hard_limit is not None and effective_count > hard_limit
-        ):
-            emit()
-            outputs.append((page, _with_chunk_index(block, idx), text))
-            continue
-        if (
-            buffer
-            and _starts_list_like(block, text)
-            and _should_emit_list_boundary(buffer[-1], block, text)
-        ):
-            emit()
-        if buffer:
-            projected_words = running_words + word_count
-            projected_dense = running_dense + dense_count
-            projected_effective = max(projected_words, projected_dense)
-            exceeds_soft = (
-                resolved_limit is not None and projected_effective > resolved_limit
-            )
-            exceeds_hard = (
-                hard_limit is not None and projected_effective > hard_limit
-            )
-            if exceeds_hard:
-                last_text = buffer[-1][2].rstrip()
-                if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
-                    emit()
-                else:
-                    emit(overflow=True)
-            elif exceeds_soft:
-                emit(overflow=True)
-        if not buffer:
-            start_index = idx
-            running_words, running_dense = word_count, dense_count
-        else:
-            running_words += word_count
-            running_dense += dense_count
-        buffer.append((page, block, text))
-
-    emit()
-    merged_outputs = _maybe_merge_dense_page(outputs, options, limit)
-    for idx, (page, block, text) in enumerate(merged_outputs):
-        yield page, _with_chunk_index(block, idx), text
-
-
-Doc = dict[str, Any]
-Block = dict[str, Any]
-Chunk = dict[str, Any]
-SplitFn = Callable[[str], list[str]]
-MetricFn = Callable[[], dict[str, int | bool]]
+    initial = _CollapseEmitter(
+        resolved_limit=resolved_limit,
+        hard_limit=hard_limit,
+        overlap=overlap,
+    )
+    final_state = reduce(_collapse_step, enumerate(seq), initial).flush()
+    merged_outputs = _maybe_merge_dense_page(final_state.outputs, options, limit)
+    yield from (
+        (page, _with_chunk_index(block, idx), text)
+        for idx, (page, block, text) in enumerate(merged_outputs)
+    )
 
 
 class _OverrideOpts(TypedDict, total=False):
@@ -1455,60 +1130,6 @@ def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
     return head.isupper() or head.isdigit() or _starts_list_like(block, text)
 
 
-def _looks_like_caption(text: str) -> bool:
-    stripped = text.lstrip()
-    lower = stripped.lower()
-    prefix = next(
-        (candidate for candidate in _CAPTION_PREFIXES if lower.startswith(candidate)),
-        None,
-    )
-    if not prefix:
-        return False
-    remainder = stripped[len(prefix) :].lstrip()
-    if not remainder:
-        return False
-    label_match = _CAPTION_LABEL_RE.match(remainder)
-    if not label_match:
-        return False
-    tail = remainder[label_match.end() :].lstrip()
-    if not tail:
-        return False
-    head = tail[0]
-    if head in '.:()"“”':
-        return True
-    if head in "–—":
-        return True
-    if head == "-":
-        if len(tail) == 1:
-            return True
-        return not tail[1].isalnum()
-    return False
-
-
-def _contains_caption_line(text: str) -> bool:
-    return any(_looks_like_caption(line) for line in text.splitlines())
-
-
-def _has_caption(block: Block) -> bool:
-    return isinstance(block, Mapping) and bool(dict(block).get(_CAPTION_FLAG))
-
-
-def _mark_caption(block: Block) -> Block:
-    if not isinstance(block, Mapping):
-        return block
-    data = dict(block)
-    data[_CAPTION_FLAG] = True
-    return data
-
-
-def _append_caption(prev_text: str, caption: str) -> str:
-    head = prev_text.rstrip()
-    tail = caption.strip()
-    if not head:
-        return tail
-    return "\n\n".join(filter(None, (head, tail)))
-
-
 def _merge_blocks(
     acc: list[tuple[int, Block, str]],
     cur: tuple[int, Block, str],
@@ -1566,153 +1187,6 @@ def _is_heading(block: Block) -> bool:
     return block.get("type") == "heading"
 
 
-def _leading_list_kind(text: str) -> str | None:
-    """Return list kind inferred from the first non-empty line of ``text``."""
-
-    lines = (line.lstrip() for line in text.splitlines())
-    first = next((line for line in lines if line), "")
-    if starts_with_bullet(first):
-        return "bullet"
-    if starts_with_number(first):
-        return "numbered"
-    return None
-
-
-def _infer_list_kind(text: str) -> str | None:
-    """Return list kind when any line resembles a bullet or numbered item."""
-
-    if starts_with_bullet(text):
-        return "bullet"
-    if starts_with_number(text):
-        return "numbered"
-    lines = tuple(line.lstrip() for line in text.splitlines())
-    if any(starts_with_bullet(line) for line in lines):
-        return "bullet"
-    if any(starts_with_number(line) for line in lines):
-        return "numbered"
-    return None
-
-
-def _list_line_ratio(text: str) -> tuple[int, int]:
-    """Return count of list-like lines vs total non-empty lines."""
-
-    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-    if not lines:
-        return 0, 0
-    list_lines = sum(
-        1
-        for line in lines
-        if starts_with_bullet(line) or starts_with_number(line)
-    )
-    return list_lines, len(lines)
-
-
-def _tag_list(block: Block) -> Block:
-    """Return ``block`` with list metadata inferred when appropriate."""
-
-    text = block.get("text", "")
-    block_type = block.get("type")
-    existing_kind = block.get("list_kind")
-
-    if block_type == "list_item":
-        if existing_kind:
-            return block
-        inferred = _infer_list_kind(text)
-        return {**block, "list_kind": inferred} if inferred else block
-
-    leading_kind = _leading_list_kind(text)
-    if not leading_kind:
-        inferred = _infer_list_kind(text)
-        if not inferred:
-            return block
-        list_lines, total_lines = _list_line_ratio(text)
-        if total_lines and (list_lines * 2) >= total_lines:
-            return {**block, "type": "list_item", "list_kind": inferred}
-        return block
-
-    return {**block, "type": "list_item", "list_kind": leading_kind}
-
-
-def _normalize_bullet_tail(tail: str) -> str:
-    if not tail:
-        return ""
-    head, *rest = tail.split(" ", 1)
-    normalized = head.lower() if head in _STOPWORD_TITLES else head
-    return f"{normalized} {rest[0]}".strip() if rest and rest[0] else normalized
-
-
-def _normalized_heading_lines(headings: Iterable[str]) -> tuple[str, ...]:
-    return tuple(
-        stripped
-        for heading in headings
-        if heading and (stripped := heading.strip())
-    )
-
-
-def _heading_body_separator(heading_block: str) -> str:
-    """Return the separator inserted between heading text and body."""
-
-    # LoRA fine-tuning and RAG retrieval benefit from compact, predictable
-    # whitespace so heading tokens stay adjacent to their descriptive body
-    # text without introducing gratuitous padding. A single newline keeps the
-    # visual separation while avoiding the blank line that previously doubled
-    # the token cost.
-    return "\n"
-
-
-def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
-    normalized_headings = _normalized_heading_lines(headings)
-    if any(starts_with_bullet(h.lstrip()) for h in normalized_headings):
-        lead = " ".join(h.rstrip() for h in normalized_headings).rstrip()
-        tail = _normalize_bullet_tail(body.lstrip()) if body else ""
-        return f"{lead} {tail}".strip()
-
-    heading_block = "\n".join(normalized_headings)
-    body_text = body.strip() if body else ""
-
-    if not heading_block:
-        return body_text
-    if not body_text:
-        return heading_block
-
-    separator = _heading_body_separator(heading_block)
-    return f"{heading_block}{separator}{body_text}"
-
-
-def _with_source(block: Block, page: int, filename: str | None) -> Block:
-    """Attach ``filename`` and ``page`` as a ``source`` entry when absent."""
-
-    existing = block.get("source") or {}
-    source = {**{"filename": filename, "page": page}, **existing}
-    return {**block, "source": {k: v for k, v in source.items() if v is not None}}
-
-
-def build_chunk(text: str) -> Chunk:
-    """Return chunk payload containing only ``text``."""
-
-    return {"text": text}
-
-
-def build_chunk_with_meta(
-    text: str, block: Block, page: int, filename: str | None, index: int
-) -> Chunk:
-    """Return chunk payload enriched with metadata."""
-    annotated = _tag_list(block)
-    start_index = annotated.pop("_chunk_start_index", None)
-    chunk_index = start_index if isinstance(start_index, int) else index
-    metadata = _build_metadata(
-        text,
-        _with_source(annotated, page, filename),
-        chunk_index,
-        {},
-    )
-    anchors, spans = _collect_superscripts(annotated, text)
-    if anchors:
-        metadata["footnote_anchors"] = anchors
-    chunk = {"text": text, "meta": metadata}
-    return {**chunk, "_footnote_spans": spans} if spans else chunk
-
-
 def _chunk_items(
     doc: Doc,
     split_fn: SplitFn,
@@ -1724,17 +1198,19 @@ def _chunk_items(
 
     filename = doc.get("source_path")
     limit = options.compute_limit() if options is not None else None
-    merged = _stitch_block_continuations(
-        _merge_styled_list_records(
-            pipeline_attach_headings(
-                _block_texts(doc, split_fn),
-                is_heading=_is_heading,
-                merge_block_text=_merge_heading_texts,
-            )
+    stages: tuple[Callable[[Iterable[Record]], Iterable[Record]], ...] = (
+        partial(
+            pipeline_attach_headings,
+            is_heading=_is_heading,
+            merge_block_text=_merge_heading_texts,
         ),
-        limit,
+        _merge_styled_list_records,
+        partial(_stitch_block_continuations, limit=limit),
     )
-    collapsed = _collapse_records(merged, options, limit)
+    records: Iterable[Record] = _block_texts(doc, split_fn)
+    for stage in stages:
+        records = stage(records)
+    collapsed = _collapse_records(records, options, limit)
     builder = partial(build_chunk_with_meta, filename=filename)
     return pipeline_chunk_records(
         collapsed,
@@ -1753,11 +1229,7 @@ def _inject_continuation_context(
         original = item.get("text", "")
         current_meta = _chunk_meta(item)
         current_is_list = _meta_is_list(current_meta)
-        can_trim = (
-            prev_text is not None
-            and not current_is_list
-            and not _meta_is_list(prev_meta)
-        )
+        can_trim = prev_text is not None and not current_is_list and not _meta_is_list(prev_meta)
         trimmed = (
             _trim_boundary_overlap(cast(str, prev_text), original, overlap)
             if can_trim
