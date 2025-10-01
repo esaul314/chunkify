@@ -1027,6 +1027,37 @@ def _normalize_leading_case(original: str, cleaned: str) -> str:
     return _uppercase_char(cleaned, offset + clean_idx)
 
 
+def _first_alpha_after(text: str, start: int) -> Optional[int]:
+    """Return the index of the first alphabetic character in ``text`` after ``start``."""
+
+    return next((idx for idx, ch in enumerate(text[start:], start=start) if ch.isalpha()), None)
+
+
+def _restore_colon_suffix_case(original: str, cleaned: str) -> str:
+    """Uppercase colon suffix initials when the original text used title casing."""
+
+    if ":" not in original or ":" not in cleaned:
+        return cleaned
+
+    orig_colons = (idx for idx, ch in enumerate(original) if ch == ":")
+    cleaned_colons = (idx for idx, ch in enumerate(cleaned) if ch == ":")
+    chars = list(cleaned)
+
+    for orig_idx, cleaned_idx in zip(orig_colons, cleaned_colons):
+        orig_alpha = _first_alpha_after(original, orig_idx + 1)
+        cleaned_alpha = _first_alpha_after(chars, cleaned_idx + 1)
+        if (
+            orig_alpha is None
+            or cleaned_alpha is None
+            or not original[orig_alpha].isupper()
+            or not chars[cleaned_alpha].islower()
+        ):
+            continue
+        chars[cleaned_alpha] = chars[cleaned_alpha].upper()
+
+    return "".join(chars)
+
+
 def _apply_leading_case(pairs: list[tuple[str, str]]) -> list[str]:
     """Return cleaned lines with the first entry's case normalised."""
 
@@ -1129,7 +1160,11 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
         if cleaned
     ]
     normalised = _apply_leading_case(cleaned_pairs)
-    pruned = _drop_trailing_bullet_footers(normalised)
+    colon_restored = [
+        _restore_colon_suffix_case(original, cleaned)
+        for (original, _), cleaned in zip(cleaned_pairs, normalised)
+    ]
+    pruned = _drop_trailing_bullet_footers(colon_restored)
     return "\n".join(pruned)
 
 

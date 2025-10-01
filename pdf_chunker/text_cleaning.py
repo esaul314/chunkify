@@ -709,12 +709,18 @@ def _should_lowercase_bullet_stopword(prefix: str) -> bool:
         last_char = prefix[-1]
         return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
 
+    colon_seen = False
     for token in reversed(tokens):
         if token in _CLOSING_QUOTE_CHARS:
             return False
         if token in _EM_DASH_CHARS:
             return False
+        if token == ":":
+            colon_seen = True
+            continue
         if any(char in END_PUNCT for char in token):
+            return False
+        if colon_seen:
             return False
         last_char = token[-1]
         return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
