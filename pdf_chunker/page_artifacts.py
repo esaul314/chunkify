@@ -125,15 +125,45 @@ def _is_question_bullet_footer_run(
     question_sum = sum(question_counts)
     shortish = max(token_totals) <= 28
     limited_long = max(long_totals) <= 14
-    threshold = run_length + max(1, run_length // 2)
-    single_line_question = (
-        run_length == 1
-        and question_counts[0] >= 1
-        and token_totals[0] <= 18
-        and long_totals[0] <= 10
-    )
-    question_dense = question_sum >= threshold or single_line_question
 
+    if run_length == 1:
+        total_tokens, long_token_count = stats[0]
+        tokens = re.findall(r"[A-Za-z0-9]+", bodies[0])
+        first_token = tokens[0].lower() if tokens else ""
+        question_leads = {
+            "who",
+            "what",
+            "when",
+            "where",
+            "why",
+            "how",
+            "is",
+            "are",
+            "am",
+            "do",
+            "does",
+            "did",
+            "can",
+            "could",
+            "should",
+            "would",
+            "will",
+            "have",
+            "has",
+            "had",
+            "may",
+            "might",
+            "shall",
+            "which",
+        }
+        if first_token in question_leads:
+            return False
+
+        single_line_short = total_tokens <= 18 and long_token_count <= 10
+        return question_counts[0] >= 1 and single_line_short
+
+    threshold = run_length + max(1, run_length // 2)
+    question_dense = question_sum >= threshold
     return shortish and limited_long and question_dense
 
 
