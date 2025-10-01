@@ -81,6 +81,12 @@ from pdf_chunker.passes.split_semantic_metadata import (
     build_chunk_with_meta,
 )
 
+Doc = dict[str, Any]
+Block = dict[str, Any]
+Record = tuple[int, Block, str]
+SplitFn = Callable[[str], list[str]]
+MetricFn = Callable[[], dict[str, int | bool]]
+
 logger = logging.getLogger(__name__)
 
 _TOKEN_PATTERN = re.compile(r"\S+")
@@ -879,98 +885,147 @@ def _maybe_merge_dense_page(
     return ((sequence[0][0], merged_block, merged_text),)
 
 
+@dataclass(frozen=True)
+class _CollapseEmitter:
+    resolved_limit: int | None
+    hard_limit: int | None
+    overlap: int
+    buffer: tuple[Record, ...] = tuple()
+    running_words: int = 0
+    running_dense: int = 0
+    start_index: int | None = None
+    outputs: tuple[Record, ...] = tuple()
+
+    def append(
+        self,
+        idx: int,
+        record: Record,
+        counts: tuple[int, int, int],
+    ) -> _CollapseEmitter:
+        start_index = self.start_index if self.buffer else idx
+        words = self.running_words + counts[0] if self.buffer else counts[0]
+        dense = self.running_dense + counts[1] if self.buffer else counts[1]
+        return replace(
+            self,
+            buffer=self.buffer + (record,),
+            running_words=words,
+            running_dense=dense,
+            start_index=start_index,
+        )
+
+    def flush(self, *, overflow: bool = False) -> _CollapseEmitter:
+        if not self.buffer:
+            return self
+        first_index = self.start_index if self.start_index is not None else 0
+        produced = _emit_buffer_segments(
+            self.buffer,
+            start_index=first_index,
+            overlap=self.overlap,
+            resolved_limit=self.resolved_limit,
+            hard_limit=self.hard_limit,
+            overflow=overflow,
+        )
+        return replace(
+            self,
+            buffer=tuple(),
+            running_words=0,
+            running_dense=0,
+            start_index=None,
+            outputs=self.outputs + produced,
+        )
+
+    def emit_single(self, idx: int, record: Record) -> _CollapseEmitter:
+        page, block, text = record
+        entry: Record = (page, _with_chunk_index(block, idx), text)
+        return replace(self, outputs=self.outputs + (entry,))
+
+
+def _page_or_footer_boundary(buffer: tuple[Record, ...], record: Record) -> bool:
+    if not buffer:
+        return False
+    prev_page, _, _ = buffer[-1]
+    page, _, _ = record
+    if prev_page != page:
+        return True
+    prev_is_footer = _record_is_footer_candidate(buffer[-1])
+    current_is_footer = _record_is_footer_candidate(record)
+    return (current_is_footer != prev_is_footer) and (current_is_footer or prev_is_footer)
+
+
+def _projected_overflow(
+    state: _CollapseEmitter,
+    block: Block,
+    text: str,
+    counts: tuple[int, int, int],
+) -> str | None:
+    words = state.running_words + counts[0]
+    dense = state.running_dense + counts[1]
+    effective = max(words, dense)
+    exceeds_soft = state.resolved_limit is not None and effective > state.resolved_limit
+    exceeds_hard = state.hard_limit is not None and effective > state.hard_limit
+    if exceeds_hard:
+        last_text = state.buffer[-1][2].rstrip()
+        if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
+            return "flush"
+        return "overflow"
+    if exceeds_soft:
+        return "overflow"
+    return None
+
+
+def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _CollapseEmitter:
+    idx, record = item
+    _, block, text = record
+    counts = _effective_counts(text)
+    _, _, effective = counts
+    if _page_or_footer_boundary(state.buffer, record):
+        state = state.flush()
+    if (state.resolved_limit is not None and effective > state.resolved_limit) or (
+        state.hard_limit is not None and effective > state.hard_limit
+    ):
+        return state.flush().emit_single(idx, record)
+    if (
+        state.buffer
+        and _starts_list_like(block, text)
+        and _should_emit_list_boundary(state.buffer[-1], block, text)
+    ):
+        state = state.flush()
+    if state.buffer:
+        overflow_action = _projected_overflow(state, block, text, counts)
+        if overflow_action is not None:
+            state = state.flush(overflow=overflow_action == "overflow")
+    return state.append(idx, record, counts)
+
+
 def _collapse_records(
     records: Iterable[tuple[int, Block, str]],
     options: SplitOptions | None = None,
     limit: int | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
-    seq = list(records)
-    seq = list(_strip_footer_suffixes(seq))
+    seq = tuple(_strip_footer_suffixes(tuple(records)))
     if not seq:
         return
     resolved_limit = _resolved_limit(options, limit)
     if resolved_limit is None:
-        for idx, (page, block, text) in enumerate(seq):
-            yield page, _with_chunk_index(block, idx), text
+        yield from (
+            (page, _with_chunk_index(block, idx), text)
+            for idx, (page, block, text) in enumerate(seq)
+        )
         return
 
     hard_limit = _hard_limit(options, resolved_limit)
     overlap = _overlap_value(options)
-    buffer: list[tuple[int, Block, str]] = []
-    running_words = 0
-    running_dense = 0
-    start_index: int | None = None
-    outputs: list[tuple[int, Block, str]] = []
-
-    def emit(*, overflow: bool = False) -> None:
-        nonlocal buffer, running_words, running_dense, start_index
-        if not buffer:
-            return
-        first_index = start_index if start_index is not None else 0
-        produced = _emit_buffer_segments(
-            tuple(buffer),
-            start_index=first_index,
-            overlap=overlap,
-            resolved_limit=resolved_limit,
-            hard_limit=hard_limit,
-            overflow=overflow,
-        )
-        outputs.extend(produced)
-        buffer, running_words, running_dense, start_index = [], 0, 0, None
-
-    for idx, record in enumerate(seq):
-        page, block, text = record
-        is_footer = _record_is_footer_candidate(record)
-        if buffer:
-            prev_page = buffer[-1][0]
-            prev_is_footer = _record_is_footer_candidate(buffer[-1])
-            if prev_page != page or (is_footer != prev_is_footer and (is_footer or prev_is_footer)):
-                emit()
-        word_count, dense_count, effective_count = _effective_counts(text)
-        if (resolved_limit is not None and effective_count > resolved_limit) or (
-            hard_limit is not None and effective_count > hard_limit
-        ):
-            emit()
-            outputs.append((page, _with_chunk_index(block, idx), text))
-            continue
-        if (
-            buffer
-            and _starts_list_like(block, text)
-            and _should_emit_list_boundary(buffer[-1], block, text)
-        ):
-            emit()
-        if buffer:
-            projected_words = running_words + word_count
-            projected_dense = running_dense + dense_count
-            projected_effective = max(projected_words, projected_dense)
-            exceeds_soft = resolved_limit is not None and projected_effective > resolved_limit
-            exceeds_hard = hard_limit is not None and projected_effective > hard_limit
-            if exceeds_hard:
-                last_text = buffer[-1][2].rstrip()
-                if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
-                    emit()
-                else:
-                    emit(overflow=True)
-            elif exceeds_soft:
-                emit(overflow=True)
-        if not buffer:
-            start_index = idx
-            running_words, running_dense = word_count, dense_count
-        else:
-            running_words += word_count
-            running_dense += dense_count
-        buffer.append((page, block, text))
-
-    emit()
-    merged_outputs = _maybe_merge_dense_page(outputs, options, limit)
-    for idx, (page, block, text) in enumerate(merged_outputs):
-        yield page, _with_chunk_index(block, idx), text
-
-
-Doc = dict[str, Any]
-Block = dict[str, Any]
-SplitFn = Callable[[str], list[str]]
-MetricFn = Callable[[], dict[str, int | bool]]
+    initial = _CollapseEmitter(
+        resolved_limit=resolved_limit,
+        hard_limit=hard_limit,
+        overlap=overlap,
+    )
+    final_state = reduce(_collapse_step, enumerate(seq), initial).flush()
+    merged_outputs = _maybe_merge_dense_page(final_state.outputs, options, limit)
+    yield from (
+        (page, _with_chunk_index(block, idx), text)
+        for idx, (page, block, text) in enumerate(merged_outputs)
+    )
 
 
 class _OverrideOpts(TypedDict, total=False):
@@ -1143,17 +1198,19 @@ def _chunk_items(
 
     filename = doc.get("source_path")
     limit = options.compute_limit() if options is not None else None
-    merged = _stitch_block_continuations(
-        _merge_styled_list_records(
-            pipeline_attach_headings(
-                _block_texts(doc, split_fn),
-                is_heading=_is_heading,
-                merge_block_text=_merge_heading_texts,
-            )
+    stages: tuple[Callable[[Iterable[Record]], Iterable[Record]], ...] = (
+        partial(
+            pipeline_attach_headings,
+            is_heading=_is_heading,
+            merge_block_text=_merge_heading_texts,
         ),
-        limit,
+        _merge_styled_list_records,
+        partial(_stitch_block_continuations, limit=limit),
     )
-    collapsed = _collapse_records(merged, options, limit)
+    records: Iterable[Record] = _block_texts(doc, split_fn)
+    for stage in stages:
+        records = stage(records)
+    collapsed = _collapse_records(records, options, limit)
     builder = partial(build_chunk_with_meta, filename=filename)
     return pipeline_chunk_records(
         collapsed,
