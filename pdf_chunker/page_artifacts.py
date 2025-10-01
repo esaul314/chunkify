@@ -2,7 +2,7 @@ import logging
 import re
 from dataclasses import replace
 from functools import reduce
-from itertools import takewhile
+from itertools import groupby, takewhile
 from typing import Iterable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -100,21 +100,134 @@ def _question_footer_token_stats(body: str) -> tuple[int, int]:
     return len(tokens), long_tokens
 
 
-def _is_question_bullet_footer(text: str, idx: int) -> bool:
-    body = _bullet_body(text)
-    if not body:
+def _is_question_bullet_footer_run(
+    span: tuple[int, ...],
+    lines: list[str],
+) -> bool:
+    """Return ``True`` when ``span`` represents a footer-style bullet run."""
+
+    if not span:
         return False
 
-    question_count = body.count("?")
-    if question_count < 2 or idx >= 10:
+    bodies = tuple(_bullet_body(lines[idx]) for idx in span)
+    if not all(bodies):
         return False
 
-    total_tokens, long_tokens = _question_footer_token_stats(body)
-    if total_tokens == 0:
+    stats = tuple(_question_footer_token_stats(body) for body in bodies)
+    token_totals = tuple(total for total, _ in stats)
+    long_totals = tuple(long for _, long in stats)
+    question_counts = tuple(body.count("?") for body in bodies)
+
+    if not all(question_counts):
         return False
 
-    punctuation_ratio = question_count / total_tokens
-    return total_tokens <= 6 and long_tokens <= 3 and punctuation_ratio >= 0.75
+    run_length = len(span)
+    question_sum = sum(question_counts)
+    shortish = max(token_totals) <= 28
+    limited_long = max(long_totals) <= 14
+    threshold = run_length + max(1, run_length // 2)
+    single_line_question = (
+        run_length == 1
+        and question_counts[0] >= 1
+        and token_totals[0] <= 18
+        and long_totals[0] <= 10
+    )
+    question_dense = question_sum >= threshold or single_line_question
+
+    return shortish and limited_long and question_dense
+
+
+def _question_footer_indices(lines: list[str]) -> frozenset[int]:
+    """Return indices for bullet lines that resemble footer question clusters."""
+
+    total = len(lines)
+    spans = (
+        tuple(idx for idx, _ in group)
+        for is_bullet, group in groupby(
+            enumerate(lines), key=lambda pair: _starts_with_bullet(pair[1].lstrip())
+        )
+        if is_bullet
+    )
+
+    def _near_footer(span: tuple[int, ...]) -> bool:
+        return bool(span) and (total - span[-1] - 1) <= 4
+
+    qualifying = (
+        span
+        for span in spans
+        if _near_footer(span) and _is_question_bullet_footer_run(span, lines)
+    )
+
+    bullet_indices = frozenset(idx for span in qualifying for idx in span)
+
+    def _looks_like_question_continuation(idx: int, line: str) -> bool:
+        stripped = line.strip()
+        if idx in bullet_indices or "?" not in stripped:
+            return False
+        tokens = re.findall(r"[A-Za-z0-9]+", stripped)
+        if not tokens or len(tokens) > 6:
+            return False
+        from_end = total - idx - 1
+        initial = stripped[0]
+        question_tail = stripped.endswith("?") or stripped.endswith("?)") or stripped.endswith("?\"")
+        return (
+            from_end <= 4
+            and (initial.islower() or len(tokens) <= 2)
+            and question_tail
+        )
+
+    continuation = frozenset(
+        idx for idx, line in enumerate(lines) if _looks_like_question_continuation(idx, line)
+    )
+
+    return bullet_indices.union(continuation)
+
+
+def _first_text_line(text: str) -> str:
+    return _first_non_empty_line(text.splitlines())
+
+
+def _classify_footer_block(text: str) -> str:
+    first_line = _first_text_line(text)
+    if not first_line:
+        return ""
+    if _starts_with_bullet(first_line):
+        return "bullet"
+    if first_line[0].islower():
+        return "continuation"
+    if len(first_line.split()) <= 2 and "?" in first_line:
+        return "continuation"
+    return ""
+
+
+def _prune_footer_blocks(blocks: list["Block"]) -> list["Block"]:
+    if not blocks:
+        return []
+
+    kinds = [(_classify_footer_block(blk.text), idx) for idx, blk in enumerate(blocks)]
+    cluster: list[int] = []
+    bullet_count = 0
+    idx = len(kinds) - 1
+    while idx >= 0:
+        kind, _ = kinds[idx]
+        if not kind:
+            break
+        cluster.append(idx)
+        if kind == "bullet":
+            bullet_count += 1
+        idx -= 1
+
+    if bullet_count < 3:
+        return blocks
+
+    cluster.reverse()
+    start = cluster[0]
+    previous_text = blocks[start - 1].text if start > 0 else ""
+    if previous_text and not previous_text.strip().endswith(":"):
+        return blocks
+
+    drop = set(cluster)
+    return [blk for idx, blk in enumerate(blocks) if idx not in drop]
 
 
 def _first_non_empty_line(lines: Iterable[str]) -> str:
@@ -172,6 +285,7 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         return lines
 
     bodies = [(_bullet_body(line), pos) for pos, line in trailing]
+    trailing_indices = tuple(pos for pos, _ in trailing)
     previous = _first_non_empty_line(
         lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1)
     )
@@ -189,6 +303,27 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
             _header_invites_footer(previous, trailing_count),
         )
     )
+
+    stats = tuple(
+        (_question_footer_token_stats(body), pos)
+        for body, pos in bodies
+        if body
+    )
+    dense_footer_run = (
+        len(trailing_indices) >= 4
+        and previous.rstrip().endswith(":")
+        and stats
+        and all(total >= 20 and long >= 10 for (total, long), _ in stats)
+    )
+
+    if _is_question_bullet_footer_run(trailing_indices, lines) or dense_footer_run:
+        removals = list(trailing_indices)
+        keep_indices = set(removals)
+        logger.debug(
+            "remove_page_artifact_lines dropped trailing question footer bullets: %s",
+            "; ".join(lines[pos].strip()[:30] for pos in removals),
+        )
+        return [line for idx, line in enumerate(lines) if idx not in keep_indices]
 
     removals = [pos for body, pos in bodies if _should_prune(body)]
     if len(removals) != len(bodies) or not context_allows:
@@ -890,6 +1025,8 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     lines = text.splitlines()
     total = len(lines)
 
+    question_footer_indices = _question_footer_indices(lines)
+
     def _clean_line(idx: int, ln: str) -> Optional[str]:
         normalized = ln if _starts_with_bullet(ln) else _strip_page_header_prefix(ln)
         normalized, removed_inline = _remove_inline_footnote_prefix(normalized)
@@ -929,7 +1066,7 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
                     ln[:30],
                 )
                 return None
-        if _starts_with_bullet(normalized) and _is_question_bullet_footer(normalized, idx):
+        if idx in question_footer_indices:
             logger.debug(
                 "remove_page_artifact_lines dropped question bullet footer: %s",
                 ln[:30],
@@ -969,8 +1106,30 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
 def strip_artifacts(blocks: Iterable["Block"], config=None) -> Iterable["Block"]:
     """Yield blocks with header and footer artifacts stripped."""
 
+    pending: list["Block"] = []
+    current_page: Optional[int] = None
+
+    def _flush() -> Iterable["Block"]:
+        nonlocal pending
+        pruned = _prune_footer_blocks(pending)
+        pending = []
+        return pruned
+
     for blk in blocks:
         page = blk.source.get("page")
         cleaned = remove_page_artifact_lines(blk.text, page)
-        if cleaned and not is_page_artifact_text(cleaned, page):
-            yield replace(blk, text=cleaned)
+        if not cleaned or is_page_artifact_text(cleaned, page):
+            continue
+        updated = replace(blk, text=cleaned)
+        if current_page is None or page == current_page:
+            pending.append(updated)
+            current_page = page
+            continue
+        for pruned_block in _flush():
+            yield pruned_block
+        pending.append(updated)
+        current_page = page
+
+    if pending:
+        for pruned_block in _flush():
+            yield pruned_block
