@@ -34,3 +34,9 @@ def test_strip_artifacts_removes_toc_dot_leaders():
     ]
     cleaned = list(strip_artifacts(blocks, None))
     assert cleaned == []
+
+
+def test_remove_page_artifact_lines_preserves_colon_case():
+    line = "A Success Red Herring: The Single Pane of Glass"
+    cleaned = remove_page_artifact_lines(line, 41)
+    assert "A Success Red Herring: The" in cleaned

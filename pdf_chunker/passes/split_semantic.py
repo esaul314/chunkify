@@ -557,6 +557,11 @@ def _is_footer_artifact_record(
     word_total = sum(len(line.split()) for line in stripped_lines)
     if word_total > 20:
         return False
+    previous_line = _previous_non_empty_line(tuple(prev_text.splitlines()))
+    if not _footer_context_allows(previous_line, len(stripped_lines)):
+        return False
+    if not all(_footer_line_is_artifact(line, previous_line) for line in stripped_lines):
+        return False
     width = None
     if isinstance(block, Mapping):
         bbox = block.get("bbox")
