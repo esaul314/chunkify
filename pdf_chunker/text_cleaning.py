@@ -230,6 +230,7 @@ COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 
 # Newline/split heuristics
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
+COLON_LIST_BREAK_RE = re.compile(r":\n{2,}(?=\s*(?:[•\-]|\d))")
 SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 
 STOPWORDS: frozenset[str] = frozenset(
@@ -482,9 +483,19 @@ def _maybe_join_words(head: str, tail: str) -> str:
     return f"{head} {tail}"
 
 
+def _collapse_colon_list_breaks(text: str) -> str:
+    """Collapse paragraph gaps after colons that precede list markers."""
+
+    return COLON_LIST_BREAK_RE.sub(":\n", text)
+
+
 def _fix_double_newlines(text: str) -> str:
     """Resolve words or phrases separated by double newlines using word heuristics."""
-    return DOUBLE_NEWLINE_RE.sub(lambda m: _maybe_join_words(m.group(1), m.group(2)), text)
+
+    normalized = _collapse_colon_list_breaks(text)
+    return DOUBLE_NEWLINE_RE.sub(
+        lambda m: _maybe_join_words(m.group(1), m.group(2)), normalized
+    )
 
 
 def _fix_split_words(text: str) -> str:

@@ -1,12 +1,14 @@
 import logging
 import re
-from functools import lru_cache
-from typing import Callable, Iterable
-from itertools import accumulate
-from haystack.dataclasses import Document
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from dataclasses import dataclass
+from functools import lru_cache, partial
+from itertools import accumulate
+from typing import Callable, Iterable
+
+from haystack.dataclasses import Document
+
+from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
 
@@ -177,13 +179,53 @@ def _compute_readability(text: str) -> dict:
     return {"flesch_kincaid_grade": flesch_kincaid, "difficulty": difficulty}
 
 
-def _generate_chunk_id(filename: str, page: int, chunk_index: int) -> str:
+def _chunk_page_index(page: int | None) -> int:
+    """Return the zero-based page index used when constructing chunk IDs."""
+
+    if not page:
+        return 0
+    return max(page - 1, 0)
+
+
+def _generate_chunk_id(filename: str, page: int | None, chunk_index: int) -> str:
     """Generates a unique chunk ID using underscores as separators."""
-    # Ensure filename does not contain underscores that would break the pattern
-    # (but preserve the extension)
-    # If page is None or 0, use 0
-    page_part = page if page is not None else 0
+
+    page_part = _chunk_page_index(page)
     return f"{filename}_p{page_part}_c{chunk_index}"
+
+
+def _normalize_list_block(block: dict, *, chunk_text: str) -> dict:
+    """Return ``block`` with inferred list metadata when list markers appear."""
+
+    if not isinstance(block, dict):
+        return block
+
+    block_type = block.get("type")
+    list_kind = block.get("list_kind")
+    if block_type == "list_item" and list_kind:
+        return block
+
+    def _lines(value: str | None) -> tuple[str, ...]:
+        if not value:
+            return tuple()
+        return tuple(line.lstrip() for line in value.splitlines() if line.strip())
+
+    text_candidates = _lines(block.get("text")) + _lines(chunk_text)
+    if not text_candidates:
+        return block
+
+    def _mark(kind: str) -> dict:
+        payload = {**block, "type": "list_item", "list_kind": kind}
+        return payload
+
+    if list_kind:
+        return _mark(list_kind)
+
+    if any(starts_with_bullet(line) for line in text_candidates):
+        return _mark("bullet")
+    if any(starts_with_number(line) for line in text_candidates):
+        return _mark("numbered")
+    return block
 
 
 def _truncate_chunk(text: str, max_chunk_size: int = 8000) -> str:
@@ -246,7 +288,7 @@ def _enrich_chunk(
 ) -> dict:
     """Perform optional AI enrichment using ``enrichment_fn``."""
     if not perform_ai_enrichment or enrichment_fn is None:
-        return {"classification": "error", "tags": []}
+        return {}
     try:
         result = enrichment_fn(text)
         return {
@@ -265,30 +307,32 @@ def _build_metadata(
     utterance_type: dict,
 ) -> dict:
     """Construct metadata object for a chunk, propagating list metadata."""
-    filename = source_block.get("source", {}).get("filename", "Unknown")
-    page = source_block.get("source", {}).get("page", 0)
-    location = source_block.get("source", {}).get("location")
+
+    normalized = _normalize_list_block(source_block, chunk_text=text)
+    source = normalized.get("source", {}) if isinstance(normalized, dict) else {}
+
+    filename = source.get("filename", "Unknown")
+    page = source.get("page", 0)
+    location = source.get("location")
 
     location_value = None if location is None and filename.lower().endswith(".pdf") else location
     page_value = page if isinstance(page, int) and page > 0 else None
 
     base_metadata = {
         "source": filename,
-        "chunk_id": _generate_chunk_id(
-            filename, page_value if page_value is not None else 0, chunk_index
-        ),
+        "chunk_id": _generate_chunk_id(filename, page_value, chunk_index),
         "page": page_value,
         "location": location_value,
-        "block_type": source_block.get("type", "paragraph"),
-        "language": source_block.get("language", "un"),
+        "block_type": normalized.get("type", "paragraph"),
+        "language": normalized.get("language", "un"),
         "readability": _compute_readability(text),
         "utterance_type": utterance_type,
         "importance": "medium",
     }
 
     list_metadata = (
-        {"list_kind": source_block["list_kind"]}
-        if source_block.get("type") == "list_item" and source_block.get("list_kind")
+        {"list_kind": normalized["list_kind"]}
+        if normalized.get("type") == "list_item" and normalized.get("list_kind")
         else {}
     )
 
