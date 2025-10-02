@@ -829,7 +829,9 @@ def collapse_single_newlines(text: str) -> str:
 
 
 def _starts_list_item(line: str) -> bool:
-    return bool(re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", line))
+    """Return True when ``line`` begins with a bullet or numbered marker."""
+
+    return bool(_LIST_MARKER_RE.match(line))
 
 
 def _starts_new_list_item(text: str) -> bool:
@@ -1113,17 +1115,16 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
             if author_line.startswith("—"):
                 merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
+            if _ends_with_footnote(prev):
+                normalized = _normalize_trailing_footnote(prev)
+                merged[-1] = normalized
+                prev = normalized
+                if not _starts_new_list_item(part):
+                    merged[-1] = f"{normalized} {part.lstrip()}"
+                    continue
             last_line = prev.strip().splitlines()[-1]
             if _starts_list_item(last_line):
-                if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                    normalized = _normalize_trailing_footnote(prev)
-                    merged[-1] = f"{normalized} {part.lstrip()}"
-                else:
-                    merged.append(part)
-                continue
-            if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                normalized = _normalize_trailing_footnote(prev)
-                merged[-1] = f"{normalized} {part.lstrip()}"
+                merged.append(part)
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
