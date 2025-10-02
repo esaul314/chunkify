@@ -30,10 +30,10 @@ def _identity(src: Path, dst: Path) -> Path:
     return dst
 
 
-_SPEC: dict[str, tuple[Path, str, Callable[[Path, Path], Path]]] = {
-    "pdf": (SAMPLES_DIR / "sample.pdf.b64", "pdf", _decode),
-    "tiny": (SAMPLES_DIR / "tiny.pdf", "pdf", _identity),
-    "epub": (SAMPLES_DIR / "sample.epub.b64", "epub", _decode),
+_SPEC: dict[str, tuple[Path, str, Callable[[Path, Path], Path], str]] = {
+    "pdf": (SAMPLES_DIR / "sample.pdf.b64", "pdf", _decode, "sample.pdf"),
+    "tiny": (SAMPLES_DIR / "tiny.pdf", "pdf", _identity, "tiny.pdf"),
+    "epub": (SAMPLES_DIR / "sample.epub.b64", "epub", _decode, "sample.epub"),
 }
 
 
@@ -73,9 +73,9 @@ def _diff(old: Path, new: Path) -> str:
 
 
 def _refresh(kind: str, approve: bool, tmp: Path) -> str | None:
-    src, ext, materialize = _SPEC[kind]
+    src, ext, materialize, target_name = _SPEC[kind]
     try:
-        inp = materialize(src, tmp / f"sample.{ext}")
+        inp = materialize(src, tmp / target_name)
     except Exception as exc:  # pragma: no cover
         return f"{kind}: materialization failed: {exc}"
     try:
