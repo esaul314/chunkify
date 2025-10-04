@@ -61,6 +61,17 @@ def pipe(value: T, *funcs: Callable[[T], T]) -> T:
     return value
 
 
+def _stabilize(value: T, transform: Callable[[T], T], *, limit: int = 3) -> T:
+    """Apply ``transform`` until a fixpoint is reached or ``limit`` iterations pass."""
+
+    for _ in range(limit):
+        updated = transform(value)
+        if updated == value:
+            return value
+        value = updated
+    return value
+
+
 def _preview(s: str, n: int = PREVIEW_LEN) -> str:
     """Return a safe preview slice for debug logs."""
     return repr(s[:n])
@@ -230,6 +241,7 @@ COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 
 # Newline/split heuristics
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
+COLON_LIST_BREAK_RE = re.compile(r":\n{2,}(?=\s*(?:[•\-]|\d))")
 SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 
 STOPWORDS: frozenset[str] = frozenset(
@@ -482,9 +494,19 @@ def _maybe_join_words(head: str, tail: str) -> str:
     return f"{head} {tail}"
 
 
+def _collapse_colon_list_breaks(text: str) -> str:
+    """Collapse paragraph gaps after colons that precede list markers."""
+
+    return COLON_LIST_BREAK_RE.sub(":\n", text)
+
+
 def _fix_double_newlines(text: str) -> str:
     """Resolve words or phrases separated by double newlines using word heuristics."""
-    return DOUBLE_NEWLINE_RE.sub(lambda m: _maybe_join_words(m.group(1), m.group(2)), text)
+
+    normalized = _collapse_colon_list_breaks(text)
+    return DOUBLE_NEWLINE_RE.sub(
+        lambda m: _maybe_join_words(m.group(1), m.group(2)), normalized
+    )
 
 
 def _fix_split_words(text: str) -> str:
@@ -602,8 +624,9 @@ def drop_spurious_number_markers(text: str) -> str:
     )
 
 
-def remove_stray_bullet_lines(text: str) -> str:
-    """Collapse stray bullet markers while keeping legitimate list breaks intact."""
+def _remove_stray_bullet_lines_once(text: str) -> str:
+    """Perform a single pass of stray bullet cleanup."""
+
     return pipe(
         text,
         lambda t: STRAY_BULLET_SOLO_RE.sub("\n", t),
@@ -612,6 +635,12 @@ def remove_stray_bullet_lines(text: str) -> str:
         _strip_address_bullet_lines,
         lambda t: re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", t),
     )
+
+
+def remove_stray_bullet_lines(text: str) -> str:
+    """Collapse stray bullet markers while keeping legitimate list breaks intact."""
+
+    return _stabilize(text, _remove_stray_bullet_lines_once)
 
 
 def cleanup_bullet_fragments(text: str) -> str:
@@ -709,12 +738,18 @@ def _should_lowercase_bullet_stopword(prefix: str) -> bool:
         last_char = prefix[-1]
         return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
 
+    colon_seen = False
     for token in reversed(tokens):
         if token in _CLOSING_QUOTE_CHARS:
             return False
         if token in _EM_DASH_CHARS:
             return False
+        if token == ":":
+            colon_seen = True
+            continue
         if any(char in END_PUNCT for char in token):
+            return False
+        if colon_seen:
             return False
         last_char = token[-1]
         return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
@@ -812,7 +847,9 @@ def collapse_single_newlines(text: str) -> str:
 
 
 def _starts_list_item(line: str) -> bool:
-    return bool(re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", line))
+    """Return True when ``line`` begins with a bullet or numbered marker."""
+
+    return bool(_LIST_MARKER_RE.match(line))
 
 
 def _starts_new_list_item(text: str) -> bool:
@@ -1049,12 +1086,13 @@ def strip_underscore_wrapping(text: str) -> str:
     return remove_underscore_emphasis(text)
 
 
-def remove_dangling_underscores(text: str) -> str:
-    """Remove underscores that don't join word characters."""
-    preserved_ranges = [
+def _remove_dangling_underscores_once(text: str) -> str:
+    """Return ``text`` with a single pass of dangling underscore removal applied."""
+
+    preserved_ranges = tuple(
         (match.start(), match.end())
         for match in _PRESERVE_MULTIWORD_UNDERSCORE_RE.finditer(text)
-    ]
+    )
 
     def _is_preserved(index: int) -> bool:
         return any(start <= index < end for start, end in preserved_ranges)
@@ -1065,20 +1103,23 @@ def remove_dangling_underscores(text: str) -> str:
         following = text[end] if end < len(text) else ""
         return bool(following and following.isupper())
 
-    result: List[str] = []
-    i = 0
-    while i < len(text):
-        if text[i] == "_":
-            match = DANGLING_UNDERSCORE_RE.match(text, i)
-            if match:
-                if _should_keep(match.start(), match.end()):
-                    result.append(match.group(0))
-                i = match.end()
-                continue
-        result.append(text[i])
-        i += 1
+    def _segments() -> Iterator[str]:
+        last = 0
+        for match in DANGLING_UNDERSCORE_RE.finditer(text):
+            start, end = match.span()
+            yield text[last:start]
+            if _should_keep(start, end):
+                yield match.group(0)
+            last = end
+        yield text[last:]
 
-    return "".join(result)
+    return "".join(_segments())
+
+
+def remove_dangling_underscores(text: str) -> str:
+    """Remove underscores that don't join word characters."""
+
+    return _stabilize(text, _remove_dangling_underscores_once)
 
 
 # ---------------------------------------------------------------------------
@@ -1096,17 +1137,16 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
             if author_line.startswith("—"):
                 merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
+            if _ends_with_footnote(prev):
+                normalized = _normalize_trailing_footnote(prev)
+                merged[-1] = normalized
+                prev = normalized
+                if not _starts_new_list_item(part):
+                    merged[-1] = f"{normalized} {part.lstrip()}"
+                    continue
             last_line = prev.strip().splitlines()[-1]
             if _starts_list_item(last_line):
-                if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                    normalized = _normalize_trailing_footnote(prev)
-                    merged[-1] = f"{normalized} {part.lstrip()}"
-                else:
-                    merged.append(part)
-                continue
-            if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                normalized = _normalize_trailing_footnote(prev)
-                merged[-1] = f"{normalized} {part.lstrip()}"
+                merged.append(part)
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):

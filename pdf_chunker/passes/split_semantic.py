@@ -174,7 +174,7 @@ def _segment_char_limit(chunk_size: int | None) -> int:
     if chunk_size is None or chunk_size <= 0:
         return SOFT_LIMIT
     estimated = int(ceil(chunk_size * _AVERAGE_CHARS_PER_TOKEN))
-    return min(SOFT_LIMIT, max(1, estimated))
+    return max(SOFT_LIMIT, max(1, estimated))
 
 
 def _soft_segments(
@@ -556,6 +556,11 @@ def _is_footer_artifact_record(
         return False
     word_total = sum(len(line.split()) for line in stripped_lines)
     if word_total > 20:
+        return False
+    previous_line = _previous_non_empty_line(tuple(prev_text.splitlines()))
+    if not _footer_context_allows(previous_line, len(stripped_lines)):
+        return False
+    if not all(_footer_line_is_artifact(line, previous_line) for line in stripped_lines):
         return False
     width = None
     if isinstance(block, Mapping):

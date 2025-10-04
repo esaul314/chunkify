@@ -1,4 +1,7 @@
-from typing import Any, Callable, Dict, Iterable, Optional
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence
 from pathlib import Path
 import sys
 import base64
@@ -77,6 +80,46 @@ from pdf_chunker.text_cleaning import (
     remove_underscore_emphasis,
 )
 from pdf_chunker.pdf_blocks import Block
+
+
+@dataclass(frozen=True)
+class _KnownIssue:
+    node_suffix: str
+    reason: str
+
+
+def _known_issue_catalog() -> Sequence[_KnownIssue]:
+    return ()
+
+
+def _known_issue_lookup(catalog: Sequence[_KnownIssue]) -> Mapping[str, str]:
+    return {issue.node_suffix: issue.reason for issue in catalog}
+
+
+def _xfail_known_issue(item: pytest.Item, lookup: Mapping[str, str]) -> None:
+    reason = next(
+        (
+            lookup[suffix]
+            for suffix in lookup
+            if item.nodeid.endswith(suffix)
+        ),
+        None,
+    )
+    if reason is not None:
+        item.add_marker(
+            pytest.mark.xfail(
+                reason=f"{reason} (see tests/KNOWN_ISSUES.md)",
+                strict=False,
+            )
+        )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: Sequence[pytest.Item]) -> None:
+    catalog = _known_issue_catalog()
+    if not catalog:
+        return
+    lookup = _known_issue_lookup(catalog)
+    tuple(_xfail_known_issue(item, lookup) for item in items)
 
 _COLOR_CODES: Dict[str, str] = {
     "red": "31",

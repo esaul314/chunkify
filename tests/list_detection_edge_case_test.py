@@ -97,3 +97,9 @@ def test_is_numbered_list_pair_property(pair):
 @given(non_number_strategy, non_number_strategy)
 def test_is_numbered_list_pair_negative(curr: str, nxt: str) -> None:
     assert not is_numbered_list_pair(curr, nxt)
+
+
+def test_is_numbered_list_pair_ignores_indented_markers() -> None:
+    curr = " 1) 2023"
+    nxt = " 2) 2024"
+    assert not is_numbered_list_pair(curr, nxt)
