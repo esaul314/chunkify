@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from functools import reduce
+from itertools import takewhile
 from typing import Any, Dict, Iterable, List, Tuple
 
 from pdf_chunker.framework import Artifact, register
@@ -22,7 +23,7 @@ LEADING_HYPHEN_RE = re.compile(r"^\s*-\s+")
 INLINE_COLON_BULLET_RE = re.compile(
     rf":\s*(?:[{BULLET_CHARS_ESC}]\s+|-\s+)"
 )
-NUMBERED_RE = re.compile(r"\s*\d+[.)]\s+")
+NUMBERED_RE = re.compile(r"(?P<number>\d+)[.)]\s+(?P<body>.+)")
 
 
 def starts_with_bullet(text: str) -> bool:
@@ -93,10 +94,23 @@ def is_bullet_list_pair(curr: str, nxt: str) -> bool:
     return has_bullet or colon_leads_bullet_list(curr)
 
 
+def _numbered_body(text: str) -> str | None:
+    if not text or not text[0].isdigit():
+        return None
+
+    digits = "".join(takewhile(str.isdigit, text))
+    remainder = text[len(digits) :]
+    if not remainder or remainder[0] not in ".)":
+        return None
+
+    tail = remainder[1:].lstrip(" \t")
+    return tail
+
+
 def starts_with_number(text: str) -> bool:
     """Return True if ``text`` begins with a numbered list marker."""
 
-    return bool(NUMBERED_RE.match(text))
+    return _numbered_body(text) is not None
 
 
 def is_numbered_list_pair(curr: str, nxt: str) -> bool:

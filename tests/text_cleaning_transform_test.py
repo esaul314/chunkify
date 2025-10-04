@@ -1,6 +1,6 @@
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.text_clean import text_clean
-from pdf_chunker.text_cleaning import clean_paragraph
+from pdf_chunker.text_cleaning import clean_paragraph, clean_text
 
 
 def test_text_cleaning_transform(pdf_case):
@@ -49,3 +49,22 @@ def test_quotes_and_control_chars():
     doc = {"type": "page_blocks", "pages": [{"page": 1, "blocks": [{"text": text}]}]}
     cleaned = text_clean(Artifact(payload=doc)).payload["pages"][0]["blocks"][0]["text"]
     assert cleaned == expected
+
+
+def test_clean_text_preserves_diacritics_without_underscores():
+    sample = "ˠ"
+    first_pass = clean_text(sample)
+    second_pass = clean_text(first_pass)
+
+    assert first_pass == sample
+    assert second_pass == sample
+    assert not first_pass.startswith("_")
+
+
+def test_clean_text_does_not_reintroduce_bullet_markers():
+    sample = "Intro:\n\n• Item"
+    first_pass = clean_text(sample)
+    second_pass = clean_text(first_pass)
+
+    assert first_pass == second_pass
+    assert "•" in first_pass
