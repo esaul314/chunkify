@@ -61,6 +61,17 @@ def pipe(value: T, *funcs: Callable[[T], T]) -> T:
     return value
 
 
+def _stabilize(value: T, transform: Callable[[T], T], *, limit: int = 3) -> T:
+    """Apply ``transform`` until a fixpoint is reached or ``limit`` iterations pass."""
+
+    for _ in range(limit):
+        updated = transform(value)
+        if updated == value:
+            return value
+        value = updated
+    return value
+
+
 def _preview(s: str, n: int = PREVIEW_LEN) -> str:
     """Return a safe preview slice for debug logs."""
     return repr(s[:n])
@@ -613,8 +624,9 @@ def drop_spurious_number_markers(text: str) -> str:
     )
 
 
-def remove_stray_bullet_lines(text: str) -> str:
-    """Collapse stray bullet markers while keeping legitimate list breaks intact."""
+def _remove_stray_bullet_lines_once(text: str) -> str:
+    """Perform a single pass of stray bullet cleanup."""
+
     return pipe(
         text,
         lambda t: STRAY_BULLET_SOLO_RE.sub("\n", t),
@@ -623,6 +635,12 @@ def remove_stray_bullet_lines(text: str) -> str:
         _strip_address_bullet_lines,
         lambda t: re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", t),
     )
+
+
+def remove_stray_bullet_lines(text: str) -> str:
+    """Collapse stray bullet markers while keeping legitimate list breaks intact."""
+
+    return _stabilize(text, _remove_stray_bullet_lines_once)
 
 
 def cleanup_bullet_fragments(text: str) -> str:
@@ -1068,12 +1086,13 @@ def strip_underscore_wrapping(text: str) -> str:
     return remove_underscore_emphasis(text)
 
 
-def remove_dangling_underscores(text: str) -> str:
-    """Remove underscores that don't join word characters."""
-    preserved_ranges = [
+def _remove_dangling_underscores_once(text: str) -> str:
+    """Return ``text`` with a single pass of dangling underscore removal applied."""
+
+    preserved_ranges = tuple(
         (match.start(), match.end())
         for match in _PRESERVE_MULTIWORD_UNDERSCORE_RE.finditer(text)
-    ]
+    )
 
     def _is_preserved(index: int) -> bool:
         return any(start <= index < end for start, end in preserved_ranges)
@@ -1084,20 +1103,23 @@ def remove_dangling_underscores(text: str) -> str:
         following = text[end] if end < len(text) else ""
         return bool(following and following.isupper())
 
-    result: List[str] = []
-    i = 0
-    while i < len(text):
-        if text[i] == "_":
-            match = DANGLING_UNDERSCORE_RE.match(text, i)
-            if match:
-                if _should_keep(match.start(), match.end()):
-                    result.append(match.group(0))
-                i = match.end()
-                continue
-        result.append(text[i])
-        i += 1
+    def _segments() -> Iterator[str]:
+        last = 0
+        for match in DANGLING_UNDERSCORE_RE.finditer(text):
+            start, end = match.span()
+            yield text[last:start]
+            if _should_keep(start, end):
+                yield match.group(0)
+            last = end
+        yield text[last:]
 
-    return "".join(result)
+    return "".join(_segments())
+
+
+def remove_dangling_underscores(text: str) -> str:
+    """Remove underscores that don't join word characters."""
+
+    return _stabilize(text, _remove_dangling_underscores_once)
 
 
 # ---------------------------------------------------------------------------
