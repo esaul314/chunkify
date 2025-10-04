@@ -230,6 +230,7 @@ COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 
 # Newline/split heuristics
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
+COLON_LIST_BREAK_RE = re.compile(r":\n{2,}(?=\s*(?:[•\-]|\d))")
 SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 
 STOPWORDS: frozenset[str] = frozenset(
@@ -482,9 +483,19 @@ def _maybe_join_words(head: str, tail: str) -> str:
     return f"{head} {tail}"
 
 
+def _collapse_colon_list_breaks(text: str) -> str:
+    """Collapse paragraph gaps after colons that precede list markers."""
+
+    return COLON_LIST_BREAK_RE.sub(":\n", text)
+
+
 def _fix_double_newlines(text: str) -> str:
     """Resolve words or phrases separated by double newlines using word heuristics."""
-    return DOUBLE_NEWLINE_RE.sub(lambda m: _maybe_join_words(m.group(1), m.group(2)), text)
+
+    normalized = _collapse_colon_list_breaks(text)
+    return DOUBLE_NEWLINE_RE.sub(
+        lambda m: _maybe_join_words(m.group(1), m.group(2)), normalized
+    )
 
 
 def _fix_split_words(text: str) -> str:
@@ -709,12 +720,18 @@ def _should_lowercase_bullet_stopword(prefix: str) -> bool:
         last_char = prefix[-1]
         return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
 
+    colon_seen = False
     for token in reversed(tokens):
         if token in _CLOSING_QUOTE_CHARS:
             return False
         if token in _EM_DASH_CHARS:
             return False
+        if token == ":":
+            colon_seen = True
+            continue
         if any(char in END_PUNCT for char in token):
+            return False
+        if colon_seen:
             return False
         last_char = token[-1]
         return last_char.islower() or last_char in _STOPWORD_LOWERCASE_CHARS
@@ -812,7 +829,9 @@ def collapse_single_newlines(text: str) -> str:
 
 
 def _starts_list_item(line: str) -> bool:
-    return bool(re.match(rf"([{BULLET_CHARS_ESC}]|\d+[.)])\s", line))
+    """Return True when ``line`` begins with a bullet or numbered marker."""
+
+    return bool(_LIST_MARKER_RE.match(line))
 
 
 def _starts_new_list_item(text: str) -> bool:
@@ -1096,17 +1115,16 @@ def merge_spurious_paragraph_breaks(text: str) -> str:
             if author_line.startswith("—"):
                 merged[-1] = f"{prev.rstrip()} {author_line}"
                 continue
+            if _ends_with_footnote(prev):
+                normalized = _normalize_trailing_footnote(prev)
+                merged[-1] = normalized
+                prev = normalized
+                if not _starts_new_list_item(part):
+                    merged[-1] = f"{normalized} {part.lstrip()}"
+                    continue
             last_line = prev.strip().splitlines()[-1]
             if _starts_list_item(last_line):
-                if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                    normalized = _normalize_trailing_footnote(prev)
-                    merged[-1] = f"{normalized} {part.lstrip()}"
-                else:
-                    merged.append(part)
-                continue
-            if _ends_with_footnote(prev) and not _starts_new_list_item(part):
-                normalized = _normalize_trailing_footnote(prev)
-                merged[-1] = f"{normalized} {part.lstrip()}"
+                merged.append(part)
                 continue
             if not any(_is_probable_heading(seg) for seg in (prev, part)):
                 if _has_unbalanced_quotes(prev) and not _has_unbalanced_quotes(prev + part):
