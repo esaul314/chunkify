@@ -174,7 +174,7 @@ def _segment_char_limit(chunk_size: int | None) -> int:
     if chunk_size is None or chunk_size <= 0:
         return SOFT_LIMIT
     estimated = int(ceil(chunk_size * _AVERAGE_CHARS_PER_TOKEN))
-    return min(SOFT_LIMIT, max(1, estimated))
+    return max(SOFT_LIMIT, max(1, estimated))
 
 
 def _soft_segments(
