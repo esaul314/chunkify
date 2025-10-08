@@ -1,10 +1,11 @@
 import logging
 import re
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import lru_cache, partial
 from itertools import accumulate
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from haystack.dataclasses import Document
 
@@ -288,7 +289,7 @@ def _enrich_chunk(
 ) -> dict:
     """Perform optional AI enrichment using ``enrichment_fn``."""
     if not perform_ai_enrichment or enrichment_fn is None:
-        return {}
+        return {"classification": "error", "tags": []}
     try:
         result = enrichment_fn(text)
         return {
@@ -300,11 +301,40 @@ def _enrich_chunk(
         return {"classification": "error", "tags": []}
 
 
+def _normalize_tags(tags: Any) -> list[str]:
+    """Return a sanitized list of tag strings preserving their original order."""
+
+    if isinstance(tags, str) or not isinstance(tags, Sequence):
+        return []
+    return [tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()]
+
+
+def _resolve_utterance_fields(
+    info: Mapping[str, Any] | str | None,
+) -> tuple[str, list[str]]:
+    """Normalize utterance metadata into classification and tag values."""
+
+    if isinstance(info, str):
+        cleaned = info.strip()
+        return (cleaned or "unclassified", [])
+    if not isinstance(info, Mapping):
+        return "unclassified", []
+
+    raw_classification = info.get("classification")
+    classification = (
+        raw_classification.strip()
+        if isinstance(raw_classification, str) and raw_classification.strip()
+        else "unclassified"
+    )
+    tags = _normalize_tags(info.get("tags"))
+    return classification, tags
+
+
 def _build_metadata(
     text: str,
     source_block: dict,
     chunk_index: int,
-    utterance_type: dict,
+    utterance_info: Mapping[str, Any] | str | None,
 ) -> dict:
     """Construct metadata object for a chunk, propagating list metadata."""
 
@@ -318,6 +348,8 @@ def _build_metadata(
     location_value = None if location is None and filename.lower().endswith(".pdf") else location
     page_value = page if isinstance(page, int) and page > 0 else None
 
+    utterance_type, tags = _resolve_utterance_fields(utterance_info)
+
     base_metadata = {
         "source": filename,
         "chunk_id": _generate_chunk_id(filename, page_value, chunk_index),
@@ -327,6 +359,7 @@ def _build_metadata(
         "language": normalized.get("language", "un"),
         "readability": _compute_readability(text),
         "utterance_type": utterance_type,
+        "tags": tags,
         "importance": "medium",
     }
 
@@ -379,12 +412,12 @@ def process_chunk(
         )
         return None
 
-    utterance_type = _enrich_chunk(final_text, perform_ai_enrichment, enrichment_fn)
+    utterance_info = _enrich_chunk(final_text, perform_ai_enrichment, enrichment_fn)
     metadata = _build_metadata(
         final_text,
         source_block,
         chunk_index,
-        utterance_type,
+        utterance_info,
     )
 
     result = {"text": final_text, "metadata": metadata}

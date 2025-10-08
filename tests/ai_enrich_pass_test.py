@@ -24,7 +24,7 @@ def test_ai_enrich_pass_disabled():
 
 def test_ai_enrich_pass_enabled_enriches():
     client = _DummyClient()
-    chunks = [{"text": "What is AI?"}]
+    chunks = [{"text": "What is AI?", "meta": {"source": "doc.pdf"}}]
     meta = {
         "ai_enrich": {
             "client": client,
@@ -36,8 +36,47 @@ def test_ai_enrich_pass_enabled_enriches():
     enriched = result.payload[0]
     assert enriched["utterance_type"] == "question"
     assert enriched["tags"] == ["technical"]
+    assert enriched["meta"]["utterance_type"] == "question"
     assert enriched["metadata"]["tags"] == ["technical"]
     assert result.meta["metrics"]["ai_enrich"]["chunks"] == 1
+    assert client.calls == 1
+
+
+def test_ai_enrich_pass_reads_nested_options():
+    client = _DummyClient()
+    chunks = [{"text": "What is AI?"}]
+    meta = {
+        "options": {
+            "ai_enrich": {
+                "enabled": True,
+                "client": client,
+                "tag_configs": {"generic": ["technical"]},
+            }
+        }
+    }
+    result = ai_enrich(Artifact(payload=chunks, meta=meta))
+    enriched = result.payload[0]
+    assert enriched["utterance_type"] == "question"
+    assert enriched["meta"]["tags"] == ["technical"]
+    assert client.calls == 1
+
+
+def test_ai_enrich_pass_enriches_chunk_containers() -> None:
+    client = _DummyClient()
+    payload = {"type": "chunks", "items": [{"text": "What is AI?"}]}
+    meta = {
+        "options": {
+            "ai_enrich": {
+                "enabled": True,
+                "client": client,
+                "tag_configs": {"generic": ["technical"]},
+            }
+        }
+    }
+    result = ai_enrich(Artifact(payload=payload, meta=meta))
+    items = result.payload["items"]
+    assert [item.get("utterance_type") for item in items] == ["question"]
+    assert [item.get("tags") for item in items] == [["technical"]]
     assert client.calls == 1
 
 
