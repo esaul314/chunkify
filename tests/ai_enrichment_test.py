@@ -17,6 +17,10 @@ def _dummy_completion(_: str) -> str:
     return "Classification: question\nTags: [Technical, unknown]"
 
 
+def _multiline_completion(_: str) -> str:
+    return """Classification: summary\nTags:\n- Technical\n- methodology\n"""
+
+
 def test_load_tag_configs_deduplicates() -> None:
     configs = _load_tag_configs()
     assert all(len(tags) == len({t for t in tags}) for tags in configs.values())
@@ -38,6 +42,19 @@ def test_process_chunk_for_file_populates_tags() -> None:
     )
     assert result["tags"] == ["technical"]
     assert result["metadata"]["tags"] == ["technical"]
+
+
+def test_classify_chunk_utterance_handles_multiline_tags() -> None:
+    tag_configs = {"generic": ["technical", "methodology"]}
+    result = classify_chunk_utterance(
+        "How should we build this?",
+        tag_configs=tag_configs,
+        completion_fn=_multiline_completion,
+    )
+    assert result == {
+        "classification": "summary",
+        "tags": ["technical", "methodology"],
+    }
 
 
 class _StubClient:

@@ -1,8 +1,10 @@
 from collections.abc import Iterable, Mapping
 from functools import lru_cache
+import ast
+import re
 from os import PathLike
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Protocol
+from typing import Any, Callable, Dict, Iterable as TypingIterable, List, Protocol
 
 from pdf_chunker.framework import Artifact, register
 
@@ -205,6 +207,126 @@ UTTERANCE_TYPES = [
 ]
 
 
+def _normalized_classification(value: str) -> str:
+    candidate = value.strip().lower()
+    return candidate if candidate in UTTERANCE_TYPES else "unclassified"
+
+
+def _valid_tags(tag_configs: Mapping[str, TypingIterable[str]]) -> set[str]:
+    return {
+        tag
+        for tags in tag_configs.values()
+        for tag in tags
+        if isinstance(tag, str)
+    }
+
+
+def _response_lines(response_text: str) -> List[str]:
+    return [line.strip() for line in response_text.splitlines()]
+
+
+def _should_continue_tag_block(line: str) -> bool:
+    if not line:
+        return False
+    lower = line.lower()
+    if lower.startswith("classification:") or lower.startswith("response:"):
+        return False
+    if ":" in line and not line.startswith(("-", "*", "•")):
+        return False
+    return True
+
+
+def _collect_tag_block(lines: List[str], start_index: int) -> List[str]:
+    first = lines[start_index]
+    remainder = first.split(":", 1)[1].strip() if ":" in first else ""
+    block = [remainder] if remainder else []
+    for line in lines[start_index + 1 :]:
+        if not _should_continue_tag_block(line):
+            break
+        block.append(line)
+    return block
+
+
+def _literal_tags(text: str) -> List[str]:
+    if not text:
+        return []
+    try:
+        parsed = ast.literal_eval(text)
+    except Exception:
+        return []
+    if isinstance(parsed, str):
+        return [parsed]
+    if isinstance(parsed, TypingIterable) and not isinstance(parsed, (bytes, Mapping)):
+        return [
+            str(item)
+            for item in parsed
+            if isinstance(item, (str, int, float))
+        ]
+    return []
+
+
+_BULLET_PREFIX = re.compile(r"^(?:[-*•]+\s*|\d+[.)]\s*)")
+
+
+def _split_tag_line(line: str) -> List[str]:
+    cleaned = _BULLET_PREFIX.sub("", line).strip().strip(",")
+    if not cleaned:
+        return []
+    if ":" in cleaned:
+        prefix, suffix = cleaned.split(":", 1)
+        cleaned = suffix.strip() or prefix.strip()
+    cleaned = cleaned.strip("[]")
+    tokens = [
+        re.sub(r"\(.*?\)$", "", token).strip().strip('"\'')
+        for token in cleaned.split(",")
+        if token.strip()
+    ]
+    return [token for token in tokens if token]
+
+
+def _tag_candidates(block: List[str]) -> List[str]:
+    literal = _literal_tags(" ".join(block).strip())
+    if literal:
+        return literal
+    return [candidate for line in block for candidate in _split_tag_line(line)]
+
+
+def _dedupe(sequence: TypingIterable[str]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for item in sequence:
+        if item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
+def _normalize_tags(candidates: List[str], valid: set[str]) -> List[str]:
+    normalized = _dedupe(
+        token.strip().lower() for token in candidates if token and token.strip()
+    )
+    filtered = [tag for tag in normalized if not valid or tag in valid]
+    return filtered or normalized
+
+
+def _parse_completion(
+    response_text: str, tag_configs: Mapping[str, TypingIterable[str]]
+) -> tuple[str, List[str]]:
+    classification = "unclassified"
+    tags: List[str] = []
+    lines = _response_lines(response_text)
+    valid = _valid_tags(tag_configs)
+    for index, line in enumerate(lines):
+        lower = line.lower()
+        if lower.startswith("classification:"):
+            value = line.split(":", 1)[1] if ":" in line else ""
+            classification = _normalized_classification(value)
+        elif lower.startswith("tags:"):
+            block = _collect_tag_block(lines, index)
+            tags = _normalize_tags(_tag_candidates(block), valid)
+    return classification, tags
+
+
 def classify_chunk_utterance(
     text_chunk: str,
     *,
@@ -240,22 +362,7 @@ def classify_chunk_utterance(
 
     try:
         response_text = completion_fn(prompt).strip()
-        classification, tags = "unclassified", []
-        for line in response_text.split("\n"):
-            line = line.strip()
-            if line.startswith("Classification:"):
-                classification = line.split(":", 1)[1].strip().lower()
-                if classification not in UTTERANCE_TYPES:
-                    classification = "unclassified"
-            elif line.startswith("Tags:"):
-                tags_text = line.split(":", 1)[1].strip()
-                raw_tags = [
-                    tag.strip().lower()
-                    for tag in tags_text.replace("[", "").replace("]", "").split(",")
-                    if tag.strip()
-                ]
-                valid = {t for v in tag_configs.values() for t in v}
-                tags = [tag for tag in raw_tags if tag in valid]
+        classification, tags = _parse_completion(response_text, tag_configs)
         return {"classification": classification, "tags": tags}
     except Exception:
         return {"classification": "error", "tags": []}
