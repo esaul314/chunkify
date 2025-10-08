@@ -61,5 +61,24 @@ def test_ai_enrich_pass_reads_nested_options():
     assert client.calls == 1
 
 
+def test_ai_enrich_pass_enriches_chunk_containers() -> None:
+    client = _DummyClient()
+    payload = {"type": "chunks", "items": [{"text": "What is AI?"}]}
+    meta = {
+        "options": {
+            "ai_enrich": {
+                "enabled": True,
+                "client": client,
+                "tag_configs": {"generic": ["technical"]},
+            }
+        }
+    }
+    result = ai_enrich(Artifact(payload=payload, meta=meta))
+    items = result.payload["items"]
+    assert [item.get("utterance_type") for item in items] == ["question"]
+    assert [item.get("tags") for item in items] == [["technical"]]
+    assert client.calls == 1
+
+
 def test_enrich_chunk_fallback_returns_error() -> None:
     assert _enrich_chunk("hi", False, None)["classification"] == "error"

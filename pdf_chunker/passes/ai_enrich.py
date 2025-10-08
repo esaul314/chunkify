@@ -140,6 +140,56 @@ def _ensure_client(
         return None
 
 
+def _iterable_items(value: Any) -> List[Any]:
+    return (
+        list(value)
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes))
+        else []
+    )
+
+
+def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
+    if isinstance(payload, list):
+        items = list(payload)
+        indices = [i for i, item in enumerate(items) if isinstance(item, Mapping)]
+        if not indices:
+            return [], lambda _: items
+        selected = set(indices)
+
+        def rebuild(enriched: Chunks) -> List[Any]:
+            replacements = iter(enriched)
+            return [
+                next(replacements) if index in selected else item
+                for index, item in enumerate(items)
+            ]
+
+        chunks = [dict(items[i]) for i in indices]
+        return chunks, rebuild
+
+    if isinstance(payload, Mapping):
+        items = _iterable_items(payload.get("items"))
+        if not items:
+            return [], lambda _: payload
+        indices = [i for i, item in enumerate(items) if isinstance(item, Mapping)]
+        if not indices:
+            base = {k: v for k, v in payload.items() if k != "items"}
+            return [], lambda _: {**base, "items": items}
+        selected = set(indices)
+        base = {k: v for k, v in payload.items() if k != "items"}
+
+        def rebuild(enriched: Chunks) -> Dict[str, Any]:
+            replacements = iter(enriched)
+            updated = [
+                next(replacements) if index in selected else item
+                for index, item in enumerate(items)
+            ]
+            return {**base, "items": updated}
+
+        chunks = [dict(items[i]) for i in indices]
+        return chunks, rebuild
+
+    return [], lambda _: payload
+
 
 UTTERANCE_TYPES = [
     "definition",
@@ -281,19 +331,20 @@ class _AiEnrichPass:
         self._tag_configs = _copy_tag_configs(tag_configs) if tag_configs else None
 
     def __call__(self, a: Artifact) -> Artifact:
-        chunks = a.payload if isinstance(a.payload, list) else []
         options = _resolve_options(a.meta)
         if not bool(options.get("enabled")):
             return a
+        chunks, rebuild_payload = _payload_chunks(a.payload)
         tag_configs = _resolve_tag_configs(options, self._tag_configs)
         client = _ensure_client(options, self._client, tag_configs)
-        if not client:
+        if not client or not chunks:
             return a
         self._client = client
         self._tag_configs = _copy_tag_configs(tag_configs)
         enriched = _classify_all(chunks, client=client, tag_configs=tag_configs)
+        payload = rebuild_payload(enriched)
         meta = _update_meta(a.meta, len(enriched))
-        return Artifact(payload=enriched, meta=meta)
+        return Artifact(payload=payload, meta=meta)
 
 
 ai_enrich = register(_AiEnrichPass())

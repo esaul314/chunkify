@@ -51,7 +51,7 @@ def test_pipeline_enrichment_with_stub() -> None:
     spec = PipelineSpec(pipeline=["ai_enrich"])
     tag_configs = {"generic": ["technical"]}
     artifact = Artifact(
-        payload=[{"text": "What is AI?"}],
+        payload={"type": "chunks", "items": [{"text": "What is AI?"}]},
         meta={
             "ai_enrich": {
                 "enabled": True,
@@ -61,5 +61,6 @@ def test_pipeline_enrichment_with_stub() -> None:
         },
     )
     result = run_pipeline(spec.pipeline, artifact)
-    assert all(c.get("utterance_type") == "question" for c in result.payload)
-    assert all(c.get("tags") == ["technical"] for c in result.payload)
+    items = result.payload["items"]
+    assert all(c.get("utterance_type") == "question" for c in items)
+    assert all(c.get("tags") == ["technical"] for c in items)
