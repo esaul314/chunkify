@@ -1,9 +1,144 @@
+from collections.abc import Iterable, Mapping
+from functools import lru_cache
+from os import PathLike
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Protocol
 
 from pdf_chunker.framework import Artifact, register
 
 Chunk = Dict[str, Any]
 Chunks = List[Chunk]
+
+
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _normalized_tags(values: Any) -> List[str]:
+    if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
+        return []
+    return [
+        normalized
+        for normalized in (
+            str(item).strip().lower()
+            for item in values
+            if item is not None
+        )
+        if normalized
+    ]
+
+
+def _sanitize_tag_configs(raw: Mapping[str, Any]) -> Dict[str, List[str]]:
+    return {
+        str(category): _normalized_tags(values)
+        for category, values in raw.items()
+        if _normalized_tags(values)
+    }
+
+
+def _copy_tag_configs(configs: Mapping[str, Iterable[str]]) -> Dict[str, List[str]]:
+    return {str(category): [*tags] for category, tags in configs.items()}
+
+
+@lru_cache(maxsize=None)
+def _load_default_tag_configs() -> Dict[str, List[str]]:
+    from pdf_chunker.adapters.ai_enrich import _load_tag_configs as load_dir
+
+    return _copy_tag_configs(load_dir())
+
+
+def _load_tag_configs_from_path(path: Path) -> Dict[str, List[str]]:
+    if path.is_dir():
+        from pdf_chunker.adapters.ai_enrich import _load_tag_configs as load_dir
+
+        return _copy_tag_configs(load_dir(config_dir=str(path)))
+    if path.is_file():
+        try:
+            import yaml
+        except Exception:  # pragma: no cover - optional dependency missing
+            return {}
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:  # pragma: no cover - defensive read guard
+            return {}
+        return _sanitize_tag_configs(_as_mapping(data))
+    return {}
+
+
+def _resolve_tag_configs(
+    options: Mapping[str, Any],
+    cached: Dict[str, List[str]] | None,
+) -> Dict[str, List[str]]:
+    explicit = options.get("tag_configs")
+    if isinstance(explicit, Mapping):
+        sanitized = _sanitize_tag_configs(explicit)
+        if sanitized:
+            return sanitized
+
+    path_value = next(
+        (
+            options.get(key)
+            for key in ("tags_dir", "tags_path", "tags_file")
+            if options.get(key)
+        ),
+        None,
+    )
+    if isinstance(path_value, (str, Path, PathLike)):
+        loaded = _load_tag_configs_from_path(Path(path_value))
+        if loaded:
+            return loaded
+
+    if cached:
+        return _copy_tag_configs(cached)
+
+    return _load_default_tag_configs()
+
+
+def _resolve_options(meta: Mapping[str, Any] | None) -> Dict[str, Any]:
+    base = _as_mapping(meta)
+    nested = _as_mapping(base.get("options"))
+    staged = _as_mapping(nested.get("ai_enrich"))
+    direct = _as_mapping(base.get("ai_enrich"))
+    return {**staged, **direct}
+
+
+def _resolve_completion(options: Mapping[str, Any]) -> Callable[[str], str] | None:
+    completion = options.get("completion_fn")
+    if callable(completion):
+        return completion
+    try:
+        from pdf_chunker.adapters.ai_enrich import init_llm
+    except Exception:  # pragma: no cover - adapters unavailable
+        return None
+    try:
+        return init_llm(api_key=options.get("api_key"))
+    except Exception:  # pragma: no cover - missing credentials
+        return None
+
+
+def _ensure_client(
+    options: Mapping[str, Any],
+    fallback: "ClassifyClient | None",
+    tag_configs: Dict[str, List[str]],
+) -> "ClassifyClient | None":
+    client = options.get("client")
+    if client:
+        return client  # type: ignore[return-value]
+    if fallback:
+        return fallback
+
+    completion = _resolve_completion(options)
+    if not completion:
+        return None
+    try:
+        from pdf_chunker.adapters.ai_enrich import Client
+    except Exception:  # pragma: no cover - adapters unavailable
+        return None
+    try:
+        return Client(completion_fn=completion, tag_configs=tag_configs or None)
+    except Exception:  # pragma: no cover - client init failure
+        return None
+
 
 
 UTTERANCE_TYPES = [
@@ -82,6 +217,20 @@ class ClassifyClient(Protocol):
     ) -> Dict[str, Any]: ...
 
 
+def _meta_payload(chunk: Chunk, key: str) -> Mapping[str, Any]:
+    return _as_mapping(chunk.get(key))
+
+
+def _merge_meta(
+    payload: Mapping[str, Any], classification: str, tags: List[str]
+) -> Dict[str, Any]:
+    return {
+        **payload,
+        "utterance_type": classification,
+        "tags": tags,
+    }
+
+
 def _classify_chunk(
     chunk: Chunk, *, client: ClassifyClient, tag_configs: Dict[str, List[str]]
 ) -> Chunk:
@@ -89,16 +238,20 @@ def _classify_chunk(
         chunk.get("text", ""),
         tag_configs=tag_configs,
     )
-    meta = {
-        **chunk.get("metadata", {}),
-        "utterance_type": result["classification"],
-        "tags": result["tags"],
-    }
+    classification = result.get("classification", "unclassified")
+    tags = result.get("tags", [])
+
+    meta_source = _meta_payload(chunk, "meta") or _meta_payload(chunk, "metadata")
+    meta = _merge_meta(meta_source, classification, tags)
+    metadata_source = _meta_payload(chunk, "metadata") or meta
+    metadata = _merge_meta(metadata_source, classification, tags)
+
     return {
         **chunk,
-        "utterance_type": result["classification"],
-        "tags": result["tags"],
-        "metadata": meta,
+        "utterance_type": classification,
+        "tags": tags,
+        "meta": meta,
+        "metadata": metadata,
     }
 
 
@@ -119,18 +272,25 @@ class _AiEnrichPass:
     input_type = list
     output_type = list
 
-    def __init__(self, client: ClassifyClient | None = None) -> None:
+    def __init__(
+        self,
+        client: ClassifyClient | None = None,
+        tag_configs: Dict[str, List[str]] | None = None,
+    ) -> None:
         self._client = client
+        self._tag_configs = _copy_tag_configs(tag_configs) if tag_configs else None
 
     def __call__(self, a: Artifact) -> Artifact:
         chunks = a.payload if isinstance(a.payload, list) else []
-        options = (a.meta or {}).get("ai_enrich", {})
-        if not options.get("enabled", False):
+        options = _resolve_options(a.meta)
+        if not bool(options.get("enabled")):
             return a
-        client = options.get("client") or self._client
+        tag_configs = _resolve_tag_configs(options, self._tag_configs)
+        client = _ensure_client(options, self._client, tag_configs)
         if not client:
             return a
-        tag_configs = options.get("tag_configs", {})
+        self._client = client
+        self._tag_configs = _copy_tag_configs(tag_configs)
         enriched = _classify_all(chunks, client=client, tag_configs=tag_configs)
         meta = _update_meta(a.meta, len(enriched))
         return Artifact(payload=enriched, meta=meta)

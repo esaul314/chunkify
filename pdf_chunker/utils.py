@@ -289,7 +289,7 @@ def _enrich_chunk(
 ) -> dict:
     """Perform optional AI enrichment using ``enrichment_fn``."""
     if not perform_ai_enrichment or enrichment_fn is None:
-        return {}
+        return {"classification": "error", "tags": []}
     try:
         result = enrichment_fn(text)
         return {
