@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterable
 from haystack.dataclasses import Document
 
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.passes.split_semantic_lists import _block_list_kind
 from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
 
@@ -206,26 +207,48 @@ def _normalize_list_block(block: dict, *, chunk_text: str) -> dict:
     if block_type == "list_item" and list_kind:
         return block
 
-    def _lines(value: str | None) -> tuple[str, ...]:
-        if not value:
-            return tuple()
-        return tuple(line.lstrip() for line in value.splitlines() if line.strip())
-
-    text_candidates = _lines(block.get("text")) + _lines(chunk_text)
-    if not text_candidates:
-        return block
-
     def _mark(kind: str) -> dict:
         payload = {**block, "type": "list_item", "list_kind": kind}
         return payload
 
-    if list_kind:
-        return _mark(list_kind)
+    sources = tuple(
+        candidate
+        for candidate in block.get("source_blocks", ())
+        if isinstance(candidate, Mapping)
+    )
+    source_kinds = tuple(
+        kind for kind in (_block_list_kind(source) for source in sources) if kind
+    )
+    declared_kind = next(
+        (
+            kind
+            for kind in (list_kind, *source_kinds)
+            if isinstance(kind, str) and kind
+        ),
+        None,
+    )
+    if declared_kind:
+        return _mark(declared_kind)
+
+    def _lines(value: Any) -> tuple[str, ...]:
+        if not isinstance(value, str):
+            return tuple()
+        return tuple(line.lstrip() for line in value.splitlines() if line.strip())
+
+    text_candidates = (
+        _lines(block.get("text"))
+        + _lines(chunk_text)
+        + tuple(line for source in sources for line in _lines(source.get("text")))
+    )
+    if not text_candidates:
+        return block
 
     if any(starts_with_bullet(line) for line in text_candidates):
         return _mark("bullet")
     if any(starts_with_number(line) for line in text_candidates):
         return _mark("numbered")
+    if any(source.get("type") == "list_item" for source in sources):
+        return {**block, "type": "list_item"}
     return block
 
 

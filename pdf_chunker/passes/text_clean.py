@@ -65,15 +65,21 @@ def _patch_clean_paragraph() -> None:
 
 
 def _render_chunk(tokens: Sequence[str]) -> str:
-    """Render ``tokens`` to text, preserving raw content when cleanup empties it."""
+    """Render ``tokens`` to text without post-processing side effects."""
 
     from pdf_chunker import splitter as _splitter
 
-    materialized = tuple(tokens)
-    raw_fragment = _splitter._detokenize_with_newlines(materialized)
-    cleaned_lines = _splitter._drop_trailing_bullet_footers(raw_fragment.splitlines())
-    cleaned_fragment = "\n".join(cleaned_lines)
-    return cleaned_fragment or raw_fragment
+    return _splitter._detokenize_with_newlines(tuple(tokens))
+
+
+def _token_windows(tokens: tuple[str, ...], chunk_size: int, overlap: int) -> tuple[tuple[str, ...], ...]:
+    """Return token windows for ``tokens`` respecting ``chunk_size`` and ``overlap``."""
+
+    if len(tokens) <= chunk_size:
+        return (tokens,)
+
+    step = max(1, chunk_size - overlap)
+    return tuple(tokens[index : index + chunk_size] for index in range(0, len(tokens), step))
 
 
 def _patch_split_text_into_chunks() -> None:
@@ -87,20 +93,16 @@ def _patch_split_text_into_chunks() -> None:
 
     @wraps(split_fn)
     def _wrapped(text: str, chunk_size: int, overlap: int) -> list[str]:
-        tokens = _splitter._tokenize_with_newlines(text)
-        if not tokens or chunk_size <= 0:
+        if chunk_size <= 0:
             return []
 
-        if len(tokens) <= chunk_size:
-            return [_render_chunk(tokens)]
+        materialized = tuple(_splitter._tokenize_with_newlines(text))
+        if not materialized:
+            return []
 
-        step = max(1, chunk_size - overlap)
-        windows = (tokens[i : i + chunk_size] for i in range(0, len(tokens), step))
+        windows = _token_windows(materialized, chunk_size, overlap)
         chunks = [_render_chunk(window) for window in windows]
-        chunks = _splitter._dedupe_overlapping_chunks(chunks)
-        if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
-            chunks = chunks[:-1]
-        return chunks or [_render_chunk(tokens)]
+        return _splitter._dedupe_overlapping_chunks(chunks) or [_render_chunk(materialized)]
 
     setattr(_wrapped, "_preserves_raw_fragment", True)
     _splitter._split_text_into_chunks = _wrapped
