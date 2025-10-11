@@ -429,7 +429,30 @@ def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Blo
     blocks = tuple(block for _, block, _ in records)
     envelope = _resolve_envelope(blocks)
     first = blocks[0] if blocks else {}
-    return _apply_envelope(first, text, envelope)
+    merged = _apply_envelope(first, text, envelope)
+    if not blocks:
+        return merged
+
+    def _snapshot(candidate: Block) -> Block:
+        if not isinstance(candidate, Mapping):
+            return {}
+        base = {**candidate}
+        base.pop("source_blocks", None)
+        return base
+
+    existing_sources = (
+        tuple(
+            _snapshot(source)
+            for source in first.get("source_blocks", ())
+            if isinstance(first, Mapping) and isinstance(source, Mapping)
+        )
+        if isinstance(first, Mapping)
+        else tuple()
+    )
+    snapshots = existing_sources + tuple(
+        _snapshot(block) for block in blocks if isinstance(block, Mapping)
+    )
+    return {**merged, "source_blocks": snapshots} if snapshots else merged
 
 
 def _with_chunk_index(block: Block, index: int) -> Block:
@@ -552,8 +575,17 @@ def _strip_footer_suffix(record: tuple[int, Block, str]) -> tuple[int, Block, st
         return None
     updated_block: Block = block
     if isinstance(block, Mapping):
+        original = {key: value for key, value in dict(block).items() if key != "source_blocks"}
+        original["text"] = text
+        existing_sources = tuple(
+            {key: value for key, value in dict(source).items() if key != "source_blocks"}
+            for source in block.get("source_blocks", ())
+            if isinstance(source, Mapping)
+        )
         updated = dict(block)
         updated["text"] = trimmed
+        if existing_sources or original.get("text"):
+            updated["source_blocks"] = existing_sources + (original,)
         updated_block = cast(Block, updated)
     return page, updated_block, trimmed
 
