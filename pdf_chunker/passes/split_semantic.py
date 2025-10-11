@@ -224,43 +224,62 @@ def _soft_segments(
 def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
     if overlap <= 0:
         return chunks
-    restored: list[str] = []
-    previous_words: tuple[str, ...] = ()
-    previous_text = ""
 
-    for chunk in chunks:
-        updated = chunk
-        words = tuple(chunk.split())
-        prefilled = False
+    restored = accumulate(
+        chunks,
+        lambda previous, current: _restore_chunk_overlap(previous, current, overlap),
+        initial="",
+    )
+    next(restored, None)
+    return list(restored)
 
-        if previous_words:
-            window = min(overlap, len(previous_words))
-            if window:
-                overlap_words = tuple(previous_words[-window:])
-                match_limit = min(window, len(words))
-                matched = next(
-                    (
-                        size
-                        for size in range(match_limit, 0, -1)
-                        if tuple(overlap_words[-size:]) == tuple(words[:size])
-                    ),
-                    0,
-                )
-                missing_count = window - matched
-                if missing_count > 0 and overlap_words:
-                    prefix = " ".join(overlap_words[:missing_count])
-                    if prefix:
-                        glue = " " if updated and not updated[0].isspace() else ""
-                        updated = f"{prefix}{glue}{updated}"
-                        prefilled = True
-                if not prefilled:
-                    updated = _trim_sentence_prefix(previous_text, updated)
 
-        restored.append(updated)
-        previous_words = tuple(updated.split())
-        previous_text = updated
+def _restore_chunk_overlap(previous: str, current: str, overlap: int) -> str:
+    if not previous or not current:
+        return current
 
-    return restored
+    previous_words = _split_words(previous)
+    current_words = _split_words(current)
+    missing = _missing_overlap_prefix(previous_words, current_words, overlap)
+    if missing:
+        return _prepend_words(missing, current)
+    return _trim_sentence_prefix(previous, current)
+
+
+def _missing_overlap_prefix(
+    previous_words: tuple[str, ...], current_words: tuple[str, ...], overlap: int
+) -> tuple[str, ...]:
+    if overlap <= 0 or not previous_words or not current_words:
+        return tuple()
+
+    window = min(overlap, len(previous_words))
+    matched = _overlap_window(previous_words, current_words, window)
+    if matched >= window:
+        return tuple()
+
+    overlap_words = previous_words[-window:]
+    missing = overlap_words[: window - matched]
+    filtered = tuple(token for token in missing if _is_overlap_token(token))
+    return filtered
+
+
+def _prepend_words(words: tuple[str, ...], text: str) -> str:
+    if not words:
+        return text
+    prefix = " ".join(words)
+    if not prefix:
+        return text
+    glue = "" if not text or text[0].isspace() else " "
+    return f"{prefix}{glue}{text}"
+
+
+def _is_overlap_token(token: str) -> bool:
+    stripped = token.strip()
+    if not stripped:
+        return False
+    if any(char.isalnum() for char in stripped):
+        return True
+    return stripped in {"•", "-", "–", "—"}
 
 
 def _trim_sentence_prefix(previous_text: str, text: str) -> str:
