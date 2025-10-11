@@ -3,7 +3,7 @@ import re
 from dataclasses import replace
 from functools import reduce
 from itertools import groupby, takewhile
-from typing import Iterable, Optional, TYPE_CHECKING
+from typing import Iterable, Optional, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from .pdf_blocks import Block
@@ -229,27 +229,67 @@ def _classify_footer_block(text: str) -> str:
     return ""
 
 
+_INLINE_KEEP_LEADS = frozenset({
+    "for",
+    "when",
+    "where",
+    "how",
+    "why",
+    "what",
+})
+
+
+def _inline_footer_drop_indices(blocks: Sequence["Block"]) -> frozenset[int]:
+    """Return indices for inline bullet footers worth pruning."""
+
+    def _bullet_lines(block: "Block") -> tuple[str, ...]:
+        text = getattr(block, "text", "") or ""
+        lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+        if not lines or not all(_starts_with_bullet(line) for line in lines):
+            return ()
+        return lines if len(lines) <= 3 else ()
+
+    drop: set[int] = set()
+    for idx, block in enumerate(blocks):
+        lines = _bullet_lines(block)
+        if not lines:
+            continue
+
+        word_totals = tuple(len(line.split()) for line in lines)
+        total_words = sum(word_totals)
+        if total_words >= 40 or any(count >= 12 for count in word_totals):
+            continue
+
+        bodies = tuple(_bullet_body(line) for line in lines)
+        if not all(bodies):
+            continue
+
+        previous_text = getattr(blocks[idx - 1], "text", "") if idx else ""
+        inviting_previous = previous_text.strip().endswith(":")
+        first_tokens = tuple((body.split() or ("",))[0].lower() for body in bodies)
+        if inviting_previous or any(token in _INLINE_KEEP_LEADS for token in first_tokens):
+            continue
+
+        footerish = any(
+            "?" in body or _footer_bullet_signals(body, previous_text)
+            for body in bodies
+        )
+        if footerish:
+            drop.add(idx)
+            continue
+
+        if len(lines) <= 2 and total_words <= 24:
+            drop.add(idx)
+
+    return frozenset(drop)
+
+
 def _prune_footer_blocks(blocks: list["Block"]) -> list["Block"]:
     if not blocks:
         return []
 
-    def _looks_like_inline_footer(block: "Block") -> bool:
-        text = getattr(block, "text", "") or ""
-        lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-        if not lines:
-            return False
-        if not all(_starts_with_bullet(line) for line in lines):
-            return False
-        if len(lines) > 3:
-            return False
-        word_totals = tuple(len(line.split()) for line in lines)
-        if sum(word_totals) >= 40:
-            return False
-        if any(count >= 12 for count in word_totals):
-            return False
-        return True
-
-    filtered = [blk for blk in blocks if not _looks_like_inline_footer(blk)]
+    inline_drops = _inline_footer_drop_indices(blocks)
+    filtered = [blk for idx, blk in enumerate(blocks) if idx not in inline_drops]
     if not filtered:
         return []
 
