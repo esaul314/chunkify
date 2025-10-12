@@ -239,49 +239,90 @@ _INLINE_KEEP_LEADS = frozenset({
 })
 
 
+_INLINE_FOOTER_BOTTOM_MARGIN = 96.0
+
+
+def _inline_bullet_lines(block: "Block") -> tuple[str, ...]:
+    text = getattr(block, "text", "") or ""
+    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
+    if not lines or not all(_starts_with_bullet(line) for line in lines):
+        return ()
+    return lines if len(lines) <= 3 else ()
+
+
+def _block_first_line(block: "Block") -> str:
+    text = getattr(block, "text", "") or ""
+    return _first_text_line(text)
+
+
+def _is_trailing_inline_footer(
+    blocks: Sequence["Block"], idx: int, previous_text: str
+) -> bool:
+    tail_lines = (
+        _block_first_line(block)
+        for block in blocks[idx + 1 :]
+    )
+    return all(
+        not line
+        or _footer_bullet_signals(line, previous_text)
+        or _looks_like_bullet_footer(line)
+        for line in tail_lines
+    )
+
+
+def _should_drop_inline_footer(
+    blocks: Sequence["Block"], idx: int, block: "Block", lines: tuple[str, ...], bottom: Optional[float]
+) -> bool:
+    word_totals = tuple(len(line.split()) for line in lines)
+    total_words = sum(word_totals)
+    if total_words >= 40 or any(count >= 12 for count in word_totals):
+        return False
+
+    bodies = tuple(_bullet_body(line) for line in lines)
+    if not all(bodies):
+        return False
+
+    previous_text = getattr(blocks[idx - 1], "text", "") if idx else ""
+    inviting_previous = previous_text.strip().endswith(":")
+    if inviting_previous:
+        return False
+
+    first_tokens = tuple((body.split() or ("",))[0].lower() for body in bodies)
+    if any(token in _INLINE_KEEP_LEADS for token in first_tokens):
+        return False
+
+    if any("?" in body or _footer_bullet_signals(body, previous_text) for body in bodies):
+        return True
+
+    bbox = getattr(block, "bbox", None)
+    near_bottom = (
+        bottom is not None
+        and bbox is not None
+        and (bottom - bbox[3]) <= _INLINE_FOOTER_BOTTOM_MARGIN
+    )
+    trailing_short = (
+        len(lines) <= 2
+        and total_words <= 24
+        and (
+            _is_trailing_inline_footer(blocks, idx, previous_text)
+            or near_bottom
+        )
+    )
+    return trailing_short
+
+
 def _inline_footer_drop_indices(blocks: Sequence["Block"]) -> frozenset[int]:
     """Return indices for inline bullet footers worth pruning."""
 
-    def _bullet_lines(block: "Block") -> tuple[str, ...]:
-        text = getattr(block, "text", "") or ""
-        lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-        if not lines or not all(_starts_with_bullet(line) for line in lines):
-            return ()
-        return lines if len(lines) <= 3 else ()
+    bottoms = [blk.bbox[3] for blk in blocks if getattr(blk, "bbox", None)]
+    page_bottom = max(bottoms) if bottoms else None
 
-    drop: set[int] = set()
-    for idx, block in enumerate(blocks):
-        lines = _bullet_lines(block)
-        if not lines:
-            continue
-
-        word_totals = tuple(len(line.split()) for line in lines)
-        total_words = sum(word_totals)
-        if total_words >= 40 or any(count >= 12 for count in word_totals):
-            continue
-
-        bodies = tuple(_bullet_body(line) for line in lines)
-        if not all(bodies):
-            continue
-
-        previous_text = getattr(blocks[idx - 1], "text", "") if idx else ""
-        inviting_previous = previous_text.strip().endswith(":")
-        first_tokens = tuple((body.split() or ("",))[0].lower() for body in bodies)
-        if inviting_previous or any(token in _INLINE_KEEP_LEADS for token in first_tokens):
-            continue
-
-        footerish = any(
-            "?" in body or _footer_bullet_signals(body, previous_text)
-            for body in bodies
-        )
-        if footerish:
-            drop.add(idx)
-            continue
-
-        if len(lines) <= 2 and total_words <= 24:
-            drop.add(idx)
-
-    return frozenset(drop)
+    return frozenset(
+        idx
+        for idx, block in enumerate(blocks)
+        for lines in (_inline_bullet_lines(block),)
+        if lines and _should_drop_inline_footer(blocks, idx, block, lines, page_bottom)
+    )
 
 
 def _prune_footer_blocks(blocks: list["Block"]) -> list["Block"]:
