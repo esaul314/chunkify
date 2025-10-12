@@ -115,10 +115,34 @@ def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
     return f"{heading_block}{_HEADING_BODY_SEPARATOR}{body_text}"
 
 
+def _existing_source(block: Block) -> Mapping[str, Any]:
+    current = block.get("source")
+    return current if isinstance(current, Mapping) else {}
+
+
+def _fallback_source(page: int, filename: str | None) -> dict[str, Any]:
+    return {k: v for k, v in (("filename", filename), ("page", page)) if v is not None}
+
+
+def _merge_source(existing: Mapping[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    has_page = existing.get("page") is not None
+    filtered = {
+        key: value
+        for key, value in fallback.items()
+        if value is not None and (key != "page" or not has_page)
+    }
+    return {**filtered, **existing}
+
+
+def _strip_nulls(source: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in source.items() if value is not None}
+
+
 def _with_source(block: Block, page: int, filename: str | None) -> Block:
-    existing = block.get("source") or {}
-    source = {**{"filename": filename, "page": page}, **existing}
-    return {**block, "source": {k: v for k, v in source.items() if v is not None}}
+    existing = _existing_source(block)
+    fallback = _fallback_source(page, filename)
+    merged = _merge_source(existing, fallback)
+    return {**block, "source": _strip_nulls(merged)}
 
 
 def build_chunk(text: str) -> Chunk:

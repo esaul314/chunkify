@@ -62,12 +62,12 @@ def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, objec
     assert len(epub_cli_rows) == 2
     metadata = [row["metadata"] for row in epub_cli_rows]
     chunk_ids = [meta["chunk_id"] for meta in metadata]
-    assert chunk_ids == ["sample.epub_p0_c0", "sample.epub_p2_c1"]
+    assert chunk_ids == ["sample.epub_p0_c0", "sample.epub_p1_c1"]
     assert {meta.get("source") for meta in metadata} == {"sample.epub"}
     assert metadata[0]["block_type"] == "list_item"
     assert metadata[0].get("list_kind") == "numbered"
-    assert metadata[1]["block_type"] == "paragraph"
-    assert "list_kind" not in metadata[1]
+    assert metadata[1]["block_type"] == "list_item"
+    assert metadata[1].get("list_kind") == "numbered"
 
     first_text, second_text = (row["text"] for row in epub_cli_rows)
 
@@ -93,7 +93,7 @@ def test_cli_epub_matches_expected_structure(epub_cli_rows: list[dict[str, objec
     )
     expected_scaffolding = {
         "sample.epub_p0_c0": (intro_prefix, intro_suffix),
-        "sample.epub_p2_c1": (list_prefix, conclusion_suffix),
+        "sample.epub_p1_c1": (list_prefix, conclusion_suffix),
     }
     actual_scaffolding = [
         (

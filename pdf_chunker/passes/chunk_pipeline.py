@@ -10,12 +10,37 @@ Block = Doc = Mapping[str, Any]
 Record = tuple[int, Block, str]
 
 
-def iter_blocks(doc: Doc) -> Iterator[tuple[int, Block]]:
+def _page_from_source(value: Any) -> int | None:
     return (
-        (page.get("page", index + 1), block)
-        for index, page in enumerate(
-            doc.get("pages", cast(Iterable[Mapping[str, Any]], ()))
-        )
+        candidate
+        if isinstance(value, Mapping)
+        and isinstance((candidate := value.get("page")), int)
+        else None
+    )
+
+
+def _resolve_page(block: Block, page: Mapping[str, Any], fallback: int) -> int:
+    raw_page = page.get("page") if hasattr(page, "get") else None
+    page_number = raw_page if isinstance(raw_page, int) else None
+    return next(
+        (
+            candidate
+            for candidate in (
+                _page_from_source(block.get("source")),
+                _page_from_source(page.get("source")),
+                page_number,
+            )
+            if candidate is not None
+        ),
+        fallback,
+    )
+
+
+def iter_blocks(doc: Doc) -> Iterator[tuple[int, Block]]:
+    pages = doc.get("pages", cast(Iterable[Mapping[str, Any]], ()))
+    return (
+        (_resolve_page(block, page, index + 1), block)
+        for index, page in enumerate(pages)
         for block in page.get("blocks", ())
     )
 
