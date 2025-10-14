@@ -642,13 +642,19 @@ def _strip_footer_suffixes(
     return tuple(cleaned)
 
 
+_LIST_BOUNDARY_MIN_PREV_WORDS = 60
+
+
 def _should_emit_list_boundary(previous: tuple[int, Block, str], block: Block, text: str) -> bool:
     _, prev_block, prev_text = previous
     if prev_text.rstrip().endswith(":"):
         return False
     if _starts_list_like(prev_block, prev_text):
         return False
-    return not _record_is_footer_candidate(previous)
+    if _record_is_footer_candidate(previous):
+        return False
+    prev_words = len(prev_text.split())
+    return prev_words < _LIST_BOUNDARY_MIN_PREV_WORDS
 
 
 def _list_tail_split_index(text: str) -> int | None:
@@ -931,8 +937,6 @@ def _maybe_merge_dense_page(
         return sequence
     word_total = sum(_effective_counts(text)[0] for _, _, text in sequence)
     if word_total > options.chunk_size > 0:
-        return sequence
-    if limit is not None and word_total <= limit:
         return sequence
     merged_text = _join_record_texts(sequence)
     if not merged_text:
