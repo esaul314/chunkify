@@ -518,6 +518,38 @@ def _looks_like_caption_label(text: str) -> bool:
     return bool(normalized and _CAPTION_LABEL_RE.match(normalized))
 
 
+def _overlap_context(
+    prev: str, curr: str, overlap: int
+) -> tuple[str, str, str, str]:
+    prefix = curr[:overlap]
+    remainder = curr[overlap:]
+    trimmed = remainder.lstrip()
+    prev_index = len(prev) - overlap
+    prev_char = prev[prev_index - 1] if prev_index > 0 else ""
+    next_non_space = next((ch for ch in remainder if not ch.isspace()), "")
+    return prefix, trimmed, prev_char, next_non_space
+
+
+def _should_preserve_overlap(
+    prev: str,
+    curr: str,
+    prefix: str,
+    prev_char: str,
+    next_char: str,
+) -> bool:
+    stripped_prefix = prefix.strip()
+    words = re.findall(r"\b\w+\b", stripped_prefix)
+    single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
+    return any(
+        (
+            _caption_overlap(prev, curr, prefix),
+            _looks_like_caption_label(stripped_prefix),
+            prev_char.isalnum(),
+            single_title and (next_char.islower() or next_char.isdigit()),
+        )
+    )
+
+
 def _trim_overlap(prev: str, curr: str) -> str:
     """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
@@ -525,23 +557,13 @@ def _trim_overlap(prev: str, curr: str) -> str:
     if _contains(prev_lower, curr_lower):
         return ""
     overlap = _overlap_len(prev_lower, curr_lower)
-    if overlap and overlap < len(curr) * 0.9:
-        prefix = curr[:overlap]
-        if _caption_overlap(prev, curr, prefix):
+    if overlap:
+        prefix, trimmed, prev_char, next_non_space = _overlap_context(prev, curr, overlap)
+        if not trimmed:
             return curr
-        prev_index = len(prev) - overlap
-        prev_char = prev[prev_index - 1] if prev_index > 0 else ""
-        next_non_space = next((ch for ch in curr[overlap:] if not ch.isspace()), "")
-        stripped_prefix = prefix.strip()
-        words = re.findall(r"\b\w+\b", stripped_prefix)
-        single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
-        if _looks_like_caption_label(stripped_prefix):
+        if _should_preserve_overlap(prev, curr, prefix, prev_char, next_non_space):
             return curr
-        if prev_char.isalnum():
-            return curr
-        if single_title and (next_non_space.islower() or next_non_space.isdigit()):
-            return curr
-        return curr[overlap:].lstrip()
+        return trimmed
     prefix = curr_lower.split("\n\n", 1)[0]
     return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
 

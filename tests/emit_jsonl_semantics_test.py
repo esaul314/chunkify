@@ -121,6 +121,32 @@ def test_emit_jsonl_trims_overlap_without_merging(monkeypatch):
     ]
 
 
+def test_emit_jsonl_trims_near_duplicate_sentence(monkeypatch):
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    shared = (
+        "These applications provided data they could use for performance tuning and "
+        "ironing out other bugs. Once they had these improvements in hand, they used "
+        "them to gain the trust of the next tranche of more critical use cases,"
+    )
+    tail = (
+        "Once they had these improvements in hand, they used them to gain the trust "
+        "of the next tranche of more critical use cases, and so on."
+    )
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": shared},
+            {"text": tail},
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert rows == [
+        {"text": shared + " and so on."},
+    ]
+    merged_text = rows[0]["text"]
+    assert merged_text.count("Once they had these improvements in hand") == 1
+
+
 def test_emit_jsonl_retains_caption_label_after_overlap(monkeypatch):
     monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
     intro = "Teams repeatedly reference the architecture seen in Figure 9-1."
