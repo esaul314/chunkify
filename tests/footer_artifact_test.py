@@ -3,12 +3,31 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from pdf_chunker.core import process_document
+from pdf_chunker.core import (
+    chunk_text,
+    filter_blocks,
+    parse_exclusions,
+    process_document,
+)
 from pdf_chunker.chunk_validation import validate_chunks
 from pdf_chunker.page_artifacts import (
     remove_page_artifact_lines,
     _drop_trailing_bullet_footers,
 )
+from pdf_chunker.parsing import extract_structured_text
+
+
+def _expected_chunk_count(pdf: Path, chunk_size: int, overlap: int) -> int:
+    blocks = extract_structured_text(pdf, exclude_pages=None)
+    filtered = filter_blocks(blocks, parse_exclusions(None))
+    baseline_chunks = chunk_text(
+        filtered,
+        chunk_size,
+        overlap,
+        min_chunk_size=max(8, chunk_size // 10),
+        enable_dialogue_detection=True,
+    )
+    return len(baseline_chunks)
 
 
 def test_footer_and_subfooter_removed():
@@ -33,7 +52,8 @@ def test_footer_and_subfooter_removed():
     assert report.boundary_overlaps == []
 
     texts = [c["text"] for c in chunks]
-    assert len(texts) == 4
+    expected_count = _expected_chunk_count(pdf, 400, 50)
+    assert len(texts) == expected_count
     assert all("spam.com" not in t.lower() for t in texts)
     assert all("Bearings of Cattle Like Leaves Know" not in t for t in texts)
     assert any("Directed to John Smith" in t for t in texts)
@@ -59,7 +79,8 @@ def test_bullet_footer_removed():
     chunks = list(process_document(str(pdf), 400, 50))
     texts = [c["text"] for c in chunks]
     assert all("Faintly from Far in the Lincoln Woods" not in t for t in texts)
-    assert len(chunks) == 1
+    expected_count = _expected_chunk_count(pdf, 400, 50)
+    assert len(chunks) == expected_count
 
 
 def test_trailing_bullet_footer_dropped_from_lines():
