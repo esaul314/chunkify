@@ -396,11 +396,10 @@ def _looks_like_contact_detail(text: str) -> bool:
     """Return ``True`` when ``text`` resembles an inline contact detail."""
 
     lowered = text.lower()
-    return bool(
-        _EMAIL_RE.search(text)
-        or _PHONE_RE.search(text)
-        or any(keyword in lowered for keyword in _CONTACT_KEYWORDS)
+    keyword_match = any(
+        re.search(rf"\b{keyword}\b", lowered) for keyword in _CONTACT_KEYWORDS
     )
+    return bool(_EMAIL_RE.search(text) or _PHONE_RE.search(text) or keyword_match)
 
 
 def _trailing_bullet_candidates(lines: list[str]) -> list[tuple[int, str]]:
@@ -427,6 +426,21 @@ def _footer_bullet_signals(*candidates: str) -> bool:
     )
 
 
+def _header_footer_signal_map(
+    previous_line: str, trailing_count: int
+) -> dict[str, bool]:
+    """Return header-derived footer signals for ``previous_line``."""
+
+    stripped = previous_line.strip()
+    if not stripped:
+        return {"colon": False, "uppercase": False}
+
+    tokens = stripped.split()
+    colon_header = stripped.endswith(":") and trailing_count <= 3
+    uppercase_header = stripped.isupper() and len(tokens) <= 5
+    return {"colon": colon_header, "uppercase": uppercase_header}
+
+
 def _footer_context_signals(
     previous: str,
     after_line: str,
@@ -437,9 +451,11 @@ def _footer_context_signals(
     """Collect contextual footer signals for trailing bullet analysis."""
 
     valid_bodies = tuple(body for body in bodies if body)
+    header_signals = _header_footer_signal_map(previous, trailing_count)
     return {
         "neighbour": _footer_bullet_signals(previous, after_line),
-        "header": _header_invites_footer(previous, trailing_count),
+        "header_colon": header_signals["colon"],
+        "header_upper": header_signals["uppercase"],
         "shipping": _looks_like_shipping_footer(after_line)
         or any(_looks_like_shipping_footer(body) for body in valid_bodies),
         "body": direct_body_signal,
@@ -510,7 +526,10 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         trailing_count,
         direct_body_signal,
     )
-    positive_context = any(signals.values())
+    positive_context = any(
+        signals[key]
+        for key in ("neighbour", "shipping", "body", "header_upper")
+    )
 
     stats = tuple(
         (_question_footer_token_stats(body), pos)
@@ -541,11 +560,14 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     if not positive_context:
         return lines
 
-    fallback_context = (
-        signals["header"]
-        or signals["neighbour"]
-        or signals["shipping"]
-        or direct_body_signal
+    fallback_context = any(
+        (
+            signals["header_colon"],
+            signals["header_upper"],
+            signals["neighbour"],
+            signals["shipping"],
+            direct_body_signal,
+        )
     )
 
     removals = [
@@ -571,12 +593,8 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
 def _header_invites_footer(previous_line: str, trailing_count: int) -> bool:
     """Return ``True`` when ``previous_line`` resembles a footer heading."""
 
-    stripped = previous_line.strip()
-    if not stripped:
-        return False
-    colon_header = stripped.endswith(":") and trailing_count <= 3
-    uppercase_header = stripped.isupper() and len(stripped.split()) <= 5
-    return colon_header or uppercase_header
+    signals = _header_footer_signal_map(previous_line, trailing_count)
+    return any(signals.values())
 
 
 _TITLE_CONNECTORS = {

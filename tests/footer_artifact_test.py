@@ -157,6 +157,15 @@ def test_trailing_bullet_footer_preserves_legitimate_list() -> None:
     assert _drop_trailing_bullet_footers(lines) == lines
 
 
+def test_trailing_bullet_footer_preserves_colon_prompted_list() -> None:
+    lines = [
+        "There were two goals to this:",
+        "• To stress to his team that it was not acceptable to resist a new application team ask just because it wasn't in their earlier plans",
+        "• To remind his stakeholders that not telling his team early about their needs would result in higher costs, because the plan would have to change to accommodate the new work",
+    ]
+    assert _drop_trailing_bullet_footers(lines) == lines
+
+
 def test_inline_footnote_removed():
     sample = "Some text\n1 Footnote text.\nNext line"
     cleaned = remove_page_artifact_lines(sample, 1)
