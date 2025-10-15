@@ -174,7 +174,13 @@ def _segment_char_limit(chunk_size: int | None) -> int:
     if chunk_size is None or chunk_size <= 0:
         return SOFT_LIMIT
     estimated = int(ceil(chunk_size * _AVERAGE_CHARS_PER_TOKEN))
-    return max(SOFT_LIMIT, max(1, estimated))
+    return max(1, min(SOFT_LIMIT, estimated))
+
+
+@dataclass(frozen=True)
+class _SegmentSlice:
+    text: str
+    allow_overlap: bool = True
 
 
 def _soft_segments(
@@ -185,56 +191,107 @@ def _soft_segments(
 ) -> list[str]:
     """Split ``text`` while honouring character and word ceilings."""
 
-    limit = SOFT_LIMIT if max_chars is None or max_chars <= 0 else min(max_chars, SOFT_LIMIT)
+    limit = max_chars if max_chars is not None and max_chars > 0 else SOFT_LIMIT
     word_limit = max_words if max_words is not None and max_words > 0 else None
 
-    def _split(chunk: str) -> Iterator[str]:
+    def _split(chunk: str) -> tuple[str, ...]:
         trimmed = chunk.strip()
         if not trimmed:
-            return
+            return tuple()
 
         if word_limit is not None:
             tokens = tuple(_TOKEN_PATTERN.finditer(trimmed))
             if len(tokens) > word_limit:
-                split_index = tokens[word_limit - 1].end()
-                head = trimmed[:split_index]
-                tail = trimmed[split_index:]
-                if head:
-                    yield from _split(head)
-                if tail:
-                    yield from _split(tail)
-                return
+                index = tokens[word_limit - 1].end()
+                head, tail = trimmed[:index], trimmed[index:]
+                return _split(head) + _split(tail)
 
         if len(trimmed) <= limit:
-            yield trimmed
-            return
+            return (trimmed,)
 
         pivot = trimmed.rfind(" ", 0, limit)
         boundary = pivot if pivot != -1 else limit
-        head = trimmed[:boundary]
-        tail = trimmed[boundary:]
-        if head:
-            yield from _split(head)
-        if tail:
-            yield from _split(tail)
+        head, tail = trimmed[:boundary], trimmed[boundary:]
+        return _split(head) + _split(tail)
 
     return list(_split(text))
 
 
-def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
+def _apply_char_budget(
+    chunks: Iterable[str],
+    *,
+    limit: int | None,
+    max_words: int | None,
+) -> list[_SegmentSlice]:
+    """Apply ``limit`` to ``chunks`` while respecting ``max_words``."""
+
+    char_limit = limit if limit is not None and limit > 0 else None
+    word_limit = max_words if max_words is not None and max_words > 0 else None
+
+    def _segments(chunk: str) -> tuple[_SegmentSlice, ...]:
+        if char_limit is None:
+            return (_SegmentSlice(chunk),) if chunk else tuple()
+        splits = _soft_segments(
+            chunk,
+            max_chars=char_limit,
+            max_words=word_limit,
+        )
+        return tuple(
+            _SegmentSlice(segment, allow_overlap=index == 0)
+            for index, segment in enumerate(splits)
+            if segment
+        )
+
+    return [segment for chunk in chunks for segment in _segments(chunk)]
+
+
+def _restore_overlap_words(
+    chunks: Iterable[str | _SegmentSlice],
+    overlap: int,
+    *,
+    limit: int | None = None,
+    max_words: int | None = None,
+) -> list[str]:
     if overlap <= 0:
-        return chunks
+        return [
+            segment.text if isinstance(segment, _SegmentSlice) else segment
+            for segment in chunks
+        ]
+
+    char_limit = limit if limit is not None and limit > 0 else None
+    word_limit = max_words if max_words is not None and max_words > 0 else None
+
+    segments = tuple(
+        segment if isinstance(segment, _SegmentSlice) else _SegmentSlice(segment)
+        for segment in chunks
+        if (segment.text if isinstance(segment, _SegmentSlice) else segment)
+    )
+    if not segments:
+        return []
 
     restored = accumulate(
-        chunks,
-        lambda previous, current: _restore_chunk_overlap(previous, current, overlap),
+        segments,
+        lambda previous, current: _restore_chunk_overlap(
+            previous,
+            current.text,
+            overlap if current.allow_overlap else 0,
+            limit=char_limit,
+            max_words=word_limit,
+        ),
         initial="",
     )
     next(restored, None)
     return list(restored)
 
 
-def _restore_chunk_overlap(previous: str, current: str, overlap: int) -> str:
+def _restore_chunk_overlap(
+    previous: str,
+    current: str,
+    overlap: int,
+    *,
+    limit: int | None = None,
+    max_words: int | None = None,
+) -> str:
     if not previous or not current:
         return current
 
@@ -242,8 +299,19 @@ def _restore_chunk_overlap(previous: str, current: str, overlap: int) -> str:
     current_words = _split_words(current)
     missing = _missing_overlap_prefix(previous_words, current_words, overlap)
     if missing:
-        return _prepend_words(missing, current)
-    return _trim_sentence_prefix(previous, current)
+        candidate = _prepend_words(missing, current)
+        if limit is not None and len(candidate) > limit:
+            return current
+        return candidate
+    trimmed = _trim_sentence_prefix(previous, current)
+    if limit is not None and len(trimmed) > limit:
+        segments = _soft_segments(
+            trimmed,
+            max_chars=limit,
+            max_words=max_words,
+        )
+        return segments[0] if segments else trimmed[:limit]
+    return trimmed
 
 
 def _missing_overlap_prefix(
@@ -1103,6 +1171,8 @@ def _get_split_fn(
 
     soft_hits = 0
     char_limit = _segment_char_limit(chunk_size)
+    word_budget = chunk_size if chunk_size > 0 else None
+    overflow_guard = char_limit if char_limit > 0 else SOFT_LIMIT
 
     try:
         from pdf_chunker.splitter import semantic_chunker
@@ -1126,21 +1196,31 @@ def _get_split_fn(
                 splits = _soft_segments(
                     segment,
                     max_chars=char_limit,
-                    max_words=chunk_size,
+                    max_words=word_budget,
                 )
                 if len(splits) > 1:
                     soft_hits += 1
                 return splits
 
             raw = [softened for chunk in merged for softened in _soften(chunk)]
-            final = _merge_sentence_fragments(
+            fused = _merge_sentence_fragments(
                 raw,
                 chunk_size=chunk_size,
                 overlap=overlap,
                 min_chunk_size=min_chunk_size,
             )
-            soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
-            return _restore_overlap_words(final, overlap)
+            budgeted = _apply_char_budget(
+                fused,
+                limit=char_limit,
+                max_words=word_budget,
+            )
+            soft_hits += sum(len(segment.text) > overflow_guard for segment in budgeted)
+            return _restore_overlap_words(
+                budgeted,
+                overlap,
+                limit=char_limit,
+                max_words=word_budget,
+            )
 
     except Exception:  # pragma: no cover - safety fallback
 
@@ -1149,16 +1229,26 @@ def _get_split_fn(
             raw = _soft_segments(
                 text,
                 max_chars=char_limit,
-                max_words=chunk_size,
+                max_words=word_budget,
             )
-            final = _merge_sentence_fragments(
+            fused = _merge_sentence_fragments(
                 raw,
                 chunk_size=chunk_size,
                 overlap=overlap,
                 min_chunk_size=min_chunk_size,
             )
-            soft_hits += sum(len(seg) > SOFT_LIMIT for seg in final)
-            return _restore_overlap_words(final, overlap)
+            budgeted = _apply_char_budget(
+                fused,
+                limit=char_limit,
+                max_words=word_budget,
+            )
+            soft_hits += sum(len(segment.text) > overflow_guard for segment in budgeted)
+            return _restore_overlap_words(
+                budgeted,
+                overlap,
+                limit=char_limit,
+                max_words=word_budget,
+            )
 
     def metrics() -> dict[str, int]:
         return {"soft_limit_hits": soft_hits}
@@ -1281,10 +1371,15 @@ def _chunk_items(
 
 
 def _inject_continuation_context(
-    items: Iterable[Chunk], limit: int | None, overlap: int
+    items: Iterable[Chunk],
+    limit: int | None,
+    overlap: int,
+    *,
+    char_limit: int | None = None,
 ) -> Iterator[Chunk]:
     prev_text: str | None = None
     prev_meta: Mapping[str, Any] | None = None
+    char_budget = char_limit if char_limit is not None and char_limit > 0 else None
     for item in items:
         original = item.get("text", "")
         current_meta = _chunk_meta(item)
@@ -1319,6 +1414,11 @@ def _inject_continuation_context(
             yield item
             continue
         combined = f"{context} {text}".strip()
+        if char_budget is not None and len(combined) > char_budget:
+            prev_text = text
+            prev_meta = current_meta
+            yield item
+            continue
         prev_text = combined
         prev_meta = current_meta
         yield {**item, "text": combined}
@@ -1354,6 +1454,7 @@ class _SplitSemanticPass:
             options.chunk_size, options.overlap, options.min_chunk_size
         )
         limit = options.compute_limit()
+        char_limit = _segment_char_limit(options.chunk_size)
         chunk_records = _chunk_items(
             doc,
             split_fn,
@@ -1362,7 +1463,10 @@ class _SplitSemanticPass:
         )
         items = list(
             _inject_continuation_context(
-                chunk_records, limit, options.overlap if options else self.overlap
+                chunk_records,
+                limit,
+                options.overlap if options else self.overlap,
+                char_limit=char_limit,
             )
         )
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)

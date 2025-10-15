@@ -51,6 +51,7 @@ from pdf_chunker.passes.split_semantic import (
     _split_inline_heading_records,
     _stitch_block_continuations,
     _get_split_fn,
+    _segment_char_limit,
     _is_heading,
     build_chunk,
     build_chunk_with_meta,
@@ -95,7 +96,15 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         build_with_meta=build_meta,
     )
     overlap = options.overlap if options is not None else DEFAULT_SPLITTER.overlap
-    items = list(_inject_continuation_context(base_chunks, limit, overlap))
+    char_limit = _segment_char_limit(options.chunk_size)
+    items = list(
+        _inject_continuation_context(
+            base_chunks,
+            limit,
+            overlap,
+            char_limit=char_limit,
+        )
+    )
     return items, {"chunks": len(items), **metric_fn()}
 
 
