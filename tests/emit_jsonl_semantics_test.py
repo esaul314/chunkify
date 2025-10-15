@@ -7,7 +7,11 @@ import pytest
 from pdf_chunker.adapters.io_pdf import read
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.emit_jsonl import _rebalance_lists, emit_jsonl
-from pdf_chunker.passes.split_semantic import DEFAULT_SPLITTER, _merge_blocks
+from pdf_chunker.passes.split_semantic import (
+    DEFAULT_SPLITTER,
+    _merge_blocks,
+    _segment_char_limit,
+)
 
 
 def _sentence(words: int, *, start: int = 0) -> str:
@@ -101,6 +105,25 @@ def test_emit_jsonl_merges_tail_fragment():
     assert len(rows) == 1
     assert rows[0]["text"].startswith("All prior context")
     assert rows[0]["text"].endswith("ends properly.")
+
+
+def test_emit_jsonl_respects_char_budget_when_merging() -> None:
+    chunk_size = DEFAULT_SPLITTER.chunk_size
+    target_budget = _segment_char_limit(chunk_size)
+    first = " ".join(f"Word{i}" for i in range(260)) + "."
+    second = "continues " + " ".join(f"Word{i}" for i in range(260, 380)) + "."
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": first},
+            {"text": second},
+        ],
+    }
+    meta = {"options": {"split_semantic": {"chunk_size": chunk_size}}}
+    rows = emit_jsonl(Artifact(payload=doc, meta=meta)).payload
+    assert len(rows) == 2
+    lengths = [len(row["text"]) for row in rows]
+    assert all(length <= target_budget for length in lengths)
 
 
 def test_emit_jsonl_trims_overlap_without_merging(monkeypatch):

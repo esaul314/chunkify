@@ -59,6 +59,18 @@ def test_dense_single_token_chunks_respect_budget() -> None:
     assert all(len(text) <= char_budget for text in texts)
 
 
+def test_wordy_paragraph_respects_character_budget() -> None:
+    chunk_size = 400
+    char_budget = _segment_char_limit(chunk_size)
+    long_text = " ".join(f"token{i:04d}" for i in range(1200))
+    artifact = _SplitSemanticPass(chunk_size=chunk_size, overlap=0)(
+        Artifact(payload=_doc(long_text))
+    )
+    lengths = [len(chunk["text"]) for chunk in artifact.payload["items"]]
+    assert lengths and max(lengths) <= char_budget
+    assert len(lengths) > 1
+
+
 def test_forced_budget_split_avoids_overlap_duplication() -> None:
     text = (
         "Instead of thinking of an offering as done the minute they got one customer "

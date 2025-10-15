@@ -1176,10 +1176,41 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
     return state.append(idx, record, counts)
 
 
+def _split_record_segments(
+    records: Iterable[tuple[int, Block, str]],
+    *,
+    char_limit: int | None,
+    word_limit: int | None,
+) -> tuple[tuple[int, Block, str], ...]:
+    """Return ``records`` split to respect ``char_limit`` when provided."""
+
+    if char_limit is None or char_limit <= 0:
+        return tuple(records)
+
+    limit = char_limit
+    word_budget = word_limit if word_limit is not None and word_limit > 0 else None
+
+    def _segments(text: str) -> tuple[str, ...]:
+        slices = _apply_char_budget(
+            (text,),
+            limit=limit,
+            max_words=word_budget,
+        )
+        return tuple(segment.text for segment in slices if segment.text)
+
+    return tuple(
+        (page, block, segment)
+        for page, block, text in records
+        for segment in _segments(text)
+    )
+
+
 def _collapse_records(
     records: Iterable[tuple[int, Block, str]],
     options: SplitOptions | None = None,
     limit: int | None = None,
+    *,
+    char_limit: int | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
     seq = tuple(_strip_footer_suffixes(tuple(records)))
     if not seq:
@@ -1201,9 +1232,14 @@ def _collapse_records(
     )
     final_state = reduce(_collapse_step, enumerate(seq), initial).flush()
     merged_outputs = _maybe_merge_dense_page(final_state.outputs, options, limit)
+    bounded_outputs = _split_record_segments(
+        merged_outputs,
+        char_limit=char_limit,
+        word_limit=(options.chunk_size if options and options.chunk_size > 0 else None),
+    )
     yield from (
         (page, _with_chunk_index(block, idx), _collapse_soft_wraps(text))
-        for idx, (page, block, text) in enumerate(merged_outputs)
+        for idx, (page, block, text) in enumerate(bounded_outputs)
     )
 
 
@@ -1394,6 +1430,7 @@ def _chunk_items(
     generate_metadata: bool = True,
     *,
     options: SplitOptions | None = None,
+    char_limit: int | None = None,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
@@ -1411,7 +1448,7 @@ def _chunk_items(
     records: Iterable[Record] = _block_texts(doc, split_fn)
     for stage in stages:
         records = stage(records)
-    collapsed = _collapse_records(records, options, limit)
+    collapsed = _collapse_records(records, options, limit, char_limit=char_limit)
     def _build_plain(text: str) -> dict[str, Any]:
         return build_chunk(_collapse_soft_wraps(text))
 
@@ -1527,6 +1564,7 @@ class _SplitSemanticPass:
             split_fn,
             self.generate_metadata,
             options=options,
+            char_limit=char_limit,
         )
         raw_items = list(
             _inject_continuation_context(
