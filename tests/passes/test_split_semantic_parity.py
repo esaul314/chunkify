@@ -51,6 +51,7 @@ from pdf_chunker.passes.split_semantic import (
     _split_inline_heading_records,
     _stitch_block_continuations,
     _get_split_fn,
+    _segment_char_limit,
     _is_heading,
     build_chunk,
     build_chunk_with_meta,
@@ -65,6 +66,7 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         DEFAULT_SPLITTER.overlap,
         DEFAULT_SPLITTER.min_chunk_size,
     )
+    char_limit = _segment_char_limit(options.chunk_size)
     split_fn, metric_fn = _get_split_fn(
         options.chunk_size, options.overlap, options.min_chunk_size
     )
@@ -83,7 +85,12 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
     )
     merged_lists = _merge_styled_list_records(headed)
     stitched = _stitch_block_continuations(merged_lists, limit)
-    collapsed = _collapse_records(stitched, options, limit)
+    collapsed = _collapse_records(
+        stitched,
+        options,
+        limit,
+        char_limit=char_limit,
+    )
     build_meta = partial(
         build_chunk_with_meta,
         filename=doc.get("source_path"),
@@ -95,7 +102,14 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         build_with_meta=build_meta,
     )
     overlap = options.overlap if options is not None else DEFAULT_SPLITTER.overlap
-    items = list(_inject_continuation_context(base_chunks, limit, overlap))
+    items = list(
+        _inject_continuation_context(
+            base_chunks,
+            limit,
+            overlap,
+            char_limit=char_limit,
+        )
+    )
     return items, {"chunks": len(items), **metric_fn()}
 
 

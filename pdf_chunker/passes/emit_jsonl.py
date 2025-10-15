@@ -4,13 +4,18 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from functools import reduce
 from itertools import accumulate, chain, dropwhile, repeat, takewhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.passes.split_semantic import (
+    DEFAULT_SPLITTER,
+    _collapse_soft_wraps,
+    _segment_char_limit,
+)
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -517,6 +522,38 @@ def _looks_like_caption_label(text: str) -> bool:
     return bool(normalized and _CAPTION_LABEL_RE.match(normalized))
 
 
+def _overlap_context(
+    prev: str, curr: str, overlap: int
+) -> tuple[str, str, str, str]:
+    prefix = curr[:overlap]
+    remainder = curr[overlap:]
+    trimmed = remainder.lstrip()
+    prev_index = len(prev) - overlap
+    prev_char = prev[prev_index - 1] if prev_index > 0 else ""
+    next_non_space = next((ch for ch in remainder if not ch.isspace()), "")
+    return prefix, trimmed, prev_char, next_non_space
+
+
+def _should_preserve_overlap(
+    prev: str,
+    curr: str,
+    prefix: str,
+    prev_char: str,
+    next_char: str,
+) -> bool:
+    stripped_prefix = prefix.strip()
+    words = re.findall(r"\b\w+\b", stripped_prefix)
+    single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
+    return any(
+        (
+            _caption_overlap(prev, curr, prefix),
+            _looks_like_caption_label(stripped_prefix),
+            prev_char.isalnum(),
+            single_title and (next_char.islower() or next_char.isdigit()),
+        )
+    )
+
+
 def _trim_overlap(prev: str, curr: str) -> str:
     """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
 
@@ -524,23 +561,13 @@ def _trim_overlap(prev: str, curr: str) -> str:
     if _contains(prev_lower, curr_lower):
         return ""
     overlap = _overlap_len(prev_lower, curr_lower)
-    if overlap and overlap < len(curr) * 0.9:
-        prefix = curr[:overlap]
-        if _caption_overlap(prev, curr, prefix):
+    if overlap:
+        prefix, trimmed, prev_char, next_non_space = _overlap_context(prev, curr, overlap)
+        if not trimmed:
             return curr
-        prev_index = len(prev) - overlap
-        prev_char = prev[prev_index - 1] if prev_index > 0 else ""
-        next_non_space = next((ch for ch in curr[overlap:] if not ch.isspace()), "")
-        stripped_prefix = prefix.strip()
-        words = re.findall(r"\b\w+\b", stripped_prefix)
-        single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
-        if _looks_like_caption_label(stripped_prefix):
+        if _should_preserve_overlap(prev, curr, prefix, prev_char, next_non_space):
             return curr
-        if prev_char.isalnum():
-            return curr
-        if single_title and (next_non_space.islower() or next_non_space.isdigit()):
-            return curr
-        return curr[overlap:].lstrip()
+        return trimmed
     prefix = curr_lower.split("\n\n", 1)[0]
     return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
 
@@ -583,7 +610,8 @@ def _merge_text(prev: str, curr: str) -> str:
     first = _first_non_empty_line(curr)
     cond = _is_list_line(last) and _is_list_line(first)
     sep = "\n" if cond else "\n\n"
-    return f"{prev.rstrip()}{sep}{curr}".strip()
+    merged = f"{prev.rstrip()}{sep}{curr}".strip()
+    return _collapse_soft_wraps(merged)
 
 
 def _merge_sentence_pieces(
@@ -623,12 +651,21 @@ def _merge_if_fragment(
     item: dict[str, Any],
     text: str,
     text_norm: str,
+    *,
+    char_limit: int | None = None,
 ) -> tuple[list[dict[str, Any]], str, str]:
     """Merge ``text`` into ``acc`` if it begins mid-sentence."""
 
     if _starts_mid_sentence(text) and acc:
         prev = acc[-1]
         merged_text = f"{prev['text'].rstrip()} {text}".strip()
+        if char_limit is not None and len(merged_text) > char_limit:
+            fallback = _merge_text(acc_text, text) if acc_text else text
+            return (
+                [*acc, {**item, "text": text}],
+                fallback,
+                acc_norm + text_norm,
+            )
         merged_item = {**prev, "text": merged_text}
         merged_acc = f"{acc_text.rstrip()} {text}".strip()
         return (
@@ -662,23 +699,36 @@ def _should_merge(prev_text: str, curr_text: str, min_words: int) -> bool:
 def _merge_items(
     acc: list[dict[str, Any]],
     item: dict[str, Any],
+    *,
+    char_limit: int | None,
 ) -> list[dict[str, Any]]:
     text = item["text"]
-    if acc:
-        prev = acc[-1]
-        text = _trim_overlap(prev["text"], text)
-        if _should_merge(prev["text"], text, _min_words()):
-            merged = _merge_text(prev["text"], text)
-            return [*acc[:-1], {**prev, "text": merged}]
-    return [*acc, {**item, "text": text}]
+    if not acc:
+        return [*acc, {**item, "text": text}]
+
+    prev = acc[-1]
+    trimmed = _trim_overlap(prev["text"], text)
+    if not _should_merge(prev["text"], trimmed, _min_words()):
+        return [*acc, {**item, "text": trimmed}]
+
+    merged = _merge_text(prev["text"], trimmed)
+    if char_limit is not None and len(merged) > char_limit:
+        return [*acc, {**item, "text": trimmed}]
+    return [*acc[:-1], {**prev, "text": merged}]
 
 
-def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def _coalesce(
+    items: Iterable[dict[str, Any]], *, char_limit: int | None
+) -> list[dict[str, Any]]:
     """Normalize item boundaries, trimming overlap and merging fragments."""
 
     cleaned = [{**i, "text": (i.get("text") or "").strip()} for i in items]
     cleaned = [i for i in cleaned if i["text"]]
-    merged = reduce(_merge_items, cleaned, cast(list[dict[str, Any]], []))
+    merged = reduce(
+        lambda acc, item: _merge_items(acc, item, char_limit=char_limit),
+        cleaned,
+        cast(list[dict[str, Any]], []),
+    )
     return merged
 
 
@@ -704,11 +754,22 @@ def _strip_superscripts(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sanitize_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [_strip_superscripts(item) for item in items]
+    def _clean(item: dict[str, Any]) -> dict[str, Any]:
+        stripped = _strip_superscripts(item)
+        text = stripped.get("text", "")
+        collapsed = _collapse_soft_wraps(text)
+        if collapsed == text:
+            return stripped
+        return {**stripped, "text": collapsed}
+
+    return [_clean(item) for item in items]
 
 
 def _dedupe(
-    items: Iterable[dict[str, Any]], *, log: list[str] | None = None
+    items: Iterable[dict[str, Any]],
+    *,
+    log: list[str] | None = None,
+    char_limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Remove items whose text already appears in prior items.
 
@@ -742,7 +803,15 @@ def _dedupe(
                 if not text:
                     return state
                 text_norm = _normalize(text)
-        return _merge_if_fragment(acc, acc_text, acc_norm, item, text, text_norm)
+        return _merge_if_fragment(
+            acc,
+            acc_text,
+            acc_norm,
+            item,
+            text,
+            text_norm,
+            char_limit=char_limit,
+        )
 
     initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")
     return reduce(step, items, initial)[0]
@@ -806,7 +875,7 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     return [row for row in (build(x) for x in enumerate(pieces)) if row["text"].strip()]
 
 
-def _enrich_rows_with_context(rows: list[Row]) -> list[Row]:
+def _enrich_rows_with_context(rows: list[Row], *, limit: int | None = None) -> list[Row]:
     enriched: list[Row] = []
     prev_text: str | None = None
     meta_key = _metadata_key()
@@ -824,6 +893,10 @@ def _enrich_rows_with_context(rows: list[Row]) -> list[Row]:
             context = _last_sentence(prev_text)
             if context and not lead.startswith(context):
                 merged = f"{context} {text}".strip()
+                if limit is not None and len(merged) > limit:
+                    enriched.append(row)
+                    prev_text = text
+                    continue
                 enriched.append({**row, "text": merged})
                 prev_text = merged
                 continue
@@ -839,12 +912,26 @@ def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
     return chunk_size is not None or (isinstance(overlap, int | float) and overlap > 0)
 
 
-def _rows(doc: Doc, *, preserve: bool = False) -> list[Row]:
+def _rows(
+    doc: Doc,
+    *,
+    preserve: bool = False,
+    char_limit: int | None = None,
+) -> list[Row]:
     debug_log: list[str] | None = (
         [] if (not preserve and os.getenv("PDF_CHUNKER_DEDUP_DEBUG")) else None
     )
     items = _sanitize_items(doc.get("items", []))
-    processed = items if preserve else _dedupe(_coalesce(items), log=debug_log)
+    budget = char_limit if char_limit is not None and char_limit > 0 else None
+    processed = (
+        items
+        if preserve
+        else _dedupe(
+            _coalesce(items, char_limit=budget),
+            log=debug_log,
+            char_limit=budget,
+        )
+    )
     if debug_log is not None:
         logger = logging.getLogger(__name__)
         logger.warning("dedupe dropped %d duplicates", len(debug_log))
@@ -853,13 +940,25 @@ def _rows(doc: Doc, *, preserve: bool = False) -> list[Row]:
         for dup in _flag_potential_duplicates(processed):
             logger.warning("possible duplicate retained: %s", dup[:80])
     rows = [r for i in processed for r in _rows_from_item(i)]
-    return _enrich_rows_with_context(rows)
+    return _enrich_rows_with_context(rows, limit=budget)
 
 
 def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
     base = dict(meta or {})
     base.setdefault("metrics", {}).setdefault("emit_jsonl", {})["rows"] = count
     return base
+
+
+def _char_budget(meta: Mapping[str, Any] | None) -> int | None:
+    opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
+
+    raw_size = opts.get("chunk_size")
+    if isinstance(raw_size, (int, float)) and raw_size > 0:
+        chunk_size = int(raw_size)
+    else:
+        default = getattr(DEFAULT_SPLITTER, "chunk_size", None)
+        chunk_size = int(default) if isinstance(default, int) and default > 0 else None
+    return _segment_char_limit(chunk_size) if chunk_size is not None else None
 
 
 class _EmitJsonlPass:
@@ -870,7 +969,12 @@ class _EmitJsonlPass:
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload if isinstance(a.payload, dict) else {}
         preserve = _preserve_chunks(a.meta)
-        rows = _rows(doc, preserve=preserve) if doc.get("type") == "chunks" else []
+        char_limit = _char_budget(a.meta)
+        rows = (
+            _rows(doc, preserve=preserve, char_limit=char_limit)
+            if doc.get("type") == "chunks"
+            else []
+        )
         meta = _update_meta(a.meta, len(rows))
         return Artifact(payload=rows, meta=meta)
 
