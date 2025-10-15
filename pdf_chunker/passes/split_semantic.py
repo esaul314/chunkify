@@ -176,6 +176,11 @@ def _segment_char_limit(chunk_size: int | None) -> int:
     estimated = int(ceil(chunk_size * _AVERAGE_CHARS_PER_TOKEN))
     return max(1, min(SOFT_LIMIT, estimated))
 
+@dataclass(frozen=True)
+class _SegmentSlice:
+    text: str
+    allow_overlap: bool = True
+
 
 def _soft_segments(
     text: str,
@@ -216,43 +221,62 @@ def _apply_char_budget(
     *,
     limit: int | None,
     max_words: int | None,
-) -> list[str]:
+) -> list[_SegmentSlice]:
     """Apply ``limit`` to ``chunks`` while respecting ``max_words``."""
 
     char_limit = limit if limit is not None and limit > 0 else None
-    if char_limit is None:
-        return list(chunks)
     word_limit = max_words if max_words is not None and max_words > 0 else None
-    return [
-        segment
-        for chunk in chunks
-        for segment in _soft_segments(
+
+    def _segments(chunk: str) -> tuple[_SegmentSlice, ...]:
+        if char_limit is None:
+            return (_SegmentSlice(chunk),) if chunk else tuple()
+        splits = _soft_segments(
             chunk,
             max_chars=char_limit,
             max_words=word_limit,
         )
-    ]
+        return tuple(
+            _SegmentSlice(segment, allow_overlap=index == 0)
+            for index, segment in enumerate(splits)
+            if segment
+        )
+
+    return [segment for chunk in chunks for segment in _segments(chunk)]
 
 
 def _restore_overlap_words(
-    chunks: list[str],
+    chunks: Iterable[str | _SegmentSlice],
     overlap: int,
     *,
     limit: int | None = None,
     max_words: int | None = None,
 ) -> list[str]:
     if overlap <= 0:
-        return chunks
+        return [
+            segment.text if isinstance(segment, _SegmentSlice) else segment
+            for segment in chunks
+        ]
+
+    char_limit = limit if limit is not None and limit > 0 else None
+    word_limit = max_words if max_words is not None and max_words > 0 else None
+
+    segments = tuple(
+        segment if isinstance(segment, _SegmentSlice) else _SegmentSlice(segment)
+        for segment in chunks
+        if (segment.text if isinstance(segment, _SegmentSlice) else segment)
+    )
+    if not segments:
+        return []
 
     char_limit = limit if limit is not None and limit > 0 else None
     word_limit = max_words if max_words is not None and max_words > 0 else None
 
     restored = accumulate(
-        chunks,
+        segments,
         lambda previous, current: _restore_chunk_overlap(
             previous,
-            current,
-            overlap,
+            current.text,
+            overlap if current.allow_overlap else 0,
             limit=char_limit,
             max_words=word_limit,
         ),
@@ -1192,7 +1216,7 @@ def _get_split_fn(
                 limit=char_limit,
                 max_words=word_budget,
             )
-            soft_hits += sum(len(c) > overflow_guard for c in budgeted)
+            soft_hits += sum(len(segment.text) > overflow_guard for segment in budgeted)
             return _restore_overlap_words(
                 budgeted,
                 overlap,
@@ -1220,7 +1244,7 @@ def _get_split_fn(
                 limit=char_limit,
                 max_words=word_budget,
             )
-            soft_hits += sum(len(seg) > overflow_guard for seg in budgeted)
+            soft_hits += sum(len(segment.text) > overflow_guard for segment in budgeted)
             return _restore_overlap_words(
                 budgeted,
                 overlap,
