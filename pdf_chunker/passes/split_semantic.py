@@ -176,7 +176,6 @@ def _segment_char_limit(chunk_size: int | None) -> int:
     estimated = int(ceil(chunk_size * _AVERAGE_CHARS_PER_TOKEN))
     return max(1, min(SOFT_LIMIT, estimated))
 
-
 @dataclass(frozen=True)
 class _SegmentSlice:
     text: str
@@ -268,6 +267,9 @@ def _restore_overlap_words(
     )
     if not segments:
         return []
+
+    char_limit = limit if limit is not None and limit > 0 else None
+    word_limit = max_words if max_words is not None and max_words > 0 else None
 
     restored = accumulate(
         segments,
