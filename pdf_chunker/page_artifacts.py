@@ -396,11 +396,10 @@ def _looks_like_contact_detail(text: str) -> bool:
     """Return ``True`` when ``text`` resembles an inline contact detail."""
 
     lowered = text.lower()
-    return bool(
-        _EMAIL_RE.search(text)
-        or _PHONE_RE.search(text)
-        or any(keyword in lowered for keyword in _CONTACT_KEYWORDS)
+    keyword_match = any(
+        re.search(rf"\b{keyword}\b", lowered) for keyword in _CONTACT_KEYWORDS
     )
+    return bool(_EMAIL_RE.search(text) or _PHONE_RE.search(text) or keyword_match)
 
 
 def _trailing_bullet_candidates(lines: list[str]) -> list[tuple[int, str]]:
@@ -427,6 +426,73 @@ def _footer_bullet_signals(*candidates: str) -> bool:
     )
 
 
+def _header_footer_signal_map(
+    previous_line: str, trailing_count: int
+) -> dict[str, bool]:
+    """Return header-derived footer signals for ``previous_line``."""
+
+    stripped = previous_line.strip()
+    if not stripped:
+        return {"colon": False, "uppercase": False}
+
+    tokens = stripped.split()
+    colon_header = stripped.endswith(":") and trailing_count <= 3
+    uppercase_header = stripped.isupper() and len(tokens) <= 5
+    return {"colon": colon_header, "uppercase": uppercase_header}
+
+
+def _footer_context_signals(
+    previous: str,
+    after_line: str,
+    bodies: Sequence[str],
+    trailing_count: int,
+    direct_body_signal: bool,
+) -> dict[str, bool]:
+    """Collect contextual footer signals for trailing bullet analysis."""
+
+    valid_bodies = tuple(body for body in bodies if body)
+    header_signals = _header_footer_signal_map(previous, trailing_count)
+    return {
+        "neighbour": _footer_bullet_signals(previous, after_line),
+        "header_colon": header_signals["colon"],
+        "header_upper": header_signals["uppercase"],
+        "shipping": _looks_like_shipping_footer(after_line)
+        or any(_looks_like_shipping_footer(body) for body in valid_bodies),
+        "body": direct_body_signal,
+    }
+
+
+def _footerish_bullet_body(body: str) -> bool:
+    """Return ``True`` when ``body`` carries typical footer cues."""
+
+    stripped = body.strip()
+    if not stripped:
+        return True
+
+    tokens, long_tokens = _question_footer_token_stats(stripped)
+    shortish = tokens <= 12 and long_tokens <= 6
+    question_hint = "?" in stripped
+    shipping_hint = _looks_like_shipping_footer(stripped)
+    contact_hint = _looks_like_contact_detail(stripped)
+    footer_context = _looks_like_footer_context(stripped)
+
+    return shipping_hint or question_hint or (shortish and (contact_hint or footer_context))
+
+
+def _prunable_trailing_bullet(
+    body: str,
+    has_direct_signal: bool,
+    positive_context: bool,
+) -> bool:
+    """Return ``True`` when a trailing bullet ``body`` should be pruned."""
+
+    if not body:
+        return True
+    if has_direct_signal:
+        return True
+    return positive_context and _footerish_bullet_body(body)
+
+
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
 
@@ -434,29 +500,40 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     if not trailing:
         return lines
 
-    bodies = [(_bullet_body(line), pos) for pos, line in trailing]
-    trailing_indices = tuple(pos for pos, _ in trailing)
+    trailing_info = tuple(
+        (pos, line, _bullet_body(line))
+        for pos, line in trailing
+    )
+    trailing_indices = tuple(pos for pos, _, _ in trailing_info)
+    trailing_count = len(trailing_info)
+
     previous = _first_non_empty_line(
         lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1)
     )
-
-    def _should_prune(body: str) -> bool:
-        return not body or _footer_bullet_signals(body, previous)
-
     after_idx = trailing[-1][0] + 1
     after_line = lines[after_idx] if after_idx < len(lines) else ""
-    trailing_count = len(trailing)
-    context_allows = any(
-        (
-            _looks_like_shipping_footer(after_line),
-            _footer_bullet_signals(after_line, previous),
-            _header_invites_footer(previous, trailing_count),
-        )
+
+    body_signal_map = {
+        pos: _footer_bullet_signals(body, previous, after_line)
+        for pos, _, body in trailing_info
+        if body
+    }
+    direct_body_signal = any(body_signal_map.values())
+    signals = _footer_context_signals(
+        previous,
+        after_line,
+        tuple(body for _, _, body in trailing_info),
+        trailing_count,
+        direct_body_signal,
+    )
+    positive_context = any(
+        signals[key]
+        for key in ("neighbour", "shipping", "body", "header_upper")
     )
 
     stats = tuple(
         (_question_footer_token_stats(body), pos)
-        for body, pos in bodies
+        for pos, _, body in trailing_info
         if body
     )
     dense_footer_run = (
@@ -466,7 +543,9 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         and all(total >= 20 and long >= 10 for (total, long), _ in stats)
     )
 
-    if _is_question_bullet_footer_run(trailing_indices, lines) or dense_footer_run:
+    if positive_context and (
+        _is_question_bullet_footer_run(trailing_indices, lines) or dense_footer_run
+    ):
         totals = tuple(total for (total, _), _ in stats)
         if totals and (sum(totals) >= 40 or any(total >= 12 for total in totals)):
             return lines
@@ -478,8 +557,29 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         )
         return [line for idx, line in enumerate(lines) if idx not in keep_indices]
 
-    removals = [pos for body, pos in bodies if _should_prune(body)]
-    if len(removals) != len(bodies) or not context_allows:
+    if not positive_context:
+        return lines
+
+    fallback_context = any(
+        (
+            signals["header_colon"],
+            signals["header_upper"],
+            signals["neighbour"],
+            signals["shipping"],
+            direct_body_signal,
+        )
+    )
+
+    removals = [
+        pos
+        for pos, _, body in trailing_info
+        if _prunable_trailing_bullet(
+            body,
+            body_signal_map.get(pos, False),
+            fallback_context,
+        )
+    ]
+    if len(removals) != len(trailing_info):
         return lines
 
     keep_indices = set(removals)
@@ -493,12 +593,8 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
 def _header_invites_footer(previous_line: str, trailing_count: int) -> bool:
     """Return ``True`` when ``previous_line`` resembles a footer heading."""
 
-    stripped = previous_line.strip()
-    if not stripped:
-        return False
-    colon_header = stripped.endswith(":") and trailing_count <= 3
-    uppercase_header = stripped.isupper() and len(stripped.split()) <= 5
-    return colon_header or uppercase_header
+    signals = _header_footer_signal_map(previous_line, trailing_count)
+    return any(signals.values())
 
 
 _TITLE_CONNECTORS = {
