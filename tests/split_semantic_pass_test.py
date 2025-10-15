@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.split_semantic import (
+    _SegmentSlice,
     _SplitSemanticPass,
+    _restore_overlap_words,
     _segment_char_limit,
 )
 
@@ -78,3 +80,29 @@ def test_forced_budget_split_avoids_overlap_duplication() -> None:
     assert containing, "expected the staged approach paragraph to survive"
     assert all(t.count(target) == 1 for t in containing)
     assert not any("use cases,\n\n the teams took" in t for t in texts)
+
+
+def test_soft_wrap_newlines_collapse_for_sentence_continuations() -> None:
+    segments = [
+        _SegmentSlice(
+            "There is no getting away from the needs of operating\n\nsoftware.",
+            allow_overlap=False,
+        )
+    ]
+    restored = _restore_overlap_words(segments, overlap=12)
+    assert restored == [
+        "There is no getting away from the needs of operating software.",
+    ]
+
+
+def test_soft_wrap_newlines_preserve_paragraph_breaks() -> None:
+    segments = [
+        _SegmentSlice(
+            "Teams presented it in two ways:\n\nSplit",
+            allow_overlap=False,
+        )
+    ]
+    restored = _restore_overlap_words(segments, overlap=12)
+    assert restored == [
+        "Teams presented it in two ways:\n\nSplit",
+    ]

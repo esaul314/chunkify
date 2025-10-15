@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.passes.split_semantic import _collapse_soft_wraps
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -583,7 +584,8 @@ def _merge_text(prev: str, curr: str) -> str:
     first = _first_non_empty_line(curr)
     cond = _is_list_line(last) and _is_list_line(first)
     sep = "\n" if cond else "\n\n"
-    return f"{prev.rstrip()}{sep}{curr}".strip()
+    merged = f"{prev.rstrip()}{sep}{curr}".strip()
+    return _collapse_soft_wraps(merged)
 
 
 def _merge_sentence_pieces(
@@ -704,7 +706,15 @@ def _strip_superscripts(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sanitize_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [_strip_superscripts(item) for item in items]
+    def _clean(item: dict[str, Any]) -> dict[str, Any]:
+        stripped = _strip_superscripts(item)
+        text = stripped.get("text", "")
+        collapsed = _collapse_soft_wraps(text)
+        if collapsed == text:
+            return stripped
+        return {**stripped, "text": collapsed}
+
+    return [_clean(item) for item in items]
 
 
 def _dedupe(

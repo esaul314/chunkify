@@ -90,6 +90,30 @@ MetricFn = Callable[[], dict[str, int | bool]]
 logger = logging.getLogger(__name__)
 
 _TOKEN_PATTERN = re.compile(r"\S+")
+_SOFT_WRAP_PATTERN = re.compile(r"\n{2,}[\t ]*")
+_SOFT_WRAP_PREFIX_SKIP = frozenset({
+    '"',
+    "'",
+    "“",
+    "”",
+    "‘",
+    "’",
+    "(",
+    "[",
+    "{",
+})
+_SOFT_WRAP_CONTINUATION = frozenset({
+    ",",
+    ".",
+    ":",
+    ";",
+    "!",
+    "?",
+    "-",
+    "–",
+    "—",
+    "…",
+})
 
 
 def _warn_stitching_issue(message: str, *, page: int | None = None) -> None:
@@ -176,6 +200,7 @@ def _segment_char_limit(chunk_size: int | None) -> int:
     estimated = int(ceil(chunk_size * _AVERAGE_CHARS_PER_TOKEN))
     return max(1, min(SOFT_LIMIT, estimated))
 
+
 @dataclass(frozen=True)
 class _SegmentSlice:
     text: str
@@ -244,6 +269,31 @@ def _apply_char_budget(
     return [segment for chunk in chunks for segment in _segments(chunk)]
 
 
+def _collapse_soft_wraps(text: str) -> str:
+    if "\n\n" not in text:
+        return text
+
+    def _lead_char(suffix: str) -> str | None:
+        return next(
+            (
+                char
+                for char in suffix
+                if char not in " \t" and char not in _SOFT_WRAP_PREFIX_SKIP
+            ),
+            None,
+        )
+
+    def _replacement(match: re.Match[str]) -> str:
+        lead = _lead_char(match.string[match.end() :])
+        if lead is None:
+            return match.group(0)
+        if lead.islower() or lead.isdigit() or lead in _SOFT_WRAP_CONTINUATION:
+            return " "
+        return match.group(0)
+
+    return _SOFT_WRAP_PATTERN.sub(_replacement, text)
+
+
 def _restore_overlap_words(
     chunks: Iterable[str | _SegmentSlice],
     overlap: int,
@@ -253,7 +303,9 @@ def _restore_overlap_words(
 ) -> list[str]:
     if overlap <= 0:
         return [
-            segment.text if isinstance(segment, _SegmentSlice) else segment
+            _collapse_soft_wraps(
+                segment.text if isinstance(segment, _SegmentSlice) else segment
+            )
             for segment in chunks
         ]
 
@@ -268,9 +320,6 @@ def _restore_overlap_words(
     if not segments:
         return []
 
-    char_limit = limit if limit is not None and limit > 0 else None
-    word_limit = max_words if max_words is not None and max_words > 0 else None
-
     restored = accumulate(
         segments,
         lambda previous, current: _restore_chunk_overlap(
@@ -283,7 +332,7 @@ def _restore_overlap_words(
         initial="",
     )
     next(restored, None)
-    return list(restored)
+    return [_collapse_soft_wraps(text) for text in restored]
 
 
 def _restore_chunk_overlap(
@@ -1138,7 +1187,7 @@ def _collapse_records(
     resolved_limit = _resolved_limit(options, limit)
     if resolved_limit is None:
         yield from (
-            (page, _with_chunk_index(block, idx), text)
+            (page, _with_chunk_index(block, idx), _collapse_soft_wraps(text))
             for idx, (page, block, text) in enumerate(seq)
         )
         return
@@ -1153,7 +1202,7 @@ def _collapse_records(
     final_state = reduce(_collapse_step, enumerate(seq), initial).flush()
     merged_outputs = _maybe_merge_dense_page(final_state.outputs, options, limit)
     yield from (
-        (page, _with_chunk_index(block, idx), text)
+        (page, _with_chunk_index(block, idx), _collapse_soft_wraps(text))
         for idx, (page, block, text) in enumerate(merged_outputs)
     )
 
@@ -1363,12 +1412,25 @@ def _chunk_items(
     for stage in stages:
         records = stage(records)
     collapsed = _collapse_records(records, options, limit)
-    builder = partial(build_chunk_with_meta, filename=filename)
+    def _build_plain(text: str) -> dict[str, Any]:
+        return build_chunk(_collapse_soft_wraps(text))
+
+    def _build_with_meta(
+        text: str, block: Block, page: int, *, index: int
+    ) -> dict[str, Any]:
+        return build_chunk_with_meta(
+            _collapse_soft_wraps(text),
+            block,
+            page,
+            filename=filename,
+            index=index,
+        )
+
     return pipeline_chunk_records(
         collapsed,
         generate_metadata=generate_metadata,
-        build_plain=build_chunk,
-        build_with_meta=builder,
+        build_plain=_build_plain,
+        build_with_meta=_build_with_meta,
     )
 
 
@@ -1383,7 +1445,10 @@ def _inject_continuation_context(
     prev_meta: Mapping[str, Any] | None = None
     char_budget = char_limit if char_limit is not None and char_limit > 0 else None
     for item in items:
-        original = item.get("text", "")
+        base_text = item.get("text", "")
+        original = _collapse_soft_wraps(base_text)
+        if original != base_text:
+            item = {**item, "text": original}
         current_meta = _chunk_meta(item)
         current_is_list = _meta_is_list(current_meta)
         can_trim = prev_text is not None and not current_is_list and not _meta_is_list(prev_meta)
@@ -1463,7 +1528,7 @@ class _SplitSemanticPass:
             self.generate_metadata,
             options=options,
         )
-        items = list(
+        raw_items = list(
             _inject_continuation_context(
                 chunk_records,
                 limit,
@@ -1471,6 +1536,12 @@ class _SplitSemanticPass:
                 char_limit=char_limit,
             )
         )
+        items = [
+            item
+            if (clean := _collapse_soft_wraps(item.get("text", ""))) == item.get("text", "")
+            else {**item, "text": clean}
+            for item in raw_items
+        ]
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 

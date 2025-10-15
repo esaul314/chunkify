@@ -14,8 +14,52 @@ def _sentence(words: int, *, start: int = 0) -> str:
     return " ".join(f"Word{i}" for i in range(start, start + words)) + "."
 
 
-def _sentence(words: int, *, start: int = 0) -> str:
-    return " ".join(f"Word{i}" for i in range(start, start + words)) + "."
+def test_emit_jsonl_collapses_sentence_soft_wraps(monkeypatch) -> None:
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": (
+                    "There is no getting away from the needs of operating\n\nsoftware. "
+                    "This continuation keeps flowing."
+                )
+            }
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert rows == [
+        {
+            "text": (
+                "There is no getting away from the needs of operating software. "
+                "This continuation keeps flowing."
+            )
+        }
+    ]
+
+
+def test_emit_jsonl_retains_paragraph_breaks(monkeypatch) -> None:
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MIN_WORDS", "1")
+    doc = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": (
+                    "Teams presented it in two ways:\n\nSplit\n\nThe summary "
+                    "continues elsewhere."
+                )
+            }
+        ],
+    }
+    rows = emit_jsonl(Artifact(payload=doc)).payload
+    assert rows == [
+        {
+            "text": (
+                "Teams presented it in two ways:\n\nSplit\n\nThe summary "
+                "continues elsewhere."
+            )
+        }
+    ]
 
 
 def test_emit_jsonl_merges_heading_with_text():
@@ -114,11 +158,9 @@ def test_emit_jsonl_drops_incoherent_tail():
         ],
     }
     rows = emit_jsonl(Artifact(payload=doc)).payload
-    expected = "\n\n".join(
-        (
-            "This opening sentence is intentionally long to satisfy the coherence heuristic and ends properly.",
-            "and lacks terminal punctuation while being sufficiently long to trigger validation logic",
-        )
+    expected = (
+        "This opening sentence is intentionally long to satisfy the coherence heuristic and ends properly. "
+        "and lacks terminal punctuation while being sufficiently long to trigger validation logic"
     )
     assert rows == [{"text": expected}]
 
