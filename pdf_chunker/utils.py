@@ -396,6 +396,68 @@ def _build_metadata(
     return {k: v for k, v in metadata.items() if k != "location" or v is None or v}
 
 
+def _chunk_meta(chunk: Document) -> Mapping[str, Any]:
+    meta = getattr(chunk, "meta", None)
+    return meta if isinstance(meta, Mapping) else {}
+
+
+def _select_first(predicate: Callable[[Any], bool], *values: Any, default: Any = None) -> Any:
+    return next((value for value in values if predicate(value)), default)
+
+
+def _fallback_source_block(chunk: Document) -> dict:
+    meta = _chunk_meta(chunk)
+    source_meta = meta.get("source", {})
+    source_map = source_meta if isinstance(source_meta, Mapping) else {}
+
+    filename = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        source_map.get("filename"),
+        meta.get("filename"),
+        meta.get("source") if isinstance(meta.get("source"), str) else None,
+        default="unknown",
+    )
+    page = _select_first(
+        lambda value: isinstance(value, int) and value > 0,
+        source_map.get("page"),
+        meta.get("page"),
+    )
+    location = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        source_map.get("location"),
+        meta.get("location"),
+    )
+    block_type = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        meta.get("block_type"),
+        source_map.get("block_type"),
+        default="paragraph",
+    )
+    language = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        meta.get("language"),
+        source_map.get("language"),
+        default="un",
+    )
+    list_kind = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        meta.get("list_kind"),
+        source_map.get("list_kind"),
+    )
+
+    fallback_source = {
+        "type": block_type,
+        "language": language,
+        "source": {
+            "filename": filename,
+            "page": page,
+            "location": location,
+        },
+    }
+
+    return {**fallback_source, **({"list_kind": list_kind} if list_kind else {})}
+
+
 def process_chunk(
     chunk: Document,
     chunk_index: int,
@@ -429,11 +491,12 @@ def process_chunk(
 
     source_block = _find_source_block(chunk, char_map, original_blocks)
     if not source_block:
-        logger.debug(
-            "process_chunk() EXIT - chunk %s - NO SOURCE BLOCK FOUND",
+        logger.warning(
+            "process_chunk() FALLBACK - chunk %s (%s) emitted with placeholder metadata",
             chunk_index,
+            getattr(chunk, "id", "unknown"),
         )
-        return None
+        source_block = _fallback_source_block(chunk)
 
     utterance_info = _enrich_chunk(final_text, perform_ai_enrichment, enrichment_fn)
     metadata = _build_metadata(
