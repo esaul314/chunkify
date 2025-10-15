@@ -182,8 +182,13 @@ def _question_footer_indices(lines: list[str]) -> frozenset[int]:
         if is_bullet
     )
 
+    edge_band = 4
+
+    def _near_edge(index: int) -> bool:
+        return index <= edge_band or (total - index - 1) <= edge_band
+
     def _near_footer(span: tuple[int, ...]) -> bool:
-        return bool(span) and (total - span[-1] - 1) <= 4
+        return bool(span) and (_near_edge(span[0]) or _near_edge(span[-1]))
 
     qualifying = (
         span
@@ -200,10 +205,9 @@ def _question_footer_indices(lines: list[str]) -> frozenset[int]:
         tokens = re.findall(r"[A-Za-z0-9]+", stripped)
         if not tokens or len(tokens) > 6:
             return False
-        from_end = total - idx - 1
-        initial = stripped[0]
         question_tail = stripped.endswith("?") or stripped.endswith("?)") or stripped.endswith("?\"")
-        return from_end <= 4 and initial.islower() and question_tail
+        near_edge = _near_edge(idx)
+        return near_edge and question_tail
 
     continuation = frozenset(
         idx for idx, line in enumerate(lines) if _looks_like_question_continuation(idx, line)
@@ -291,8 +295,12 @@ def _should_drop_inline_footer(
     if any(token in _INLINE_KEEP_LEADS for token in first_tokens):
         return False
 
-    if any("?" in body or _footer_bullet_signals(body, previous_text) for body in bodies):
-        return True
+    signals = tuple(
+        _footer_bullet_signals(body, previous_text) or "?" in body
+        for body in bodies
+    )
+    if not any(signals):
+        return False
 
     bbox = getattr(block, "bbox", None)
     near_bottom = (
@@ -300,15 +308,8 @@ def _should_drop_inline_footer(
         and bbox is not None
         and (bottom - bbox[3]) <= _INLINE_FOOTER_BOTTOM_MARGIN
     )
-    trailing_short = (
-        len(lines) <= 2
-        and total_words <= 24
-        and (
-            _is_trailing_inline_footer(blocks, idx, previous_text)
-            or near_bottom
-        )
-    )
-    return trailing_short
+    trailing_context = _is_trailing_inline_footer(blocks, idx, previous_text) or near_bottom
+    return trailing_context
 
 
 def _inline_footer_drop_indices(blocks: Sequence["Block"]) -> frozenset[int]:
@@ -325,12 +326,57 @@ def _inline_footer_drop_indices(blocks: Sequence["Block"]) -> frozenset[int]:
     )
 
 
+def _question_footer_block_indices(blocks: Sequence["Block"]) -> frozenset[int]:
+    """Return block indices for question-heavy bullet footers."""
+
+    candidates = [
+        (idx, _first_text_line(block.text))
+        for idx, block in enumerate(blocks)
+        if _starts_with_bullet(_first_text_line(block.text)) and "?" in block.text
+    ]
+    if not candidates:
+        return frozenset()
+
+    spans: list[tuple[int, ...]] = []
+    current: list[int] = []
+    for idx, _ in candidates:
+        if current and idx != current[-1] + 1:
+            spans.append(tuple(current))
+            current = []
+        current.append(idx)
+    if current:
+        spans.append(tuple(current))
+
+    total = len(blocks)
+    drop: set[int] = set()
+    for span in spans:
+        question_marks = sum(blocks[idx].text.count("?") for idx in span)
+        bullet_count = len(span)
+        if bullet_count < 2:
+            continue
+
+        previous_text = blocks[span[0] - 1].text if span[0] > 0 else ""
+        invites = previous_text.strip().endswith(":")
+        near_top = span[0] <= 3
+        near_bottom = (total - span[-1] - 1) <= 3
+        dense_questions = question_marks >= bullet_count + 1
+        if (invites or near_top or near_bottom) and dense_questions:
+            drop.update(span)
+
+    return frozenset(drop)
+
+
 def _prune_footer_blocks(blocks: list["Block"]) -> list["Block"]:
     if not blocks:
         return []
 
     inline_drops = _inline_footer_drop_indices(blocks)
-    filtered = [blk for idx, blk in enumerate(blocks) if idx not in inline_drops]
+    question_drops = _question_footer_block_indices(blocks)
+    filtered = [
+        blk
+        for idx, blk in enumerate(blocks)
+        if idx not in inline_drops and idx not in question_drops
+    ]
     if not filtered:
         return []
 
@@ -425,6 +471,99 @@ def _footer_bullet_signals(*candidates: str) -> bool:
         if candidate
         for predicate in (_looks_like_footer_context, _looks_like_contact_detail)
     )
+
+
+def _question_bullet_spans(lines: list[str]) -> tuple[tuple[int, ...], ...]:
+    """Return spans of bullet/question lines that resemble footer runs."""
+
+    total = len(lines)
+    spans: list[tuple[int, ...]] = []
+    idx = 0
+    while idx < total:
+        stripped = lines[idx].lstrip()
+        if not _starts_with_bullet(stripped):
+            idx += 1
+            continue
+
+        bullet_indices: list[int] = [idx]
+        idx += 1
+        while idx < total and _starts_with_bullet(lines[idx].lstrip()):
+            bullet_indices.append(idx)
+            idx += 1
+
+        tail: list[int] = []
+        tail_idx = idx
+        while tail_idx < total:
+            candidate = lines[tail_idx].strip()
+            if not candidate:
+                tail_idx += 1
+                continue
+            if _starts_with_bullet(candidate):
+                break
+            if "?" not in candidate or len(candidate.split()) > 12:
+                break
+            tail.append(tail_idx)
+            tail_idx += 1
+
+        span = tuple(bullet_indices + tail)
+        if len(span) >= 2:
+            spans.append(span)
+        idx = tail_idx
+
+    return tuple(spans)
+
+
+def _should_drop_question_span(span: tuple[int, ...], lines: list[str]) -> bool:
+    """Return ``True`` when ``span`` of ``lines`` behaves like a question footer."""
+
+    bullet_positions = tuple(
+        idx for idx in span if _starts_with_bullet(lines[idx].lstrip())
+    )
+    if not bullet_positions:
+        return False
+
+    bodies = tuple(_bullet_body(lines[idx]) for idx in bullet_positions)
+    if not all(bodies) or not all("?" in body for body in bodies):
+        return False
+
+    question_marks = sum(lines[idx].count("?") for idx in span)
+    bullet_count = len(bullet_positions)
+    dense_questions = question_marks >= bullet_count * 2
+    long_run = bullet_count >= 3 and question_marks >= bullet_count
+    if not (dense_questions or long_run):
+        return False
+
+    previous = _first_non_empty_line(lines[pos] for pos in range(span[0] - 1, -1, -1))
+    invites = not previous or previous.strip().endswith(":")
+    near_edge = span[0] <= 4 or (len(lines) - span[-1] - 1) <= 4
+    if not (invites or near_edge):
+        return False
+
+    next_line = _next_non_empty_line(lines, span[-1])
+    if next_line and _starts_with_bullet(next_line):
+        return False
+
+    return True
+
+
+def _drop_question_bullet_runs(lines: list[str]) -> list[str]:
+    """Remove question-heavy bullet runs from ``lines`` when they resemble footers."""
+
+    spans = _question_bullet_spans(lines)
+    if not spans:
+        return lines
+
+    removals = {
+        idx
+        for span in spans
+        if _should_drop_question_span(span, lines)
+        for idx in span
+    }
+    if not removals:
+        return lines
+
+    drop_indices = set(removals)
+    return [line for idx, line in enumerate(lines) if idx not in drop_indices]
 
 
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
@@ -1287,7 +1426,8 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
         _restore_colon_suffix_case(original, cleaned)
         for (original, _), cleaned in zip(cleaned_pairs, normalised)
     ]
-    pruned = _drop_trailing_bullet_footers(colon_restored)
+    question_pruned = _drop_question_bullet_runs(colon_restored)
+    pruned = _drop_trailing_bullet_footers(question_pruned)
     return "\n".join(pruned)
 
 
