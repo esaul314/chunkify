@@ -255,6 +255,20 @@ def _block_first_line(block: "Block") -> str:
     return _first_text_line(text)
 
 
+def _previous_non_bullet_text(blocks: Sequence["Block"], idx: int) -> str:
+    """Return the nearest non-bullet block text preceding ``idx``."""
+
+    return next(
+        (
+            getattr(blocks[pos], "text", "") or ""
+            for pos in range(idx - 1, -1, -1)
+            if not _inline_bullet_lines(blocks[pos])
+            and (getattr(blocks[pos], "text", "") or "").strip()
+        ),
+        "",
+    )
+
+
 def _is_trailing_inline_footer(
     blocks: Sequence["Block"], idx: int, previous_text: str
 ) -> bool:
@@ -284,6 +298,8 @@ def _should_drop_inline_footer(
 
     previous_text = getattr(blocks[idx - 1], "text", "") if idx else ""
     inviting_previous = previous_text.strip().endswith(":")
+    if not inviting_previous:
+        inviting_previous = _previous_non_bullet_text(blocks, idx).strip().endswith(":")
     if inviting_previous:
         return False
 
@@ -292,7 +308,7 @@ def _should_drop_inline_footer(
         return False
 
     if any("?" in body or _footer_bullet_signals(body, previous_text) for body in bodies):
-        return True
+        return _is_trailing_inline_footer(blocks, idx, previous_text)
 
     bbox = getattr(block, "bbox", None)
     near_bottom = (
@@ -303,10 +319,8 @@ def _should_drop_inline_footer(
     trailing_short = (
         len(lines) <= 2
         and total_words <= 24
-        and (
-            _is_trailing_inline_footer(blocks, idx, previous_text)
-            or near_bottom
-        )
+        and near_bottom
+        and _is_trailing_inline_footer(blocks, idx, previous_text)
     )
     return trailing_short
 
@@ -560,15 +574,14 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     if not positive_context:
         return lines
 
-    fallback_context = any(
-        (
-            signals["header_colon"],
-            signals["header_upper"],
-            signals["neighbour"],
-            signals["shipping"],
-            direct_body_signal,
-        )
+    context_flags = (
+        signals["header_colon"],
+        signals["header_upper"],
+        signals["neighbour"],
+        signals["shipping"],
     )
+    context_strength = sum(1 for flag in context_flags if flag)
+    fallback_context = direct_body_signal or context_strength >= 2
 
     removals = [
         pos

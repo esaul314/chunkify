@@ -242,6 +242,12 @@ COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
 # Newline/split heuristics
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
 COLON_LIST_BREAK_RE = re.compile(r":\n{2,}(?=\s*(?:[•\-]|\d))")
+
+
+def _guarded_sub(pattern: re.Pattern[str], repl: str, text: str) -> str:
+    """Apply ``pattern.sub`` only when the pattern appears."""
+
+    return pattern.sub(repl, text) if pattern.search(text) else text
 SPLIT_WORD_RE = re.compile(r"([A-Za-z]{2,})(?:\n|\s{2,}|\u00A0)([a-z]{2,})")
 
 STOPWORDS: frozenset[str] = frozenset(
@@ -497,7 +503,7 @@ def _maybe_join_words(head: str, tail: str) -> str:
 def _collapse_colon_list_breaks(text: str) -> str:
     """Collapse paragraph gaps after colons that precede list markers."""
 
-    return COLON_LIST_BREAK_RE.sub(":\n", text)
+    return _guarded_sub(COLON_LIST_BREAK_RE, ":\n", text)
 
 
 def _fix_double_newlines(text: str) -> str:
@@ -797,6 +803,9 @@ def _join_bullet_wrapped_lines(text: str) -> str:
         follower = match.string[match.end()] if match.end() < len(match.string) else ""
         return match.group(0) if follower == "\n" else f"{match.group(1)} "
 
+    if not BULLET_CONTINUATION_RE.search(text):
+        return _normalize_bullet_stopword_case(text)
+
     return pipe(
         text,
         lambda value: BULLET_CONTINUATION_RE.sub(_replace, value),
@@ -812,8 +821,8 @@ def collapse_single_newlines(text: str) -> str:
 
     normalized = pipe(
         text,
+        lambda value: _guarded_sub(COLON_BULLET_START_RE, ":\n", value),
         merge_number_suffix_lines,
-        lambda t: COLON_BULLET_START_RE.sub(":\n", t),
     )
     protected, sentinels = _capture_list_break_sentinels(normalized)
 
@@ -1188,21 +1197,44 @@ def validate_json_safety(text: str) -> Tuple[bool, List[str]]:
 
 
 def apply_json_safety_fixes(text: str) -> str:
-    fixed = CONTROL_CHARS.sub("", text)
-    if fixed.startswith('", '):
-        fixed = fixed[3:]
-    elif fixed.startswith('"') and len(fixed) > 1 and fixed[1].islower():
-        fixed = fixed[1:]
-    try:
-        fixed = fixed.encode("utf-8", errors="replace").decode("utf-8")
-    except UnicodeError:
-        fixed = "".join(ch for ch in fixed if ord(ch) < 128)
-    if fixed.count('"') % 2 != 0:
-        if fixed.endswith('"'):
-            fixed = fixed[:-1]
-        elif fixed.startswith('"'):
-            fixed = fixed[1:]
-    return fixed.strip()
+    def _strip_control(text: str) -> str:
+        return CONTROL_CHARS.sub("", text) if CONTROL_CHARS.search(text) else text
+
+    def _strip_problematic_prefix(value: str) -> str:
+        return pipe(
+            value,
+            lambda current: current[3:] if current.startswith('", ') else current,
+            lambda current: (
+                current[1:]
+                if current.startswith('"') and len(current) > 1 and current[1].islower()
+                else current
+            ),
+        )
+
+    def _ensure_utf8(value: str) -> str:
+        try:
+            value.encode("utf-8")
+            return value
+        except UnicodeError:
+            try:
+                return value.encode("utf-8", errors="replace").decode("utf-8")
+            except UnicodeError:
+                return "".join(ch for ch in value if ord(ch) < 128)
+
+    def _rebalance_quotes(value: str) -> str:
+        if value.count('"') % 2 == 0:
+            return value
+        if value.endswith('"'):
+            return value[:-1]
+        if value.startswith('"'):
+            return value[1:]
+        return value
+
+    def _trim_if_needed(value: str) -> str:
+        trimmed = value.strip()
+        return trimmed if trimmed != value else value
+
+    return pipe(text, _strip_control, _strip_problematic_prefix, _ensure_utf8, _rebalance_quotes, _trim_if_needed)
 
 
 # ---------------------------------------------------------------------------
