@@ -691,8 +691,15 @@ def insert_numbered_list_newlines(text: str) -> str:
 
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
-    placeholder = "[[LIST_BREAK]]"
-    return LIST_BREAK_RE.sub(placeholder, text).replace("\n", " ").replace(placeholder, "\n")
+
+    if "\n" not in text:
+        return text
+
+    preserved: frozenset[int] = frozenset(match.start() for match in LIST_BREAK_RE.finditer(text))
+    return "".join(
+        "\n" if index in preserved else (" " if char == "\n" else char)
+        for index, char in enumerate(text)
+    )
 
 
 ListBreakSentinel = Tuple[str, str, str]
@@ -1242,6 +1249,12 @@ def apply_json_safety_fixes(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_underscore_artifacts(text: str) -> str:
+    """Remove emphasis and dangling underscores in a single functional pass."""
+
+    return pipe(text, remove_underscore_emphasis, remove_dangling_underscores)
+
+
 def clean_paragraph(paragraph: str) -> str:
     """
     Cleans a single paragraph: removes mid-line hyphens, artifacts,
@@ -1249,6 +1262,7 @@ def clean_paragraph(paragraph: str) -> str:
     """
     return pipe(
         paragraph,
+        _normalize_underscore_artifacts,
         rejoin_hyphenated_words,
         strip_headers_and_footers,
         replace_pipes,
@@ -1256,8 +1270,6 @@ def clean_paragraph(paragraph: str) -> str:
         cleanup_bullet_fragments,
         _preserve_list_newlines,
         remove_control_characters,
-        remove_underscore_emphasis,
-        remove_dangling_underscores,
         normalize_ligatures,
         consolidate_whitespace,
     )
@@ -1317,6 +1329,10 @@ def _clean_text_impl(text: str) -> str:
     logger.debug("Calling normalize_newlines")
     text = normalize_newlines(text)
     logger.debug(f"After normalize_newlines: {_preview(text)}")
+
+    logger.debug("Calling _normalize_underscore_artifacts")
+    text = _normalize_underscore_artifacts(text)
+    logger.debug(f"After _normalize_underscore_artifacts: {_preview(text)}")
 
     logger.debug("Calling fix_hyphenated_linebreaks")
     text = fix_hyphenated_linebreaks(text)

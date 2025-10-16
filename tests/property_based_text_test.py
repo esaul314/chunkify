@@ -59,6 +59,20 @@ def test_split_roundtrip_cleaning(sample: str) -> None:
     assert pipeline(sample) == clean_text(sample)
 
 
+def test_clean_text_handles_emphasis_hyphen_roundtrip() -> None:
+    sample = "Prefix- _suffix"
+    cleaned = clean_text(sample)
+    assert clean_text(cleaned) == cleaned
+    assert "- " in cleaned or "-" in cleaned
+
+
+def test_clean_text_preserves_colon_bullet_break() -> None:
+    sample = "Intro:_• bullet"
+    cleaned = clean_text(sample)
+    assert ":\n•" in cleaned
+    assert clean_text(cleaned) == cleaned
+
+
 def test_inline_footnote_continuation_preserved() -> None:
     sample = "Lead in.\n3 Footnote text. The continuation survives."
     cleaned = remove_page_artifact_lines(sample, 3)
