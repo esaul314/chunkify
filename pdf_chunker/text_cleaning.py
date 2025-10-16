@@ -1271,6 +1271,7 @@ def clean_paragraph(paragraph: str) -> str:
         _preserve_list_newlines,
         remove_control_characters,
         normalize_ligatures,
+        _fix_quote_spacing,
         consolidate_whitespace,
     )
 

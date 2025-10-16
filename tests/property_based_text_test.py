@@ -73,6 +73,13 @@ def test_clean_text_preserves_colon_bullet_break() -> None:
     assert clean_text(cleaned) == cleaned
 
 
+def test_clean_text_handles_windows_quote_spacing() -> None:
+    sample = "A\x84\x9a"
+    cleaned = clean_text(sample)
+    assert cleaned == clean_text(cleaned)
+    assert 'A "' in cleaned
+
+
 def test_inline_footnote_continuation_preserved() -> None:
     sample = "Lead in.\n3 Footnote text. The continuation survives."
     cleaned = remove_page_artifact_lines(sample, 3)
