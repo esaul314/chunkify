@@ -43,6 +43,8 @@ from typing import Callable, Iterator, List, Match, Optional, Sequence, Tuple, T
 import ftfy
 from wordfreq import zipf_frequency
 
+from pdf_chunker.page_artifacts import _drop_trailing_bullet_footers
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -518,6 +520,30 @@ def _fix_double_newlines(text: str) -> str:
 def _fix_split_words(text: str) -> str:
     """Join words erroneously split by whitespace using word heuristics."""
     return SPLIT_WORD_RE.sub(lambda m: _maybe_join_words(m.group(1), m.group(2)), text)
+
+
+# ---------------------------------------------------------------------------
+# Footer clean-up
+# ---------------------------------------------------------------------------
+
+
+def _remove_trailing_bullet_footers(text: str) -> str:
+    """Prune footer-style bullet runs at the end of paragraphs."""
+
+    if not text:
+        return text
+
+    paragraphs = (
+        tuple(filter(None, text.split("\n\n")))
+        if "\n" in text
+        else (text,)
+    )
+    pruned = (
+        "\n".join(_drop_trailing_bullet_footers(paragraph.split("\n")))
+        for paragraph in paragraphs
+    )
+    compact = tuple(paragraph for paragraph in pruned if paragraph)
+    return "\n\n".join(compact)
 
 
 # ---------------------------------------------------------------------------
@@ -1381,6 +1407,7 @@ def _clean_text_impl(text: str) -> str:
     logger.debug(f"Split into {len(paragraphs)} paragraphs")
     cleaned_paragraphs = [clean_paragraph(p) for p in paragraphs]
     result = "\n\n".join(cleaned_paragraphs)
+    result = _remove_trailing_bullet_footers(result)
 
     # Final JSON safety check
     safe, issues = validate_json_safety(result)

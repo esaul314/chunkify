@@ -73,6 +73,19 @@ def test_clean_text_preserves_colon_bullet_break() -> None:
     assert clean_text(cleaned) == cleaned
 
 
+def test_clean_text_prunes_footer_style_bullet() -> None:
+    sample = "Intro:_• Contact"
+    cleaned = clean_text(sample)
+    assert cleaned == "Intro:"
+    pipeline = compose(
+        clean_text,
+        "".join,
+        lambda s: splitter._split_text_into_chunks(s, 30, 0),
+        clean_text,
+    )
+    assert pipeline(sample) == cleaned
+
+
 def test_clean_text_handles_windows_quote_spacing() -> None:
     sample = "A\x84\x9a"
     cleaned = clean_text(sample)
