@@ -80,5 +80,6 @@ def test_ai_enrich_pass_enriches_chunk_containers() -> None:
     assert client.calls == 1
 
 
-def test_enrich_chunk_fallback_returns_error() -> None:
-    assert _enrich_chunk("hi", False, None)["classification"] == "error"
+def test_enrich_chunk_fallback_returns_default_classification() -> None:
+    fallback = _enrich_chunk("hi", False, None)
+    assert fallback == {"classification": "unclassified", "tags": []}

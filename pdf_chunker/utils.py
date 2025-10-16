@@ -305,23 +305,30 @@ def _truncate_chunk(text: str, max_chunk_size: int = 8000) -> str:
     return truncated
 
 
+def _default_enrichment() -> dict[str, Any]:
+    """Return the canonical enrichment payload for unenriched chunks."""
+
+    return {"classification": "unclassified", "tags": []}
+
+
 def _enrich_chunk(
     text: str,
     perform_ai_enrichment: bool,
     enrichment_fn: Callable[[str], dict] | None,
 ) -> dict:
     """Perform optional AI enrichment using ``enrichment_fn``."""
+
     if not perform_ai_enrichment or enrichment_fn is None:
-        return {"classification": "error", "tags": []}
+        return _default_enrichment()
+
     try:
         result = enrichment_fn(text)
-        return {
-            "classification": result.get("classification", "unclassified"),
-            "tags": result.get("tags", []),
-        }
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("AI enrichment failed: %s", exc)
-        return {"classification": "error", "tags": []}
+        return _default_enrichment()
+
+    classification, tags = _resolve_utterance_fields(result)
+    return {"classification": classification, "tags": tags}
 
 
 def _normalize_tags(tags: Any) -> list[str]:
