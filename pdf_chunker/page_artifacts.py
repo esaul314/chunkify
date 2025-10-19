@@ -68,6 +68,12 @@ _BULLET_MARKERS = frozenset(
 _FOOTER_STRIP_CHARS = "".join(chain(" ", sorted(filter(None, _BULLET_MARKERS))))
 
 
+def bullet_strategy() -> BulletHeuristicStrategy:
+    """Expose the shared bullet strategy for external callers."""
+
+    return _BULLET_STRATEGY
+
+
 def _strip_bullet_marker(text: str, strategy: BulletHeuristicStrategy = _BULLET_STRATEGY) -> str:
     stripped = text.lstrip()
     if not starts_with_bullet(stripped, strategy):
