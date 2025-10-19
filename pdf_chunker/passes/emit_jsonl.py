@@ -7,10 +7,13 @@ import re
 from collections.abc import Iterable
 from functools import reduce
 from itertools import accumulate, chain, dropwhile, repeat, takewhile
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from pdf_chunker.framework import Artifact, register
-from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+)
 from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
@@ -56,9 +59,22 @@ def _max_chars() -> int:
     return int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000"))
 
 
-def _is_list_line(line: str) -> bool:
+def _resolve_bullet_strategy(
+    strategy: BulletHeuristicStrategy | None,
+) -> BulletHeuristicStrategy:
+    return strategy or default_bullet_strategy()
+
+
+def _is_list_line(
+    line: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
     stripped = line.lstrip()
-    return starts_with_bullet(stripped) or starts_with_number(stripped)
+    if not stripped:
+        return False
+    heuristics = _resolve_bullet_strategy(strategy)
+    return heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(stripped)
 
 
 def _first_non_empty_line(text: str) -> str:
@@ -91,20 +107,31 @@ def _partition_preamble(lines: list[str]) -> tuple[list[str], list[str]]:
 _LIST_GAP_RE = re.compile(r"\n{2,}(?=\s*(?:[-\*\u2022]|\d+\.))")
 
 
-def _collapse_list_gaps(text: str) -> str:
+def _collapse_list_gaps(
+    text: str,
+    *,
+    is_list_line: Callable[[str], bool] | None = None,
+) -> str:
+    predicate = is_list_line or _is_list_line
+
     def repl(match: re.Match[str]) -> str:
         prior = text[: match.start()]
         prev_line = prior.splitlines()[-1] if "\n" in prior else prior
-        return "\n" if not _is_list_line(prev_line) else match.group(0)
+        return "\n" if not predicate(prev_line) else match.group(0)
 
     return _LIST_GAP_RE.sub(repl, text)
 
 
-def _split_inline_list_start(line: str) -> tuple[str, str] | None:
+def _split_inline_list_start(
+    line: str,
+    *,
+    is_list_line: Callable[[str], bool] | None = None,
+) -> tuple[str, str] | None:
+    predicate = is_list_line or _is_list_line
     for idx, char in enumerate(line):
         if char in "-\u2022*" and (idx == 0 or line[idx - 1].isspace()):
             tail = line[idx:].lstrip()
-            if _is_list_line(tail):
+            if predicate(tail):
                 return line[:idx].rstrip(), tail
         if char.isdigit() and (idx == 0 or line[idx - 1].isspace()):
             end = idx
@@ -117,24 +144,30 @@ def _split_inline_list_start(line: str) -> tuple[str, str] | None:
                 and line[end + 1].isspace()
             ):
                 tail = line[idx:].lstrip()
-                if _is_list_line(tail):
+                if predicate(tail):
                     return line[:idx].rstrip(), tail
     return None
 
 
-def _reserve_for_list(text: str, limit: int) -> tuple[str, str, str | None]:
-    collapsed = _collapse_list_gaps(text)
+def _reserve_for_list(
+    text: str,
+    limit: int,
+    *,
+    is_list_line: Callable[[str], bool] | None = None,
+) -> tuple[str, str, str | None]:
+    predicate = is_list_line or _is_list_line
+    collapsed = _collapse_list_gaps(text, is_list_line=predicate)
     lines = collapsed.splitlines()
 
     inline = next(
         (
             (idx, result)
             for idx, line in enumerate(lines)
-            if (result := _split_inline_list_start(line))
+            if (result := _split_inline_list_start(line, is_list_line=predicate))
         ),
         None,
     )
-    list_idx = next((i for i, ln in enumerate(lines) if _is_list_line(ln)), len(lines))
+    list_idx = next((i for i, ln in enumerate(lines) if predicate(ln)), len(lines))
 
     if inline and inline[0] <= list_idx:
         idx, (head, tail) = inline
@@ -149,7 +182,9 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str, str | None]:
     if not pre_lines:
         return collapsed, "", None
 
-    block_lines = list(takewhile(lambda ln: not ln.strip() or _is_list_line(ln), tail_lines))
+    block_lines = list(
+        takewhile(lambda ln: not ln.strip() or predicate(ln), tail_lines)
+    )
     if not block_lines:
         return collapsed, "", None
 
@@ -167,9 +202,13 @@ def _reserve_for_list(text: str, limit: int) -> tuple[str, str, str | None]:
         return collapsed, "", None
 
     keep_lines, intro_lines = _partition_preamble(trimmed_pre)
-    if not intro_lines and len(keep_lines) > 1 and any(_is_list_line(ln) for ln in block_lines):
+    if (
+        not intro_lines
+        and len(keep_lines) > 1
+        and any(predicate(ln) for ln in block_lines)
+    ):
         candidate_intro = keep_lines[-1]
-        if candidate_intro.strip() and not _is_list_line(candidate_intro):
+        if candidate_intro.strip() and not predicate(candidate_intro):
             keep_lines = keep_lines[:-1]
             intro_lines = [candidate_intro, *intro_lines]
     if not keep_lines:
@@ -292,15 +331,22 @@ def _prepend_intro(intro: str, rest: str) -> str:
     return _compose_intro_with_chunk(intro_core, tail, separators)
 
 
-def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
+def _rebalance_lists(
+    raw: str,
+    rest: str,
+    *,
+    is_list_line: Callable[[str], bool] | None = None,
+) -> tuple[str, str]:
     """Shift trailing context or list block into ``rest`` when it starts with a list."""
 
-    if not rest or not _is_list_line(_first_non_empty_line(rest)):
+    predicate = is_list_line or _is_list_line
+
+    if not rest or not predicate(_first_non_empty_line(rest)):
         return raw, rest
 
     lines = _trim_trailing_empty(raw.splitlines())
     trimmed = "\n".join(lines)
-    has_list = any(_is_list_line(ln) for ln in lines)
+    has_list = any(predicate(ln) for ln in lines)
 
     if not has_list:
         kept, intro = _peel_list_intro(trimmed)
@@ -315,9 +361,7 @@ def _rebalance_lists(raw: str, rest: str) -> tuple[str, str]:
             i
             for i, ln in enumerate(reversed(lines))
             if (
-                (ln.strip() and not _is_list_line(ln))
-                if has_list
-                else not ln.strip()
+                (ln.strip() and not predicate(ln)) if has_list else not ln.strip()
             )
         ),
         len(lines),
@@ -375,8 +419,15 @@ def _truncate_with_remainder(text: str, limit: int) -> tuple[str, str]:
     return chunk, text[len(chunk) :]
 
 
-def _split(text: str, limit: int) -> list[str]:
+def _split(
+    text: str,
+    limit: int,
+    *,
+    is_list_line: Callable[[str], bool] | None = None,
+) -> list[str]:
     """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
+
+    predicate = is_list_line or _is_list_line
 
     def step(
         state: tuple[list[str], str, str | None], _: object
@@ -385,11 +436,15 @@ def _split(text: str, limit: int) -> list[str]:
         if not remaining:
             return state
 
-        candidate, rem, next_intro = _reserve_for_list(remaining, limit)
+        candidate, rem, next_intro = _reserve_for_list(
+            remaining,
+            limit,
+            is_list_line=predicate,
+        )
         source = candidate or remaining
         first = _first_non_empty_line(source)
         second = source.splitlines()[1] if "\n" in source else ""
-        is_list = _is_list_line(first) or (_is_list_line(second) and len(first) < limit)
+        is_list = predicate(first) or (predicate(second) and len(first) < limit)
 
         if is_list and len(source) > limit:
             suffix = f"\n{rem}" if rem else ""
@@ -398,8 +453,11 @@ def _split(text: str, limit: int) -> list[str]:
             raw, leftover = _truncate_with_remainder(source, limit)
             suffix = f"\n{rem}" if rem else ""
             rest = f"{leftover}{suffix}"
-        raw, rest = _collapse_list_gaps(raw), _collapse_list_gaps(rest)
-        raw, rest = _rebalance_lists(raw, rest)
+        raw, rest = _collapse_list_gaps(
+            raw,
+            is_list_line=predicate,
+        ), _collapse_list_gaps(rest, is_list_line=predicate)
+        raw, rest = _rebalance_lists(raw, rest, is_list_line=predicate)
         raw_intro_line = _first_non_empty_line(raw)
         rest_first_line = _first_non_empty_line(rest)
         if (
@@ -407,11 +465,11 @@ def _split(text: str, limit: int) -> list[str]:
             and intro_hint.strip()
             and raw_intro_line.strip() == intro_hint.strip()
             and rest_first_line
-            and _is_list_line(rest_first_line)
+            and predicate(rest_first_line)
         ):
             rest_lines = rest.splitlines()
             block_lines = list(
-                takewhile(lambda ln: not ln.strip() or _is_list_line(ln), rest_lines)
+                takewhile(lambda ln: not ln.strip() or predicate(ln), rest_lines)
             )
             block_text = "\n".join(block_lines).lstrip("\n")
             if block_text:
@@ -419,12 +477,16 @@ def _split(text: str, limit: int) -> list[str]:
                 rest = "\n".join(rest_lines[len(block_lines) :])
         raw_first_line = _first_non_empty_line(raw)
         skip_trim = bool(pieces) and (
-            _is_list_line(raw_first_line)
-            or (intro_hint and intro_hint.strip() and raw_first_line.strip() == intro_hint.strip())
+            predicate(raw_first_line)
+            or (
+                intro_hint
+                and intro_hint.strip()
+                and raw_first_line.strip() == intro_hint.strip()
+            )
         )
         trimmed = raw if not pieces or skip_trim else _trim_overlap(pieces[-1], raw)
         if trimmed and trimmed.strip():
-            if pieces and _is_list_line(_first_non_empty_line(trimmed)):
+            if pieces and predicate(_first_non_empty_line(trimmed)):
                 merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
                 if len(merged) <= limit:  # noqa: SIM108
                     pieces = [*pieces[:-1], merged]
@@ -578,10 +640,18 @@ def _steal_sentence_prefix(prev: str, fragment: str, limit: int | None) -> tuple
     return candidate, ""
 
 
-def _merge_text(prev: str, curr: str) -> str:
+def _merge_text(
+    prev: str,
+    curr: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str:
     last = _last_non_empty_line(prev)
     first = _first_non_empty_line(curr)
-    cond = _is_list_line(last) and _is_list_line(first)
+    cond = _is_list_line(last, strategy=strategy) and _is_list_line(
+        first,
+        strategy=strategy,
+    )
     sep = "\n" if cond else "\n\n"
     return f"{prev.rstrip()}{sep}{curr}".strip()
 
@@ -623,6 +693,8 @@ def _merge_if_fragment(
     item: dict[str, Any],
     text: str,
     text_norm: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[list[dict[str, Any]], str, str]:
     """Merge ``text`` into ``acc`` if it begins mid-sentence."""
 
@@ -636,7 +708,7 @@ def _merge_if_fragment(
             merged_acc,
             acc_norm + text_norm,
         )
-    new_text = _merge_text(acc_text, text) if acc_text else text
+    new_text = _merge_text(acc_text, text, strategy=strategy) if acc_text else text
     return (
         [*acc, {**item, "text": text}],
         new_text,
@@ -662,23 +734,33 @@ def _should_merge(prev_text: str, curr_text: str, min_words: int) -> bool:
 def _merge_items(
     acc: list[dict[str, Any]],
     item: dict[str, Any],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> list[dict[str, Any]]:
     text = item["text"]
     if acc:
         prev = acc[-1]
         text = _trim_overlap(prev["text"], text)
         if _should_merge(prev["text"], text, _min_words()):
-            merged = _merge_text(prev["text"], text)
+            merged = _merge_text(prev["text"], text, strategy=strategy)
             return [*acc[:-1], {**prev, "text": merged}]
     return [*acc, {**item, "text": text}]
 
 
-def _coalesce(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def _coalesce(
+    items: Iterable[dict[str, Any]],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> list[dict[str, Any]]:
     """Normalize item boundaries, trimming overlap and merging fragments."""
 
     cleaned = [{**i, "text": (i.get("text") or "").strip()} for i in items]
     cleaned = [i for i in cleaned if i["text"]]
-    merged = reduce(_merge_items, cleaned, cast(list[dict[str, Any]], []))
+    merged = reduce(
+        lambda acc, item: _merge_items(acc, item, strategy=strategy),
+        cleaned,
+        cast(list[dict[str, Any]], []),
+    )
     return merged
 
 
@@ -708,7 +790,10 @@ def _sanitize_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _dedupe(
-    items: Iterable[dict[str, Any]], *, log: list[str] | None = None
+    items: Iterable[dict[str, Any]],
+    *,
+    log: list[str] | None = None,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> list[dict[str, Any]]:
     """Remove items whose text already appears in prior items.
 
@@ -742,7 +827,15 @@ def _dedupe(
                 if not text:
                     return state
                 text_norm = _normalize(text)
-        return _merge_if_fragment(acc, acc_text, acc_norm, item, text, text_norm)
+        return _merge_if_fragment(
+            acc,
+            acc_text,
+            acc_norm,
+            item,
+            text,
+            text_norm,
+            strategy=strategy,
+        )
 
     initial: tuple[list[dict[str, Any]], str, str] = ([], "", "")
     return reduce(step, items, initial)[0]
@@ -767,7 +860,11 @@ def _flag_potential_duplicates(
     return flagged
 
 
-def _rows_from_item(item: dict[str, Any]) -> list[Row]:
+def _rows_from_item(
+    item: dict[str, Any],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> list[Row]:
     meta_key = _metadata_key()
     max_chars = _max_chars()
     meta: dict[str, Any] = item.get("meta") or {}
@@ -780,9 +877,15 @@ def _rows_from_item(item: dict[str, Any]) -> list[Row]:
     if avail <= 0:
         return []
 
+    heuristics = _resolve_bullet_strategy(strategy)
+    predicate = lambda line: _is_list_line(line, strategy=heuristics)
+
     pieces = [
         piece
-        for piece in _merge_sentence_pieces(_split(item.get("text", ""), avail), avail)
+        for piece in _merge_sentence_pieces(
+            _split(item.get("text", ""), avail, is_list_line=predicate),
+            avail,
+        )
         if piece.strip()
     ]
 
@@ -839,12 +942,26 @@ def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
     return chunk_size is not None or (isinstance(overlap, int | float) and overlap > 0)
 
 
-def _rows(doc: Doc, *, preserve: bool = False) -> list[Row]:
+def _rows(
+    doc: Doc,
+    *,
+    preserve: bool = False,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> list[Row]:
     debug_log: list[str] | None = (
         [] if (not preserve and os.getenv("PDF_CHUNKER_DEDUP_DEBUG")) else None
     )
     items = _sanitize_items(doc.get("items", []))
-    processed = items if preserve else _dedupe(_coalesce(items), log=debug_log)
+    heuristics = _resolve_bullet_strategy(strategy)
+    processed = (
+        items
+        if preserve
+        else _dedupe(
+            _coalesce(items, strategy=heuristics),
+            log=debug_log,
+            strategy=heuristics,
+        )
+    )
     if debug_log is not None:
         logger = logging.getLogger(__name__)
         logger.warning("dedupe dropped %d duplicates", len(debug_log))
@@ -852,7 +969,7 @@ def _rows(doc: Doc, *, preserve: bool = False) -> list[Row]:
             logger.warning("dedupe dropped: %s", dup[:80])
         for dup in _flag_potential_duplicates(processed):
             logger.warning("possible duplicate retained: %s", dup[:80])
-    rows = [r for i in processed for r in _rows_from_item(i)]
+    rows = [r for i in processed for r in _rows_from_item(i, strategy=heuristics)]
     return _enrich_rows_with_context(rows)
 
 
@@ -866,11 +983,17 @@ class _EmitJsonlPass:
     name = "emit_jsonl"
     input_type = dict
     output_type = list
+    bullet_strategy: BulletHeuristicStrategy | None = default_bullet_strategy()
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload if isinstance(a.payload, dict) else {}
         preserve = _preserve_chunks(a.meta)
-        rows = _rows(doc, preserve=preserve) if doc.get("type") == "chunks" else []
+        strategy = _resolve_bullet_strategy(self.bullet_strategy)
+        rows = (
+            _rows(doc, preserve=preserve, strategy=strategy)
+            if doc.get("type") == "chunks"
+            else []
+        )
         meta = _update_meta(a.meta, len(rows))
         return Artifact(payload=rows, meta=meta)
 

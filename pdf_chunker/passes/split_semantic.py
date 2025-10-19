@@ -18,7 +18,10 @@ from math import ceil
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
-from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+)
 from pdf_chunker.page_artifacts import (
     _bullet_body,
     _drop_trailing_bullet_footers,
@@ -90,6 +93,12 @@ MetricFn = Callable[[], dict[str, int | bool]]
 logger = logging.getLogger(__name__)
 
 _TOKEN_PATTERN = re.compile(r"\S+")
+
+
+def _resolve_bullet_strategy(
+    strategy: BulletHeuristicStrategy | None,
+) -> BulletHeuristicStrategy:
+    return strategy or default_bullet_strategy()
 
 
 def _warn_stitching_issue(message: str, *, page: int | None = None) -> None:
@@ -393,7 +402,10 @@ def _promote_inline_heading(block: Block, text: str) -> Block:
 
 
 def _stitch_block_continuations(
-    seq: Iterable[tuple[int, Block, str]], limit: int | None
+    seq: Iterable[tuple[int, Block, str]],
+    limit: int | None,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> list[tuple[int, Block, str]]:
     def _consume(
         acc: list[tuple[int, Block, str]],
@@ -402,7 +414,7 @@ def _stitch_block_continuations(
         page, block, text = cur
         if not acc:
             return [*acc, cur]
-        if _starts_list_like(block, text):
+        if _starts_list_like(block, text, strategy=strategy):
             return [*acc, cur]
         lead = text.lstrip()
         if not lead or not _is_continuation_lead(lead):
@@ -471,13 +483,27 @@ def _effective_counts(text: str) -> tuple[int, int, int]:
     return word_count, dense_total, effective_total
 
 
-def _colon_bullet_boundary(prev_text: str, block: Block, text: str) -> bool:
-    return prev_text.rstrip().endswith(":") and _starts_list_like(block, text)
+def _colon_bullet_boundary(
+    prev_text: str,
+    block: Block,
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    return prev_text.rstrip().endswith(":") and _starts_list_like(
+        block,
+        text,
+        strategy=strategy,
+    )
 
 
-def _record_is_list_like(record: tuple[int, Block, str]) -> bool:
+def _record_is_list_like(
+    record: tuple[int, Block, str],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
     _, block, text = record
-    return _starts_list_like(block, text)
+    return _starts_list_like(block, text, strategy=strategy)
 
 
 def _previous_non_empty_line(lines: tuple[str, ...]) -> str:
@@ -513,7 +539,12 @@ def _resolve_footer_suffix(lines: tuple[str, ...]) -> tuple[str, ...]:
     return suffix
 
 
-def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, ...]:
+def _record_trailing_footer_lines(
+    record: tuple[int, Block, str],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> tuple[str, ...]:
+    heuristics = _resolve_bullet_strategy(strategy)
     """Return trailing bullet lines that heuristically resemble footers."""
 
     _, block, text = record
@@ -524,13 +555,19 @@ def _record_trailing_footer_lines(record: tuple[int, Block, str]) -> tuple[str, 
         return tuple()
     suffix = _resolve_footer_suffix(lines)
     bullet_like = tuple(
-        line for line in suffix if starts_with_bullet(line) or starts_with_number(line)
+        line
+        for line in suffix
+        if heuristics.starts_with_bullet(line) or heuristics.starts_with_number(line)
     )
     return bullet_like if bullet_like == suffix else tuple()
 
 
-def _record_is_footer_candidate(record: tuple[int, Block, str]) -> bool:
-    return bool(_record_trailing_footer_lines(record))
+def _record_is_footer_candidate(
+    record: tuple[int, Block, str],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    return bool(_record_trailing_footer_lines(record, strategy=strategy))
 
 
 def _trim_footer_suffix(text: str, suffix: tuple[str, ...]) -> str:
@@ -561,11 +598,16 @@ def _trim_footer_suffix(text: str, suffix: tuple[str, ...]) -> str:
     return "\n".join(trimmed)
 
 
-def _strip_footer_suffix(record: tuple[int, Block, str]) -> tuple[int, Block, str] | None:
+def _strip_footer_suffix(
+    record: tuple[int, Block, str],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> tuple[int, Block, str] | None:
     """Return ``record`` without footer bullets or ``None`` if empty."""
 
+    heuristics = _resolve_bullet_strategy(strategy)
     page, block, text = record
-    suffix = _record_trailing_footer_lines(record)
+    suffix = _record_trailing_footer_lines(record, strategy=heuristics)
     if not suffix:
         return record
     trimmed = _trim_footer_suffix(text, suffix)
@@ -593,9 +635,12 @@ def _strip_footer_suffix(record: tuple[int, Block, str]) -> tuple[int, Block, st
 def _is_footer_artifact_record(
     previous: tuple[int, Block, str],
     current: tuple[int, Block, str],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> bool:
     """Return ``True`` when ``current`` resembles a stray footer list."""
 
+    heuristics = _resolve_bullet_strategy(strategy)
     prev_page, prev_block, prev_text = previous
     page, block, text = current
     if page != prev_page:
@@ -603,7 +648,10 @@ def _is_footer_artifact_record(
     stripped_lines = tuple(line.strip() for line in text.splitlines() if line.strip())
     if not stripped_lines or len(stripped_lines) > 2:
         return False
-    if not all(starts_with_bullet(line) or starts_with_number(line) for line in stripped_lines):
+    if not all(
+        heuristics.starts_with_bullet(line) or heuristics.starts_with_number(line)
+        for line in stripped_lines
+    ):
         return False
     word_total = sum(len(line.split()) for line in stripped_lines)
     if word_total > 20:
@@ -628,30 +676,46 @@ def _is_footer_artifact_record(
 
 def _strip_footer_suffixes(
     records: Iterable[tuple[int, Block, str]],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[int, Block, str], ...]:
     """Remove footer suffix bullets from ``records``."""
 
+    heuristics = _resolve_bullet_strategy(strategy)
     cleaned: list[tuple[int, Block, str]] = []
     for record in records:
-        trimmed = _strip_footer_suffix(record)
+        trimmed = _strip_footer_suffix(record, strategy=heuristics)
         if trimmed is None:
             continue
-        if cleaned and _is_footer_artifact_record(cleaned[-1], trimmed):
+        if cleaned and _is_footer_artifact_record(
+            cleaned[-1], trimmed, strategy=heuristics
+        ):
             continue
         cleaned.append(trimmed)
     return tuple(cleaned)
 
 
-def _should_emit_list_boundary(previous: tuple[int, Block, str], block: Block, text: str) -> bool:
+def _should_emit_list_boundary(
+    previous: tuple[int, Block, str],
+    block: Block,
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
     _, prev_block, prev_text = previous
     if prev_text.rstrip().endswith(":"):
         return False
-    if _starts_list_like(prev_block, prev_text):
+    if _starts_list_like(prev_block, prev_text, strategy=strategy):
         return False
-    return not _record_is_footer_candidate(previous)
+    return not _record_is_footer_candidate(previous, strategy=strategy)
 
 
-def _list_tail_split_index(text: str) -> int | None:
+def _list_tail_split_index(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> int | None:
+    heuristics = _resolve_bullet_strategy(strategy)
     """Return the index where a list block transitions into narrative text."""
 
     parts = text.splitlines(keepends=True)
@@ -663,7 +727,9 @@ def _list_tail_split_index(text: str) -> int | None:
         stripped = part.lstrip()
         if not stripped:
             continue
-        if starts_with_bullet(stripped) or starts_with_number(stripped):
+        if heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(
+            stripped
+        ):
             continue
         indent = len(part) - len(stripped)
         if indent:
@@ -677,9 +743,13 @@ def _list_tail_split_index(text: str) -> int | None:
     return None
 
 
-def _split_list_record(record: tuple[int, Block, str]) -> tuple[tuple[int, Block, str], ...]:
+def _split_list_record(
+    record: tuple[int, Block, str],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> tuple[tuple[int, Block, str], ...]:
     page, block, text = record
-    split_at = _list_tail_split_index(text)
+    split_at = _list_tail_split_index(text, strategy=strategy)
     if split_at is None:
         return (record,)
     head_text = text[:split_at].rstrip()
@@ -695,6 +765,8 @@ def _split_list_record(record: tuple[int, Block, str]) -> tuple[tuple[int, Block
 
 def _split_colon_bullet_segments(
     buffer: Iterable[tuple[int, Block, str]],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[tuple[int, Block, str], ...], ...]:
     """Return ``buffer`` sliced so colon-prefixed bullets anchor a new segment."""
 
@@ -706,13 +778,21 @@ def _split_colon_bullet_segments(
             return ((record,),)
         previous = acc[-1]
         prev_text = previous[-1][2]
-        if _colon_bullet_boundary(prev_text, record[1], record[2]):
+        if _colon_bullet_boundary(
+            prev_text,
+            record[1],
+            record[2],
+            strategy=strategy,
+        ):
             prefix = previous[:-1]
             colon_record = previous[-1]
             head = acc[:-1]
             head = (*head, prefix) if prefix else head
             return (*head, (colon_record, record))
-        if _record_is_list_like(previous[-1]) and not _record_is_list_like(record):
+        if _record_is_list_like(previous[-1], strategy=strategy) and not _record_is_list_like(
+            record,
+            strategy=strategy,
+        ):
             return (*acc, (record,))
         return (*acc[:-1], previous + (record,))
 
@@ -721,8 +801,14 @@ def _split_colon_bullet_segments(
 
 def _expand_segment_records(
     segment: tuple[tuple[int, Block, str], ...],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[int, Block, str], ...]:
-    expanded = tuple(chain.from_iterable(_split_list_record(record) for record in segment))
+    expanded = tuple(
+        chain.from_iterable(
+            _split_list_record(record, strategy=strategy) for record in segment
+        )
+    )
     return expanded if expanded else segment
 
 
@@ -740,7 +826,11 @@ def _enumerate_segments(
     return tuple(zip(offsets, segments, strict=False))
 
 
-def _collapse_numbered_list_spacing(text: str) -> str:
+def _collapse_numbered_list_spacing(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str:
     """Collapse blank lines between numbered items while preserving others."""
 
     if "\n\n" not in text:
@@ -749,9 +839,11 @@ def _collapse_numbered_list_spacing(text: str) -> str:
     if len(lines) <= 2:
         return text
 
+    heuristics = _resolve_bullet_strategy(strategy)
+
     def _is_numbered(line: str) -> bool:
         stripped = line.lstrip()
-        return bool(stripped) and starts_with_number(stripped)
+        return bool(stripped) and heuristics.starts_with_number(stripped)
 
     def _keep(index_line: tuple[int, str]) -> bool:
         index, line = index_line
@@ -766,15 +858,27 @@ def _collapse_numbered_list_spacing(text: str) -> str:
     return "\n".join(filtered)
 
 
-def _normalize_numbered_list_text(text: str) -> str:
+def _normalize_numbered_list_text(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str:
     """Normalize numbered list spacing without altering other content."""
 
-    return _collapse_numbered_list_spacing(text) if text else text
+    return _collapse_numbered_list_spacing(text, strategy=strategy) if text else text
 
 
-def _join_record_texts(records: Iterable[tuple[int, Block, str]]) -> str:
+def _join_record_texts(
+    records: Iterable[tuple[int, Block, str]],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str:
     joined = "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
-    return _normalize_numbered_list_text(joined) if joined else joined
+    return (
+        _normalize_numbered_list_text(joined, strategy=strategy)
+        if joined
+        else joined
+    )
 
 
 def _apply_overlap_within_segment(
@@ -834,10 +938,11 @@ def _emit_buffer_segments(
     resolved_limit: int | None,
     hard_limit: int | None,
     overflow: bool,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[int, Block, str], ...]:
     if not buffer:
         return tuple()
-    segments = _split_colon_bullet_segments(buffer) or (buffer,)
+    segments = _split_colon_bullet_segments(buffer, strategy=strategy) or (buffer,)
     enumerated = _enumerate_segments(segments)
     return tuple(
         emission
@@ -849,6 +954,7 @@ def _emit_buffer_segments(
             resolved_limit=resolved_limit,
             hard_limit=hard_limit,
             overflow=overflow,
+            strategy=strategy,
         )
     )
 
@@ -858,11 +964,12 @@ def _merged_segment_record(
     *,
     start_index: int,
     overlap: int,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[int, Block, str] | None:
     trimmed = _apply_overlap_within_segment(segment, overlap)
     if not trimmed:
         return None
-    joined = _join_record_texts(trimmed)
+    joined = _join_record_texts(trimmed, strategy=strategy)
     if not joined or len(joined) > SOFT_LIMIT:
         return None
     merged = _merge_record_block(list(trimmed), joined)
@@ -871,13 +978,16 @@ def _merged_segment_record(
 
 
 def _emit_individual_records(
-    segment: tuple[tuple[int, Block, str], ...], start_index: int
+    segment: tuple[tuple[int, Block, str], ...],
+    start_index: int,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[int, Block, str], ...]:
     return tuple(
         (
             page,
             _with_chunk_index(block, start_index + offset),
-            _normalize_numbered_list_text(text),
+            _normalize_numbered_list_text(text, strategy=strategy),
         )
         for offset, (page, block, text) in enumerate(segment)
     )
@@ -891,26 +1001,28 @@ def _emit_segment_records(
     resolved_limit: int | None,
     hard_limit: int | None,
     overflow: bool,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[int, Block, str], ...]:
     """Emit ``segment`` as merged or individual records respecting limits."""
     if not segment:
         return tuple()
-    segment = _expand_segment_records(segment)
+    segment = _expand_segment_records(segment, strategy=strategy)
     words, dense, effective = _segment_totals(segment)
     exceeds_soft = resolved_limit is not None and effective > resolved_limit
     exceeds_hard = hard_limit is not None and effective > hard_limit
     overflow_active = overflow and (exceeds_soft or exceeds_hard)
     if overflow_active or len(segment) == 1:
-        return _emit_individual_records(segment, start_index)
+        return _emit_individual_records(segment, start_index, strategy=strategy)
     if exceeds_soft or exceeds_hard:
-        return _emit_individual_records(segment, start_index)
+        return _emit_individual_records(segment, start_index, strategy=strategy)
     merged = _merged_segment_record(
         segment,
         start_index=start_index,
         overlap=overlap,
+        strategy=strategy,
     )
     if merged is None:
-        return _emit_individual_records(segment, start_index)
+        return _emit_individual_records(segment, start_index, strategy=strategy)
     return (merged,)
 
 
@@ -918,6 +1030,8 @@ def _maybe_merge_dense_page(
     records: Iterable[tuple[int, Block, str]],
     options: SplitOptions | None,
     limit: int | None,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[int, Block, str], ...]:
     sequence = tuple(records)
     if len(sequence) <= 1:
@@ -934,7 +1048,7 @@ def _maybe_merge_dense_page(
         return sequence
     if limit is not None and word_total <= limit:
         return sequence
-    merged_text = _join_record_texts(sequence)
+    merged_text = _join_record_texts(sequence, strategy=strategy)
     if not merged_text:
         return sequence
     merged_block = _merge_record_block(list(sequence), merged_text)
@@ -951,6 +1065,7 @@ class _CollapseEmitter:
     running_dense: int = 0
     start_index: int | None = None
     outputs: tuple[Record, ...] = tuple()
+    strategy: BulletHeuristicStrategy | None = None
 
     def append(
         self,
@@ -980,6 +1095,7 @@ class _CollapseEmitter:
             resolved_limit=self.resolved_limit,
             hard_limit=self.hard_limit,
             overflow=overflow,
+            strategy=self.strategy,
         )
         return replace(
             self,
@@ -996,15 +1112,20 @@ class _CollapseEmitter:
         return replace(self, outputs=self.outputs + (entry,))
 
 
-def _page_or_footer_boundary(buffer: tuple[Record, ...], record: Record) -> bool:
+def _page_or_footer_boundary(
+    buffer: tuple[Record, ...],
+    record: Record,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
     if not buffer:
         return False
     prev_page, _, _ = buffer[-1]
     page, _, _ = record
     if prev_page != page:
         return True
-    prev_is_footer = _record_is_footer_candidate(buffer[-1])
-    current_is_footer = _record_is_footer_candidate(record)
+    prev_is_footer = _record_is_footer_candidate(buffer[-1], strategy=strategy)
+    current_is_footer = _record_is_footer_candidate(record, strategy=strategy)
     return (current_is_footer != prev_is_footer) and (current_is_footer or prev_is_footer)
 
 
@@ -1021,7 +1142,11 @@ def _projected_overflow(
     exceeds_hard = state.hard_limit is not None and effective > state.hard_limit
     if exceeds_hard:
         last_text = state.buffer[-1][2].rstrip()
-        if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(block, text):
+        if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(
+            block,
+            text,
+            strategy=state.strategy,
+        ):
             return "flush"
         return "overflow"
     if exceeds_soft:
@@ -1034,16 +1159,26 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
     _, block, text = record
     counts = _effective_counts(text)
     _, _, effective = counts
-    if _page_or_footer_boundary(state.buffer, record):
-        state = state.flush()
-    if (state.resolved_limit is not None and effective > state.resolved_limit) or (
-        state.hard_limit is not None and effective > state.hard_limit
+    if _page_or_footer_boundary(
+        state.buffer,
+        record,
+        strategy=state.strategy,
     ):
+        state = state.flush()
+    if (
+        state.resolved_limit is not None
+        and effective > state.resolved_limit
+    ) or (state.hard_limit is not None and effective > state.hard_limit):
         return state.flush().emit_single(idx, record)
     if (
         state.buffer
-        and _starts_list_like(block, text)
-        and _should_emit_list_boundary(state.buffer[-1], block, text)
+        and _starts_list_like(block, text, strategy=state.strategy)
+        and _should_emit_list_boundary(
+            state.buffer[-1],
+            block,
+            text,
+            strategy=state.strategy,
+        )
     ):
         state = state.flush()
     if state.buffer:
@@ -1057,8 +1192,11 @@ def _collapse_records(
     records: Iterable[tuple[int, Block, str]],
     options: SplitOptions | None = None,
     limit: int | None = None,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
-    seq = tuple(_strip_footer_suffixes(tuple(records)))
+    heuristics = _resolve_bullet_strategy(strategy)
+    seq = tuple(_strip_footer_suffixes(tuple(records), strategy=heuristics))
     if not seq:
         return
     resolved_limit = _resolved_limit(options, limit)
@@ -1075,9 +1213,15 @@ def _collapse_records(
         resolved_limit=resolved_limit,
         hard_limit=hard_limit,
         overlap=overlap,
+        strategy=heuristics,
     )
     final_state = reduce(_collapse_step, enumerate(seq), initial).flush()
-    merged_outputs = _maybe_merge_dense_page(final_state.outputs, options, limit)
+    merged_outputs = _maybe_merge_dense_page(
+        final_state.outputs,
+        options,
+        limit,
+        strategy=heuristics,
+    )
     yield from (
         (page, _with_chunk_index(block, idx), text)
         for idx, (page, block, text) in enumerate(merged_outputs)
@@ -1166,30 +1310,53 @@ def _block_text(block: Block) -> str:
     return block.get("text", "")
 
 
-def _starts_list_like(block: Block, text: str) -> bool:
+def _starts_list_like(
+    block: Block,
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
     kind = _block_list_kind(block)
     if kind:
         return True
     if block.get("type") == "list_item":
         return True
     stripped = text.lstrip()
-    return bool(stripped) and (starts_with_bullet(stripped) or starts_with_number(stripped))
+    if not stripped:
+        return False
+    heuristics = _resolve_bullet_strategy(strategy)
+    return heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(
+        stripped
+    )
 
 
-def _should_break_after_colon(prev_text: str, block: Block, text: str) -> bool:
+def _should_break_after_colon(
+    prev_text: str,
+    block: Block,
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
     if not prev_text.rstrip().endswith(":"):
         return False
     lead = text.lstrip()
     if not lead:
         return False
     head = lead[0]
-    return head.isupper() or head.isdigit() or _starts_list_like(block, text)
+    return head.isupper() or head.isdigit() or _starts_list_like(
+        block,
+        text,
+        strategy=strategy,
+    )
 
 
 def _merge_blocks(
     acc: list[tuple[int, Block, str]],
     cur: tuple[int, Block, str],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> list[tuple[int, Block, str]]:
+    heuristics = _resolve_bullet_strategy(strategy)
     page, block, text = cur
     block = _promote_inline_heading(block, text)
     cur = (page, block, text)
@@ -1209,9 +1376,9 @@ def _merge_blocks(
         return acc
     if _is_heading(prev_block) or _is_heading(block):
         return acc + [cur]
-    if _starts_list_like(block, text):
+    if _starts_list_like(block, text, strategy=heuristics):
         return acc + [cur]
-    if _should_break_after_colon(prev_text, block, text):
+    if _should_break_after_colon(prev_text, block, text, strategy=heuristics):
         return acc + [cur]
     lead = text.lstrip()
     continuation_chars = ",.;:)]\"'"
@@ -1225,13 +1392,18 @@ def _merge_blocks(
     return acc + [cur]
 
 
-def _block_texts(doc: Doc, split_fn: SplitFn) -> Iterator[tuple[int, Block, str]]:
+def _block_texts(
+    doc: Doc,
+    split_fn: SplitFn,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> Iterator[tuple[int, Block, str]]:
     """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
     merged = pipeline_merge_adjacent_blocks(
         pipeline_iter_blocks(doc),
         text_of=_block_text,
-        fold=_merge_blocks,
+        fold=partial(_merge_blocks, strategy=strategy),
         split_fn=split_fn,
     )
     return _split_inline_heading_records(merged)
@@ -1249,25 +1421,27 @@ def _chunk_items(
     generate_metadata: bool = True,
     *,
     options: SplitOptions | None = None,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
     limit = options.compute_limit() if options is not None else None
+    heuristics = _resolve_bullet_strategy(strategy)
     stages: tuple[Callable[[Iterable[Record]], Iterable[Record]], ...] = (
         partial(
             pipeline_attach_headings,
             is_heading=_is_heading,
-            merge_block_text=_merge_heading_texts,
+            merge_block_text=partial(_merge_heading_texts, strategy=heuristics),
         ),
         _merge_styled_list_records,
-        partial(_stitch_block_continuations, limit=limit),
+        partial(_stitch_block_continuations, limit=limit, strategy=heuristics),
     )
-    records: Iterable[Record] = _block_texts(doc, split_fn)
+    records: Iterable[Record] = _block_texts(doc, split_fn, strategy=heuristics)
     for stage in stages:
         records = stage(records)
-    collapsed = _collapse_records(records, options, limit)
-    builder = partial(build_chunk_with_meta, filename=filename)
+    collapsed = _collapse_records(records, options, limit, strategy=heuristics)
+    builder = partial(build_chunk_with_meta, filename=filename, bullet_strategy=heuristics)
     return pipeline_chunk_records(
         collapsed,
         generate_metadata=generate_metadata,
@@ -1333,6 +1507,9 @@ class _SplitSemanticPass:
     overlap: int = 50
     min_chunk_size: int | None = None
     generate_metadata: bool = True
+    bullet_strategy: BulletHeuristicStrategy | None = field(
+        default_factory=default_bullet_strategy,
+    )
 
     def __post_init__(self) -> None:
         self.min_chunk_size = derive_min_chunk_size(
@@ -1350,11 +1527,13 @@ class _SplitSemanticPass:
             options.chunk_size, options.overlap, options.min_chunk_size
         )
         limit = options.compute_limit()
+        strategy = _resolve_bullet_strategy(self.bullet_strategy)
         chunk_records = _chunk_items(
             doc,
             split_fn,
             self.generate_metadata,
             options=options,
+            strategy=strategy,
         )
         items = list(
             _inject_continuation_context(
@@ -1380,6 +1559,9 @@ def make_splitter(**opts: Any) -> _SplitSemanticPass:
     base = replace(DEFAULT_SPLITTER, **opts_map)
     if "chunk_size" in opts and "min_chunk_size" not in opts:
         base = replace(base, min_chunk_size=None)
+    strategy = opts.get("bullet_strategy")
+    if isinstance(strategy, BulletHeuristicStrategy):
+        base = replace(base, bullet_strategy=strategy)
     base.__post_init__()
     return base
 

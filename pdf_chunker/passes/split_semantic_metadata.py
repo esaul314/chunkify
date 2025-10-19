@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from pdf_chunker.list_detection import starts_with_bullet
 from pdf_chunker.passes.split_semantic_inline import (
     _span_attrs,
     _span_bounds,
@@ -14,6 +13,10 @@ from pdf_chunker.passes.split_semantic_inline import (
 from pdf_chunker.passes.split_semantic_lists import _tag_list
 from pdf_chunker.text_cleaning import STOPWORDS
 from pdf_chunker.utils import _build_metadata
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+)
 
 Block = dict[str, Any]
 Chunk = dict[str, Any]
@@ -97,9 +100,21 @@ def _normalized_heading_lines(headings: Iterable[str]) -> tuple[str, ...]:
 _HEADING_BODY_SEPARATOR = "\n"
 
 
-def _merge_heading_texts(headings: Iterable[str], body: str) -> str:
+def _resolve_bullet_strategy(
+    strategy: BulletHeuristicStrategy | None,
+) -> BulletHeuristicStrategy:
+    return strategy or default_bullet_strategy()
+
+
+def _merge_heading_texts(
+    headings: Iterable[str],
+    body: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str:
     normalized_headings = _normalized_heading_lines(headings)
-    if any(starts_with_bullet(h.lstrip()) for h in normalized_headings):
+    heuristics = _resolve_bullet_strategy(strategy)
+    if any(heuristics.starts_with_bullet(h.lstrip()) for h in normalized_headings):
         lead = " ".join(h.rstrip() for h in normalized_headings).rstrip()
         tail = _normalize_bullet_tail(body.lstrip()) if body else ""
         return f"{lead} {tail}".strip()
@@ -150,9 +165,16 @@ def build_chunk(text: str) -> Chunk:
 
 
 def build_chunk_with_meta(
-    text: str, block: Block, page: int, filename: str | None, index: int
+    text: str,
+    block: Block,
+    page: int,
+    filename: str | None,
+    index: int,
+    *,
+    bullet_strategy: BulletHeuristicStrategy | None = None,
 ) -> Chunk:
-    annotated = _tag_list(block)
+    heuristics = _resolve_bullet_strategy(bullet_strategy)
+    annotated = _tag_list(block, strategy=heuristics)
     start_index = annotated.pop("_chunk_start_index", None)
     chunk_index = start_index if isinstance(start_index, int) else index
     metadata = _build_metadata(
@@ -160,6 +182,7 @@ def build_chunk_with_meta(
         _with_source(annotated, page, filename),
         chunk_index,
         {},
+        strategy=heuristics,
     )
     anchors, spans = _collect_superscripts(annotated, text)
     if anchors:

@@ -9,7 +9,10 @@ from typing import Any, Callable, Iterable
 
 from haystack.dataclasses import Document
 
-from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+)
 from pdf_chunker.passes.split_semantic_lists import _block_list_kind
 from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
@@ -33,6 +36,12 @@ _RE_NONCONTRACTION_APOSTROPHE = re.compile(
 )
 _RE_WORD_CHARS = re.compile(r"[^\w\s']")
 _RE_SENTENCE = re.compile(r"\b[^.!?]+[.!?]*", re.UNICODE)
+
+
+def _resolve_bullet_strategy(
+    strategy: BulletHeuristicStrategy | None,
+) -> BulletHeuristicStrategy:
+    return strategy or default_bullet_strategy()
 
 
 @lru_cache(maxsize=None)
@@ -196,7 +205,12 @@ def _generate_chunk_id(filename: str, page: int | None, chunk_index: int) -> str
     return f"{filename}_p{page_part}_c{chunk_index}"
 
 
-def _normalize_list_block(block: dict, *, chunk_text: str) -> dict:
+def _normalize_list_block(
+    block: dict,
+    *,
+    chunk_text: str,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> dict:
     """Return ``block`` with inferred list metadata when list markers appear."""
 
     if not isinstance(block, dict):
@@ -243,9 +257,11 @@ def _normalize_list_block(block: dict, *, chunk_text: str) -> dict:
     if not text_candidates:
         return block
 
-    if any(starts_with_bullet(line) for line in text_candidates):
+    heuristics = _resolve_bullet_strategy(strategy)
+
+    if any(heuristics.starts_with_bullet(line) for line in text_candidates):
         return _mark("bullet")
-    if any(starts_with_number(line) for line in text_candidates):
+    if any(heuristics.starts_with_number(line) for line in text_candidates):
         return _mark("numbered")
     if any(source.get("type") == "list_item" for source in sources):
         return {**block, "type": "list_item"}
@@ -365,10 +381,16 @@ def _build_metadata(
     source_block: dict,
     chunk_index: int,
     utterance_info: Mapping[str, Any] | str | None,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> dict:
     """Construct metadata object for a chunk, propagating list metadata."""
 
-    normalized = _normalize_list_block(source_block, chunk_text=text)
+    normalized = _normalize_list_block(
+        source_block,
+        chunk_text=text,
+        strategy=strategy,
+    )
     source = normalized.get("source", {}) if isinstance(normalized, dict) else {}
 
     filename = source.get("filename", "Unknown")
@@ -474,6 +496,7 @@ def process_chunk(
     enrichment_fn: Callable[[str], dict] | None,
     char_map: dict,
     original_blocks: list[dict],
+    bullet_strategy: BulletHeuristicStrategy | None = None,
 ) -> dict | None:
     """Process a single chunk, optionally generating metadata.
 
@@ -511,6 +534,7 @@ def process_chunk(
         source_block,
         chunk_index,
         utterance_info,
+        strategy=bullet_strategy,
     )
 
     result = {"text": final_text, "metadata": metadata}

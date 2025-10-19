@@ -24,7 +24,6 @@ import pytest
 
 from pdf_chunker.adapters.io_pdf import read
 from pdf_chunker.framework import Artifact
-from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
 from pdf_chunker.passes.chunk_options import SplitOptions
 from pdf_chunker.passes.chunk_pipeline import (
     attach_headings as attach_headings_pipeline,
@@ -54,6 +53,15 @@ from pdf_chunker.passes.split_semantic import (
     _is_heading,
     build_chunk,
     build_chunk_with_meta,
+)
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+)
+
+
+_BULLET_HEURISTICS: BulletHeuristicStrategy = (
+    DEFAULT_SPLITTER.bullet_strategy or default_bullet_strategy()
 )
 
 
@@ -87,6 +95,7 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
     build_meta = partial(
         build_chunk_with_meta,
         filename=doc.get("source_path"),
+        bullet_strategy=DEFAULT_SPLITTER.bullet_strategy,
     )
     base_chunks = chunk_records_pipeline(
         collapsed,
@@ -126,9 +135,10 @@ def _chunk_list_kinds(items: Iterable[dict]) -> list[str]:
 
 def _textual_list_kind(text: str) -> str | None:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if any(starts_with_bullet(line) for line in lines):
+    heuristics = _BULLET_HEURISTICS
+    if any(heuristics.starts_with_bullet(line) for line in lines):
         return "bullet"
-    if any(starts_with_number(line) for line in lines):
+    if any(heuristics.starts_with_number(line) for line in lines):
         return "numbered"
     return None
 
