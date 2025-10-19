@@ -145,6 +145,13 @@ def test_trailing_bullet_footer_dropped_with_header_signal(
     assert pruned == ["BOOK CLUB QUESTIONS"]
 
 
+def test_trailing_bullet_footer_dropped_for_uppercase_header_without_partners(
+) -> None:
+    lines = ["PROGRAM OVERVIEW", "• Who leads the quarterly review?"]
+    pruned = _drop_trailing_bullet_footers(lines)
+    assert pruned == ["PROGRAM OVERVIEW"]
+
+
 def test_trailing_bullet_footer_dropped_for_shipping_notice(
     shipping_footer_lines: list[str],
 ) -> None:
