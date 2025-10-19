@@ -143,6 +143,24 @@ def _textual_list_kind(text: str) -> str | None:
     return None
 
 
+def _bullet_fragment_positions(items: Iterable[dict]) -> list[int]:
+    texts = _texts(items)
+    return [
+        index
+        for index, (current, following) in enumerate(zip(texts, texts[1:]))
+        if _BULLET_HEURISTICS.is_bullet_fragment(current, following)
+    ]
+
+
+def _bullet_continuation_positions(items: Iterable[dict]) -> list[int]:
+    texts = _texts(items)
+    return [
+        index
+        for index, (current, following) in enumerate(zip(texts, texts[1:]))
+        if _BULLET_HEURISTICS.is_bullet_continuation(current, following)
+    ]
+
+
 def _find_chunk(items: Iterable[dict], *needles: str) -> dict:
     """Return the first chunk whose text contains all ``needles``."""
 
@@ -278,6 +296,33 @@ def test_sample_book_list_metadata() -> None:
         for item, meta in zip(refactored_items, _metas(refactored_items))
         if meta.get("list_kind") in {"bullet", "numbered"}
     )
+
+
+def test_sample_book_bullet_fragments_respect_strategy() -> None:
+    """Bullet fragment/continuation pairs remain aligned with default markers."""
+
+    pytest.importorskip("fitz")
+    doc = _pdf(str(Path("sample_book-bullets.pdf")))
+
+    legacy_items, _ = _legacy_chunks(doc)
+    refactored_items, _ = _manual_pipeline(doc)
+
+    legacy_fragments = _bullet_fragment_positions(legacy_items)
+    refactored_fragments = _bullet_fragment_positions(refactored_items)
+    assert refactored_fragments == legacy_fragments
+
+    legacy_continuations = _bullet_continuation_positions(legacy_items)
+    refactored_continuations = _bullet_continuation_positions(refactored_items)
+    assert refactored_continuations == legacy_continuations
+
+    bullet_markers = {
+        line.lstrip()[:1]
+        for text in _texts(refactored_items)
+        for line in text.splitlines()
+        if line.strip() and _BULLET_HEURISTICS.starts_with_bullet(line)
+    }
+    assert bullet_markers
+    assert bullet_markers <= set(_BULLET_HEURISTICS.bullet_chars)
 
 
 @pytest.mark.usefixtures("_nltk_data")
