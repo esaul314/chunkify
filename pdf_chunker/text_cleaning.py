@@ -37,8 +37,10 @@ import json
 import logging
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import reduce
-from typing import Callable, Iterator, List, Match, Optional, Sequence, Tuple, TypeVar
+from typing import Callable, Iterator, List, Mapping, Match, Optional, Sequence, Tuple, TypeVar
 
 import ftfy
 from wordfreq import zipf_frequency
@@ -46,6 +48,13 @@ from wordfreq import zipf_frequency
 from pdf_chunker.page_artifacts import _drop_trailing_bullet_footers
 
 logger = logging.getLogger(__name__)
+
+_BULLET_TRACE_ENV = "PDF_CHUNKER_TRACE_BULLETS"
+_BULLET_TRACE_TARGETS = frozenset({"sample_book-footer.pdf", "sample-local-pdf.pdf"})
+_BULLET_TRACE_CONTEXT: ContextVar[Optional[dict[str, object]]] = ContextVar(
+    "_BULLET_TRACE_CONTEXT",
+    default=None,
+)
 
 T = TypeVar("T")
 
@@ -77,6 +86,65 @@ def _stabilize(value: T, transform: Callable[[T], T], *, limit: int = 3) -> T:
 def _preview(s: str, n: int = PREVIEW_LEN) -> str:
     """Return a safe preview slice for debug logs."""
     return repr(s[:n])
+
+
+def _should_trace_bullets(source: Optional[Mapping[str, object]]) -> bool:
+    if not os.environ.get(_BULLET_TRACE_ENV):
+        return False
+    if not source:
+        return False
+    filename = source.get("filename")
+    if not filename:
+        return False
+    return os.path.basename(str(filename)) in _BULLET_TRACE_TARGETS
+
+
+@contextmanager
+def bullet_trace_scope(
+    source: Optional[Mapping[str, object]],
+    *,
+    stage: str,
+    **metadata: object,
+) -> Iterator[None]:
+    if not _should_trace_bullets(source):
+        yield
+        return
+
+    filename = os.path.basename(str(source.get("filename"))) if source else ""
+    context = {
+        "filename": filename,
+        "stage": stage,
+        **{key: value for key, value in metadata.items() if value is not None},
+    }
+    token = _BULLET_TRACE_CONTEXT.set(context)
+    try:
+        yield
+    finally:
+        _BULLET_TRACE_CONTEXT.reset(token)
+
+
+def emit_bullet_trace(
+    event: str,
+    *,
+    before: str,
+    after: str,
+    extra: Optional[Mapping[str, object]] = None,
+) -> None:
+    context = _BULLET_TRACE_CONTEXT.get()
+    if context is None:
+        return
+
+    payload: dict[str, object] = {
+        "event": event,
+        "before_preview": _preview(before),
+        "after_preview": _preview(after),
+        "changed": before != after,
+        **context,
+    }
+    if extra:
+        payload.update({k: v for k, v in extra.items() if v is not None})
+
+    logger.debug("bullet-trace %s", json.dumps(payload, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +231,21 @@ ADDRESS_BULLET_RE = re.compile(
     r"[A-Z][A-Za-z.'-]+$",
     re.IGNORECASE,
 )
+_ADDRESS_TRAIT_RE = re.compile(
+    r"(\d{1,6}\b|\b(?:street|st\.|road|rd\.|avenue|ave\.|boulevard|blvd\.|suite|ste\.|floor|fl\.|building|bldg|box)\b)",
+    re.IGNORECASE,
+)
+
+
+def _should_strip_address_bullet(line: str) -> bool:
+    match = ADDRESS_BULLET_RE.match(line)
+    if not match:
+        return False
+    if match.group(1):
+        return True
+    return bool(_ADDRESS_TRAIT_RE.search(line))
+
+
 BULLET_CONTINUATION_RE = re.compile(
     rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?)\n(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
 )
@@ -211,7 +294,7 @@ def _strip_address_bullet_line(line: str) -> str:
     if not stripped:
         return line
 
-    if ADDRESS_BULLET_RE.match(stripped):
+    if _should_strip_address_bullet(stripped):
         prefix = line[: len(line) - len(stripped)]
         content = re.sub(rf"^[{BULLET_CHARS_ESC}]\s*", "", stripped)
         return f"{prefix}{content}"
@@ -683,7 +766,14 @@ def _remove_stray_bullet_lines_once(text: str) -> str:
 def remove_stray_bullet_lines(text: str) -> str:
     """Collapse stray bullet markers while keeping legitimate list breaks intact."""
 
-    return _stabilize(text, _remove_stray_bullet_lines_once)
+    cleaned = _stabilize(text, _remove_stray_bullet_lines_once)
+    emit_bullet_trace(
+        "remove_stray_bullet_lines",
+        before=text,
+        after=cleaned,
+        extra={"stabilized": cleaned != text},
+    )
+    return cleaned
 
 
 def cleanup_bullet_fragments(text: str) -> str:
