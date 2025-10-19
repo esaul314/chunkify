@@ -2,8 +2,8 @@ import logging
 import re
 from dataclasses import replace
 from functools import reduce
-from itertools import chain, groupby, takewhile
-from typing import Iterable, Optional, Sequence, TYPE_CHECKING
+from itertools import chain, combinations, groupby, takewhile
+from typing import Iterable, Mapping, Optional, Sequence, TYPE_CHECKING
 
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
@@ -66,6 +66,16 @@ _BULLET_MARKERS = frozenset(
     }
 )
 _FOOTER_STRIP_CHARS = "".join(chain(" ", sorted(filter(None, _BULLET_MARKERS))))
+
+
+_TRAILING_CONTEXT_KEYS = ("header_colon", "header_upper", "neighbour", "shipping")
+_POSITIVE_CONTEXT_KEYS = (
+    "neighbour",
+    "shipping",
+    "body",
+    "header_upper",
+    "header_colon",
+)
 
 
 def bullet_strategy() -> BulletHeuristicStrategy:
@@ -543,6 +553,32 @@ def _prunable_trailing_bullet(
     return positive_context and _footerish_bullet_body(body)
 
 
+def _trailing_footer_positive_context(signals: Mapping[str, bool]) -> bool:
+    """Return ``True`` when any contextual signal supports pruning."""
+
+    return any(signals[key] for key in _POSITIVE_CONTEXT_KEYS)
+
+
+def _trailing_footer_fallback_guard(
+    signals: Mapping[str, bool], direct_body_signal: bool
+) -> bool:
+    """Return ``True`` when fallback context permits pruning."""
+
+    context_flags = tuple(signals[key] for key in _TRAILING_CONTEXT_KEYS)
+    header_support = any(context_flags[:2])
+    multi_signal_support = any(
+        all(pair) for pair in combinations(context_flags, 2)
+    )
+    return any(
+        (
+            direct_body_signal,
+            header_support,
+            signals["shipping"],
+            multi_signal_support,
+        )
+    )
+
+
 def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     """Remove isolated trailing bullet lines while preserving real lists."""
 
@@ -576,10 +612,7 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         trailing_count,
         direct_body_signal,
     )
-    positive_context = any(
-        signals[key]
-        for key in ("neighbour", "shipping", "body", "header_upper")
-    )
+    positive_context = _trailing_footer_positive_context(signals)
 
     stats = tuple(
         (_question_footer_token_stats(body), pos)
@@ -610,14 +643,9 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     if not positive_context:
         return lines
 
-    context_flags = (
-        signals["header_colon"],
-        signals["header_upper"],
-        signals["neighbour"],
-        signals["shipping"],
+    fallback_context = _trailing_footer_fallback_guard(
+        signals, direct_body_signal
     )
-    context_strength = sum(1 for flag in context_flags if flag)
-    fallback_context = direct_body_signal or context_strength >= 2
 
     removals = [
         pos
