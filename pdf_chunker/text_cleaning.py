@@ -46,6 +46,7 @@ import ftfy
 from wordfreq import zipf_frequency
 
 from pdf_chunker.page_artifacts import _drop_trailing_bullet_footers
+from pdf_chunker.strategies.bullets import BULLET_CHARS_ESC, HYPHEN_BULLET_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +215,9 @@ HYPHEN_CHARS_ESC = re.escape(_HYPHEN_CHARS)
 SOFT_HYPHEN_RE = re.compile("\u00ad")
 
 # Bullets
-BULLET_CHARS_ESC = re.escape("*•")
+_HYPHEN_PREFIX_RE = re.escape(HYPHEN_BULLET_PREFIX)
+_HYPHEN_MARKER_ESC = re.escape(HYPHEN_BULLET_PREFIX.strip())
+_BULLET_OR_HYPHEN = rf"(?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE})"
 _ADDRESS_BULLET_PREFIXES: Tuple[str, ...] = (
     "directed to",
     "addressed to",
@@ -247,7 +250,8 @@ def _should_strip_address_bullet(line: str) -> bool:
 
 
 BULLET_CONTINUATION_RE = re.compile(
-    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])[^\n]*?)\n(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]))"
+    rf"((?:^|\n)\s*(?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE}|\d+[.)])[^\n]*?)\n"
+    rf"(?=\s*\S)(?!\s*(?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE}|\d+[.)]))"
 )
 
 # Terminal punctuation for quoted sentence continuation
@@ -256,7 +260,9 @@ _TOKEN_RE = re.compile(r"\w+|[^\w\s]")
 _CLOSING_QUOTE_CHARS = frozenset({'"', "'", "”", "’", "›", "»"})
 _EM_DASH_CHARS = frozenset("—")
 _STOPWORD_LOWERCASE_CHARS = frozenset(",;:'\"-")
-_LIST_MARKER_RE = re.compile(rf"^\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])\s*")
+_LIST_MARKER_RE = re.compile(
+    rf"^\s*(?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE}|\d+[.)])\s*"
+)
 _LEADING_WORD_RE = re.compile(r"[A-Za-z]+(?:['’\-][A-Za-z]+)*")
 
 # Inline artifacts
@@ -282,9 +288,12 @@ DANGLING_UNDERSCORE_RE = re.compile(r"(?<!\w)_+|_+(?!\w)")
 STRAY_BULLET_SOLO_RE = re.compile(rf"\n[{BULLET_CHARS_ESC}]\s*(?=\n|$)")
 # Guard against collapsing legitimate list items (e.g., after colons)
 STRAY_BULLET_AFTER_NEWLINE_RE = re.compile(
-    rf"(?<![\n:{BULLET_CHARS_ESC}])\n[{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])"
+    rf"(?<![\n:{BULLET_CHARS_ESC}{_HYPHEN_MARKER_ESC}])\n"
+    rf"(?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE})\s+(?=[a-z0-9])"
 )
-STRAY_BULLET_INLINE_RE = re.compile(rf"(?<=\S)[ \t][{BULLET_CHARS_ESC}]\s+(?=[a-z0-9])")
+STRAY_BULLET_INLINE_RE = re.compile(
+    rf"(?<=\S)[ \t](?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE})\s+(?=[a-z0-9])"
+)
 
 
 def _strip_address_bullet_line(line: str) -> str:
@@ -318,16 +327,18 @@ NUMBERED_END_RE = re.compile(
 NUMBERED_CONTINUATION_RE = re.compile(rf"(\d{{1,3}}[.)][^\n]*[{re.escape(END_PUNCT)}])\n(?=[^\n])")
 
 # List break preservation
-LIST_BREAK_RE = re.compile(rf"\n(?=\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]|.*\.\.))")
+LIST_BREAK_RE = re.compile(
+    rf"\n(?=\s*(?:{_BULLET_OR_HYPHEN}|\d+[.)]|.*\.\.))"
+)
 LIST_BREAK_SPAN_RE = re.compile(
-    rf"(?P<break>\n{{1,}})(?=(?P<context>\s*(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)]|.*\.\.)))"
+    rf"(?P<break>\n{{1,}})(?=(?P<context>\s*(?:{_BULLET_OR_HYPHEN}|\d+[.)]|.*\.\.)))"
 )
 LIST_BREAK_SENTINEL_RE = re.compile(r"\[\[LIST_BREAK_(?P<idx>\d+)\]\]")
-COLON_BULLET_START_RE = re.compile(rf":\s*(?=-|[{BULLET_CHARS_ESC}])")
+COLON_BULLET_START_RE = re.compile(rf":\s*(?={_BULLET_OR_HYPHEN})")
 
 # Newline/split heuristics
 DOUBLE_NEWLINE_RE = re.compile(r"([A-Za-z]+)\n{2,}\s*([a-z][A-Za-z]+)")
-COLON_LIST_BREAK_RE = re.compile(r":\n{2,}(?=\s*(?:[•\-]|\d))")
+COLON_LIST_BREAK_RE = re.compile(rf":\n{{2,}}(?=\s*(?:{_BULLET_OR_HYPHEN}|\d))")
 
 
 def _guarded_sub(pattern: re.Pattern[str], repl: str, text: str) -> str:
@@ -371,7 +382,7 @@ _SUP_DIGITS_ESC = re.escape(SUPERSCRIPT_DIGITS)
 INLINE_FOOTNOTE_RE = re.compile(rf"(?<!\d)\.([0-9{_SUP_DIGITS_ESC}]+)(\s|$)")
 
 # Hyphenated word joiners (compiled with constants above)
-_HYPHEN_BULLET_OPT = rf"(?:[{BULLET_CHARS_ESC}]\s*)?"
+_HYPHEN_BULLET_OPT = rf"(?:{_BULLET_OR_HYPHEN}\s*)?"
 HYPHEN_BREAK_RE = re.compile(
     rf"([A-Za-z]+)[{HYPHEN_CHARS_ESC}]\s*\n\s*{_HYPHEN_BULLET_OPT}([A-Za-z]+)"
 )
@@ -759,7 +770,7 @@ def _remove_stray_bullet_lines_once(text: str) -> str:
         lambda t: STRAY_BULLET_AFTER_NEWLINE_RE.sub(" ", t),
         lambda t: STRAY_BULLET_INLINE_RE.sub(" ", t),
         _strip_address_bullet_lines,
-        lambda t: re.sub(rf"\n+(?=[{BULLET_CHARS_ESC}])", "\n", t),
+        lambda t: re.sub(rf"\n+(?=\s*(?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE}))", "\n", t),
     )
 
 
@@ -903,7 +914,8 @@ def _normalize_bullet_stopword_case(text: str) -> str:
     def _normalize_line(line: str) -> str:
         stripped = line.lstrip()
         if not stripped or not re.match(
-            rf"(?:[{BULLET_CHARS_ESC}]|-\s|\d+[.)])", stripped
+            rf"(?:[{BULLET_CHARS_ESC}]|{_HYPHEN_PREFIX_RE}|\d+[.)])",
+            stripped,
         ):
             return line
 

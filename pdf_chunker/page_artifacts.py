@@ -5,6 +5,12 @@ from functools import reduce
 from itertools import groupby, takewhile
 from typing import Iterable, Optional, Sequence, TYPE_CHECKING
 
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+    starts_with_bullet,
+)
+
 if TYPE_CHECKING:  # pragma: no cover
     from .pdf_blocks import Block
 
@@ -46,17 +52,34 @@ def _looks_like_footnote(text: str) -> bool:
     return bool(re.match(pattern, stripped))
 
 
-_BULLET_CHARS = ("\u2022", "*", "-")
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
 _PHONE_RE = re.compile(r"\+?\d[\d()\s.-]{5,}\d")
 _CONTACT_KEYWORDS = ("contact", "tel", "phone", "fax", "email")
 
 
-def _starts_with_bullet(line: str) -> bool:
-    """Return ``True`` if ``line`` begins with a bullet marker."""
+_BULLET_STRATEGY: BulletHeuristicStrategy = default_bullet_strategy()
+_BULLET_MARKERS = frozenset(
+    {
+        *_BULLET_STRATEGY.bullet_chars,
+        _BULLET_STRATEGY.hyphen_bullet_prefix.strip(),
+    }
+)
 
-    return line.lstrip().startswith(_BULLET_CHARS)
+
+def _strip_bullet_marker(text: str, strategy: BulletHeuristicStrategy = _BULLET_STRATEGY) -> str:
+    stripped = text.lstrip()
+    if not starts_with_bullet(stripped, strategy):
+        return stripped
+
+    hyphen_prefix = strategy.hyphen_bullet_prefix
+    without_hyphen = (
+        stripped[len(hyphen_prefix) :].lstrip()
+        if stripped.startswith(hyphen_prefix)
+        else stripped
+    )
+    marker_free = without_hyphen.lstrip(strategy.bullet_chars)
+    return marker_free.lstrip()
 
 
 def _looks_like_bullet_footer(text: str) -> bool:
@@ -64,7 +87,11 @@ def _looks_like_bullet_footer(text: str) -> bool:
 
     stripped = text.strip()
     words = stripped.split()
-    return _starts_with_bullet(stripped) and "?" in stripped and len(words) <= 2
+    return (
+        starts_with_bullet(stripped, _BULLET_STRATEGY)
+        and "?" in stripped
+        and len(words) <= 2
+    )
 
 
 def _looks_like_footer_context(text: str) -> bool:
@@ -86,10 +113,11 @@ def _bullet_body(text: str) -> str:
     """Return ``text`` without its leading bullet marker and adornments."""
 
     stripped = text.lstrip()
-    if not _starts_with_bullet(stripped):
+    if not starts_with_bullet(stripped, _BULLET_STRATEGY):
         return ""
-    without_marker = stripped.lstrip("".join(_BULLET_CHARS))
-    return without_marker.strip(" -\u2022*.")
+    body = _strip_bullet_marker(stripped)
+    ornaments = f" .{_BULLET_STRATEGY.hyphen_bullet_prefix.strip()}{_BULLET_STRATEGY.bullet_chars}"
+    return body.strip(ornaments)
 
 
 def _question_footer_token_stats(body: str) -> tuple[int, int]:
@@ -177,7 +205,8 @@ def _question_footer_indices(lines: list[str]) -> frozenset[int]:
     spans = (
         tuple(idx for idx, _ in group)
         for is_bullet, group in groupby(
-            enumerate(lines), key=lambda pair: _starts_with_bullet(pair[1].lstrip())
+            enumerate(lines),
+            key=lambda pair: starts_with_bullet(pair[1].lstrip(), _BULLET_STRATEGY),
         )
         if is_bullet
     )
@@ -220,7 +249,7 @@ def _classify_footer_block(text: str) -> str:
     first_line = _first_text_line(text)
     if not first_line:
         return ""
-    if _starts_with_bullet(first_line):
+    if starts_with_bullet(first_line, _BULLET_STRATEGY):
         return "bullet"
     if first_line[0].islower():
         return "continuation"
@@ -245,7 +274,7 @@ _INLINE_FOOTER_BOTTOM_MARGIN = 96.0
 def _inline_bullet_lines(block: "Block") -> tuple[str, ...]:
     text = getattr(block, "text", "") or ""
     lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-    if not lines or not all(_starts_with_bullet(line) for line in lines):
+    if not lines or not all(starts_with_bullet(line, _BULLET_STRATEGY) for line in lines):
         return ()
     return lines if len(lines) <= 3 else ()
 
@@ -419,12 +448,12 @@ def _looks_like_contact_detail(text: str) -> bool:
 def _trailing_bullet_candidates(lines: list[str]) -> list[tuple[int, str]]:
     """Return trailing bullet candidates paired with their indices."""
 
-    enumerated = (
-        (idx, line)
-        for idx, line in enumerate(reversed(lines))
-    )
+    enumerated = ((idx, line) for idx, line in enumerate(reversed(lines)))
     trailing = list(
-        takewhile(lambda pair: _starts_with_bullet(pair[1].lstrip()), enumerated)
+        takewhile(
+            lambda pair: starts_with_bullet(pair[1].lstrip(), _BULLET_STRATEGY),
+            enumerated,
+        )
     )
     return [(len(lines) - 1 - idx, line) for idx, line in trailing]
 
@@ -1321,7 +1350,11 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
     question_footer_indices = _question_footer_indices(lines)
 
     def _clean_line(idx: int, ln: str) -> Optional[str]:
-        normalized = ln if _starts_with_bullet(ln) else _strip_page_header_prefix(ln)
+        normalized = (
+            ln
+            if starts_with_bullet(ln, _BULLET_STRATEGY)
+            else _strip_page_header_prefix(ln)
+        )
         normalized, removed_inline = _remove_inline_footnote_prefix(normalized)
         if not normalized:
             if removed_inline:
@@ -1336,12 +1369,18 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
                 normalized[:30],
             )
         stripped_norm = normalized.strip()
-        if stripped_norm in _BULLET_CHARS:
+        if stripped_norm in _BULLET_MARKERS:
             next_line = _next_non_empty_line(lines, idx)
             previous_line = _first_non_empty_line(lines[pos] for pos in range(idx - 1, -1, -1))
             prev_raw = lines[idx - 1] if idx > 0 else ""
-            prev_has_body = prev_raw.lstrip().startswith(_BULLET_CHARS) and bool(_bullet_body(prev_raw))
-            next_is_bullet = next_line.lstrip().startswith(_BULLET_CHARS) if next_line else False
+            prev_has_body = starts_with_bullet(prev_raw, _BULLET_STRATEGY) and bool(
+                _bullet_body(prev_raw)
+            )
+            next_is_bullet = (
+                starts_with_bullet(next_line, _BULLET_STRATEGY)
+                if next_line
+                else False
+            )
             if (
                 not next_line
                 or _footer_bullet_signals(next_line, previous_line)
