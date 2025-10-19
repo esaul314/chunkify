@@ -93,6 +93,13 @@ def test_clean_text_handles_windows_quote_spacing() -> None:
     assert 'A "' in cleaned
 
 
+def test_clean_text_normalizes_circumflex_whitespace_artifact() -> None:
+    sample = "Â\t0"
+    cleaned = clean_text(sample)
+    assert cleaned == "0"
+    assert clean_text(cleaned) == cleaned
+
+
 def test_inline_footnote_continuation_preserved() -> None:
     sample = "Lead in.\n3 Footnote text. The continuation survives."
     cleaned = remove_page_artifact_lines(sample, 3)

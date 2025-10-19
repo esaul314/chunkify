@@ -127,6 +127,7 @@ _NBSP_EQUIVALENTS = {
     "\u205f",  # medium mathematical space
     "\u3000",  # ideographic space
 }
+_CIRCUMFLEX_WHITESPACE_ARTIFACT_RE = re.compile(r"(?:(?<=\s)|^)\u00C2(?=\s)")
 _NBSP_TRANSLATION = str.maketrans({ch: " " for ch in _NBSP_EQUIVALENTS})
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
@@ -571,6 +572,16 @@ def normalize_windows_1252_quotes(text: str) -> str:
     """Public wrapper ensuring callers share the same byte normalization."""
 
     return _normalize_windows_1252_quote_bytes(text)
+
+
+def _normalize_circumflex_whitespace_artifacts(text: str) -> str:
+    """Collapse stray ``Â`` prefixes that merely guard whitespace artifacts."""
+
+    return (
+        _CIRCUMFLEX_WHITESPACE_ARTIFACT_RE.sub(" ", text)
+        if "\u00C2" in text
+        else text
+    )
 
 
 def normalize_non_breaking_spaces(text: str) -> str:
@@ -1347,6 +1358,12 @@ def _clean_text_impl(text: str) -> str:
     logger.debug("Calling normalize_windows_1252_quotes")
     text = normalize_windows_1252_quotes(text)
     logger.debug(f"After normalize_windows_1252_quotes: {_preview(text)}")
+
+    logger.debug("Calling _normalize_circumflex_whitespace_artifacts")
+    text = _normalize_circumflex_whitespace_artifacts(text)
+    logger.debug(
+        f"After _normalize_circumflex_whitespace_artifacts: {_preview(text)}"
+    )
 
     logger.debug("Calling normalize_non_breaking_spaces")
     text = normalize_non_breaking_spaces(text)
