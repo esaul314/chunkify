@@ -51,9 +51,11 @@ class BulletHeuristicStrategy:
     def starts_with_bullet(self, text: str) -> bool:
         """Return ``True`` when ``text`` begins with a bullet marker."""
 
+        stripped = text.lstrip()
         return bool(
             self.leading_bullet_re.match(text)
             or self.leading_hyphen_re.match(text)
+            or (stripped[:1] and stripped[0] in self.bullet_chars)
         )
 
     def last_non_empty_line(self, text: str) -> str:
