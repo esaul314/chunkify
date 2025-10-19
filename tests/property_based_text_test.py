@@ -48,6 +48,12 @@ def test_split_text_preserves_non_whitespace(sample: str) -> None:
     assert strip_ws(joined) == strip_ws(sample)
 
 
+def test_split_text_preserves_intro_bullet_newline() -> None:
+    sample = "Intro:\n• item"
+    chunks = splitter._split_text_into_chunks(sample, chunk_size=2, overlap=0)
+    assert "".join(chunks) == sample
+
+
 @given(st.text(min_size=1))
 def test_split_roundtrip_cleaning(sample: str) -> None:
     pipeline = compose(

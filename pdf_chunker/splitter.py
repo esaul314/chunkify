@@ -549,6 +549,36 @@ def _slice_text_window(text: str, spans: Sequence[Tuple[int, int]], start: int, 
     return text[slice_start:trailing_index]
 
 
+def _meaningful_lines(text: str) -> Tuple[str, ...]:
+    """Return non-empty lines preserving original order."""
+
+    return tuple(line for line in text.split("\n") if line.strip())
+
+
+def _ends_mid_list(text: str) -> bool:
+    """Return ``True`` when ``text`` terminates within a list body."""
+
+    lines = _meaningful_lines(text)
+    if len(lines) < 2:
+        return False
+
+    last_line = lines[-1].strip()
+    if not starts_with_bullet(last_line):
+        return False
+
+    previous = next((line.strip() for line in reversed(lines[:-1]) if line.strip()), "")
+    if not previous:
+        return False
+
+    return starts_with_bullet(previous) or previous.endswith(":")
+
+
+def _should_prune_footer(text: str, is_last_chunk: bool) -> bool:
+    """Return ``True`` when footer artifacts should be pruned for ``text``."""
+
+    return bool(is_last_chunk and text and not _ends_mid_list(text))
+
+
 def _remove_footer_artifacts(text: str) -> str:
     """Prune trailing footer bullet lines while preserving other spacing."""
 
@@ -613,18 +643,23 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
     if not spans:
         return []
 
-    if len(spans) <= chunk_size:
-        return [_remove_footer_artifacts(text)]
-
     windows = _window_bounds(len(spans), chunk_size, overlap)
-    chunks = [
-        _remove_footer_artifacts(_slice_text_window(text, spans, start, end))
+    slices = [
+        _slice_text_window(text, spans, start, end)
         for start, end in windows
     ]
-    chunks = _dedupe_overlapping_chunks(chunks)
+    chunks = _dedupe_overlapping_chunks(slices)
     if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
         chunks = chunks[:-1]
-    return chunks or [_remove_footer_artifacts(text)]
+
+    if not chunks:
+        chunks = [text]
+
+    last_index = len(chunks) - 1
+    return [
+        _remove_footer_artifacts(chunk) if _should_prune_footer(chunk, idx == last_index) else chunk
+        for idx, chunk in enumerate(chunks)
+    ]
 
 
 setattr(_split_text_into_chunks, "_preserves_raw_fragment", True)
