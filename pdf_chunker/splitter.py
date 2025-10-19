@@ -633,6 +633,34 @@ def _dedupe_overlapping_chunks(chunks: List[str]) -> List[str]:
     )
 
 
+def _prune_footer_if_needed(chunks: Sequence[str]) -> List[str]:
+    """Apply footer pruning exclusively to the last chunk."""
+
+    if not chunks:
+        return []
+
+    last_index = len(chunks) - 1
+    return [
+        _remove_footer_artifacts(chunk)
+        if _should_prune_footer(chunk, idx == last_index)
+        else chunk
+        for idx, chunk in enumerate(chunks)
+    ]
+
+
+def _drop_redundant_tail(chunks: Sequence[str], overlap: int) -> List[str]:
+    """Remove the trailing chunk when pruning leaves it empty or redundant."""
+
+    if len(chunks) <= 1:
+        return list(chunks)
+
+    tail = chunks[-1]
+    if not tail.strip():
+        return list(chunks[:-1])
+
+    return list(chunks[:-1]) if len(tail.split()) <= overlap * 2 else list(chunks)
+
+
 def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[str]:
     """Return ``text`` split into word windows respecting ``overlap``."""
 
@@ -649,17 +677,11 @@ def _split_text_into_chunks(text: str, chunk_size: int, overlap: int) -> List[st
         for start, end in windows
     ]
     chunks = _dedupe_overlapping_chunks(slices)
-    if len(chunks) > 1 and len(chunks[-1].split()) <= overlap * 2:
-        chunks = chunks[:-1]
+    base_chunks = chunks or [text]
+    pruned_chunks = _prune_footer_if_needed(base_chunks)
+    trimmed_chunks = _drop_redundant_tail(pruned_chunks, overlap)
 
-    if not chunks:
-        chunks = [text]
-
-    last_index = len(chunks) - 1
-    return [
-        _remove_footer_artifacts(chunk) if _should_prune_footer(chunk, idx == last_index) else chunk
-        for idx, chunk in enumerate(chunks)
-    ]
+    return trimmed_chunks or [text]
 
 
 setattr(_split_text_into_chunks, "_preserves_raw_fragment", True)
