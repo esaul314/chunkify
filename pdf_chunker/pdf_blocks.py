@@ -20,6 +20,8 @@ from .text_cleaning import (
     HYPHEN_CHARS_ESC,
     remove_stray_bullet_lines,
     insert_numbered_list_newlines,
+    bullet_trace_scope,
+    emit_bullet_trace,
 )
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .language import default_language
@@ -54,6 +56,10 @@ class Block:
 class PagePayload:
     number: int
     blocks: List[Block]
+
+
+def _preview_text(text: str, limit: int = 100) -> str:
+    return repr(text[:limit])
 
 
 # -- Page extraction --------------------------------------------------------------------
@@ -575,7 +581,24 @@ def _merge_bullet_text(reason: str, current: str, nxt: str) -> Tuple[str, Option
     }
 
     merged, remainder = handlers[reason]()
-    return remove_stray_bullet_lines(merged), remainder
+    emit_bullet_trace(
+        "merge_bullet_raw",
+        before=current,
+        after=merged,
+        extra={
+            "reason": reason,
+            "next_preview": _preview_text(nxt),
+            "remainder_preview": _preview_text(remainder) if remainder else None,
+        },
+    )
+    cleaned = remove_stray_bullet_lines(merged)
+    emit_bullet_trace(
+        "merge_bullet_cleaned",
+        before=merged,
+        after=cleaned,
+        extra={"reason": reason},
+    )
+    return cleaned, remainder
 
 
 def _leading_alpha_token(text: str) -> str:
@@ -788,7 +811,16 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
                     normalized_sentence = _normalize_sentence_tail(current_text, next_text)
                     merged_text = current_text + " " + normalized_sentence
                 elif reason.startswith("bullet_"):
-                    merged_text, remainder = _merge_bullet_text(reason, current_text, next_text)
+                    with bullet_trace_scope(
+                        current.source,
+                        stage="merge_continuation_blocks",
+                        reason=reason,
+                        current_preview=_preview_text(current_text),
+                        next_preview=_preview_text(next_text),
+                        page=current.source.get("page"),
+                        next_page=next_page,
+                    ):
+                        merged_text, remainder = _merge_bullet_text(reason, current_text, next_text)
                     current = replace(current, text=merged_text)
                     current_text = merged_text
                     merged_any = True
