@@ -59,6 +59,47 @@ def test_split_roundtrip_cleaning(sample: str) -> None:
     assert pipeline(sample) == clean_text(sample)
 
 
+def test_clean_text_handles_emphasis_hyphen_roundtrip() -> None:
+    sample = "Prefix- _suffix"
+    cleaned = clean_text(sample)
+    assert clean_text(cleaned) == cleaned
+    assert "- " in cleaned or "-" in cleaned
+
+
+def test_clean_text_preserves_colon_bullet_break() -> None:
+    sample = "Intro:_• bullet"
+    cleaned = clean_text(sample)
+    assert ":\n•" in cleaned
+    assert clean_text(cleaned) == cleaned
+
+
+def test_clean_text_prunes_footer_style_bullet() -> None:
+    sample = "Intro:_• Contact"
+    cleaned = clean_text(sample)
+    assert cleaned == "Intro:"
+    pipeline = compose(
+        clean_text,
+        "".join,
+        lambda s: splitter._split_text_into_chunks(s, 30, 0),
+        clean_text,
+    )
+    assert pipeline(sample) == cleaned
+
+
+def test_clean_text_handles_windows_quote_spacing() -> None:
+    sample = "A\x84\x9a"
+    cleaned = clean_text(sample)
+    assert cleaned == clean_text(cleaned)
+    assert 'A "' in cleaned
+
+
+def test_clean_text_normalizes_circumflex_whitespace_artifact() -> None:
+    sample = "Â\t0"
+    cleaned = clean_text(sample)
+    assert cleaned == "0"
+    assert clean_text(cleaned) == cleaned
+
+
 def test_inline_footnote_continuation_preserved() -> None:
     sample = "Lead in.\n3 Footnote text. The continuation survives."
     cleaned = remove_page_artifact_lines(sample, 3)

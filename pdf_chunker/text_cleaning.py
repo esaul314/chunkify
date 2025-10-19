@@ -43,6 +43,8 @@ from typing import Callable, Iterator, List, Match, Optional, Sequence, Tuple, T
 import ftfy
 from wordfreq import zipf_frequency
 
+from pdf_chunker.page_artifacts import _drop_trailing_bullet_footers
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -125,6 +127,7 @@ _NBSP_EQUIVALENTS = {
     "\u205f",  # medium mathematical space
     "\u3000",  # ideographic space
 }
+_CIRCUMFLEX_WHITESPACE_ARTIFACT_RE = re.compile(r"(?:(?<=\s)|^)\u00C2(?=\s)")
 _NBSP_TRANSLATION = str.maketrans({ch: " " for ch in _NBSP_EQUIVALENTS})
 
 QUOTE_SPACING_PATTERNS: List[Tuple[re.Pattern[str], str]] = [
@@ -521,6 +524,30 @@ def _fix_split_words(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Footer clean-up
+# ---------------------------------------------------------------------------
+
+
+def _remove_trailing_bullet_footers(text: str) -> str:
+    """Prune footer-style bullet runs at the end of paragraphs."""
+
+    if not text:
+        return text
+
+    paragraphs = (
+        tuple(filter(None, text.split("\n\n")))
+        if "\n" in text
+        else (text,)
+    )
+    pruned = (
+        "\n".join(_drop_trailing_bullet_footers(paragraph.split("\n")))
+        for paragraph in paragraphs
+    )
+    compact = tuple(paragraph for paragraph in pruned if paragraph)
+    return "\n\n".join(compact)
+
+
+# ---------------------------------------------------------------------------
 # Quote & ligature normalization
 # ---------------------------------------------------------------------------
 
@@ -545,6 +572,16 @@ def normalize_windows_1252_quotes(text: str) -> str:
     """Public wrapper ensuring callers share the same byte normalization."""
 
     return _normalize_windows_1252_quote_bytes(text)
+
+
+def _normalize_circumflex_whitespace_artifacts(text: str) -> str:
+    """Collapse stray ``Â`` prefixes that merely guard whitespace artifacts."""
+
+    return (
+        _CIRCUMFLEX_WHITESPACE_ARTIFACT_RE.sub(" ", text)
+        if "\u00C2" in text
+        else text
+    )
 
 
 def normalize_non_breaking_spaces(text: str) -> str:
@@ -691,8 +728,15 @@ def insert_numbered_list_newlines(text: str) -> str:
 
 def _preserve_list_newlines(text: str) -> str:
     """Keep newlines that precede bullets or enumerated items."""
-    placeholder = "[[LIST_BREAK]]"
-    return LIST_BREAK_RE.sub(placeholder, text).replace("\n", " ").replace(placeholder, "\n")
+
+    if "\n" not in text:
+        return text
+
+    preserved: frozenset[int] = frozenset(match.start() for match in LIST_BREAK_RE.finditer(text))
+    return "".join(
+        "\n" if index in preserved else (" " if char == "\n" else char)
+        for index, char in enumerate(text)
+    )
 
 
 ListBreakSentinel = Tuple[str, str, str]
@@ -1242,6 +1286,12 @@ def apply_json_safety_fixes(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_underscore_artifacts(text: str) -> str:
+    """Remove emphasis and dangling underscores in a single functional pass."""
+
+    return pipe(text, remove_underscore_emphasis, remove_dangling_underscores)
+
+
 def clean_paragraph(paragraph: str) -> str:
     """
     Cleans a single paragraph: removes mid-line hyphens, artifacts,
@@ -1249,6 +1299,7 @@ def clean_paragraph(paragraph: str) -> str:
     """
     return pipe(
         paragraph,
+        _normalize_underscore_artifacts,
         rejoin_hyphenated_words,
         strip_headers_and_footers,
         replace_pipes,
@@ -1256,9 +1307,8 @@ def clean_paragraph(paragraph: str) -> str:
         cleanup_bullet_fragments,
         _preserve_list_newlines,
         remove_control_characters,
-        remove_underscore_emphasis,
-        remove_dangling_underscores,
         normalize_ligatures,
+        _fix_quote_spacing,
         consolidate_whitespace,
     )
 
@@ -1309,6 +1359,12 @@ def _clean_text_impl(text: str) -> str:
     text = normalize_windows_1252_quotes(text)
     logger.debug(f"After normalize_windows_1252_quotes: {_preview(text)}")
 
+    logger.debug("Calling _normalize_circumflex_whitespace_artifacts")
+    text = _normalize_circumflex_whitespace_artifacts(text)
+    logger.debug(
+        f"After _normalize_circumflex_whitespace_artifacts: {_preview(text)}"
+    )
+
     logger.debug("Calling normalize_non_breaking_spaces")
     text = normalize_non_breaking_spaces(text)
     logger.debug(f"After normalize_non_breaking_spaces: {_preview(text)}")
@@ -1317,6 +1373,10 @@ def _clean_text_impl(text: str) -> str:
     logger.debug("Calling normalize_newlines")
     text = normalize_newlines(text)
     logger.debug(f"After normalize_newlines: {_preview(text)}")
+
+    logger.debug("Calling _normalize_underscore_artifacts")
+    text = _normalize_underscore_artifacts(text)
+    logger.debug(f"After _normalize_underscore_artifacts: {_preview(text)}")
 
     logger.debug("Calling fix_hyphenated_linebreaks")
     text = fix_hyphenated_linebreaks(text)
@@ -1364,6 +1424,7 @@ def _clean_text_impl(text: str) -> str:
     logger.debug(f"Split into {len(paragraphs)} paragraphs")
     cleaned_paragraphs = [clean_paragraph(p) for p in paragraphs]
     result = "\n\n".join(cleaned_paragraphs)
+    result = _remove_trailing_bullet_footers(result)
 
     # Final JSON safety check
     safe, issues = validate_json_safety(result)
