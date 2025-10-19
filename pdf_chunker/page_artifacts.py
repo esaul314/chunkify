@@ -2,7 +2,7 @@ import logging
 import re
 from dataclasses import replace
 from functools import reduce
-from itertools import groupby, takewhile
+from itertools import chain, groupby, takewhile
 from typing import Iterable, Optional, Sequence, TYPE_CHECKING
 
 from pdf_chunker.strategies.bullets import (
@@ -65,6 +65,7 @@ _BULLET_MARKERS = frozenset(
         _BULLET_STRATEGY.hyphen_bullet_prefix.strip(),
     }
 )
+_FOOTER_STRIP_CHARS = "".join(chain(" ", sorted(filter(None, _BULLET_MARKERS))))
 
 
 def _strip_bullet_marker(text: str, strategy: BulletHeuristicStrategy = _BULLET_STRATEGY) -> str:
@@ -104,7 +105,7 @@ def _looks_like_footer_context(text: str) -> bool:
         _contains_domain(text)
         or "http" in lowered
         or "www." in lowered
-        or lowered.strip(" -\u2022*").isdigit()
+        or lowered.strip(_FOOTER_STRIP_CHARS).isdigit()
         or lowered.rstrip().endswith("page")
     )
 

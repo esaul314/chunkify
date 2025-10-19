@@ -26,3 +26,14 @@ def test_remove_stray_bullet_lines_uses_shared_bullet_inventory() -> None:
     assert "\u25e6" not in cleaned_once
     assert cleaned_once == cleaned_twice
     assert cleaned_once.endswith("Next")
+
+
+def test_footer_context_strips_all_strategy_bullet_markers() -> None:
+    exotic_marker = next(
+        marker
+        for marker in page_artifacts._BULLET_STRATEGY.bullet_chars
+        if marker not in " -\u2022*"
+    )
+    footer_like = f"{exotic_marker} 2024"
+
+    assert page_artifacts._looks_like_footer_context(footer_like)
