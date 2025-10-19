@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from itertools import chain
 from typing import Any
 
-from pdf_chunker.list_detection import starts_with_bullet, starts_with_number
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+)
 from pdf_chunker.passes.split_semantic_inline import _span_attrs
 
 Block = dict[str, Any]
@@ -28,6 +31,12 @@ _CAPTION_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 _CAPTION_FLAG = "_caption_attached"
+
+
+def _resolve_strategy(
+    strategy: BulletHeuristicStrategy | None,
+) -> BulletHeuristicStrategy:
+    return strategy or default_bullet_strategy()
 
 
 def _inline_list_kinds(block: Mapping[str, Any]) -> tuple[str, ...]:
@@ -51,40 +60,62 @@ def _block_list_kind(block: Mapping[str, Any]) -> str | None:
     return next(iter(inline), None)
 
 
-def _leading_list_kind(text: str) -> str | None:
+def _leading_list_kind(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str | None:
+    heuristics = _resolve_strategy(strategy)
     lines = (line.lstrip() for line in text.splitlines())
     first = next((line for line in lines if line), "")
-    if starts_with_bullet(first):
+    if heuristics.starts_with_bullet(first):
         return "bullet"
-    if starts_with_number(first):
+    if heuristics.starts_with_number(first):
         return "numbered"
     return None
 
 
-def _infer_list_kind(text: str) -> str | None:
-    if starts_with_bullet(text):
+def _infer_list_kind(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str | None:
+    heuristics = _resolve_strategy(strategy)
+    if heuristics.starts_with_bullet(text):
         return "bullet"
-    if starts_with_number(text):
+    if heuristics.starts_with_number(text):
         return "numbered"
     lines = tuple(line.lstrip() for line in text.splitlines())
-    if any(starts_with_bullet(line) for line in lines):
+    if any(heuristics.starts_with_bullet(line) for line in lines):
         return "bullet"
-    if any(starts_with_number(line) for line in lines):
+    if any(heuristics.starts_with_number(line) for line in lines):
         return "numbered"
     return None
 
 
-def _list_line_ratio(text: str) -> tuple[int, int]:
+def _list_line_ratio(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> tuple[int, int]:
+    heuristics = _resolve_strategy(strategy)
     lines = tuple(line.strip() for line in text.splitlines() if line.strip())
     if not lines:
         return 0, 0
     list_lines = sum(
-        1 for line in lines if starts_with_bullet(line) or starts_with_number(line)
+        1
+        for line in lines
+        if heuristics.starts_with_bullet(line) or heuristics.starts_with_number(line)
     )
     return list_lines, len(lines)
 
 
-def _tag_list(block: Block) -> Block:
+def _tag_list(
+    block: Block,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> Block:
+    heuristics = _resolve_strategy(strategy)
     text = block.get("text", "")
     block_type = block.get("type")
     existing_kind = block.get("list_kind")
@@ -92,15 +123,15 @@ def _tag_list(block: Block) -> Block:
     if block_type == "list_item":
         if existing_kind:
             return block
-        inferred = _infer_list_kind(text)
+        inferred = _infer_list_kind(text, strategy=heuristics)
         return {**block, "list_kind": inferred} if inferred else block
 
-    leading_kind = _leading_list_kind(text)
+    leading_kind = _leading_list_kind(text, strategy=heuristics)
     if not leading_kind:
-        inferred = _infer_list_kind(text)
+        inferred = _infer_list_kind(text, strategy=heuristics)
         if not inferred:
             return block
-        list_lines, total_lines = _list_line_ratio(text)
+        list_lines, total_lines = _list_line_ratio(text, strategy=heuristics)
         if total_lines and (list_lines * 2) >= total_lines:
             return {**block, "type": "list_item", "list_kind": inferred}
         return block

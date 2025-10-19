@@ -25,19 +25,7 @@ from .text_cleaning import (
 )
 from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .language import default_language
-from .list_detection import (
-    BULLET_CHARS,
-    BULLET_CHARS_ESC,
-    is_bullet_continuation,
-    is_bullet_fragment,
-    is_bullet_list_pair,
-    is_numbered_continuation,
-    is_numbered_list_pair,
-    split_bullet_fragment,
-    starts_with_bullet,
-    starts_with_number,
-    _last_non_empty_line,
-)
+from .strategies.bullets import BulletHeuristicStrategy, default_bullet_strategy
 
 # -- Data models -------------------------------------------------------------------------
 
@@ -60,6 +48,12 @@ class PagePayload:
 
 def _preview_text(text: str, limit: int = 100) -> str:
     return repr(text[:limit])
+
+
+def _resolve_strategy(
+    strategy: BulletHeuristicStrategy | None,
+) -> BulletHeuristicStrategy:
+    return strategy or default_bullet_strategy()
 
 
 # -- Page extraction --------------------------------------------------------------------
@@ -511,7 +505,13 @@ def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
     return True
 
 
-def _is_same_page_continuation(curr: Block, nxt: Block) -> bool:
+def _is_same_page_continuation(
+    curr: Block,
+    nxt: Block,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    heuristics = _resolve_strategy(strategy)
     curr_text = curr.text.strip()
     next_text = nxt.text.strip()
     curr_page = curr.source.get("page")
@@ -520,9 +520,12 @@ def _is_same_page_continuation(curr: Block, nxt: Block) -> bool:
         return False
     if curr_page != next_page or not next_text:
         return False
-    if _looks_like_caption(curr_text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
+    if _looks_like_caption(
+        curr_text,
+        emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS),
+    ):
         return False
-    if any(b in curr_text for b in BULLET_CHARS):
+    if any(b in curr_text for b in heuristics.bullet_chars):
         return False
     if _is_heading_like(next_text):
         return False
@@ -558,19 +561,31 @@ def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
     )
 
 
-def _merge_bullet_text(reason: str, current: str, nxt: str) -> Tuple[str, Optional[str]]:
+def _merge_bullet_text(
+    reason: str,
+    current: str,
+    nxt: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> Tuple[str, Optional[str]]:
+    heuristics = _resolve_strategy(strategy)
+
     def merge_fragment() -> Tuple[str, Optional[str]]:
-        fragment, remainder = split_bullet_fragment(nxt)
+        fragment, remainder = heuristics.split_bullet_fragment(nxt)
         return f"{current} {fragment}", remainder
 
     def merge_continuation() -> Tuple[str, Optional[str]]:
-        return current.rstrip(" " + BULLET_CHARS) + " " + nxt, None
+        return current.rstrip(" " + heuristics.bullet_chars) + " " + nxt, None
 
     def merge_short_fragment() -> Tuple[str, Optional[str]]:
         return f"{current} {nxt}", None
 
     def merge_list() -> Tuple[str, Optional[str]]:
-        adjusted = re.sub(rf":\s*(?=-|[{BULLET_CHARS_ESC}])", ":\n", current)
+        adjusted = re.sub(
+            rf":\s*(?=-|[{heuristics.bullet_chars_esc}])",
+            ":\n",
+            current,
+        )
         return adjusted + "\n" + nxt, None
 
     handlers = {
@@ -695,7 +710,13 @@ def _block_has_list_markers(block: Block) -> bool:
     return any(candidate.get("list_kind") for candidate in nested if isinstance(candidate, dict))
 
 
-def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
+def _should_merge_blocks(
+    curr: Block,
+    nxt: Block,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> Tuple[bool, str]:
+    heuristics = _resolve_strategy(strategy)
     curr_text = curr.text.strip()
     next_text = nxt.text.strip()
 
@@ -708,36 +729,44 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
     if next_text.startswith("—"):
         return True, "author_attribution"
 
-    if is_bullet_continuation(curr_text, next_text):
+    if heuristics.is_bullet_continuation(curr_text, next_text):
         return True, "bullet_continuation"
 
-    if is_bullet_fragment(curr_text, next_text):
+    if heuristics.is_bullet_fragment(curr_text, next_text):
         return True, "bullet_fragment"
 
-    last_line = _last_non_empty_line(curr_text)
+    last_line = heuristics.last_non_empty_line(curr_text)
     if (
-        starts_with_bullet(last_line)
-        and not starts_with_bullet(next_text)
+        heuristics.starts_with_bullet(last_line)
+        and not heuristics.starts_with_bullet(next_text)
         and len(next_text.split()) <= 3
     ):
         return True, "bullet_short_fragment"
 
-    colon_intro = curr_text.rstrip().endswith(":") and not starts_with_bullet(curr_text)
-    if is_bullet_list_pair(curr_text, next_text):
+    colon_intro = curr_text.rstrip().endswith(":") and not heuristics.starts_with_bullet(
+        curr_text
+    )
+    if heuristics.is_bullet_list_pair(curr_text, next_text):
         if colon_intro and not _block_has_list_markers(curr):
             return False, "colon_intro_without_list_markers"
         return True, "bullet_list"
 
-    if is_numbered_list_pair(curr_text, next_text):
+    if heuristics.is_numbered_list_pair(curr_text, next_text):
         return True, "numbered_list"
 
-    if is_numbered_continuation(curr_text, next_text) and not _is_heading_like(next_text):
+    if heuristics.is_numbered_continuation(curr_text, next_text) and not _is_heading_like(
+        next_text
+    ):
         return True, "numbered_continuation"
 
-    if re.fullmatch(r"\d+[.)]", curr_text) and not starts_with_number(next_text):
+    if re.fullmatch(r"\d+[.)]", curr_text) and not heuristics.starts_with_number(
+        next_text
+    ):
         return True, "numbered_standalone"
 
-    if re.search(r"\n\d+[.)]\s*$", curr_text) and not starts_with_number(next_text):
+    if re.search(r"\n\d+[.)]\s*$", curr_text) and not heuristics.starts_with_number(
+        next_text
+    ):
         return True, "numbered_suffix"
 
     curr_has_quote = '"' in curr_text or "'" in curr_text
@@ -762,7 +791,7 @@ def _should_merge_blocks(curr: Block, nxt: Block) -> Tuple[bool, str]:
         and (tail_is_lower or (tail_is_titlecase and head_word.islower()))
     ):
         return True, "hyphenated_continuation"
-    elif _is_same_page_continuation(curr, nxt):
+    elif _is_same_page_continuation(curr, nxt, strategy=heuristics):
         return True, "sentence_continuation"
     elif _is_cross_page_continuation(curr, nxt):
         return True, "sentence_continuation"
@@ -778,7 +807,12 @@ def within_page_span(pages: Iterable[Optional[int]], limit: int = 1) -> bool:
     return not nums or max(nums) - min(nums) <= limit
 
 
-def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
+def merge_continuation_blocks(
+    blocks: Iterable[Block],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> Iterable[Block]:
+    heuristics = _resolve_strategy(strategy)
     items = list(blocks)
     if not items:
         return []
@@ -802,7 +836,11 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
             ) or not within_page_span(candidate_pages):
                 break
             curr_for_merge = replace(current, source={**current.source, "page": pages[-1]})
-            should_merge, reason = _should_merge_blocks(curr_for_merge, nxt)
+            should_merge, reason = _should_merge_blocks(
+                curr_for_merge,
+                nxt,
+                strategy=heuristics,
+            )
             if should_merge:
                 if reason == "hyphenated_continuation":
                     normalized_tail = _normalize_hyphenated_tail(current_text, next_text)
@@ -820,7 +858,12 @@ def merge_continuation_blocks(blocks: Iterable[Block]) -> Iterable[Block]:
                         page=current.source.get("page"),
                         next_page=next_page,
                     ):
-                        merged_text, remainder = _merge_bullet_text(reason, current_text, next_text)
+                        merged_text, remainder = _merge_bullet_text(
+                            reason,
+                            current_text,
+                            next_text,
+                            strategy=heuristics,
+                        )
                     current = replace(current, text=merged_text)
                     current_text = merged_text
                     merged_any = True
