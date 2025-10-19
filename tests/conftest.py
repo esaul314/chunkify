@@ -6,11 +6,34 @@ from pathlib import Path
 import sys
 import base64
 import ssl
+import warnings
 
 import nltk
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+
+def _pymupdf_deprecation_messages() -> tuple[str, ...]:
+    return (
+        r"builtin type SwigPyPacked has no __module__ attribute",
+        r"builtin type SwigPyObject has no __module__ attribute",
+        r"builtin type swigvarlink has no __module__ attribute",
+    )
+
+
+def _suppress_deprecations(messages: Iterable[str]) -> None:
+    tuple(
+        warnings.filterwarnings(
+            "ignore",
+            message=message,
+            category=DeprecationWarning,
+        )
+        for message in messages
+    )
+
+
+_suppress_deprecations(_pymupdf_deprecation_messages())
 
 
 try:  # Optional regression plugin used by a subset of golden tests.
