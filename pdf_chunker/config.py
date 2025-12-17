@@ -6,6 +6,7 @@ import warnings
 from functools import reduce
 from importlib import import_module
 from typing import Any, Dict, Iterable, Mapping, List, cast
+import re
 
 from pydantic import BaseModel, Field
 
@@ -38,8 +39,9 @@ def _env_overrides() -> Dict[str, Dict[str, Any]]:
     Values are YAML-coerced (so 'true', '42' etc. become bool/int).
     """
     out: Dict[str, Dict[str, Any]] = {}
+    pattern = re.compile(r"^[A-Za-z0-9_]+__[A-Za-z0-9_]+$")
     for k, v in os.environ.items():
-        if "__" not in k:
+        if "__" not in k or not pattern.match(k):
             continue
         step, key = k.lower().split("__", 1)
         try:

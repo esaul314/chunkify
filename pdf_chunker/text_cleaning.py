@@ -37,12 +37,38 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import reduce
 from typing import Callable, Iterator, List, Mapping, Match, Optional, Sequence, Tuple, TypeVar
 
 import ftfy
+# Override locate.this_dir before importing wordfreq to avoid inspect.stack()
+# failures on newer Python versions (e.g., 3.14). This keeps wordfreq's data
+# path resolution simple and deterministic.
+try:  # pragma: no cover - defensive guard
+    import locate as _locate
+except Exception:  # pragma: no cover
+    _locate = None
+else:  # pragma: no cover
+    def _safe_this_dir() -> Path:
+        import inspect
+
+        frame = inspect.currentframe()
+        caller = frame.f_back if frame else None
+        if caller:
+            globals_ = caller.f_globals
+            path = globals_.get("__file__")
+            if path:
+                return Path(os.path.abspath(path)).parent
+        return Path(os.getcwd())
+
+    try:
+        _locate.this_dir = _safe_this_dir
+    except Exception:
+        pass
+
 from wordfreq import zipf_frequency
 
 from pdf_chunker.page_artifacts import _drop_trailing_bullet_footers
