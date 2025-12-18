@@ -30,7 +30,8 @@ def _assess_text_quality(text: str) -> dict[str, float]:
 def _clean_fallback_text(text: str) -> str:
     pages = text.split("\f")
     cleaned = [
-        remove_page_artifact_lines(page, i + 1) for i, page in enumerate(pages)
+        remove_page_artifact_lines(page, i + 1, keep_shipping=True)
+        for i, page in enumerate(pages)
     ]
     return "\f".join(cleaned)
 

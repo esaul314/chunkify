@@ -818,7 +818,7 @@ def cleanup_bullet_fragments(text: str) -> str:
     return remove_stray_bullet_lines(text)
 
 
-def strip_headers_and_footers(text: str) -> str:
+def strip_headers_and_footers(text: str, keep_shipping: bool = False) -> str:
     """Remove simple header/footer lines containing ``|`` separators."""
     lines = text.splitlines()
     filtered = (ln for ln in lines if "|" not in ln)
@@ -1429,7 +1429,7 @@ def clean_paragraph(paragraph: str) -> str:
         paragraph,
         _normalize_underscore_artifacts,
         rejoin_hyphenated_words,
-        strip_headers_and_footers,
+        lambda value: strip_headers_and_footers(value, keep_shipping=True),
         replace_pipes,
         collapse_artifact_breaks,
         cleanup_bullet_fragments,
@@ -1569,7 +1569,16 @@ def clean_text(text: str) -> str:
     from pdf_chunker.framework import Artifact
     from pdf_chunker.passes.text_clean import text_clean as _text_clean
 
-    return _text_clean(Artifact(payload=text)).payload
+    # Enforce a small fixpoint so callers see an idempotent result even when
+    # intermediate normalizations remove additional artifacts on a second pass.
+    artifact = Artifact(payload=text)
+    prev = _text_clean(artifact).payload
+    for _ in range(2):
+        stabilized = _text_clean(Artifact(payload=prev)).payload
+        if stabilized == prev:
+            break
+        prev = stabilized
+    return prev
 
 
 __all__ = [

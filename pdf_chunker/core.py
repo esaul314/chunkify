@@ -199,6 +199,18 @@ def chunk_text(
         "Semantic chunking with conversational text handling produced %d chunks",
         len(chunks),
     )
+    merged: list[str] = []
+    for idx, chunk in enumerate(chunks):
+        next_chunk = chunks[idx + 1] if idx + 1 < len(chunks) else ""
+        lines = [ln for ln in chunk.splitlines() if ln.strip()]
+        bullet_only = lines and all(ln.lstrip().startswith("•") for ln in lines)
+        if bullet_only and next_chunk:
+            merged.append(chunk + "\n" + next_chunk)
+            # skip the next chunk in the outer loop
+            chunks[idx + 1] = ""
+        elif chunk:
+            merged.append(chunk)
+    chunks = [c for c in merged if c]
     if chunks:
         log_chunk_stats(chunks)
     return chunks

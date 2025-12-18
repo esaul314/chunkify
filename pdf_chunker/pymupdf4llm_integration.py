@@ -255,7 +255,7 @@ def _clean_pymupdf4llm_block(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     )
 
     text = _strip_list_marker(text, block)
-    text = remove_page_artifact_lines(text, block.get("source", {}).get("page"))
+    text = remove_page_artifact_lines(text, block.get("source", {}).get("page"), keep_shipping=True)
 
     text = pipe(
         text,

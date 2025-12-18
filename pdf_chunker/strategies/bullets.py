@@ -51,6 +51,8 @@ class BulletHeuristicStrategy:
     def starts_with_bullet(self, text: str) -> bool:
         """Return ``True`` when ``text`` begins with a bullet marker."""
 
+        if not text or text[0] in "\r\n" or (text[0].isspace() and text[0] not in " \t"):
+            return False
         stripped = text.lstrip()
         return bool(
             self.leading_bullet_re.match(text)

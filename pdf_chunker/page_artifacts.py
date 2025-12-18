@@ -592,6 +592,7 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     )
     trailing_indices = tuple(pos for pos, _, _ in trailing_info)
     trailing_count = len(trailing_info)
+    body_word_count = sum(len((body or "").split()) for _, _, body in trailing_info if body)
 
     previous = _first_non_empty_line(
         lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1)
@@ -605,6 +606,13 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         if body
     }
     direct_body_signal = any(body_signal_map.values())
+    if direct_body_signal:
+        keep_indices = set(pos for pos, _, _ in trailing_info)
+        logger.debug(
+            "remove_page_artifact_lines dropped trailing footer bullets with direct signal: %s",
+            "; ".join(lines[pos].strip()[:30] for pos in keep_indices),
+        )
+        return [line for idx, line in enumerate(lines) if idx not in keep_indices]
     signals = _footer_context_signals(
         previous,
         after_line,
@@ -612,6 +620,13 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         trailing_count,
         direct_body_signal,
     )
+    direct_body_signal = direct_body_signal or signals["shipping"]
+    if trailing_count <= 2:
+        header_signals = signals["header_colon"] or signals["header_upper"] or signals["neighbour"]
+        if not header_signals and not direct_body_signal and body_word_count >= 8:
+            return lines
+        if not header_signals and not direct_body_signal:
+            return lines
     positive_context = _trailing_footer_positive_context(signals)
 
     stats = tuple(
@@ -652,7 +667,7 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
         for pos, _, body in trailing_info
         if _prunable_trailing_bullet(
             body,
-            body_signal_map.get(pos, False),
+            body_signal_map.get(pos, False) or signals["shipping"],
             fallback_context,
         )
     ]
@@ -689,11 +704,7 @@ _TITLE_CONNECTORS = {
     "at",
 }
 
-_SHIPPING_FOOTER_PREFIXES = (
-    "directed to",
-    "some trader",
-    "he expects",
-)
+_SHIPPING_FOOTER_PREFIXES = ("directed to",)
 
 
 def _is_titlecase_token(token: str) -> bool:
@@ -1366,7 +1377,9 @@ def _apply_leading_case(pairs: list[tuple[str, str]]) -> list[str]:
     return [head, *tail]
 
 
-def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
+def remove_page_artifact_lines(
+    text: str, page_num: Optional[int], *, keep_shipping: bool = False
+) -> str:
     """Remove header or footer artifact lines from a block."""
 
     pipeline = (
@@ -1439,6 +1452,12 @@ def remove_page_artifact_lines(text: str, page_num: Optional[int]) -> str:
                 ln[:30],
             )
             return None
+        if _looks_like_shipping_footer(stripped_norm) and not keep_shipping:
+            logger.debug(
+                "remove_page_artifact_lines dropped shipping footer line: %s",
+                stripped_norm[:30],
+            )
+            return None
 
         edge_band = 2
         if idx < edge_band or idx >= total - edge_band:
@@ -1488,7 +1507,7 @@ def strip_artifacts(blocks: Iterable["Block"], config=None) -> Iterable["Block"]
 
     for blk in blocks:
         page = blk.source.get("page")
-        cleaned = remove_page_artifact_lines(blk.text, page)
+        cleaned = remove_page_artifact_lines(blk.text, page, keep_shipping=True)
         if not cleaned or is_page_artifact_text(cleaned, page):
             continue
         updated = replace(blk, text=cleaned)
