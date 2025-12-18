@@ -389,6 +389,7 @@ Tests must:
 3. Do not mix formatting-only and logic changes
 4. Provide clear docstrings and inline comments where needed
 5. Reference relevant issues or defects in commit messages
+6. Use short-lived branches per task/turn; the parent branch should only be merged after the user reviews the turn’s changes.
 
 ---
 
@@ -405,4 +406,3 @@ bash scripts/validate_chunks.sh
 All checks must pass before merging.
 
 ---
-
