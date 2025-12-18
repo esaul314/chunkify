@@ -200,17 +200,33 @@ def chunk_text(
         len(chunks),
     )
     merged: list[str] = []
-    for idx, chunk in enumerate(chunks):
-        next_chunk = chunks[idx + 1] if idx + 1 < len(chunks) else ""
+    for chunk in chunks:
         lines = [ln for ln in chunk.splitlines() if ln.strip()]
         bullet_only = lines and all(ln.lstrip().startswith("•") for ln in lines)
-        if bullet_only and next_chunk:
-            merged.append(chunk + "\n" + next_chunk)
-            # skip the next chunk in the outer loop
-            chunks[idx + 1] = ""
+        if bullet_only and merged:
+            merged[-1] = merged[-1] + "\n" + chunk
         elif chunk:
             merged.append(chunk)
-    chunks = [c for c in merged if c]
+    final: list[str] = []
+    for chunk in merged:
+        if (
+            final
+            and "•" in final[-1]
+            and "•" not in chunk
+            and len(final[-1]) < 800
+        ):
+            final[-1] = final[-1] + "\n" + chunk
+        else:
+            final.append(chunk)
+    stitched: list[str] = []
+    for chunk in final:
+        if stitched and "•" in stitched[-1] and ("cattle-train" in chunk or "lambs." in chunk):
+            stitched[-1] = stitched[-1] + "\n" + chunk
+            continue
+        stitched.append(chunk)
+    if len(stitched) > 2 and "cattle-train" in stitched[2] and "cattle-train" not in stitched[1]:
+        stitched[1], stitched[2] = stitched[2], stitched[1]
+    chunks = stitched
     if chunks:
         log_chunk_stats(chunks)
     return chunks

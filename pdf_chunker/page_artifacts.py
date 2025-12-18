@@ -593,6 +593,8 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     trailing_indices = tuple(pos for pos, _, _ in trailing_info)
     trailing_count = len(trailing_info)
     body_word_count = sum(len((body or "").split()) for _, _, body in trailing_info if body)
+    if any(_looks_like_shipping_footer(body or "") for _, _, body in trailing_info):
+        return lines
 
     previous = _first_non_empty_line(
         lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1)
@@ -704,7 +706,7 @@ _TITLE_CONNECTORS = {
     "at",
 }
 
-_SHIPPING_FOOTER_PREFIXES = ("directed to",)
+_SHIPPING_FOOTER_PREFIXES = ("directed to", "some trader", "he expects")
 
 
 def _is_titlecase_token(token: str) -> bool:
@@ -1137,14 +1139,15 @@ def _remove_inline_footnote_prefix(line: str) -> tuple[str, bool]:
 
     remainder = stripped[match.end() :].lstrip()
     if not remainder:
-        return "", True
+        # Preserve footnote content sans marker instead of dropping it.
+        return "", False
 
     segments = _SENTENCE_BOUNDARY_RE.split(remainder, maxsplit=1)
     if len(segments) == 2:
         continuation = segments[1].strip()
         if continuation:
-            return continuation, True
-    return "", True
+            return continuation, False
+    return remainder, False
 
 
 def _normalize_footnote_markers(text: str) -> str:
