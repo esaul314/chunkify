@@ -18,7 +18,7 @@ import statistics
 import sys
 import os
 import traceback
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -33,7 +33,7 @@ from pdf_chunker.pymupdf4llm_integration import (
     assess_pymupdf4llm_quality,
     PyMuPDF4LLMExtractionError,
 )
-from pdf_chunker.extraction_fallbacks import (
+from pdf_chunker.fallbacks import (
     _assess_text_quality,
     execute_fallback_extraction,
 )
@@ -53,7 +53,7 @@ class ExtractionMetrics:
     heading_count: int
     avg_chunk_size: float
     quality_score: float
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -211,11 +211,12 @@ def extract_with_traditional_approach(pdf_file: str, **kwargs) -> List[Dict[str,
         pymupdf4llm_module.PYMUPDF4LLM_AVAILABLE = False
 
         # Use the PDF parsing function which will now use traditional methods
-        blocks = extract_text_blocks_from_pdf(
-            pdf_file, exclude_pages=kwargs.get("exclude_pages")
-        )
-
-        return blocks
+        return [
+            asdict(b)
+            for b in extract_text_blocks_from_pdf(
+                pdf_file, exclude_pages=kwargs.get("exclude_pages")
+            )
+        ]
 
     finally:
         # Restore original PyMuPDF4LLM availability
@@ -361,9 +362,7 @@ def compare_methods(
                 "hybrid_avg_memory_mb": hybrid_memory,
                 "traditional_avg_memory_mb": traditional_memory,
                 "memory_ratio": memory_ratio,
-                "lower_memory_method": (
-                    "hybrid" if memory_ratio < 1.0 else "traditional"
-                ),
+                "lower_memory_method": ("hybrid" if memory_ratio < 1.0 else "traditional"),
             }
 
     # Quality comparison
@@ -402,9 +401,7 @@ def compare_methods(
         "traditional_success_rate": traditional_success_rate,
         "reliability_difference": hybrid_success_rate - traditional_success_rate,
         "more_reliable_method": (
-            "hybrid"
-            if hybrid_success_rate > traditional_success_rate
-            else "traditional"
+            "hybrid" if hybrid_success_rate > traditional_success_rate else "traditional"
         ),
     }
 
@@ -423,9 +420,7 @@ def compare_methods(
     if abs(qual_comp.get("quality_difference", 0)) > 0.1:
         better = qual_comp.get("better_quality_method", "unknown")
         diff = abs(qual_comp.get("quality_difference", 0))
-        recommendations.append(
-            f"{better.title()} method has {diff:.2f} higher quality score"
-        )
+        recommendations.append(f"{better.title()} method has {diff:.2f} higher quality score")
 
     # Heading detection recommendations
     heading_comp = qual_comp.get("heading_detection", {})
@@ -457,7 +452,7 @@ def run_benchmark(
     iterations: int = 3,
     chunk_size: int = 8000,
     overlap: int = 200,
-    exclude_pages: Optional[str] = None,
+    exclude_pages: str | None = None,
 ) -> BenchmarkResults:
     """
     Run complete benchmark comparing hybrid vs traditional extraction.
@@ -472,9 +467,7 @@ def run_benchmark(
     Returns:
         Complete benchmark results
     """
-    print(
-        f"Starting benchmark with {len(pdf_files)} PDF files, {iterations} iterations each"
-    )
+    print(f"Starting benchmark with {len(pdf_files)} PDF files, {iterations} iterations each")
     print(f"PyMuPDF4LLM available: {is_pymupdf4llm_available()}")
 
     all_hybrid_metrics = []
@@ -487,9 +480,7 @@ def run_benchmark(
     }
 
     for i, pdf_file in enumerate(pdf_files):
-        print(
-            f"\nProcessing file {i + 1}/{len(pdf_files)}: {os.path.basename(pdf_file)}"
-        )
+        print(f"\nProcessing file {i + 1}/{len(pdf_files)}: {os.path.basename(pdf_file)}")
 
         if not os.path.exists(pdf_file):
             print(f"  WARNING: File not found: {pdf_file}")
@@ -577,9 +568,7 @@ def print_benchmark_summary(results: BenchmarkResults) -> None:
 
         mem_comp = perf.get("memory_comparison", {})
         if mem_comp:
-            print(
-                f"  Hybrid average memory: {mem_comp.get('hybrid_avg_memory_mb', 0):.1f} MB"
-            )
+            print(f"  Hybrid average memory: {mem_comp.get('hybrid_avg_memory_mb', 0):.1f} MB")
             print(
                 f"  Traditional average memory: {mem_comp.get('traditional_avg_memory_mb', 0):.1f} MB"
             )
@@ -592,18 +581,12 @@ def print_benchmark_summary(results: BenchmarkResults) -> None:
     if qual:
         print(f"\nQuality Comparison:")
         print(f"  Hybrid average quality: {qual.get('hybrid_avg_quality', 0):.2f}")
-        print(
-            f"  Traditional average quality: {qual.get('traditional_avg_quality', 0):.2f}"
-        )
-        print(
-            f"  Better quality method: {qual.get('better_quality_method', 'unknown').title()}"
-        )
+        print(f"  Traditional average quality: {qual.get('traditional_avg_quality', 0):.2f}")
+        print(f"  Better quality method: {qual.get('better_quality_method', 'unknown').title()}")
 
         heading = qual.get("heading_detection", {})
         if heading:
-            print(
-                f"  Hybrid average headings: {heading.get('hybrid_avg_headings', 0):.1f}"
-            )
+            print(f"  Hybrid average headings: {heading.get('hybrid_avg_headings', 0):.1f}")
             print(
                 f"  Traditional average headings: {heading.get('traditional_avg_headings', 0):.1f}"
             )
@@ -616,12 +599,8 @@ def print_benchmark_summary(results: BenchmarkResults) -> None:
     if rel:
         print(f"\nReliability Comparison:")
         print(f"  Hybrid success rate: {rel.get('hybrid_success_rate', 0):.1%}")
-        print(
-            f"  Traditional success rate: {rel.get('traditional_success_rate', 0):.1%}"
-        )
-        print(
-            f"  More reliable method: {rel.get('more_reliable_method', 'unknown').title()}"
-        )
+        print(f"  Traditional success rate: {rel.get('traditional_success_rate', 0):.1%}")
+        print(f"  More reliable method: {rel.get('more_reliable_method', 'unknown').title()}")
 
     # Recommendations
     recommendations = comparison.get("recommendations", [])
@@ -665,9 +644,7 @@ def main() -> None:
         help="Overlap size for chunking (default: 200)",
     )
     parser.add_argument("--exclude-pages", help='Pages to exclude (e.g., "1,3,5-10")')
-    parser.add_argument(
-        "--quiet", "-q", action="store_true", help="Suppress detailed output"
-    )
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress detailed output")
 
     args = parser.parse_args()
 
@@ -703,9 +680,7 @@ def main() -> None:
         print(f"\nDetailed results saved to: {args.output}")
 
         # Exit with appropriate code based on results
-        hybrid_success = results.comparison_summary["hybrid_statistics"].get(
-            "success_rate", 0
-        )
+        hybrid_success = results.comparison_summary["hybrid_statistics"].get("success_rate", 0)
         traditional_success = results.comparison_summary["traditional_statistics"].get(
             "success_rate", 0
         )

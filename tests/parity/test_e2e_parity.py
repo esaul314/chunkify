@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from itertools import combinations, chain
+from pathlib import Path
+from typing import Mapping, Sequence
+
+import re
+
+import pytest
+
+import fitz
+
+from scripts.parity import run_parity
+from tests.parity.normalize import canonical_rows
+from tests.parity import exceptions
+from pdf_chunker.framework import Artifact
+from pdf_chunker.passes.emit_jsonl import emit_jsonl
+from pdf_chunker.config import PipelineSpec
+from pdf_chunker.core_new import _input_artifact
+from pdf_chunker.page_utils import parse_page_ranges
+from pdf_chunker.pdf_parsing import _excluded_pages
+
+_TOKEN_PATTERN = re.compile(r"[^0-9A-Za-z]+")
+
+
+def _normalize_flag_token(token: str) -> str:
+    sanitized = _TOKEN_PATTERN.sub("_", token.lstrip("-")).strip("_")
+    return sanitized or "flag"
+
+
+def _flag_identifier(flags: Sequence[str]) -> str:
+    return "base" if not flags else "__".join(map(_normalize_flag_token, flags))
+
+
+SAMPLES = Path("tests/golden/samples")
+PDFS = sorted(SAMPLES.glob("*.pdf"))
+
+
+def _project(row: Mapping[str, object]) -> dict:
+    base = {"text": row.get("text", "")}
+    meta_key = "metadata" if "metadata" in row else "meta" if "meta" in row else None
+    return base if meta_key is None else {**base, "metadata": row[meta_key]}
+
+
+def _rows(path: Path) -> list[dict]:
+    return [_project(r) for r in canonical_rows(path)]
+
+
+def _flag_args() -> dict[str, str | None]:
+    return {
+        "--exclude-pages": "1",
+        "--chunk-size": "200",
+        "--overlap": "10",
+        "--no-metadata": None,
+    }
+
+
+def flag_sets() -> list[tuple[str, ...]]:
+    items = list(_flag_args().items())
+    return [
+        tuple(arg for flag, val in combo for arg in ([flag, val] if val is not None else [flag]))
+        for r in range(len(items) + 1)
+        for combo in combinations(items, r)
+    ]
+
+
+def test_flag_identifier_sanitizes_tokens() -> None:
+    assert _flag_identifier(("--chunk-size", "200", "--no-metadata")) == "chunk_size__200__no_metadata"
+    assert _flag_identifier(()) == "base"
+
+
+@pytest.mark.parametrize("flags", flag_sets(), ids=_flag_identifier)
+def test_e2e_parity_flags(tmp_path: Path, flags: tuple[str, ...]) -> None:
+    pairs = [(pdf, run_parity(pdf, tmp_path / f"{i}", flags)) for i, pdf in enumerate(PDFS)]
+    assert all(
+        exceptions.apply(_rows(l), exceptions.get("test_e2e_parity_flags", flags, pdf.name))
+        == exceptions.apply(_rows(n), exceptions.get("test_e2e_parity_flags", flags, pdf.name))
+        for pdf, (l, n) in pairs
+    )
+    if "--no-metadata" in flags:
+        assert all(
+            row.keys() == {"text"}
+            for path in chain.from_iterable(p[1] for p in pairs)
+            for row in canonical_rows(path)
+        )
+
+
+@pytest.mark.parametrize("pdf", PDFS)
+def test_exclude_pages_yields_no_rows(tmp_path: Path, pdf: Path) -> None:
+    with fitz.open(pdf) as doc:
+        flag = f"1-{doc.page_count}"
+    expected = parse_page_ranges(flag)
+    legacy, new = run_parity(pdf, tmp_path / pdf.stem, ("--exclude-pages", flag))
+    assert list(canonical_rows(legacy)) == []
+    assert list(canonical_rows(new)) == []
+    assert _excluded_pages(str(pdf), flag) == expected
+    artifact = _input_artifact(
+        str(pdf), PipelineSpec(options={"pdf_parse": {"exclude_pages": flag}})
+    )
+    assert artifact.payload.get("type") == "page_blocks"
+    assert artifact.payload.get("pages") == []
+
+
+def test_emit_jsonl_omits_meta_when_absent() -> None:
+    doc = {"type": "chunks", "items": [{"text": "hello"}]}
+    result = emit_jsonl(Artifact(payload=doc, meta={})).payload
+    assert result == [{"text": "hello"}]
+    assert all(row.keys() == {"text"} for row in result)

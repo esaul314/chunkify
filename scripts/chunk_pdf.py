@@ -1,97 +1,125 @@
+"""Deprecated shim for the old ``chunk_pdf`` CLI.
+
+Accepts the historical flag set and forwards them to the modern
+``pdf_chunker`` command while emitting a deprecation notice.
+"""
+
+from __future__ import annotations
+
 import argparse
-import argparse
-import json
-import logging
+import io
+import tempfile
+import sys
+from collections.abc import Sequence
+from contextlib import redirect_stdout
+from pathlib import Path
 
-from pdf_chunker.core import process_document
-
-logger = logging.getLogger(__name__)
+from pdf_chunker import cli
 
 
-def main() -> None:
-    logger.debug("Starting chunk_pdf script execution")
-    parser = argparse.ArgumentParser("Chunk a document into structured JSONL.")
-    parser.add_argument("document_file", help="Path to the document file (PDF or EPUB)")
-    parser.add_argument("--chunk_size", type=int, default=400)
-    parser.add_argument("--overlap", type=int, default=50)
-    parser.add_argument(
-        "--exclude-pages",
-        type=str,
-        help="Page ranges to exclude from processing (e.g., '1,3,5-10,15-20'). For PDF files, excludes pages. For EPUB files, excludes spine indices.",
-    )
-    parser.add_argument(
-        "--no-metadata",
-        action="store_true",
-        help="Set this flag to exclude metadata from the output.",
-    )
-    parser.add_argument(
-        "--list-spines",
-        action="store_true",
-        help="List EPUB spine items with their indices and filenames (EPUB files only).",
-    )
-    args = parser.parse_args()
+def _needs_help(argv: Sequence[str]) -> bool:
+    """Return ``True`` when ``-h`` or ``--help`` is present."""
+    return any(flag in argv for flag in ("-h", "--help"))
 
-    logger.debug(f"Processing document: {args.document_file}")
-    logger.debug(
-        f"Arguments: chunk_size={args.chunk_size}, overlap={args.overlap}, no_metadata={args.no_metadata}"
-    )
-    # Handle spine listing for EPUB files
-    if args.list_spines:
-        if not args.document_file.lower().endswith(".epub"):
-            print("Error: --list-spines can only be used with EPUB files.")
-            return 1
 
-        try:
-            from pdf_chunker.epub_parsing import list_epub_spines
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="chunk_pdf.py")
+    parser.add_argument("input_path", type=Path)
+    parser.add_argument("-o", "--out", type=Path)
+    parser.add_argument("--chunk-size", type=int)
+    parser.add_argument("--overlap", type=int)
+    parser.add_argument("--exclude-pages")
+    parser.add_argument("--no-metadata", action="store_true")
+    return parser
 
-            spine_items = list_epub_spines(args.document_file)
 
-            print(f"EPUB Spine Structure ({len(spine_items)} items):")
-            for item in spine_items:
-                print(
-                    f"{item['index']:3d}. {item['filename']} - {item['content_preview']}"
-                )
+def _to_cli_args(ns: argparse.Namespace) -> list[str]:
+    pairs = {
+        "--out": ns.out,
+        "--chunk-size": ns.chunk_size,
+        "--overlap": ns.overlap,
+        "--exclude-pages": ns.exclude_pages,
+    }
+    flags = [item for k, v in pairs.items() for item in (k, str(v)) if v is not None]
+    bools = ["--no-metadata"] if ns.no_metadata else []
+    return ["convert", str(ns.input_path), *flags, *bools]
 
+
+def _exit_code(exc: BaseException) -> int | None:
+    """Return the exit code carried by ``exc`` when available."""
+
+    if isinstance(exc, SystemExit):
+        code = exc.code
+        if code in (None, 0):
             return 0
-        except Exception as e:
-            print(f"Error listing spine items: {e}")
-            return 1
-
-    # The flag is --no-metadata, so we pass the inverse to generate_metadata
-    generate_metadata = not args.no_metadata
-
-    logger.debug(f"Calling process_document with generate_metadata={generate_metadata}")
-
-    chunks = process_document(
-        args.document_file,
-        args.chunk_size,
-        args.overlap,
-        generate_metadata=generate_metadata,
-        exclude_pages=args.exclude_pages,
-    )
-
-    logger.debug(f"process_document returned {len(chunks)} chunks")
-
-    # Filter out any None or empty chunks
-    valid_chunks = [chunk for chunk in chunks if chunk]
-
-    logger.debug(f"After filtering, have {len(valid_chunks)} valid chunks")
-    # Use a more robust approach for JSONL output
-    for chunk in valid_chunks:
+        if isinstance(code, int):
+            return code
         try:
-            # Ensure we have a clean, complete JSON object per line
-            json_str = json.dumps(chunk, ensure_ascii=False)
-            print(json_str)
-        except Exception as e:
-            # Skip problematic chunks to maintain JSONL integrity
-            import sys
+            return int(code)
+        except (TypeError, ValueError):  # pragma: no cover - defensive
+            return None
 
-            print(f"Error serializing chunk: {e}", file=sys.stderr)
+    for attr in ("exit_code", "code"):
+        value = getattr(exc, attr, None)
+        if value is None:
+            continue
+        if isinstance(value, int):
+            return value
+        if value == 0:
+            return 0
+    return None
 
 
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(name)s - %(levelname)s - %(message)s",
-    )
+def _invoke_cli(argv: Sequence[str]) -> int:
+    """Execute the ``pdf_chunker`` CLI while normalising exit codes."""
+
+    run = cli.app
+    args = list(argv)
+
+    try:
+        if getattr(cli, "typer", None):
+            run(args=args, standalone_mode=False)
+        else:
+            run(args)
+    except BaseException as exc:  # ``typer.Exit`` is not a ``SystemExit``
+        code = _exit_code(exc)
+        if code == 0:
+            return 0
+        raise
+    return 0
+
+
+def _delegate(argv: Sequence[str]) -> int:
+    """Print a deprecation notice and invoke the modern CLI."""
+
+    print("chunk_pdf.py is deprecated; use `pdf_chunker` instead.", file=sys.stderr)
+    return _invoke_cli(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Entry point retaining the old script's interface."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if _needs_help(args):
+        _delegate(["--help"])
+        return
+    ns = _parser().parse_args(args)
+    out = ns.out
+    tmp: Path | None = None
+    if out is None:
+        handle = tempfile.NamedTemporaryFile(delete=False)
+        tmp = Path(handle.name)
+        handle.close()
+        ns.out = tmp
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        _delegate(_to_cli_args(ns))
+    if tmp is not None:
+        print(tmp.read_text(encoding="utf-8"), end="")
+        tmp.unlink()
+    report = Path("run_report.json")
+    if report.exists():
+        report.unlink()
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised in tests
     main()

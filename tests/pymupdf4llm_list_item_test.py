@@ -36,3 +36,5 @@ def test_list_kind_propagated_to_metadata():
     metadata = _build_metadata("Item", block, 0, {})
     assert metadata["block_type"] == "list_item"
     assert metadata["list_kind"] == "bullet"
+    assert metadata["utterance_type"] == "unclassified"
+    assert metadata["tags"] == []

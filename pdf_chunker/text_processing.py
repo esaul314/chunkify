@@ -75,9 +75,30 @@ def _fix_page_boundary_gluing(text: str) -> str:
 
 
 def _fix_quote_boundary_gluing(text: str) -> str:
-    """Fix spacing around quotes after normalization."""
+    """Fix spacing around double quotes after normalization."""
 
-    return text if not text else pipe(text, normalize_quotes, str.strip)
+    if not text:
+        return text
+
+    def _strip_inner_trailing(s: str) -> str:
+        """Remove spaces immediately before a closing quote."""
+
+        return re.sub(r'"([^"\n]*?)\s+"', lambda m: f'"{m.group(1)}"', s)
+
+    def _space_after_close(s: str) -> str:
+        return re.sub(r'(?<=\w)"(?=[A-Za-z])', '" ', s)
+
+    def _space_before_open(s: str) -> str:
+        return re.sub(r'(?<=[A-Za-z])"(?=[A-Za-z])', ' "', s)
+
+    return pipe(
+        text,
+        normalize_quotes,
+        _strip_inner_trailing,
+        _space_after_close,
+        _space_before_open,
+        str.strip,
+    )
 
 
 def detect_and_fix_word_gluing(text: str) -> str:
@@ -99,9 +120,7 @@ def _detect_text_reordering(*args: Any, **kwargs: Any) -> bool:
     return False
 
 
-def _validate_chunk_integrity(
-    chunks: List[str], original_text: str | None = None
-) -> List[str]:
+def _validate_chunk_integrity(chunks: List[str], original_text: str | None = None) -> List[str]:
     """Stub for test compatibility. Returns chunks unchanged."""
     return chunks
 

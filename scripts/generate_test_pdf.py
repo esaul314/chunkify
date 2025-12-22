@@ -136,9 +136,7 @@ def create_test_pdf() -> str:
     c.drawString(1 * inch, height - 1 * inch, "Chapter 2: Structured Content")
 
     c.setFont("Helvetica", 11)
-    c.drawString(
-        1 * inch, height - 1.5 * inch, "This page tests structured content processing:"
-    )
+    c.drawString(1 * inch, height - 1.5 * inch, "This page tests structured content processing:")
 
     c.drawString(1 * inch, height - 2 * inch, "1. First numbered item")
     c.drawString(1 * inch, height - 2.3 * inch, "2. Second numbered item")
@@ -154,9 +152,7 @@ def create_test_pdf() -> str:
         height - 4.5 * inch,
         "This content tests the system's ability to handle different",
     )
-    c.drawString(
-        1 * inch, height - 4.8 * inch, "text structures and formatting patterns."
-    )
+    c.drawString(1 * inch, height - 4.8 * inch, "text structures and formatting patterns.")
 
     c.save()
     print(f"Created test PDF: {pdf_path}")
@@ -174,9 +170,7 @@ def create_pdf_placeholder() -> str:
         f.write("TEST PDF PLACEHOLDER\n")
         f.write("===================\n\n")
         f.write("This file serves as a placeholder for sample_test.pdf\n")
-        f.write(
-            "The actual PDF could not be created because reportlab is not available.\n\n"
-        )
+        f.write("The actual PDF could not be created because reportlab is not available.\n\n")
         f.write("To create the test PDF, install reportlab:\n")
         f.write("pip install reportlab\n\n")
         f.write("Then run this script again:\n")

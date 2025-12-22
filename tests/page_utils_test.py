@@ -1,18 +1,21 @@
-import sys
-
-sys.path.insert(0, ".")
-
 import pytest
 from pdf_chunker.page_utils import parse_page_ranges
 
 
-def test_parse_individual_pages():
-    assert parse_page_ranges("1,3,5") == {1, 3, 5}
+@pytest.mark.parametrize(
+    "spec, expected",
+    [
+        ("1", {1}),
+        ("1,3-5", {1, 3, 4, 5}),
+        ("2-4", {2, 3, 4}),
+        (" 1 , 3-4 , 6 ", {1, 3, 4, 6}),
+    ],
+)
+def test_parse_page_ranges_valid(spec: str, expected: set[int]) -> None:
+    assert parse_page_ranges(spec) == expected
 
 
-def test_parse_page_ranges_function():
-    assert parse_page_ranges("2-4") == {2, 3, 4}
-
-
-def test_parse_mixed_pages_and_ranges():
-    assert parse_page_ranges("1,3-4,6") == {1, 3, 4, 6}
+@pytest.mark.parametrize("spec", ["0", "1-0", "2-1", "a", "1,b"])
+def test_parse_page_ranges_invalid(spec: str) -> None:
+    with pytest.raises(ValueError):
+        parse_page_ranges(spec)

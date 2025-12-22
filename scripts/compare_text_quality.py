@@ -111,13 +111,10 @@ def extract_with_traditional_method(pdf_file: str) -> List[Dict[str, Any]]:
         original_available = pymupdf4llm_module.PYMUPDF4LLM_AVAILABLE
         pymupdf4llm_module.PYMUPDF4LLM_AVAILABLE = False
 
-        # Extract blocks using traditional methods
-        blocks = extract_text_blocks_from_pdf(pdf_file)
+        blocks = [asdict(b) for b in extract_text_blocks_from_pdf(pdf_file)]
 
-        # Convert blocks to chunk format for comparison
-        chunks = []
-        for i, block in enumerate(blocks):
-            chunk = {
+        chunks = [
+            {
                 "text": block.get("text", ""),
                 "metadata": {
                     "chunk_id": f"traditional_{i}",
@@ -127,7 +124,8 @@ def extract_with_traditional_method(pdf_file: str) -> List[Dict[str, Any]]:
                     "extraction_method": "traditional",
                 },
             }
-            chunks.append(chunk)
+            for i, block in enumerate(blocks)
+        ]
 
         return chunks
 
@@ -240,16 +238,12 @@ def assess_whitespace_quality(text: str) -> Tuple[float, List[str]]:
     # Check for excessive newlines
     excessive_newlines = len(re.findall(r"\n{3,}", text))
     if excessive_newlines > 0:
-        issues.append(
-            f"Found {excessive_newlines} instances of 3+ consecutive newlines"
-        )
+        issues.append(f"Found {excessive_newlines} instances of 3+ consecutive newlines")
 
     # Check for missing spaces after punctuation
     missing_spaces = len(re.findall(r"[.!?][a-zA-Z]", text))
     if missing_spaces > 0:
-        issues.append(
-            f"Found {missing_spaces} instances of missing spaces after punctuation"
-        )
+        issues.append(f"Found {missing_spaces} instances of missing spaces after punctuation")
 
     # Check for excessive spaces
     excessive_spaces = len(re.findall(r" {3,}", text))
@@ -263,16 +257,12 @@ def assess_whitespace_quality(text: str) -> Tuple[float, List[str]]:
 
     # Check for trailing whitespace on lines
     lines = text.split("\n")
-    trailing_whitespace = sum(
-        1 for line in lines if line.endswith(" ") or line.endswith("\t")
-    )
+    trailing_whitespace = sum(1 for line in lines if line.endswith(" ") or line.endswith("\t"))
     if trailing_whitespace > len(lines) * 0.1:  # More than 10% of lines
         issues.append(f"Excessive trailing whitespace on {trailing_whitespace} lines")
 
     # Calculate score based on issues found
-    total_issues = (
-        excessive_newlines + missing_spaces + excessive_spaces + trailing_whitespace
-    )
+    total_issues = excessive_newlines + missing_spaces + excessive_spaces + trailing_whitespace
     if mixed_whitespace:
         total_issues += 1
 
@@ -363,9 +353,7 @@ def assess_header_footer_contamination(text: str) -> Tuple[float, List[str]]:
     line_counts = {}
     for line in lines:
         stripped = line.strip()
-        if (
-            stripped and len(stripped) < 50
-        ):  # Short lines more likely to be headers/footers
+        if stripped and len(stripped) < 50:  # Short lines more likely to be headers/footers
             line_counts[stripped] = line_counts.get(stripped, 0) + 1
 
     repeated_lines = [(line, count) for line, count in line_counts.items() if count > 1]
@@ -374,18 +362,14 @@ def assess_header_footer_contamination(text: str) -> Tuple[float, List[str]]:
     for line, count in repeated_lines:
         if count > 2:  # Repeated more than twice
             contamination_score += count
-            issues.append(
-                f"Repeated line '{line}' appears {count} times (likely header/footer)"
-            )
+            issues.append(f"Repeated line '{line}' appears {count} times (likely header/footer)")
 
     # Check for page numbers in text
     page_numbers = re.findall(r"\b(?:page\s+)?\d+\b", text, re.IGNORECASE)
     isolated_numbers = [num for num in page_numbers if re.match(r"^\d+$", num.strip())]
     if len(isolated_numbers) > 3:
         contamination_score += len(isolated_numbers)
-        issues.append(
-            f"Found {len(isolated_numbers)} isolated numbers (possible page numbers)"
-        )
+        issues.append(f"Found {len(isolated_numbers)} isolated numbers (possible page numbers)")
 
     # Check for common header/footer patterns
     header_footer_patterns = [
@@ -400,9 +384,7 @@ def assess_header_footer_contamination(text: str) -> Tuple[float, List[str]]:
         matches = re.findall(pattern, text, re.IGNORECASE)
         if matches:
             contamination_score += len(matches)
-            issues.append(
-                f"Header/footer pattern found: {matches[:3]}"
-            )  # Show first 3 matches
+            issues.append(f"Header/footer pattern found: {matches[:3]}")  # Show first 3 matches
 
     # Calculate score (higher is better, lower contamination)
     total_lines = len(lines)
@@ -453,9 +435,7 @@ def analyze_text_quality(
     word_score, word_issues = assess_word_joining(all_text)
     whitespace_score, whitespace_issues = assess_whitespace_quality(all_text)
     ligature_score, ligature_issues = assess_ligature_translation(all_text)
-    contamination_score, contamination_issues = assess_header_footer_contamination(
-        all_text
-    )
+    contamination_score, contamination_issues = assess_header_footer_contamination(all_text)
 
     # Calculate overall quality score (weighted average)
     weights = {
@@ -476,11 +456,7 @@ def analyze_text_quality(
 
     # Collect all issues
     all_issues = (
-        sentence_issues
-        + word_issues
-        + whitespace_issues
-        + ligature_issues
-        + contamination_issues
+        sentence_issues + word_issues + whitespace_issues + ligature_issues + contamination_issues
     )
 
     # Create sample issues with categories
@@ -500,9 +476,7 @@ def analyze_text_quality(
                     "category": category,
                     "issue": issue,
                     "severity": (
-                        "high"
-                        if category in ["Sentence Integrity", "Word Joining"]
-                        else "medium"
+                        "high" if category in ["Sentence Integrity", "Word Joining"] else "medium"
                     ),
                 }
             )
@@ -552,9 +526,7 @@ def compare_text_quality(
         "hybrid_score": hybrid_overall,
         "traditional_score": traditional_overall,
         "difference": hybrid_overall - traditional_overall,
-        "better_method": (
-            "hybrid" if hybrid_overall > traditional_overall else "traditional"
-        ),
+        "better_method": ("hybrid" if hybrid_overall > traditional_overall else "traditional"),
         "improvement_percentage": abs(hybrid_overall - traditional_overall) * 100,
     }
 
@@ -577,9 +549,7 @@ def compare_text_quality(
             "hybrid_score": hybrid_score,
             "traditional_score": traditional_score,
             "difference": hybrid_score - traditional_score,
-            "better_method": (
-                "hybrid" if hybrid_score > traditional_score else "traditional"
-            ),
+            "better_method": ("hybrid" if hybrid_score > traditional_score else "traditional"),
         }
 
     comparison["dimension_comparison"] = dimension_results
@@ -671,9 +641,7 @@ def generate_detailed_examples(
                 hybrid_text[:200] + "..." if len(hybrid_text) > 200 else hybrid_text
             ),
             "traditional_text_preview": (
-                traditional_text[:200] + "..."
-                if len(traditional_text) > 200
-                else traditional_text
+                traditional_text[:200] + "..." if len(traditional_text) > 200 else traditional_text
             ),
             "length_comparison": {
                 "hybrid_length": len(hybrid_text),
@@ -791,12 +759,8 @@ def run_text_quality_comparison(pdf_files: List[str]) -> List[QualityComparison]
 
         # Print summary
         print(f"  Hybrid overall quality: {hybrid_metrics.overall_quality_score:.2f}")
-        print(
-            f"  Traditional overall quality: {traditional_metrics.overall_quality_score:.2f}"
-        )
-        print(
-            f"  Better method: {comparison_analysis['overall_comparison']['better_method']}"
-        )
+        print(f"  Traditional overall quality: {traditional_metrics.overall_quality_score:.2f}")
+        print(f"  Better method: {comparison_analysis['overall_comparison']['better_method']}")
 
     return results
 
@@ -870,9 +834,7 @@ def print_quality_summary(results: List[QualityComparison]) -> None:
         print("=" * 80)
 
         hybrid_scores = [r.hybrid_metrics.overall_quality_score for r in results]
-        traditional_scores = [
-            r.traditional_metrics.overall_quality_score for r in results
-        ]
+        traditional_scores = [r.traditional_metrics.overall_quality_score for r in results]
 
         avg_hybrid = statistics.mean(hybrid_scores)
         avg_traditional = statistics.mean(traditional_scores)
@@ -901,9 +863,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare text quality between hybrid PyMuPDF4LLM and traditional PDF extraction methods"
     )
-    parser.add_argument(
-        "pdf_files", nargs="+", help="PDF files to analyze for text quality"
-    )
+    parser.add_argument("pdf_files", nargs="+", help="PDF files to analyze for text quality")
     parser.add_argument(
         "--output",
         "-o",
@@ -915,9 +875,7 @@ def main() -> None:
         action="store_true",
         help="Include detailed text examples in output",
     )
-    parser.add_argument(
-        "--quiet", "-q", action="store_true", help="Suppress detailed output"
-    )
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress detailed output")
 
     args = parser.parse_args()
 
@@ -952,9 +910,7 @@ def main() -> None:
         # Add summary statistics
         if results:
             hybrid_scores = [r.hybrid_metrics.overall_quality_score for r in results]
-            traditional_scores = [
-                r.traditional_metrics.overall_quality_score for r in results
-            ]
+            traditional_scores = [r.traditional_metrics.overall_quality_score for r in results]
 
             output_data["summary_statistics"] = {
                 "average_hybrid_quality": statistics.mean(hybrid_scores),
@@ -962,14 +918,12 @@ def main() -> None:
                 "hybrid_wins": sum(
                     1
                     for r in results
-                    if r.comparison_analysis["overall_comparison"]["better_method"]
-                    == "hybrid"
+                    if r.comparison_analysis["overall_comparison"]["better_method"] == "hybrid"
                 ),
                 "traditional_wins": sum(
                     1
                     for r in results
-                    if r.comparison_analysis["overall_comparison"]["better_method"]
-                    == "traditional"
+                    if r.comparison_analysis["overall_comparison"]["better_method"] == "traditional"
                 ),
                 "quality_improvement": statistics.mean(hybrid_scores)
                 - statistics.mean(traditional_scores),
@@ -986,9 +940,7 @@ def main() -> None:
 
         # Exit with appropriate code based on results
         if results:
-            avg_hybrid = statistics.mean(
-                [r.hybrid_metrics.overall_quality_score for r in results]
-            )
+            avg_hybrid = statistics.mean([r.hybrid_metrics.overall_quality_score for r in results])
             avg_traditional = statistics.mean(
                 [r.traditional_metrics.overall_quality_score for r in results]
             )

@@ -1,25 +1,32 @@
 import sys
+from typing import Any
 
 # Ensure local package path for pdf_chunker imports
 sys.path.insert(0, ".")
 
-from pdf_chunker.ai_enrichment import (
+from pdf_chunker.adapters.ai_enrich import (
     _load_tag_configs,
-    classify_chunk_utterance,
     _process_chunk_for_file,
 )
+from pdf_chunker.config import PipelineSpec
+from pdf_chunker.framework import Artifact, run_pipeline
+from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
 
 
 def _dummy_completion(_: str) -> str:
     return "Classification: question\nTags: [Technical, unknown]"
 
 
-def test_load_tag_configs_deduplicates():
+def _multiline_completion(_: str) -> str:
+    return """Classification: summary\nTags:\n- Technical\n- methodology\n"""
+
+
+def test_load_tag_configs_deduplicates() -> None:
     configs = _load_tag_configs()
     assert all(len(tags) == len({t for t in tags}) for tags in configs.values())
 
 
-def test_classify_chunk_utterance_filters_invalid_tags():
+def test_classify_chunk_utterance_filters_invalid_tags() -> None:
     tag_configs = {"generic": ["technical"]}
     result = classify_chunk_utterance(
         "What is AI?", tag_configs=tag_configs, completion_fn=_dummy_completion
@@ -27,7 +34,7 @@ def test_classify_chunk_utterance_filters_invalid_tags():
     assert result == {"classification": "question", "tags": ["technical"]}
 
 
-def test_process_chunk_for_file_populates_tags():
+def test_process_chunk_for_file_populates_tags() -> None:
     chunk = {"text": "What is AI?"}
     tag_configs = {"generic": ["technical"]}
     result = _process_chunk_for_file(
@@ -35,3 +42,42 @@ def test_process_chunk_for_file_populates_tags():
     )
     assert result["tags"] == ["technical"]
     assert result["metadata"]["tags"] == ["technical"]
+
+
+def test_classify_chunk_utterance_handles_multiline_tags() -> None:
+    tag_configs = {"generic": ["technical", "methodology"]}
+    result = classify_chunk_utterance(
+        "How should we build this?",
+        tag_configs=tag_configs,
+        completion_fn=_multiline_completion,
+    )
+    assert result == {
+        "classification": "summary",
+        "tags": ["technical", "methodology"],
+    }
+
+
+class _StubClient:
+    def classify_chunk_utterance(
+        self, text_chunk: str, *, tag_configs: dict[str, list[str]]
+    ) -> dict[str, Any]:
+        return {"classification": "question", "tags": ["technical"]}
+
+
+def test_pipeline_enrichment_with_stub() -> None:
+    spec = PipelineSpec(pipeline=["ai_enrich"])
+    tag_configs = {"generic": ["technical"]}
+    artifact = Artifact(
+        payload={"type": "chunks", "items": [{"text": "What is AI?"}]},
+        meta={
+            "ai_enrich": {
+                "enabled": True,
+                "client": _StubClient(),
+                "tag_configs": tag_configs,
+            }
+        },
+    )
+    result = run_pipeline(spec.pipeline, artifact)
+    items = result.payload["items"]
+    assert all(c.get("utterance_type") == "question" for c in items)
+    assert all(c.get("tags") == ["technical"] for c in items)

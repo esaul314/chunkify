@@ -1,6 +1,7 @@
 import sys
 import re
 import pytest
+from dataclasses import asdict
 
 sys.path.insert(0, ".")
 
@@ -12,11 +13,9 @@ from pdf_chunker.text_cleaning import (
 
 
 def test_numbered_list_preservation():
-    blocks = extract_text_blocks_from_pdf("sample_book0-1.pdf")
+    blocks = [asdict(b) for b in extract_text_blocks_from_pdf("sample_book0-1.pdf")]
     blob = "\n\n".join(b["text"] for b in blocks)
-    items = [
-        line.strip() for line in blob.splitlines() if re.match(r"\d+\.", line.strip())
-    ]
+    items = [line.strip() for line in blob.splitlines() if re.match(r"\d+\.", line.strip())]
     assert len(items) == 4
     assert "\n\n2." not in blob
     assert "\n\n3." not in blob
@@ -63,10 +62,7 @@ def test_quoted_question_inside_numbered_item() -> None:
 
 @pytest.mark.parametrize("punct", list(".…"))
 def test_quoted_sentence_endings_inside_numbered_item(punct: str) -> None:
-    text = (
-        f'1. Item with a quote "quoted sentence{punct}" '
-        "Then proceed with more details."
-    )
+    text = f'1. Item with a quote "quoted sentence{punct}" ' "Then proceed with more details."
     cleaned = insert_numbered_list_newlines(text)
     cleaned = collapse_single_newlines(cleaned)
     assert "\n\nThen" not in cleaned
@@ -85,10 +81,7 @@ def test_long_inline_numbered_items() -> None:
 
 
 def test_item_ending_with_chapter_preserves_newline() -> None:
-    text = (
-        "1. Intro text spanning lines\n"
-        "continues and ends with Chapter 2. Second item"
-    )
+    text = "1. Intro text spanning lines\n" "continues and ends with Chapter 2. Second item"
     cleaned = insert_numbered_list_newlines(text)
     cleaned = collapse_single_newlines(cleaned)
     assert "Chapter 2." not in cleaned
@@ -101,3 +94,25 @@ def test_lowercase_chapter_followed_by_next_number() -> None:
     cleaned = collapse_single_newlines(cleaned)
     assert "chapter. 3." not in cleaned
     assert "chapter.\n3." in cleaned
+
+
+def test_multiline_numbered_item_continuation() -> None:
+    text = (
+        "2. The shortage, combined with people cobbling together their own\n"
+        "Terraform all over the company, often led leadership to centralize the work across multiple teams"
+    )
+    cleaned = insert_numbered_list_newlines(text)
+    cleaned = collapse_single_newlines(cleaned)
+    assert "own\n\nTerraform" not in cleaned
+    assert "own Terraform" in cleaned
+
+
+def test_multiple_list_markers_keep_blank_lines() -> None:
+    text = (
+        "Intro paragraph.\n\n"
+        "- first item\n\n"
+        "- second item\n\n"
+        "- third item"
+    )
+    cleaned = collapse_single_newlines(text)
+    assert cleaned == text

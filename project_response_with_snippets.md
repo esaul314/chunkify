@@ -19,7 +19,7 @@ structured.append(
     {
         "type": block_type,
         "text": block_text,
-        "language": _detect_language(block_text),
+        "language": default_language(),
         "source": {"filename": filename, "page": page_num, "location": None},
         "bbox": b[:4],
     }
@@ -129,4 +129,3 @@ class ValidationReport:
 - `pdftotext` fallback times out after 60 s per call
 
 - LLM enrichment requests cap at 100 tokens per completion
-

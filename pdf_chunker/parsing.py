@@ -1,37 +1,52 @@
 # parsing.py
 #
 # Default extraction approach: Simplified PyMuPDF4LLM integration
-# - Uses traditional font-based extraction for all structural analysis (headings, blocks, metadata)
-# - Applies PyMuPDF4LLM text cleaning for superior text quality (ligatures, word joining, whitespace)
+# - Uses traditional font-based extraction for all structural analysis
+#   (headings, blocks, metadata)
+# - Applies PyMuPDF4LLM text cleaning for superior text quality
+#   (ligatures, word joining, whitespace)
 # - Maintains proven reliability while leveraging PyMuPDF4LLM's evolving capabilities
 # - Reduces complexity compared to complex hybrid approaches
 
-import os
+from collections.abc import Callable
+from dataclasses import asdict
+from pathlib import Path
+
+from .epub_parsing import TextBlock, extract_text_blocks_from_epub
 from .pdf_parsing import extract_text_blocks_from_pdf
-from .epub_parsing import extract_text_blocks_from_epub
+
+Extractor = Callable[[Path, str | None], list[TextBlock]]
 
 
-def extract_structured_text(filepath: str, exclude_pages: str = None) -> list[dict]:
+def _pdf_extractor(path: Path, exclude: str | None) -> list[TextBlock]:
+    return [
+        asdict(b)
+        for b in extract_text_blocks_from_pdf(str(path), exclude_pages=exclude)
+    ]
+
+
+def _epub_extractor(path: Path, exclude: str | None) -> list[TextBlock]:
+    return extract_text_blocks_from_epub(str(path), exclude_spines=exclude)
+
+
+DISPATCH: dict[str, Extractor] = {
+    ".pdf": _pdf_extractor,
+    ".epub": _epub_extractor,
+}
+
+
+def extract_structured_text(
+    path: Path | str, exclude_pages: str | None = None
+) -> list[TextBlock]:
+    """Return text blocks from a PDF or EPUB file.
+
+    The extractor is chosen solely by the file's suffix, keeping the function
+    free of side effects and external state.
     """
-    Facade function to extract structured text from PDF or EPUB files.
 
-    Args:
-        filepath: Path to the input file
-        exclude_pages: Pages to exclude (PDF only) or spine indices to exclude (EPUB only)
-
-    Returns:
-        List of structured text blocks
-
-    Raises:
-        ValueError: if the file type is unsupported
-    """
-    extension = os.path.splitext(filepath)[1].lower()
-
-    match extension:
-        case ".pdf":
-            return extract_text_blocks_from_pdf(filepath, exclude_pages)
-        case ".epub":
-            # Pass exclude_pages as exclude_spines for EPUBs
-            return extract_text_blocks_from_epub(filepath, exclude_spines=exclude_pages)
-        case _:
-            raise ValueError(f"Unsupported file type: '{extension}'")
+    p = Path(path)
+    try:
+        extractor = DISPATCH[p.suffix.lower()]
+    except KeyError as exc:  # pragma: no cover - defensive
+        raise ValueError(f"Unsupported file type: '{p.suffix}'") from exc
+    return extractor(p, exclude_pages)

@@ -17,13 +17,10 @@ def test_chunk_pdf_generates_jsonl(tmp_path: Path) -> None:
         check=True,
     )
     lines = [
-        json.loads(line)
-        for line in result.stdout.splitlines()
-        if line.strip().startswith("{")
+        json.loads(line) for line in result.stdout.splitlines() if line.strip().startswith("{")
     ]
     assert lines and all(
-        {"text", "metadata"} <= line.keys()
-        and {"chunk_id", "source"} <= line["metadata"].keys()
+        {"text", "metadata"} <= line.keys() and {"chunk_id", "source"} <= line["metadata"].keys()
         for line in lines
     )
     assert not any(tmp_path.iterdir())

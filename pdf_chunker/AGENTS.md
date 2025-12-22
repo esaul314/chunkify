@@ -11,15 +11,18 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `parsing.py`: Structural block extraction.
 - `text_cleaning.py`: Ligature repair, quote normalization, control-character removal.
 - `heading_detection.py`: Infers heading hierarchy.
-- `extraction_fallbacks.py`: Fallback strategies with scoring.
+- `fallbacks.py`: Quality assessment and block-level extraction fallbacks.
+- `language.py`: Default language utilities.
 - `page_utils.py`: Page range parsing/filtering.
 - `epub_parsing.py`: Spine discovery and exclusion.
 - `splitter.py`: Enforces chunk boundaries and semantic cohesion.
-- `ai_enrichment.py`: Applies YAML-based tags.
+- `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
 - `utils.py`: Metadata mapping and helper functions.
 - `env_utils.py`: Environment flag helpers.
-- `page_artifacts.py`: Header/footer detection utilities.
-- `pdf_parsing.py`: High-level PDF parsing entry point.
+- `page_artifacts.py`: Header/footer detection utilities, `strip_artifacts`.
+- `pdf_parsing.py`: High-level PDF parsing entry point offering streaming block extraction.
+- `pdf_blocks.py`: Dataclasses and helpers for page/block extraction and merging.
+- `fallbacks.py`: Quality assessment and block-level extraction fallbacks.
 - `pymupdf4llm_integration.py`: Optional PyMuPDF4LLM extraction and cleanup.
 - `text_processing.py`: Additional text-repair helpers.
 - `source_matchers.py`: Matching strategies for locating original source blocks.

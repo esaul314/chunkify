@@ -29,9 +29,7 @@ def is_real_word(word: str) -> bool:
     """Return True if `word` is recognized by aspell."""
     # aspell list prints unknown words—so if our word does NOT show up,
     # it’s known.
-    p = subprocess.Popen(
-        SPELLER_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
-    )
+    p = subprocess.Popen(SPELLER_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     out, _ = p.communicate(word + "\n")
     return out.strip() == ""
 

@@ -1,10 +1,13 @@
 import unittest
+from pathlib import Path
 
 from pdf_chunker.page_artifacts import (
     is_page_artifact_text,
     strip_page_artifact_suffix,
     remove_page_artifact_lines,
+    strip_artifacts,
 )
+from pdf_chunker.pdf_blocks import Block
 from pdf_chunker.pymupdf4llm_integration import _clean_pymupdf4llm_block
 
 
@@ -68,12 +71,61 @@ class TestPageArtifactDetection(unittest.TestCase):
     def test_remove_footnote_line(self):
         text = "Paragraph text\n4 This is a sample footnote text.\nNext paragraph"
         cleaned = remove_page_artifact_lines(text, 2)
-        self.assertEqual(cleaned, "Paragraph text\nNext paragraph")
+        self.assertEqual(
+            cleaned,
+            "Paragraph text\nNext paragraph\nThis is a sample footnote text.",
+        )
+
+    def test_inline_footnote_appended_to_paragraph_end(self):
+        text = "Lead in.\n3 Footnote text. The continuation survives."
+        cleaned = remove_page_artifact_lines(text, 3)
+        self.assertEqual(cleaned, "Lead in.\nThe continuation survives.\nFootnote text.")
 
     def test_inline_footnote_marker(self):
         text = "Can exist.3\n3 Footnote text.\n\nThis is next"
         cleaned = remove_page_artifact_lines(text, 2)
         self.assertEqual(cleaned, "Can exist.[3] This is next")
+
+    def test_inline_footnote_sentence_relocated_when_anchor_present(self):
+        text = (
+            "Whether or not they've called their teams1 We'll sometimes call these teams "
+            'your "users" or "customers," if it makes more sense in the context.\n'
+            "efforts platform engineering, they embody the mindset."
+        )
+        cleaned = remove_page_artifact_lines(text, 9)
+        expected = (
+            "Whether or not they've called their teams1\n"
+            "efforts platform engineering, they embody the mindset.\n"
+            'We\'ll sometimes call these teams your "users" or "customers," if it makes more sense in the context.'
+        )
+        self.assertEqual(cleaned, expected)
+
+    def test_inline_footnote_sentence_line_relocated(self):
+        text = (
+            "Whether or not they've called their\n"
+            "We\u2019ll sometimes call these teams your \"users\" or \"customers,\" if it makes more sense in the context.\n"
+            "efforts platform engineering, they embody the mindset."
+        )
+        cleaned = remove_page_artifact_lines(text, 9)
+        expected = (
+            "Whether or not they've called their\n"
+            "efforts platform engineering, they embody the mindset.\n"
+            "We\u2019ll sometimes call these teams your \"users\" or \"customers,\" if it makes more sense in the context."
+        )
+        self.assertEqual(cleaned, expected)
+
+    def test_inline_lowercase_footnote_sentence_relocated(self):
+        text = (
+            'But if a team this is the platform equivalent of "shadow IT"\u2014systems deployed elsewhere.\n'
+            "realizes they need a storage option."
+        )
+        cleaned = remove_page_artifact_lines(text, 24)
+        expected = (
+            "But if a team\n"
+            "realizes they need a storage option.\n"
+            'this is the platform equivalent of "shadow IT"\u2014systems deployed elsewhere.'
+        )
+        self.assertEqual(cleaned, expected)
 
     def test_superscript_footnote_marker(self):
         text = "Can exist.\u00b3\n\u00b3 Footnote text.\n\nThis is next"
@@ -93,8 +145,11 @@ class TestPageArtifactDetection(unittest.TestCase):
         )
         cleaned = remove_page_artifact_lines(text, 115)
         self.assertEqual(
-            cleaned, "First part of sentence\nThe sentence continues here."
+            cleaned,
+            "First part of sentence\nThe sentence continues here.\nFootnote text.",
         )
+        self.assertIn("First part of sentence", cleaned)
+        self.assertTrue(cleaned.endswith("Footnote text."))
 
     def test_header_inserted_mid_sentence(self):
         text = (
@@ -106,7 +161,8 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(text, 115)
         expected = (
             "A sentence on the last line of the page and it continues on the next page\n"
-            "the sentence continues here, on the next page."
+            "the sentence continues here, on the next page.\n"
+            "And then there is a footnote at the bottom of the second page."
         )
         self.assertEqual(cleaned, expected)
 
@@ -123,13 +179,11 @@ class TestPageArtifactDetection(unittest.TestCase):
             "|salt fish||\n"
             "|Person Name, PMP<br>Alma, Quebec, Canada|Person Name, PMP<br>Alma, Quebec, Canada|"
         )
-        expected = (
-            "This closed car smells of salt fish\n"
-            "Person Name, PMP\n"
-            "Alma, Quebec, Canada"
-        )
+        expected = "This closed car smells of salt fish"
         cleaned = remove_page_artifact_lines(table_text, 1)
         self.assertEqual(cleaned, expected)
+        self.assertNotIn("Person Name", cleaned)
+        self.assertNotIn("Quebec", cleaned)
 
     def test_pymupdf4llm_block_normalization(self):
         table_text = (
@@ -143,8 +197,34 @@ class TestPageArtifactDetection(unittest.TestCase):
         self.assertIsNotNone(cleaned)
         self.assertEqual(
             cleaned["text"],
-            "This closed car smells of salt fish\nPerson Name, PMP\nAlma, Quebec, Canada",
+            "This closed car smells of salt fish",
         )
+        self.assertNotIn("Person Name", cleaned["text"])
+
+    def test_numbered_list_item_not_removed(self):
+        text = (
+            "1. Most engineers don\u2019t want to learn a whole new toolset for infrequent tasks.\n"
+            "1.\n"
+            "Infrastructure setup and provisioning are not an everyday core focus."
+        )
+        cleaned = remove_page_artifact_lines(text, 20)
+        self.assertIn("Most engineers", cleaned)
+        self.assertIn("Infrastructure setup", cleaned)
+
+    def test_strip_artifacts_preserves_numbered_paragraph(self):
+        page = Path(__file__).resolve().parent.parent / "test_data/platform-eng-excerpt/page20.txt"
+        text = page.read_text()
+        blk = Block(text=text, source={"page": 20})
+        cleaned = next(strip_artifacts([blk])).text
+        self.assertIn("Most engineers", cleaned)
+        self.assertIn("Infrastructure setup", cleaned)
+        self.assertNotIn("\n1.\n", cleaned)
+
+    def test_trailing_bullet_without_footer_context_preserved(self):
+        text = "Paragraph lead\n\n• Keep me"
+        cleaned = remove_page_artifact_lines(text, 0)
+        self.assertTrue(cleaned.endswith("Keep me"))
+        self.assertIn("Paragraph lead", cleaned)
 
 
 if __name__ == "__main__":

@@ -1,27 +1,84 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf-chunker"
+version = "0.1.0"
+description = "CLI pipeline to convert PDFs/EPUBs into JSONL for LoRA/RAG, with declarative passes."
+readme = {file = "README.md", content-type = "text/markdown"}
+authors = [{name = "Alex"}]
+requires-python = ">=3.10"
+license = {text = "MIT"}
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Text Processing",
+]
+dependencies = [
+  "typer[all]>=0.12",
+  "pydantic>=2.4",
+  "PyYAML>=6.0",
+  "structlog>=24.1",
+  "funcy>=2.0",
+  "pluggy>=1.5",
+  "ftfy>=6.3.1",
+  "langchain-text-splitters>=0.3.8",
+  "wordfreq>=3.1.1",
+  "haystack-ai>=2.15.1",
+  "textstat>=0.7.7",
+  "PyMuPDF>=1.26.3",
+  "python-dotenv>=1.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-regressions>=2.6",
+  "hypothesis>=6.108",
+  "ruff>=0.5.5",
+  "black>=24.8.0",
+  "mypy>=1.11.2",
+  "nox>=2024.4.15",
+  "types-PyYAML>=6.0.12",
+  "ebooklib>=0.19",
+  "beautifulsoup4>=4.12",
+]
+
+[project.scripts]
+pdf_chunker = "pdf_chunker.cli:app"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+fix = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
 [tool.black]
-line-length = 88
+line-length = 100
+target-version = ["py311"]
 
 [tool.mypy]
 python_version = "3.11"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+pretty = true
+show_error_codes = true
+allow_untyped_globals = true
+plugins = []
 
-[[tool.mypy.overrides]]
-module = ["fitz", "pymupdf4llm"]
-ignore_missing_imports = true
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
 
-[[tool.mypy.overrides]]
-module = ["yaml", "ebooklib", "langdetect"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = [
-    "pdf_chunker.list_detection",
-    "pdf_chunker.extraction_fallbacks",
-    "pdf_chunker.pdf_parsing",
-    "pdf_chunker.parsing",
-    "pdf_chunker.splitter",
-    "pdf_chunker.ai_enrichment",
-    "pdf_chunker.core",
-    "pdf_chunker.epub_parsing",
-]
-ignore_errors = true
-
+[tool.hatch.build.targets.wheel]
+packages = ["pdf_chunker"]

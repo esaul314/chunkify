@@ -2,7 +2,7 @@
 import sys
 
 sys.path.insert(0, ".")
-from pdf_chunker.extraction_fallbacks import _extract_with_pdfminer
+from pdf_chunker.fallbacks import _extract_with_pdfminer
 
 
 def test_page_exclusion_fallback():

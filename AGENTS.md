@@ -2,7 +2,75 @@
 
 This `AGENTS.md` suite provides comprehensive guidance to OpenAI Codex and other AI agents working across this modular Python library for processing large PDF and EPUB documents. The goal is to generate high-quality, semantically coherent document chunks enriched with rich metadata for downstream local LLM workflows, particularly Retrieval-Augmented Generation (RAG).
 
+> **Remember**: keep this file and its siblings in sync with the codebase. Update instructions whenever workflows, dependencies, or project structure change.
+> **Reminder**: whenever application functionality evolves, update all relevant `AGENTS.md` files with usage examples so agents stay in sync.
+
 ---
+
+### Stable Dependencies
+It is important to rely on well-supported libraries and keep them pinned to avoid accidental regressions. The following dependencies are considered stable and should be preserved:
+
+| Library           | Role / Rationale                                                               |
+| ----------------- | ------------------------------------------------------------------------------ |
+| **PyMuPDF**       | High‑quality PDF parsing; preserves layout and metadata.                       |
+| **pdfminer.six**  | Pure‑Python PDF text extractor—good secondary fallback.                        |
+| **pdftotext**     | Stable C‑based CLI; useful when PyMuPDF isn’t available.                       |
+| **lxml**          | Robust XML/HTML handling for EPUB or structural heuristics.                    |
+| **regex**         | Advanced regular‑expression engine used heavily in cleaning.                   |
+| **haystack** (ai) | Required for chunk validation scripts that depend on its formatting utilities. |
+
+### Environment Setup
+- `pip install -e .[dev]`
+- `pip install nox`  # not preinstalled in some environments
+- `apt-get install -y poppler-utils`  # provides `pdftotext`
+
+### Quick Usage
+- Convert PDF via library CLI:
+  ```bash
+  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
+  ```
+- After conversion, verify the output contains the sentinel phrase
+  "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
+  ensure pages near the end are not truncated.
+- Treat `platform-eng-excerpt.pdf` as the canonical smoke-test fixture:
+  - Run `python -m pdf_chunker.cli convert platform-eng-excerpt.pdf --spec pipeline.yaml --out platform-eng.jsonl --no-enrich`
+    (or the equivalent `pdf_chunker convert ... --no-metadata`) before declaring multiline list fixes complete.
+  - Open the generated JSONL and confirm that line 7 reads `ownership of operating the application's infrastructure`
+    with no embedded newline or stray capitalization.
+  - If the reproduction steps are unclear or the output disagrees with expectations, stop and request clarification
+    rather than guessing.
+- Or use the script wrapper:
+  ```bash
+  python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
+  ```
+- Trace a specific phrase through the pipeline to debug loss or duplication:
+  ```bash
+    pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
+    ```
+    Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
+
+### Debugging Directions
+- When JSONL lines begin mid-sentence or phrases like "Most engineers" repeat, inspect the `split_semantic` pass before focusing on downstream emission or deduplication.
+- Ensure `_get_split_fn` pipes `semantic_chunker` through `merge_conversational_chunks` prior to `iter_word_chunks` and `_soft_segments`; skipping this step truncates or duplicates sentences.
+- Use `pdf_chunker convert ... --trace <phrase>` or run `tests/emit_jsonl_coalesce_test.py::test_split_does_not_duplicate` to pinpoint which pass introduces the anomaly.
+- `emit_jsonl` deduplication can mask upstream defects, so validate semantic split outputs first to avoid chasing the wrong component.
+- Inline style spans are fully wired through extraction, cleaning, tracing, and chunk consumers. Review `docs/inline_style_schema.md` before modifying inline-style logic, and update the document whenever tags, heuristics, or telemetry change.
+
+## Pass Responsibilities
+
+<!-- BEGIN AUTO-PASSES -->
+| Pass | Module | Responsibility |
+| --- | --- | --- |
+| `ai_enrich` | `pdf_chunker.passes.ai_enrich` |  |
+| `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` |  |
+| `epub_parse` | `pdf_chunker.passes.epub_parse` |  |
+| `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` |  |
+| `heading_detect` | `pdf_chunker.passes.heading_detect` |  |
+| `list_detect` | `pdf_chunker.passes.list_detect` | List detection pass. |
+| `pdf_parse` | `pdf_chunker.passes.pdf_parse` |  |
+| `split_semantic` | `pdf_chunker.passes.split_semantic` | Split ``page_blocks`` into canonical ``chunks``. |
+| `text_clean` | `pdf_chunker.passes.text_clean` |  |
+<!-- END AUTO-PASSES -->
 
 ## Project Structure for OpenAI Codex Navigation
 
@@ -26,11 +94,17 @@ pdf_chunker/
 │       └── project_management.yaml # PM domain tags
 ├── pdf_chunker/
 │   ├── __init__.py                # Package initializer
-│   ├── ai_enrichment.py           # AI Pass: classification and YAML-based tagging
+│   ├── adapters/
+│   │   ├── __init__.py
+│   │   ├── ai_enrich.py           # LLM completion & tag config loading
+│   │   ├── io_pdf.py
+│   │   └── io_epub.py
+│   ├── ai_enrichment.py           # Shim delegating to ai_enrich pass and adapter
 │   ├── core.py                    # Orchestrates the three-pass pipeline
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
-│   ├── extraction_fallbacks.py    # Fallback strategies (pdftotext, pdfminer)
+│   ├── fallbacks.py              # Quality assessment and extraction fallbacks
+│   ├── language.py               # Default language utilities
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── list_detection.py          # Bullet and numbered list detection helpers
 │   ├── page_artifacts.py          # Header/footer detection helpers
@@ -42,6 +116,15 @@ pdf_chunker/
 │   ├── splitter.py                # Semantic Pass: chunk splitting and boundaries
 │   ├── text_cleaning.py           # Ligature, quote, control-character cleanup
 │   ├── text_processing.py         # Shared text manipulation utilities
+│   ├── passes/                    # Registered pipeline passes
+│   │   ├── __init__.py
+│   │   ├── extraction_fallback.py
+│   │   ├── heading_detect.py
+│   │   ├── list_detect.py
+│   │   ├── pdf_parse.py
+│   │   ├── split_semantic.py
+│   │   ├── ai_enrich.py
+│   │   └── text_clean.py
 │   └── utils.py                   # Metadata mapping and glue logic
 ├── scripts/
 │   ├── AGENTS.md                # Guidance for maintenance scripts
@@ -64,13 +147,16 @@ pdf_chunker/
 ├── tests/                        # Modular test architecture
     ├── AGENTS.md
     ├── conftest.py                 # Pytest fixtures and colored output
+    ├── ai_enrich_pass_test.py
     ├── ai_enrichment_test.py
     ├── artifact_block_test.py
     ├── bullet_list_test.py
     ├── chunk_pdf_integration_test.py
+    ├── convert_returns_rows_test.py
     ├── cross_page_sentence_test.py
     ├── env_utils_test.py
     ├── epub_spine_test.py
+    ├── extraction_fallback_pass_test.py
     ├── heading_boundary_test.py
     ├── heading_detection_test.py
     ├── hyphenation_test.py
@@ -98,6 +184,14 @@ pdf_chunker/
     ├── splitter_transform_test.py
     ├── test_text_processing.py
     ├── text_cleaning_transform_test.py
+    ├── golden/
+    │   ├── expected/
+    │   │   ├── epub.jsonl
+    │   │   └── pdf.jsonl
+    │   ├── samples/
+    │   │   ├── sample.epub.b64
+    │   │   └── sample.pdf.b64
+    │   └── test_conversion.py
     ├── utils/
     │   ├── AGENTS.md
     │   └── common.sh              # Shared test utilities and formatting
@@ -106,11 +200,12 @@ pdf_chunker/
     ├── README.md
     ├── hyphenation.b64
     ├── ligature.b64
+    ├── sample_chunks.jsonl
     ├── sample_test.pdf
     └── underscore.b64
 `````
 
-*PDF fixtures for ligatures, underscores, and hyphenation are stored as Base64 to avoid binary artifacts and decoded during tests.*
+*PDF fixtures for ligatures, underscores, hyphenation, and golden conversion samples are stored as Base64 to avoid binary artifacts and decoded during tests.*
 
 ---
 
@@ -124,7 +219,7 @@ All Python modules, scripts, and tests must be formatted with **Black**, linted 
 
 The project implements a robust **Three-Pass Pipeline**:
 
-1. **Structural Pass** (`parsing.py`, `heading_detection.py`, `extraction_fallbacks.py`)
+1. **Structural Pass** (`parsing.py`, `heading_detection.py`, `fallbacks.py`)
 
    * Extracts typographic and layout structure from PDF/EPUB
    * Hybrid approach: font-size and style heuristics + PyMuPDF4LLM cleaning
@@ -243,7 +338,7 @@ All CLI scripts follow these conventions:
 
 * Tests may not fully cover all critical features or edge cases
 * Some code descriptions in `AGENTS.md` may be outdated due to drift
-* **Footnote handling improved**: footnote lines detected and removed to prevent mid-sentence splits; detection tuned to avoid false positives
+* **Footnote handling improved**: footnote lines detected and appended to the end of their paragraph (e.g., `"Sentence.\nFootnote text."`) to prevent mid-sentence splits; inline footnote sentences with lost markers are relocated when they match common footnote starters; detection tuned to avoid false positives
 * **Header/footer cleanup**: headers and footers stripped when they appear at page breaks or within paragraphs, including trailing "|" fragments
 * **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- fixed.
 * **Bullet hyphen fix**: words split at line breaks within bullet lists now rejoin correctly without duplicating the bullet marker.
@@ -255,9 +350,19 @@ All CLI scripts follow these conventions:
 * **Cross-page paragraph splits fixed**: lines continuing after a page break are merged to prevent orphaned single-sentence paragraphs.
 * **Comma continuation fix**: same-page blocks ending with commas merge with following blocks even if the next starts with an uppercase word.
 * **Split-word merging guarded**: only joins across newlines or double spaces when the combined form is more common than its parts, avoiding merges like "no longer"→"nolonger".
+* **JSONL deduplication**: repeated sentences are trimmed during emission, even when the duplicate is followed by new material; run conversions with `--trace <phrase>` to verify expected lines survive.
+* **Dedup debug**: set `PDF_CHUNKER_DEDUP_DEBUG=1` to emit a warning for each dropped duplicate, a summary count, and a notice for any long sentences that still appear more than once after dedupe.
+* **Regression sweep status**: `nox -s tests` currently surfaces footer overlap, golden snapshot drift, heading merge whitespace, CLI flag wiring, and readability expectation regressions (see `PROJECT_BOOTSTRAP.md`'s “Regression Sweep — 2025-09-28” table for reproduction steps).
 * Possible regression where `text_cleaning.py` updated logic not applied
 * Overlap detection threshold may need tuning
 * Tag classification may not cover nested or multi-domain contexts
+
+### Streaming Extraction
+
+* `pdf_chunker.pdf_parsing.extract_text_blocks_from_pdf` now yields an iterator
+  of `Block` dataclasses for streaming consumption.
+* Use `extract_text_blocks_from_pdf_list` for the deprecated list-of-dicts
+  behaviour when eager materialisation is required.
 
 ---
 
@@ -275,6 +380,8 @@ Tests must:
 * Focus on input→output behavior
 * Use fixtures and shared utilities in ```tests/utils/common.sh`
 
+> **Note**: Some legacy regressions are still being worked through, but any tests that currently pass (e.g., numbered list preservation) are authoritative. Do **not** introduce new failures—rerun the relevant specs after modifying chunking or emission logic.
+
 ---
 
 ## Pull Request Guidelines for OpenAI Codex
@@ -284,19 +391,20 @@ Tests must:
 3. Do not mix formatting-only and logic changes
 4. Provide clear docstrings and inline comments where needed
 5. Reference relevant issues or defects in commit messages
+6. Use short-lived branches per task/turn; the parent branch should only be merged after the user reviews the turn’s changes.
 
 ---
 
 ## Programmatic Checks for OpenAI Codex
 
 ```bash
-black pdf_chunker/ scripts/ tests/
-flake8 pdf_chunker/ scripts/ tests/
-mypy pdf_chunker/
+pip install nox  # if missing
+nox -s lint
+nox -s typecheck
+nox -s tests
 bash scripts/validate_chunks.sh
 `````
 
 All checks must pass before merging.
 
 ---
-

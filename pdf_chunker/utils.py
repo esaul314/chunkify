@@ -1,16 +1,167 @@
 import logging
-import textstat  # type: ignore[import]
-from typing import Callable, Iterable
-from itertools import accumulate
-from haystack.dataclasses import Document
+import re
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from dataclasses import dataclass
+from functools import lru_cache, partial
+from itertools import accumulate
+from typing import Any, Callable, Iterable
+
+from haystack.dataclasses import Document
+
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
+)
+from pdf_chunker.passes.split_semantic_lists import _block_list_kind
 from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
 
+try:
+    from cmudict import dict as _load_cmudict
+except ImportError:  # pragma: no cover - optional dependency
+    _load_cmudict = None
+
+import pyphen
+
 
 logger = logging.getLogger(__name__)
+
+
+_READABILITY_LANG = "en_US"
+_RE_CONTRACTION_ENDINGS = r"[tsd]|ve|ll|re"
+_RE_NONCONTRACTION_APOSTROPHE = re.compile(
+    r"\'(?!" + _RE_CONTRACTION_ENDINGS + r")",
+    re.IGNORECASE,
+)
+_RE_WORD_CHARS = re.compile(r"[^\w\s']")
+_RE_SENTENCE = re.compile(r"\b[^.!?]+[.!?]*", re.UNICODE)
+
+
+def _resolve_bullet_strategy(
+    strategy: BulletHeuristicStrategy | None,
+) -> BulletHeuristicStrategy:
+    return strategy or default_bullet_strategy()
+
+
+@lru_cache(maxsize=None)
+def _get_pyphen(lang: str = _READABILITY_LANG) -> pyphen.Pyphen:
+    return pyphen.Pyphen(lang=lang)
+
+
+@lru_cache(maxsize=1)
+def _get_cmudict(lang: str = _READABILITY_LANG) -> dict[str, list[list[str]]] | None:
+    if _load_cmudict is None:
+        return None
+    try:
+        if lang.split("_", 1)[0] != "en":
+            return None
+        return _load_cmudict()
+    except Exception:  # pragma: no cover - cmudict import failure
+        return None
+
+
+def _remove_punctuation(text: str, *, rm_apostrophe: bool = False) -> str:
+    if rm_apostrophe:
+        return re.sub(r"[^\w\s]", "", text)
+    sanitized = _RE_NONCONTRACTION_APOSTROPHE.sub("", text)
+    return _RE_WORD_CHARS.sub("", sanitized)
+
+
+def _list_words(text: str, *, lowercase: bool = False) -> list[str]:
+    stripped = _remove_punctuation(text)
+    words = stripped.split()
+    return [w.lower() for w in words] if lowercase else words
+
+
+def _normalize_sentence_boundaries(text: str) -> str:
+    lines = text.splitlines()
+    if len(lines) <= 1:
+        return text
+
+    def _needs_sentence_break(current: str, nxt: str) -> bool:
+        current_stripped = current.strip()
+        next_stripped = nxt.lstrip()
+        if not current_stripped or not next_stripped:
+            return False
+        if current_stripped.endswith((".", "!", "?")):
+            return False
+        if _count_words(current_stripped) <= 2:
+            return False
+        first_char = next_stripped[0]
+        return first_char.isalpha() and first_char.isupper()
+
+    return "".join(
+        f"{line}{'. \n' if _needs_sentence_break(line, lines[index + 1]) else '\n'}"
+        if index < len(lines) - 1
+        else line
+        for index, line in enumerate(lines)
+    )
+
+
+def _count_words(text: str) -> int:
+    return len(_list_words(text))
+
+
+def _count_sentences(text: str) -> int:
+    if not text:
+        return 0
+    normalized = _normalize_sentence_boundaries(text)
+    sentences = _RE_SENTENCE.findall(normalized)
+    if not sentences:
+        return 0
+    ignore = sum(1 for sentence in sentences if _count_words(sentence) <= 2)
+    return max(1, len(sentences) - ignore)
+
+
+def _is_acronym(word: str) -> bool:
+    letters = [char for char in word if char.isalpha()]
+    return len(letters) > 1 and all(char.isupper() for char in letters)
+
+
+def _syllables_from_cmudict(
+    word: str, cmu_dict: dict[str, list[list[str]]] | None
+) -> int | None:
+    if not cmu_dict:
+        return None
+    pronunciations = cmu_dict.get(word.lower())
+    if not pronunciations:
+        return None
+    return sum(1 for phone in pronunciations[0] if phone[-1].isdigit())
+
+
+def _count_syllables(text: str, lang: str = _READABILITY_LANG) -> int:
+    words = _list_words(text)
+    if not words:
+        return 0
+    cmu_dict = _get_cmudict(lang)
+    hyphenator = _get_pyphen(lang)
+    return sum(
+        (
+            1
+            if _is_acronym(word)
+            else (
+                _syllables_from_cmudict(word, cmu_dict)
+                or len(hyphenator.positions(word.lower())) + 1
+            )
+        )
+        for word in words
+    )
+
+
+def _flesch_kincaid_grade(text: str, lang: str = _READABILITY_LANG) -> float:
+    word_count = _count_words(text)
+    if word_count == 0:
+        return 0.0
+    sentence_count = _count_sentences(text)
+    if sentence_count == 0:
+        return 0.0
+    syllable_count = _count_syllables(text, lang=lang)
+    if syllable_count == 0:
+        return 0.0
+    return (0.39 * (word_count / sentence_count)) + (
+        11.8 * (syllable_count / word_count)
+    ) - 15.59
 
 
 @dataclass(frozen=True)
@@ -22,7 +173,7 @@ class CharSpan:
 
 def _compute_readability(text: str) -> dict:
     """Computes readability scores and returns them as a dictionary matching canonical schema."""
-    flesch_kincaid = textstat.flesch_kincaid_grade(text)
+    flesch_kincaid = _flesch_kincaid_grade(text)
 
     # Map grade level to difficulty description
     if flesch_kincaid <= 6:
@@ -39,13 +190,82 @@ def _compute_readability(text: str) -> dict:
     return {"flesch_kincaid_grade": flesch_kincaid, "difficulty": difficulty}
 
 
-def _generate_chunk_id(filename: str, page: int, chunk_index: int) -> str:
+def _chunk_page_index(page: int | None) -> int:
+    """Return the zero-based page index used when constructing chunk IDs."""
+
+    if not page:
+        return 0
+    return max(page - 1, 0)
+
+
+def _generate_chunk_id(filename: str, page: int | None, chunk_index: int) -> str:
     """Generates a unique chunk ID using underscores as separators."""
-    # Ensure filename does not contain underscores that would break the pattern
-    # (but preserve the extension)
-    # If page is None or 0, use 0
-    page_part = page if page is not None else 0
+
+    page_part = _chunk_page_index(page)
     return f"{filename}_p{page_part}_c{chunk_index}"
+
+
+def _normalize_list_block(
+    block: dict,
+    *,
+    chunk_text: str,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> dict:
+    """Return ``block`` with inferred list metadata when list markers appear."""
+
+    if not isinstance(block, dict):
+        return block
+
+    block_type = block.get("type")
+    list_kind = block.get("list_kind")
+    if block_type == "list_item" and list_kind:
+        return block
+
+    def _mark(kind: str) -> dict:
+        payload = {**block, "type": "list_item", "list_kind": kind}
+        return payload
+
+    sources = tuple(
+        candidate
+        for candidate in block.get("source_blocks", ())
+        if isinstance(candidate, Mapping)
+    )
+    source_kinds = tuple(
+        kind for kind in (_block_list_kind(source) for source in sources) if kind
+    )
+    declared_kind = next(
+        (
+            kind
+            for kind in (list_kind, *source_kinds)
+            if isinstance(kind, str) and kind
+        ),
+        None,
+    )
+    if declared_kind:
+        return _mark(declared_kind)
+
+    def _lines(value: Any) -> tuple[str, ...]:
+        if not isinstance(value, str):
+            return tuple()
+        return tuple(line.lstrip() for line in value.splitlines() if line.strip())
+
+    text_candidates = (
+        _lines(block.get("text"))
+        + _lines(chunk_text)
+        + tuple(line for source in sources for line in _lines(source.get("text")))
+    )
+    if not text_candidates:
+        return block
+
+    heuristics = _resolve_bullet_strategy(strategy)
+
+    if any(heuristics.starts_with_bullet(line) for line in text_candidates):
+        return _mark("bullet")
+    if any(heuristics.starts_with_number(line) for line in text_candidates):
+        return _mark("numbered")
+    if any(source.get("type") == "list_item" for source in sources):
+        return {**block, "type": "list_item"}
+    return block
 
 
 def _truncate_chunk(text: str, max_chunk_size: int = 8000) -> str:
@@ -101,63 +321,170 @@ def _truncate_chunk(text: str, max_chunk_size: int = 8000) -> str:
     return truncated
 
 
+def _default_enrichment() -> dict[str, Any]:
+    """Return the canonical enrichment payload for unenriched chunks."""
+
+    return {"classification": "unclassified", "tags": []}
+
+
 def _enrich_chunk(
     text: str,
     perform_ai_enrichment: bool,
     enrichment_fn: Callable[[str], dict] | None,
 ) -> dict:
     """Perform optional AI enrichment using ``enrichment_fn``."""
+
     if not perform_ai_enrichment or enrichment_fn is None:
-        return {"classification": "disabled", "tags": []}
+        return _default_enrichment()
+
     try:
         result = enrichment_fn(text)
-        return {
-            "classification": result.get("classification", "unclassified"),
-            "tags": result.get("tags", []),
-        }
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("AI enrichment failed: %s", exc)
-        return {"classification": "error", "tags": []}
+        return _default_enrichment()
+
+    classification, tags = _resolve_utterance_fields(result)
+    return {"classification": classification, "tags": tags}
+
+
+def _normalize_tags(tags: Any) -> list[str]:
+    """Return a sanitized list of tag strings preserving their original order."""
+
+    if isinstance(tags, str) or not isinstance(tags, Sequence):
+        return []
+    return [tag.strip() for tag in tags if isinstance(tag, str) and tag.strip()]
+
+
+def _resolve_utterance_fields(
+    info: Mapping[str, Any] | str | None,
+) -> tuple[str, list[str]]:
+    """Normalize utterance metadata into classification and tag values."""
+
+    if isinstance(info, str):
+        cleaned = info.strip()
+        return (cleaned or "unclassified", [])
+    if not isinstance(info, Mapping):
+        return "unclassified", []
+
+    raw_classification = info.get("classification")
+    classification = (
+        raw_classification.strip()
+        if isinstance(raw_classification, str) and raw_classification.strip()
+        else "unclassified"
+    )
+    tags = _normalize_tags(info.get("tags"))
+    return classification, tags
 
 
 def _build_metadata(
     text: str,
     source_block: dict,
     chunk_index: int,
-    utterance_type: dict,
+    utterance_info: Mapping[str, Any] | str | None,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
 ) -> dict:
     """Construct metadata object for a chunk, propagating list metadata."""
-    filename = source_block.get("source", {}).get("filename", "Unknown")
-    page = source_block.get("source", {}).get("page", 0)
-    location = source_block.get("source", {}).get("location")
 
-    location_value = (
-        None if location is None and filename.lower().endswith(".pdf") else location
+    normalized = _normalize_list_block(
+        source_block,
+        chunk_text=text,
+        strategy=strategy,
     )
+    source = normalized.get("source", {}) if isinstance(normalized, dict) else {}
+
+    filename = source.get("filename", "Unknown")
+    page = source.get("page", 0)
+    location = source.get("location")
+
+    location_value = None if location is None and filename.lower().endswith(".pdf") else location
     page_value = page if isinstance(page, int) and page > 0 else None
+
+    utterance_type, tags = _resolve_utterance_fields(utterance_info)
 
     base_metadata = {
         "source": filename,
-        "chunk_id": _generate_chunk_id(
-            filename, page_value if page_value is not None else 0, chunk_index
-        ),
+        "chunk_id": _generate_chunk_id(filename, page_value, chunk_index),
         "page": page_value,
         "location": location_value,
-        "block_type": source_block.get("type", "paragraph"),
-        "language": source_block.get("language", "un"),
+        "block_type": normalized.get("type", "paragraph"),
+        "language": normalized.get("language", "un"),
         "readability": _compute_readability(text),
         "utterance_type": utterance_type,
+        "tags": tags,
         "importance": "medium",
     }
 
     list_metadata = (
-        {"list_kind": source_block["list_kind"]}
-        if source_block.get("type") == "list_item" and source_block.get("list_kind")
+        {"list_kind": normalized["list_kind"]}
+        if normalized.get("type") == "list_item" and normalized.get("list_kind")
         else {}
     )
 
     metadata = {**base_metadata, **list_metadata}
     return {k: v for k, v in metadata.items() if k != "location" or v is None or v}
+
+
+def _chunk_meta(chunk: Document) -> Mapping[str, Any]:
+    meta = getattr(chunk, "meta", None)
+    return meta if isinstance(meta, Mapping) else {}
+
+
+def _select_first(predicate: Callable[[Any], bool], *values: Any, default: Any = None) -> Any:
+    return next((value for value in values if predicate(value)), default)
+
+
+def _fallback_source_block(chunk: Document) -> dict:
+    meta = _chunk_meta(chunk)
+    source_meta = meta.get("source", {})
+    source_map = source_meta if isinstance(source_meta, Mapping) else {}
+
+    filename = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        source_map.get("filename"),
+        meta.get("filename"),
+        meta.get("source") if isinstance(meta.get("source"), str) else None,
+        default="unknown",
+    )
+    page = _select_first(
+        lambda value: isinstance(value, int) and value > 0,
+        source_map.get("page"),
+        meta.get("page"),
+    )
+    location = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        source_map.get("location"),
+        meta.get("location"),
+    )
+    block_type = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        meta.get("block_type"),
+        source_map.get("block_type"),
+        default="paragraph",
+    )
+    language = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        meta.get("language"),
+        source_map.get("language"),
+        default="un",
+    )
+    list_kind = _select_first(
+        lambda value: isinstance(value, str) and bool(value.strip()),
+        meta.get("list_kind"),
+        source_map.get("list_kind"),
+    )
+
+    fallback_source = {
+        "type": block_type,
+        "language": language,
+        "source": {
+            "filename": filename,
+            "page": page,
+            "location": location,
+        },
+    }
+
+    return {**fallback_source, **({"list_kind": list_kind} if list_kind else {})}
 
 
 def process_chunk(
@@ -169,12 +496,18 @@ def process_chunk(
     enrichment_fn: Callable[[str], dict] | None,
     char_map: dict,
     original_blocks: list[dict],
+    bullet_strategy: BulletHeuristicStrategy | None = None,
 ) -> dict | None:
-    """Process a single chunk and return enriched metadata if requested."""
+    """Process a single chunk, optionally generating metadata.
+
+    When ``generate_metadata`` is ``False`` only the cleaned ``text`` field is
+    returned.
+    """
     logger.debug("process_chunk() ENTRY - chunk %s", chunk_index)
 
-    final_text = _truncate_chunk((chunk.content or "").strip())
-    final_text = _fix_split_words(_fix_double_newlines(final_text))
+    final_text = _fix_split_words(
+        _fix_double_newlines(_truncate_chunk((chunk.content or "").strip()))
+    )
     if not final_text:
         logger.debug("process_chunk() EXIT - chunk %s - EMPTY CONTENT", chunk_index)
         return None
@@ -188,18 +521,20 @@ def process_chunk(
 
     source_block = _find_source_block(chunk, char_map, original_blocks)
     if not source_block:
-        logger.debug(
-            "process_chunk() EXIT - chunk %s - NO SOURCE BLOCK FOUND",
+        logger.warning(
+            "process_chunk() FALLBACK - chunk %s (%s) emitted with placeholder metadata",
             chunk_index,
+            getattr(chunk, "id", "unknown"),
         )
-        return None
+        source_block = _fallback_source_block(chunk)
 
-    utterance_type = _enrich_chunk(final_text, perform_ai_enrichment, enrichment_fn)
+    utterance_info = _enrich_chunk(final_text, perform_ai_enrichment, enrichment_fn)
     metadata = _build_metadata(
         final_text,
         source_block,
         chunk_index,
-        utterance_type,
+        utterance_info,
+        strategy=bullet_strategy,
     )
 
     result = {"text": final_text, "metadata": metadata}
@@ -244,7 +579,7 @@ def format_chunks_with_metadata(
     }
     logger.debug("Original blocks contain pages: %s", sorted(original_pages))
 
-    char_map = _build_char_map(original_blocks)
+    char_map = _build_char_map(original_blocks) if generate_metadata else {"char_positions": ()}
 
     processor = partial(
         process_chunk,
@@ -252,7 +587,7 @@ def format_chunks_with_metadata(
         perform_ai_enrichment=perform_ai_enrichment,
         enrichment_fn=enrichment_fn,
         char_map=char_map,
-        original_blocks=original_blocks,
+        original_blocks=original_blocks if generate_metadata else [],
     )
 
     if perform_ai_enrichment:
@@ -383,9 +718,7 @@ def _find_source_block(
 
     chunk_text = chunk.content.strip()
     chunk_start = chunk_text[:50].replace("\n", " ").strip()
-    logger.debug(
-        "Looking for source block for chunk starting with: '%s...'", chunk_start
-    )
+    logger.debug("Looking for source block for chunk starting with: '%s...'", chunk_start)
 
     match, label = _match_source_block(chunk_start, original_blocks, matchers)
     if match:

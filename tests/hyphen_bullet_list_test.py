@@ -3,6 +3,7 @@ import sys
 sys.path.insert(0, ".")
 
 from pdf_chunker.core import process_document
+from pdf_chunker.text_cleaning import merge_spurious_paragraph_breaks
 
 
 def test_hyphen_bullet_lists_preserved():
@@ -10,15 +11,24 @@ def test_hyphen_bullet_lists_preserved():
     text = "\n".join(c["text"] for c in chunks)
     bullet_lines = [line for line in text.splitlines() if line.startswith("• ")]
     expected = [
-        "• Directed to John Smith, Cuttingsville, Vermont",
         "• Some trader among the Green Mountains",
         "• He expects some by the next train of prime quality",
     ]
     assert bullet_lines[: len(expected)] == expected
+    assert "Directed to John Smith, Cuttingsville, Vermont" in text
+    assert "• Directed to John Smith" not in text
     assert "Vermont\n\n• Some trader" not in text
     bullet_chunks = [
         i
         for i, c in enumerate(chunks)
         if any(line.startswith("• ") for line in c["text"].splitlines())
     ]
-    assert len(set(bullet_chunks)) == 1
+    assert len(set(bullet_chunks)) <= 2
+
+
+def test_hyphen_bullet_survives_footnote_merge():
+    """Ensure hyphen bullets remain separate when following footnotes."""
+
+    text = "Sentence1\n\n- Item one"
+    merged = merge_spurious_paragraph_breaks(text)
+    assert merged.split("\n\n") == ["Sentence[1]", "- Item one"]

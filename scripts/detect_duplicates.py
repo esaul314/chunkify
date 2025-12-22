@@ -90,9 +90,7 @@ def detect_duplications(
                         "chunk_index": i,
                         "chunk_line": chunk.get("_line_number", i + 1),
                         "window_index": window_idx,
-                        "text_preview": (
-                            window[:100] + "..." if len(window) > 100 else window
-                        ),
+                        "text_preview": (window[:100] + "..." if len(window) > 100 else window),
                     }
                 )
 
@@ -101,9 +99,7 @@ def detect_duplications(
         if len(chunk_list) > 1:
             # Multiple chunks contain this window - potential duplication
             duplication = {
-                "duplicated_text": (
-                    window[:200] + "..." if len(window) > 200 else window
-                ),
+                "duplicated_text": (window[:200] + "..." if len(window) > 200 else window),
                 "word_count": len(window.split()),
                 "occurrences": [],
             }
@@ -131,7 +127,21 @@ def detect_duplications(
     # Sort by word count (largest duplications first)
     duplications.sort(key=lambda x: x["word_count"], reverse=True)
 
-    return duplications
+    def _is_expected_overlap(entry: Dict) -> bool:
+        occ = entry["occurrences"]
+        if len(occ) != 2:
+            return False
+        a, b = occ
+        if abs(a["chunk_index"] - b["chunk_index"]) != 1:
+            return False
+        first, second = (a, b) if a["chunk_index"] < b["chunk_index"] else (b, a)
+        first_len = len(chunks[first["chunk_index"]]["text"].split())
+        return (
+            first["window_position"] == first_len - window_size
+            and second["window_position"] == 0
+        )
+
+    return [dup for dup in duplications if not _is_expected_overlap(dup)]
 
 
 def analyze_chunk_boundaries(chunks: List[Dict]) -> Dict:
@@ -155,9 +165,7 @@ def analyze_chunk_boundaries(chunks: List[Dict]) -> Dict:
         # Look for overlap at boundaries
         max_check = min(20, len(current_words), len(next_words))
 
-        for overlap_size in range(
-            max_check, 4, -1
-        ):  # Check from large to small overlaps
+        for overlap_size in range(max_check, 4, -1):  # Check from large to small overlaps
             current_end = " ".join(current_words[-overlap_size:])
             next_start = " ".join(next_words[:overlap_size])
 
@@ -169,9 +177,7 @@ def analyze_chunk_boundaries(chunks: List[Dict]) -> Dict:
                         "chunk1_id": current_chunk.get("metadata", {}).get(
                             "chunk_id", f"chunk_{i}"
                         ),
-                        "chunk2_id": next_chunk.get("metadata", {}).get(
-                            "chunk_id", f"chunk_{i+1}"
-                        ),
+                        "chunk2_id": next_chunk.get("metadata", {}).get("chunk_id", f"chunk_{i+1}"),
                         "overlap_words": overlap_size,
                         "overlapping_text": current_end,
                         "issue_type": "boundary_overlap",

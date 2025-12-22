@@ -8,6 +8,8 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 ## Coverage
 - `pdf_extraction_test.py`: Extractor accuracy and fallback thresholds
 - `ai_enrichment_test.py`: Classification correctness and tag injection
+- `ai_enrich_pass_test.py`: Pass-level enrichment and metadata injection
+- `convert_returns_rows_test.py`: `convert` yields rows for chunk dict payloads
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
@@ -19,9 +21,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `footer_artifact_test.py`: Regression for footer and sub-footer removal and multi-page preservation
 - `artifact_block_test.py`: Numeric margin block detection conservatism
 - `scripts_cli_test.py`: CLI invocation sanity checks
+- `test_conversion_epub_cli.py`: CLI EPUB conversion parity with golden output
 - `splitter_transform_test.py`: Chunk splitting of cleaned text artifacts
 - `text_cleaning_transform_test.py`: Ligature, underscore, and hyphenation normalization
 - Duplicate detection thresholds (via `detect_duplicates.py`).
+- `parity/test_page_count_regression.py`: Page count parity with sentinel phrase check and TOC dot-leader removal
+- `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters
 
 ## AI Agent Guidance
 - Use clear input/output examples
@@ -43,6 +48,7 @@ Run repository formatters before committing test changes:
 black tests/
 flake8 tests/
 mypy pdf_chunker/
+nox -s tests  # requires `pip install nox`
 ```
 
 ## Known Issues
@@ -50,6 +56,8 @@ mypy pdf_chunker/
 - Some modules (e.g. `text_cleaning`) are not tested against known real-world PDF defects
 - Some custom PDF edge-case tests missing.
 - Real-world PDF/EPUB defects may not be simulated.
+
+Note: tests are not likely to get stuck, but they might take a long time to run. It's better to wait.
 ```
 
 ---

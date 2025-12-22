@@ -18,6 +18,20 @@ venv
 *.bak
 *.ipynb
 *.log
+.~lock.*
+summary.last
+comparison_report.json
+long_text_quality_comparison.json
+page_boundary_comparison_sample_book.json
+text_quality_comparison.json
+validation_report.json
+AGENTS-GENERIC.md
+README_libs.ai
+long_book.pdf
+sample.pdf
+sample_book*.pdf
+test_data/sample_test.epub
+test_data/sample_test_pdf_info.txt
 *pycache*
 cert.pem
 key.pem
@@ -46,6 +60,9 @@ wandb
 __pycache__/
 *.py[codz]
 *$py.class
+artifacts/
+run_report.json
+data/
 
 # C extensions
 *.so
@@ -249,3 +266,4 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+!test_data/sample_chunks.jsonl

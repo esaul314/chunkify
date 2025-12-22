@@ -17,7 +17,11 @@ def test_hyphenation_fix_with_pymupdf4llm(force_pymupdf4llm):
     assert all(word in cleaned for word in ("container", "specialists", "management"))
     assert all(
         broken not in cleaned
-        for broken in ("con- tainer", "special- ists", "man- agement")
+        for broken in (
+            "con- tainer",
+            "special- ists",
+            "man- agement",
+        )
     )
 
 
@@ -41,6 +45,10 @@ def test_clean_block_hyphen_fix(block, expected):
             "We sell business-critical, off-the-shelf solutions.",
             ("business-critical", "off-the-shelf"),
         ),
+        (
+            "The release schedule is business-\u00adcritical.",
+            ("business-critical",),
+        ),
     ],
 )
 def test_preserve_existing_hyphens(text, expected):
@@ -53,3 +61,31 @@ def test_bullet_hyphen_continuation():
     cleaned = clean_text(text)
     assert "ambiguous" in cleaned
     assert cleaned.count("*") == 1
+
+
+def test_join_preserves_double_letters():
+    text = "bal-\n loon"
+    assert clean_text(text) == "balloon"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("business-\ncritical systems", "business-critical systems"),
+        ("business\u00ad\ncritical systems", "businesscritical systems"),
+    ],
+)
+def test_crossline_hyphen_preserved(text, expected):
+    assert clean_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("provision-\ning", "provisioning"),
+        ("through-\nOut", "throughout"),
+        ("through\u2010 Out", "throughout"),
+    ],
+)
+def test_crossline_spurious_hyphen_removed(text, expected):
+    assert clean_text(text) == expected

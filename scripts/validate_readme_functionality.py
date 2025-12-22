@@ -52,9 +52,7 @@ class READMEValidator:
         self.results.append(result)
 
         # Print immediate feedback
-        status_symbol = {"PASS": "✓", "FAIL": "✗", "MISSING": "?", "PARTIAL": "~"}.get(
-            status, "?"
-        )
+        status_symbol = {"PASS": "✓", "FAIL": "✗", "MISSING": "?", "PARTIAL": "~"}.get(status, "?")
 
         print(f"{status_symbol} {feature}: {status}")
         if details:
@@ -113,34 +111,22 @@ class READMEValidator:
 
             # Test availability check
             available = is_pymupdf4llm_available()
-            self.log_result(
-                "PyMuPDF4LLM availability check", "PASS", f"Available: {available}"
-            )
+            self.log_result("PyMuPDF4LLM availability check", "PASS", f"Available: {available}")
 
             # Test extraction function exists
             if hasattr(extract_with_pymupdf4llm, "__call__"):
-                self.log_result(
-                    "PyMuPDF4LLM extract function", "PASS", "Function is callable"
-                )
+                self.log_result("PyMuPDF4LLM extract function", "PASS", "Function is callable")
             else:
-                self.log_result(
-                    "PyMuPDF4LLM extract function", "FAIL", "Function not callable"
-                )
+                self.log_result("PyMuPDF4LLM extract function", "FAIL", "Function not callable")
 
             # Test cleaning function exists
             if hasattr(clean_text_with_pymupdf4llm, "__call__"):
-                self.log_result(
-                    "PyMuPDF4LLM clean function", "PASS", "Function is callable"
-                )
+                self.log_result("PyMuPDF4LLM clean function", "PASS", "Function is callable")
             else:
-                self.log_result(
-                    "PyMuPDF4LLM clean function", "FAIL", "Function not callable"
-                )
+                self.log_result("PyMuPDF4LLM clean function", "FAIL", "Function not callable")
 
         except ImportError as e:
-            self.log_result(
-                "PyMuPDF4LLM integration", "MISSING", "Module not found", str(e)
-            )
+            self.log_result("PyMuPDF4LLM integration", "MISSING", "Module not found", str(e))
         except Exception as e:
             self.log_result("PyMuPDF4LLM integration", "FAIL", "Import error", str(e))
 
@@ -152,8 +138,8 @@ class READMEValidator:
             from pdf_chunker.pdf_parsing import (
                 extract_text_blocks_from_pdf,
                 extract_blocks_from_page,
-                merge_continuation_blocks,
             )
+            from pdf_chunker.pdf_blocks import merge_continuation_blocks
 
             # Check function signatures and callability
             functions = [
@@ -164,18 +150,12 @@ class READMEValidator:
 
             for func_name, func in functions:
                 if hasattr(func, "__call__"):
-                    self.log_result(
-                        f"PDF function {func_name}", "PASS", "Function is callable"
-                    )
+                    self.log_result(f"PDF function {func_name}", "PASS", "Function is callable")
                 else:
-                    self.log_result(
-                        f"PDF function {func_name}", "FAIL", "Function not callable"
-                    )
+                    self.log_result(f"PDF function {func_name}", "FAIL", "Function not callable")
 
         except ImportError as e:
-            self.log_result(
-                "PDF processing functions", "MISSING", "Module not found", str(e)
-            )
+            self.log_result("PDF processing functions", "MISSING", "Module not found", str(e))
         except Exception as e:
             self.log_result("PDF processing functions", "FAIL", "Import error", str(e))
 
@@ -199,22 +179,16 @@ class READMEValidator:
 
             for func_name, func in functions:
                 if hasattr(func, "__call__"):
-                    self.log_result(
-                        f"EPUB function {func_name}", "PASS", "Function is callable"
-                    )
+                    self.log_result(f"EPUB function {func_name}", "PASS", "Function is callable")
                 else:
-                    self.log_result(
-                        f"EPUB function {func_name}", "FAIL", "Function not callable"
-                    )
+                    self.log_result(f"EPUB function {func_name}", "FAIL", "Function not callable")
 
             # Check for spine discovery functionality
             try:
                 import inspect
 
                 sig = inspect.signature(list_epub_spines)
-                self.log_result(
-                    "EPUB spine discovery", "PASS", f"Function signature: {sig}"
-                )
+                self.log_result("EPUB spine discovery", "PASS", f"Function signature: {sig}")
             except Exception as e:
                 self.log_result(
                     "EPUB spine discovery",
@@ -224,9 +198,7 @@ class READMEValidator:
                 )
 
         except ImportError as e:
-            self.log_result(
-                "EPUB processing functions", "MISSING", "Module not found", str(e)
-            )
+            self.log_result("EPUB processing functions", "MISSING", "Module not found", str(e))
         except Exception as e:
             self.log_result("EPUB processing functions", "FAIL", "Import error", str(e))
 
@@ -250,22 +222,16 @@ class READMEValidator:
 
             for func_name, func in functions:
                 if hasattr(func, "__call__"):
-                    self.log_result(
-                        f"AI function {func_name}", "PASS", "Function is callable"
-                    )
+                    self.log_result(f"AI function {func_name}", "PASS", "Function is callable")
                 else:
-                    self.log_result(
-                        f"AI function {func_name}", "FAIL", "Function not callable"
-                    )
+                    self.log_result(f"AI function {func_name}", "FAIL", "Function not callable")
 
             # Check for tag configuration loading
             try:
                 import inspect
 
                 sig = inspect.signature(_load_tag_configs)
-                self.log_result(
-                    "Tag configuration loading", "PASS", f"Function signature: {sig}"
-                )
+                self.log_result("Tag configuration loading", "PASS", f"Function signature: {sig}")
             except Exception as e:
                 self.log_result(
                     "Tag configuration loading",
@@ -275,9 +241,7 @@ class READMEValidator:
                 )
 
         except ImportError as e:
-            self.log_result(
-                "AI enrichment functions", "MISSING", "Module not found", str(e)
-            )
+            self.log_result("AI enrichment functions", "MISSING", "Module not found", str(e))
         except Exception as e:
             self.log_result("AI enrichment functions", "FAIL", "Import error", str(e))
 
@@ -303,18 +267,12 @@ class READMEValidator:
 
             for func_name, func in cleaning_functions:
                 if hasattr(func, "__call__"):
-                    self.log_result(
-                        f"Text cleaning {func_name}", "PASS", "Function is callable"
-                    )
+                    self.log_result(f"Text cleaning {func_name}", "PASS", "Function is callable")
                 else:
-                    self.log_result(
-                        f"Text cleaning {func_name}", "FAIL", "Function not callable"
-                    )
+                    self.log_result(f"Text cleaning {func_name}", "FAIL", "Function not callable")
 
         except ImportError as e:
-            self.log_result(
-                "Text cleaning functions", "MISSING", "Module not found", str(e)
-            )
+            self.log_result("Text cleaning functions", "MISSING", "Module not found", str(e))
         except Exception as e:
             self.log_result("Text cleaning functions", "FAIL", "Import error", str(e))
 
@@ -334,18 +292,12 @@ class READMEValidator:
 
             for func_name, func in processing_functions:
                 if hasattr(func, "__call__"):
-                    self.log_result(
-                        f"Text processing {func_name}", "PASS", "Function is callable"
-                    )
+                    self.log_result(f"Text processing {func_name}", "PASS", "Function is callable")
                 else:
-                    self.log_result(
-                        f"Text processing {func_name}", "FAIL", "Function not callable"
-                    )
+                    self.log_result(f"Text processing {func_name}", "FAIL", "Function not callable")
 
         except ImportError as e:
-            self.log_result(
-                "Text processing functions", "MISSING", "Module not found", str(e)
-            )
+            self.log_result("Text processing functions", "MISSING", "Module not found", str(e))
         except Exception as e:
             self.log_result("Text processing functions", "FAIL", "Import error", str(e))
 
@@ -368,13 +320,9 @@ class READMEValidator:
 
             for func_name, func in chunking_functions:
                 if hasattr(func, "__call__"):
-                    self.log_result(
-                        f"Chunking {func_name}", "PASS", "Function is callable"
-                    )
+                    self.log_result(f"Chunking {func_name}", "PASS", "Function is callable")
                 else:
-                    self.log_result(
-                        f"Chunking {func_name}", "FAIL", "Function not callable"
-                    )
+                    self.log_result(f"Chunking {func_name}", "FAIL", "Function not callable")
 
         except ImportError as e:
             self.log_result("Chunking functions", "MISSING", "Module not found", str(e))
@@ -400,13 +348,9 @@ class READMEValidator:
 
             for func_name, func in utility_functions:
                 if hasattr(func, "__call__"):
-                    self.log_result(
-                        f"Utility {func_name}", "PASS", "Function is callable"
-                    )
+                    self.log_result(f"Utility {func_name}", "PASS", "Function is callable")
                 else:
-                    self.log_result(
-                        f"Utility {func_name}", "FAIL", "Function not callable"
-                    )
+                    self.log_result(f"Utility {func_name}", "FAIL", "Function not callable")
 
         except ImportError as e:
             self.log_result("Utility functions", "MISSING", "Module not found", str(e))
@@ -421,9 +365,7 @@ class READMEValidator:
             from pdf_chunker.core import process_document
 
             if hasattr(process_document, "__call__"):
-                self.log_result(
-                    "Core process_document function", "PASS", "Function is callable"
-                )
+                self.log_result("Core process_document function", "PASS", "Function is callable")
 
                 # Check function signature for expected parameters
                 import inspect
@@ -442,13 +384,9 @@ class READMEValidator:
                         f"Missing expected params: {missing_params}, Found: {params}",
                     )
                 else:
-                    self.log_result(
-                        "Core function parameters", "PASS", f"Parameters: {params}"
-                    )
+                    self.log_result("Core function parameters", "PASS", f"Parameters: {params}")
             else:
-                self.log_result(
-                    "Core process_document function", "FAIL", "Function not callable"
-                )
+                self.log_result("Core process_document function", "FAIL", "Function not callable")
 
         except ImportError as e:
             self.log_result("Core processing", "MISSING", "Module not found", str(e))
@@ -485,9 +423,7 @@ class READMEValidator:
                 )
 
         except Exception as e:
-            self.log_result(
-                "Page exclusion functionality", "FAIL", "Could not validate", str(e)
-            )
+            self.log_result("Page exclusion functionality", "FAIL", "Could not validate", str(e))
 
     def validate_chunk_quality(self):
         """Validate chunk quality validation and size limits"""
@@ -496,9 +432,7 @@ class READMEValidator:
         # Check for existing chunk quality validation script
         quality_script = self.project_root / "scripts" / "validate_chunk_quality.py"
         if quality_script.exists():
-            self.log_result(
-                "Chunk quality script", "PASS", f"Found at {quality_script}"
-            )
+            self.log_result("Chunk quality script", "PASS", f"Found at {quality_script}")
         else:
             self.log_result("Chunk quality script", "MISSING", "Script not found")
 
@@ -524,9 +458,7 @@ class READMEValidator:
             # Check for tags directory
             tags_dir = config_dir / "tags"
             if tags_dir.exists():
-                self.log_result(
-                    "Tags configuration directory", "PASS", f"Found at {tags_dir}"
-                )
+                self.log_result("Tags configuration directory", "PASS", f"Found at {tags_dir}")
 
                 # Check for any tag files
                 tag_files = list(tags_dir.glob("*.yaml")) + list(tags_dir.glob("*.yml"))
@@ -537,13 +469,9 @@ class READMEValidator:
                         f"Found {len(tag_files)} files",
                     )
                 else:
-                    self.log_result(
-                        "Tag configuration files", "MISSING", "No YAML tag files found"
-                    )
+                    self.log_result("Tag configuration files", "MISSING", "No YAML tag files found")
             else:
-                self.log_result(
-                    "Tags configuration directory", "MISSING", "Directory not found"
-                )
+                self.log_result("Tags configuration directory", "MISSING", "Directory not found")
         else:
             self.log_result("Configuration directory", "MISSING", "Directory not found")
 
@@ -579,9 +507,7 @@ class READMEValidator:
         # Check requirements.txt
         requirements_file = self.project_root / "requirements.txt"
         if requirements_file.exists():
-            self.log_result(
-                "Requirements file", "PASS", f"Found at {requirements_file}"
-            )
+            self.log_result("Requirements file", "PASS", f"Found at {requirements_file}")
 
             # Read and check for key dependencies mentioned in README
             try:
@@ -599,9 +525,7 @@ class READMEValidator:
                         missing_deps.append(dep)
 
                 if found_deps:
-                    self.log_result(
-                        "Key dependencies found", "PASS", f"Found: {found_deps}"
-                    )
+                    self.log_result("Key dependencies found", "PASS", f"Found: {found_deps}")
                 if missing_deps:
                     self.log_result(
                         "Key dependencies missing",
@@ -643,16 +567,12 @@ class READMEValidator:
             epub_files = list(self.test_data_dir.glob("*.epub"))
 
         if pdf_files:
-            self.log_result(
-                "Test PDF files", "PASS", f"Found {len(pdf_files)} PDF files"
-            )
+            self.log_result("Test PDF files", "PASS", f"Found {len(pdf_files)} PDF files")
         else:
             self.log_result("Test PDF files", "MISSING", "No PDF test files found")
 
         if epub_files:
-            self.log_result(
-                "Test EPUB files", "PASS", f"Found {len(epub_files)} EPUB files"
-            )
+            self.log_result("Test EPUB files", "PASS", f"Found {len(epub_files)} EPUB files")
         else:
             self.log_result("Test EPUB files", "MISSING", "No EPUB test files found")
 
@@ -678,9 +598,7 @@ class READMEValidator:
                     )
 
             except Exception as e:
-                self.log_result(
-                    "Core processing test", "FAIL", "Could not set up test", str(e)
-                )
+                self.log_result("Core processing test", "FAIL", "Could not set up test", str(e))
 
     def generate_report(self):
         """Generate a comprehensive validation report"""
