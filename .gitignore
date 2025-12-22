@@ -25,6 +25,13 @@ long_text_quality_comparison.json
 page_boundary_comparison_sample_book.json
 text_quality_comparison.json
 validation_report.json
+AGENTS-GENERIC.md
+README_libs.ai
+long_book.pdf
+sample.pdf
+sample_book*.pdf
+test_data/sample_test.epub
+test_data/sample_test_pdf_info.txt
 *pycache*
 cert.pem
 key.pem
