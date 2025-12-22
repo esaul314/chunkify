@@ -52,7 +52,7 @@ def _compat_chunk_id(chunk_id: str) -> str:
     if not match:
         return chunk_id
     page = max(int(match.group(1)) - 1, 0)
-    return f"{chunk_id[: match.start(1)]}{page}{chunk_id[match.end(1):]}"
+    return f"{chunk_id[: match.start(1)]}{page}{chunk_id[match.end(1) :]}"
 
 
 def _max_chars() -> int:
@@ -447,10 +447,13 @@ def _split(
             raw, leftover = _truncate_with_remainder(source, limit)
             suffix = f"\n{rem}" if rem else ""
             rest = f"{leftover}{suffix}"
-        raw, rest = _collapse_list_gaps(
-            raw,
-            is_list_line=predicate,
-        ), _collapse_list_gaps(rest, is_list_line=predicate)
+        raw, rest = (
+            _collapse_list_gaps(
+                raw,
+                is_list_line=predicate,
+            ),
+            _collapse_list_gaps(rest, is_list_line=predicate),
+        )
         raw, rest = _rebalance_lists(raw, rest, is_list_line=predicate)
         raw_intro_line = _first_non_empty_line(raw)
         rest_first_line = _first_non_empty_line(rest)
