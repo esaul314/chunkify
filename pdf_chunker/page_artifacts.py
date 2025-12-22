@@ -53,6 +53,9 @@ def _looks_like_footnote(text: str) -> bool:
 
 
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
+_INLINE_FOOTNOTE_SENTENCE_RE = re.compile(
+    r"(?<=[a-z0-9])\s+(?P<footnote>(?:For|See|As|In|This|Other|Years|We(?:'ll|\s+(?:will|would)))\b.+)$"
+)
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
 _PHONE_RE = re.compile(r"\+?\d[\d()\s.-]{5,}\d")
 _CONTACT_KEYWORDS = ("contact", "tel", "phone", "fax", "email")
@@ -1149,6 +1152,21 @@ def _remove_inline_footnote_prefix(line: str) -> tuple[str, Optional[str]]:
     return "", footnote or None
 
 
+def _split_inline_footnote_sentence(line: str) -> tuple[str, Optional[str]]:
+    """Split inline footnote sentences when markers are lost."""
+
+    match = _INLINE_FOOTNOTE_SENTENCE_RE.search(line)
+    if not match:
+        return line, None
+    footnote = match.group("footnote").strip()
+    if not footnote or len(footnote.split()) < 4:
+        return line, None
+    prefix = line[: match.start()].rstrip()
+    if not prefix:
+        return line, None
+    return prefix, footnote
+
+
 def _normalize_footnote_markers(text: str) -> str:
     """Replace trailing footnote numbers with bracketed form.
 
@@ -1406,6 +1424,14 @@ def remove_page_artifact_lines(
             else _strip_page_header_prefix(ln)
         )
         normalized, footnote = _remove_inline_footnote_prefix(normalized)
+        if normalized and not footnote:
+            normalized, inline_footnote = _split_inline_footnote_sentence(normalized)
+            if inline_footnote:
+                footnote = inline_footnote
+                logger.debug(
+                    "remove_page_artifact_lines split inline footnote sentence: %s",
+                    inline_footnote[:30],
+                )
         if footnote:
             logger.debug(
                 "remove_page_artifact_lines queued inline footnote: %s",

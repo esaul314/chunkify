@@ -86,6 +86,20 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(text, 2)
         self.assertEqual(cleaned, "Can exist.[3] This is next")
 
+    def test_inline_footnote_sentence_relocated_when_anchor_present(self):
+        text = (
+            "Whether or not they've called their teams1 We'll sometimes call these teams "
+            'your "users" or "customers," if it makes more sense in the context.\n'
+            "efforts platform engineering, they embody the mindset."
+        )
+        cleaned = remove_page_artifact_lines(text, 9)
+        expected = (
+            "Whether or not they've called their teams1\n"
+            "efforts platform engineering, they embody the mindset.\n"
+            'We\'ll sometimes call these teams your "users" or "customers," if it makes more sense in the context.'
+        )
+        self.assertEqual(cleaned, expected)
+
     def test_superscript_footnote_marker(self):
         text = "Can exist.\u00b3\n\u00b3 Footnote text.\n\nThis is next"
         cleaned = remove_page_artifact_lines(text, 2)
