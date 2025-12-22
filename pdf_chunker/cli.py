@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import argparse
-import json
-from pathlib import Path
-from collections.abc import Iterator, Mapping
-from typing import Any, Callable, cast
-
 import importlib.util as ilu
-from importlib import import_module
+import json
+import os
 import sys
 import types
+from collections.abc import Callable, Iterator, Mapping
+from importlib import import_module
+from pathlib import Path
+from typing import Any, cast
+
+print(f"DEBUG: cli.py running from {__file__}", file=sys.stderr)
 
 try:  # pragma: no cover - exercised via CLI tests
     typer = cast(Any, import_module("typer"))
@@ -65,7 +67,15 @@ def _run_convert(
     spec: str,
     verbose: bool,
     trace: str | None,
+    max_chars: int | None,
 ) -> None:
+    if max_chars:
+        os.environ["PDF_CHUNKER_JSONL_MAX_CHARS"] = str(max_chars)
+        if chunk_size is None:
+            chunk_size = max_chars // 5
+        if overlap is None:
+            overlap = 0
+
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
         _resolve_spec_path(spec),
@@ -157,9 +167,7 @@ def _cli_overrides(
     }
     enrich_opts: dict[str, Any] = {"enabled": True} if enrich else {}
     parse_opts: dict[str, Any] = {
-        k: v
-        for k, v in {"exclude_pages": exclude_pages}.items()
-        if v is not None
+        k: v for k, v in {"exclude_pages": exclude_pages}.items() if v is not None
     }
     return {
         k: v
@@ -206,6 +214,7 @@ if typer:
         spec: str = typer.Option("pipeline.yaml", "--spec"),
         verbose: bool = typer.Option(False, "--verbose"),
         trace: str | None = typer.Option(None, "--trace"),
+        max_chars: int | None = typer.Option(None, "--max-chars"),
     ) -> None:
         _safe(
             lambda: _run_convert(
@@ -219,6 +228,7 @@ if typer:
                 spec,
                 verbose,
                 trace,
+                max_chars,
             )
         )
 
@@ -244,6 +254,7 @@ else:
         conv.add_argument("--spec", default="pipeline.yaml")
         conv.add_argument("--verbose", action="store_true")
         conv.add_argument("--trace")
+        conv.add_argument("--max-chars", type=int)
         conv.set_defaults(
             enrich=False,
             func=lambda ns: _safe(
@@ -258,6 +269,7 @@ else:
                     ns.spec,
                     ns.verbose,
                     ns.trace,
+                    ns.max_chars,
                 )
             ),
         )

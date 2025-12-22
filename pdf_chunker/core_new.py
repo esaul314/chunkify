@@ -9,15 +9,14 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass, replace
 from functools import reduce
+from hashlib import md5
 from importlib import import_module
 from itertools import chain
 from pathlib import Path
 from typing import Any, Final
 
-from hashlib import md5
-
-from pdf_chunker.adapters import emit_jsonl
 import pdf_chunker.adapters.emit_trace as emit_trace
+from pdf_chunker.adapters import emit_jsonl
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, Pass, registry
 
@@ -76,9 +75,7 @@ def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     return _pass_steps(PipelineSpec(pipeline=steps, options=spec.options))
 
 
-def _prepare_pass(
-    pass_obj: Pass, overrides: Mapping[str, Any]
-) -> tuple[Pass, Mapping[str, Any]]:
+def _prepare_pass(pass_obj: Pass, overrides: Mapping[str, Any]) -> tuple[Pass, Mapping[str, Any]]:
     """Return a configured pass and sanitized overrides for meta propagation."""
 
     opts = dict(overrides)
@@ -130,7 +127,7 @@ def _with_pass_options(
     """Return ``meta`` with ``overrides`` recorded under ``options[name]``."""
 
     base = {**(meta or {})}
-    existing = dict(((meta or {}).get("options") or {}))
+    existing = dict((meta or {}).get("options") or {})
     if overrides:
         existing[name] = dict(overrides)
     if existing:
@@ -143,8 +140,7 @@ def _with_pass_options(
 def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, float]]:
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
     configs = [
-        _prepare_pass(registry()[name], spec.options.get(name, {}))
-        for name in spec.pipeline
+        _prepare_pass(registry()[name], spec.options.get(name, {})) for name in spec.pipeline
     ]
 
     def _apply(
@@ -202,7 +198,9 @@ def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
     return (
         payload
         if isinstance(payload, list)
-        else payload.get("items", []) if isinstance(payload, Mapping) else []
+        else payload.get("items", [])
+        if isinstance(payload, Mapping)
+        else []
     )
 
 

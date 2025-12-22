@@ -56,7 +56,8 @@ def _compat_chunk_id(chunk_id: str) -> str:
 
 
 def _max_chars() -> int:
-    return int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000"))
+    val = os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000")
+    return int(val)
 
 
 def _resolve_bullet_strategy(
@@ -890,8 +891,10 @@ def _rows_from_item(
         else:
             meta_part = base_meta
         row = {"text": piece, **meta_part}
+
         while len(json.dumps(row, ensure_ascii=False)) > max_chars:
-            allowed = avail - (len(json.dumps(row, ensure_ascii=False)) - max_chars)
+            current_len = len(json.dumps(row, ensure_ascii=False))
+            allowed = avail - (current_len - max_chars)
             allowed = min(allowed, len(piece) - 1)
             if allowed <= 0:
                 return {"text": "", **meta_part}
@@ -920,9 +923,10 @@ def _enrich_rows_with_context(rows: list[Row]) -> list[Row]:
             context = _last_sentence(prev_text)
             if context and not lead.startswith(context):
                 merged = f"{context} {text}".strip()
-                enriched.append({**row, "text": merged})
-                prev_text = merged
-                continue
+                if len(merged) <= _max_chars():
+                    enriched.append({**row, "text": merged})
+                    prev_text = merged
+                    continue
         enriched.append(row)
         prev_text = text
     return enriched
@@ -963,6 +967,8 @@ def _rows(
         for dup in _flag_potential_duplicates(processed):
             logger.warning("possible duplicate retained: %s", dup[:80])
     rows = [r for i in processed for r in _rows_from_item(i, strategy=heuristics)]
+    if _max_chars() < 8000:
+        return rows
     return _enrich_rows_with_context(rows)
 
 

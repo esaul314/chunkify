@@ -1463,6 +1463,7 @@ def _inject_continuation_context(
         lead = text.lstrip()
         if (
             prev_text is None
+            or overlap <= 0
             or not lead
             or was_trimmed
             or current_is_list
@@ -1503,9 +1504,7 @@ class _SplitSemanticPass:
     )
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = derive_min_chunk_size(
-            self.chunk_size, self.min_chunk_size
-        )  # noqa: E501
+        self.min_chunk_size = derive_min_chunk_size(self.chunk_size, self.min_chunk_size)  # noqa: E501
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload

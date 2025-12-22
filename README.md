@@ -11,7 +11,13 @@ pip install pdf-chunker
 
 ### Basic usage
 ```bash
-pdf_chunker convert "sample.pdf" out.jsonl --chunk-size 400 --overlap 50
+pdf_chunker convert "sample.pdf" --out out.jsonl --chunk-size 400 --overlap 50
+```
+
+### TTS Preparation (Strict Character Limits)
+To generate chunks suitable for Text-to-Speech engines (strict character limit, no overlap, no metadata):
+```bash
+pdf_chunker convert "book.pdf" --out tts.jsonl --max-chars 1000 --no-metadata
 ```
 
 ## pipeline.yaml options
