@@ -70,6 +70,8 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 | **haystack** (ai) | Required for chunk validation scripts that depend on its formatting utilities. |
 
 ### Environment Setup
+- Always activate the local venv before running any repo commands:
+  - `source pdf-env/bin/activate`
 - `pip install -e .[dev]`
 - `pip install nox`  # not preinstalled in some environments
 - `apt-get install -y poppler-utils`  # provides `pdftotext`
@@ -112,11 +114,14 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 | Pass | Module | Responsibility |
 | --- | --- | --- |
 | `ai_enrich` | `pdf_chunker.passes.ai_enrich` |  |
+| `detect_doc_end` | `pdf_chunker.passes.detect_doc_end` | Detect end-of-document markers and truncate trailing pages. |
+| `detect_page_artifacts` | `pdf_chunker.passes.detect_page_artifacts` | Cleanup page artifacts (e.g., flatten markdown-like tables). |
 | `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` |  |
 | `epub_parse` | `pdf_chunker.passes.epub_parse` |  |
 | `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` |  |
 | `heading_detect` | `pdf_chunker.passes.heading_detect` |  |
 | `list_detect` | `pdf_chunker.passes.list_detect` | List detection pass. |
+| `merge_footers` | `pdf_chunker.passes.merge_footers` | Merge short trailing footer lines into a single block for stability. |
 | `pdf_parse` | `pdf_chunker.passes.pdf_parse` |  |
 | `split_semantic` | `pdf_chunker.passes.split_semantic` | Split ``page_blocks`` into canonical ``chunks``. |
 | `text_clean` | `pdf_chunker.passes.text_clean` |  |

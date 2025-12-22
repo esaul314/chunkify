@@ -4,10 +4,10 @@ import json
 import logging
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import reduce
 from itertools import accumulate, chain, dropwhile, repeat, takewhile
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.strategies.bullets import (
@@ -182,9 +182,7 @@ def _reserve_for_list(
     if not pre_lines:
         return collapsed, "", None
 
-    block_lines = list(
-        takewhile(lambda ln: not ln.strip() or predicate(ln), tail_lines)
-    )
+    block_lines = list(takewhile(lambda ln: not ln.strip() or predicate(ln), tail_lines))
     if not block_lines:
         return collapsed, "", None
 
@@ -202,11 +200,7 @@ def _reserve_for_list(
         return collapsed, "", None
 
     keep_lines, intro_lines = _partition_preamble(trimmed_pre)
-    if (
-        not intro_lines
-        and len(keep_lines) > 1
-        and any(predicate(ln) for ln in block_lines)
-    ):
+    if not intro_lines and len(keep_lines) > 1 and any(predicate(ln) for ln in block_lines):
         candidate_intro = keep_lines[-1]
         if candidate_intro.strip() and not predicate(candidate_intro):
             keep_lines = keep_lines[:-1]
@@ -468,9 +462,7 @@ def _split(
             and predicate(rest_first_line)
         ):
             rest_lines = rest.splitlines()
-            block_lines = list(
-                takewhile(lambda ln: not ln.strip() or predicate(ln), rest_lines)
-            )
+            block_lines = list(takewhile(lambda ln: not ln.strip() or predicate(ln), rest_lines))
             block_text = "\n".join(block_lines).lstrip("\n")
             if block_text:
                 raw = f"{raw.rstrip()}\n{block_text}".strip("\n")
@@ -478,11 +470,7 @@ def _split(
         raw_first_line = _first_non_empty_line(raw)
         skip_trim = bool(pieces) and (
             predicate(raw_first_line)
-            or (
-                intro_hint
-                and intro_hint.strip()
-                and raw_first_line.strip() == intro_hint.strip()
-            )
+            or (intro_hint and intro_hint.strip() and raw_first_line.strip() == intro_hint.strip())
         )
         trimmed = raw if not pieces or skip_trim else _trim_overlap(pieces[-1], raw)
         if trimmed and trimmed.strip():
@@ -878,7 +866,9 @@ def _rows_from_item(
         return []
 
     heuristics = _resolve_bullet_strategy(strategy)
-    predicate = lambda line: _is_list_line(line, strategy=heuristics)
+
+    def predicate(line: str) -> bool:
+        return _is_list_line(line, strategy=heuristics)
 
     pieces = [
         piece
@@ -990,9 +980,7 @@ class _EmitJsonlPass:
         preserve = _preserve_chunks(a.meta)
         strategy = _resolve_bullet_strategy(self.bullet_strategy)
         rows = (
-            _rows(doc, preserve=preserve, strategy=strategy)
-            if doc.get("type") == "chunks"
-            else []
+            _rows(doc, preserve=preserve, strategy=strategy) if doc.get("type") == "chunks" else []
         )
         meta = _update_meta(a.meta, len(rows))
         return Artifact(payload=rows, meta=meta)

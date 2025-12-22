@@ -18,10 +18,6 @@ from math import ceil
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
-from pdf_chunker.strategies.bullets import (
-    BulletHeuristicStrategy,
-    default_bullet_strategy,
-)
 from pdf_chunker.page_artifacts import (
     _bullet_body,
     _drop_trailing_bullet_footers,
@@ -82,6 +78,10 @@ from pdf_chunker.passes.split_semantic_metadata import (
     _meta_is_list,
     build_chunk,
     build_chunk_with_meta,
+)
+from pdf_chunker.strategies.bullets import (
+    BulletHeuristicStrategy,
+    default_bullet_strategy,
 )
 
 Doc = dict[str, Any]
@@ -687,9 +687,7 @@ def _strip_footer_suffixes(
         trimmed = _strip_footer_suffix(record, strategy=heuristics)
         if trimmed is None:
             continue
-        if cleaned and _is_footer_artifact_record(
-            cleaned[-1], trimmed, strategy=heuristics
-        ):
+        if cleaned and _is_footer_artifact_record(cleaned[-1], trimmed, strategy=heuristics):
             continue
         cleaned.append(trimmed)
     return tuple(cleaned)
@@ -727,9 +725,7 @@ def _list_tail_split_index(
         stripped = part.lstrip()
         if not stripped:
             continue
-        if heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(
-            stripped
-        ):
+        if heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(stripped):
             continue
         indent = len(part) - len(stripped)
         if indent:
@@ -805,9 +801,7 @@ def _expand_segment_records(
     strategy: BulletHeuristicStrategy | None = None,
 ) -> tuple[tuple[int, Block, str], ...]:
     expanded = tuple(
-        chain.from_iterable(
-            _split_list_record(record, strategy=strategy) for record in segment
-        )
+        chain.from_iterable(_split_list_record(record, strategy=strategy) for record in segment)
     )
     return expanded if expanded else segment
 
@@ -874,11 +868,7 @@ def _join_record_texts(
     strategy: BulletHeuristicStrategy | None = None,
 ) -> str:
     joined = "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
-    return (
-        _normalize_numbered_list_text(joined, strategy=strategy)
-        if joined
-        else joined
-    )
+    return _normalize_numbered_list_text(joined, strategy=strategy) if joined else joined
 
 
 def _apply_overlap_within_segment(
@@ -1165,10 +1155,9 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
         strategy=state.strategy,
     ):
         state = state.flush()
-    if (
-        state.resolved_limit is not None
-        and effective > state.resolved_limit
-    ) or (state.hard_limit is not None and effective > state.hard_limit):
+    if (state.resolved_limit is not None and effective > state.resolved_limit) or (
+        state.hard_limit is not None and effective > state.hard_limit
+    ):
         return state.flush().emit_single(idx, record)
     if (
         state.buffer
@@ -1325,9 +1314,7 @@ def _starts_list_like(
     if not stripped:
         return False
     heuristics = _resolve_bullet_strategy(strategy)
-    return heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(
-        stripped
-    )
+    return heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(stripped)
 
 
 def _should_break_after_colon(
@@ -1343,10 +1330,14 @@ def _should_break_after_colon(
     if not lead:
         return False
     head = lead[0]
-    return head.isupper() or head.isdigit() or _starts_list_like(
-        block,
-        text,
-        strategy=strategy,
+    return (
+        head.isupper()
+        or head.isdigit()
+        or _starts_list_like(
+            block,
+            text,
+            strategy=strategy,
+        )
     )
 
 
