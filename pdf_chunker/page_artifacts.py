@@ -1126,28 +1126,27 @@ def _strip_footnote_lines(text: str) -> str:
 FOOTNOTE_MARKER_RE = re.compile(rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+")
 
 
-def _remove_inline_footnote_prefix(line: str) -> tuple[str, bool]:
-    """Strip numeric footnote prefixes while keeping continuation sentences."""
+def _remove_inline_footnote_prefix(line: str) -> tuple[str, Optional[str]]:
+    """Strip numeric footnote prefixes and return inline/footnote text."""
 
-    if not _looks_like_footnote(line):
-        return line, False
+    if not _looks_like_footnote(line) or _looks_like_numbered_list_item(line):
+        return line, None
 
     stripped = line.lstrip()
     match = FOOTNOTE_PREFIX_RE.match(stripped)
     if not match:
-        return line, False
+        return line, None
 
     remainder = stripped[match.end() :].lstrip()
     if not remainder:
-        # Preserve footnote content sans marker instead of dropping it.
-        return "", False
+        return "", None
 
     segments = _SENTENCE_BOUNDARY_RE.split(remainder, maxsplit=1)
-    if len(segments) == 2:
-        continuation = segments[1].strip()
-        if continuation:
-            return continuation, False
-    return remainder, False
+    footnote = segments[0].strip()
+    continuation = segments[1].strip() if len(segments) == 2 else ""
+    if continuation:
+        return continuation, footnote or None
+    return "", footnote or None
 
 
 def _normalize_footnote_markers(text: str) -> str:
@@ -1400,25 +1399,20 @@ def remove_page_artifact_lines(
 
     question_footer_indices = _question_footer_indices(lines)
 
-    def _clean_line(idx: int, ln: str) -> Optional[str]:
+    def _clean_line(idx: int, ln: str) -> tuple[Optional[str], Optional[str]]:
         normalized = (
             ln
             if starts_with_bullet(ln, _BULLET_STRATEGY)
             else _strip_page_header_prefix(ln)
         )
-        normalized, removed_inline = _remove_inline_footnote_prefix(normalized)
-        if not normalized:
-            if removed_inline:
-                logger.debug(
-                    "remove_page_artifact_lines dropped inline footnote: %s",
-                    ln[:30],
-                )
-            return None
-        if removed_inline:
+        normalized, footnote = _remove_inline_footnote_prefix(normalized)
+        if footnote:
             logger.debug(
-                "remove_page_artifact_lines preserved inline continuation: %s",
-                normalized[:30],
+                "remove_page_artifact_lines queued inline footnote: %s",
+                footnote[:30],
             )
+        if not normalized:
+            return None, footnote
         stripped_norm = normalized.strip()
         if stripped_norm in _BULLET_MARKERS:
             next_line = _next_non_empty_line(lines, idx)
@@ -1448,19 +1442,19 @@ def remove_page_artifact_lines(
                     "remove_page_artifact_lines dropped empty bullet marker: %s",
                     ln[:30],
                 )
-                return None
+                return None, footnote
         if idx in question_footer_indices:
             logger.debug(
                 "remove_page_artifact_lines dropped question bullet footer: %s",
                 ln[:30],
             )
-            return None
+            return None, footnote
         if _looks_like_shipping_footer(stripped_norm) and not keep_shipping:
             logger.debug(
                 "remove_page_artifact_lines dropped shipping footer line: %s",
                 stripped_norm[:30],
             )
-            return None
+            return None, footnote
 
         edge_band = 2
         if idx < edge_band or idx >= total - edge_band:
@@ -1469,30 +1463,32 @@ def remove_page_artifact_lines(
                     "remove_page_artifact_lines dropped isolated title: %s",
                     normalized[:30],
                 )
-                return None
+                return None, footnote
 
         if is_page_artifact_text(normalized, page_num) or _looks_like_bullet_footer(normalized):
             logger.debug("remove_page_artifact_lines dropped: %s", ln[:30])
-            return None
+            return None, footnote
         stripped = _strip_spurious_number_prefix(strip_page_artifact_suffix(normalized, page_num))
         if stripped != normalized:
             logger.debug("remove_page_artifact_lines stripped suffix: %s", ln[:30])
-        return stripped
+        return stripped, footnote
 
-    cleaned_pairs = [
-        (original, cleaned)
-        for original, cleaned in (
-            (ln, _clean_line(idx, ln))
-            for idx, ln in enumerate(lines)
-        )
-        if cleaned
-    ]
+    cleaned_pairs = []
+    footnotes: list[str] = []
+    for idx, ln in enumerate(lines):
+        cleaned, footnote = _clean_line(idx, ln)
+        if footnote:
+            footnotes.append(footnote)
+        if cleaned:
+            cleaned_pairs.append((ln, cleaned))
     normalised = _apply_leading_case(cleaned_pairs)
     colon_restored = [
         _restore_colon_suffix_case(original, cleaned)
         for (original, _), cleaned in zip(cleaned_pairs, normalised)
     ]
     pruned = _drop_trailing_bullet_footers(colon_restored)
+    if footnotes:
+        pruned.extend(footnotes)
     return "\n".join(pruned)
 
 

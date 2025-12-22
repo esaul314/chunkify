@@ -109,5 +109,4 @@ def test_clean_text_normalizes_circumflex_whitespace_artifact() -> None:
 def test_inline_footnote_continuation_preserved() -> None:
     sample = "Lead in.\n3 Footnote text. The continuation survives."
     cleaned = remove_page_artifact_lines(sample, 3)
-    assert cleaned.endswith("The continuation survives.")
-    assert "Lead in." in cleaned
+    assert cleaned == "Lead in.\nThe continuation survives.\nFootnote text."

@@ -71,7 +71,15 @@ class TestPageArtifactDetection(unittest.TestCase):
     def test_remove_footnote_line(self):
         text = "Paragraph text\n4 This is a sample footnote text.\nNext paragraph"
         cleaned = remove_page_artifact_lines(text, 2)
-        self.assertEqual(cleaned, "Paragraph text\nNext paragraph")
+        self.assertEqual(
+            cleaned,
+            "Paragraph text\nNext paragraph\nThis is a sample footnote text.",
+        )
+
+    def test_inline_footnote_appended_to_paragraph_end(self):
+        text = "Lead in.\n3 Footnote text. The continuation survives."
+        cleaned = remove_page_artifact_lines(text, 3)
+        self.assertEqual(cleaned, "Lead in.\nThe continuation survives.\nFootnote text.")
 
     def test_inline_footnote_marker(self):
         text = "Can exist.3\n3 Footnote text.\n\nThis is next"
@@ -95,9 +103,12 @@ class TestPageArtifactDetection(unittest.TestCase):
             "4 Footnote text. The sentence continues here."
         )
         cleaned = remove_page_artifact_lines(text, 115)
-        self.assertEqual(cleaned, "First part of sentence\nThe sentence continues here.")
+        self.assertEqual(
+            cleaned,
+            "First part of sentence\nThe sentence continues here.\nFootnote text.",
+        )
         self.assertIn("First part of sentence", cleaned)
-        self.assertTrue(cleaned.endswith("The sentence continues here."))
+        self.assertTrue(cleaned.endswith("Footnote text."))
 
     def test_header_inserted_mid_sentence(self):
         text = (
@@ -109,7 +120,8 @@ class TestPageArtifactDetection(unittest.TestCase):
         cleaned = remove_page_artifact_lines(text, 115)
         expected = (
             "A sentence on the last line of the page and it continues on the next page\n"
-            "the sentence continues here, on the next page."
+            "the sentence continues here, on the next page.\n"
+            "And then there is a footnote at the bottom of the second page."
         )
         self.assertEqual(cleaned, expected)
 
