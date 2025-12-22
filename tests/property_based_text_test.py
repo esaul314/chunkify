@@ -54,6 +54,24 @@ def test_split_text_preserves_intro_bullet_newline() -> None:
     assert "".join(chunks) == sample
 
 
+def test_split_text_discards_pruned_footer_tail(monkeypatch) -> None:
+    sample = "one two three four tail"
+
+    monkeypatch.setattr(
+        splitter,
+        "_remove_footer_artifacts",
+        lambda text: "" if text.endswith(" tail") else text,
+    )
+    monkeypatch.setattr(
+        splitter,
+        "_should_prune_footer",
+        lambda text, is_last: is_last,
+    )
+
+    chunks = splitter._split_text_into_chunks(sample, chunk_size=3, overlap=1)
+    assert chunks == ["one two three "]
+
+
 @given(st.text(min_size=1))
 def test_split_roundtrip_cleaning(sample: str) -> None:
     pipeline = compose(
