@@ -18,6 +18,13 @@ venv
 *.bak
 *.ipynb
 *.log
+.~lock.*
+summary.last
+comparison_report.json
+long_text_quality_comparison.json
+page_boundary_comparison_sample_book.json
+text_quality_comparison.json
+validation_report.json
 *pycache*
 cert.pem
 key.pem
