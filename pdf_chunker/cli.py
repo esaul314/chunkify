@@ -11,7 +11,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
-print(f"DEBUG: cli.py running from {__file__}", file=sys.stderr)
 
 try:  # pragma: no cover - exercised via CLI tests
     typer = cast(Any, import_module("typer"))
