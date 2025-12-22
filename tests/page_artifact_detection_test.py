@@ -100,6 +100,33 @@ class TestPageArtifactDetection(unittest.TestCase):
         )
         self.assertEqual(cleaned, expected)
 
+    def test_inline_footnote_sentence_line_relocated(self):
+        text = (
+            "Whether or not they've called their\n"
+            "We\u2019ll sometimes call these teams your \"users\" or \"customers,\" if it makes more sense in the context.\n"
+            "efforts platform engineering, they embody the mindset."
+        )
+        cleaned = remove_page_artifact_lines(text, 9)
+        expected = (
+            "Whether or not they've called their\n"
+            "efforts platform engineering, they embody the mindset.\n"
+            "We\u2019ll sometimes call these teams your \"users\" or \"customers,\" if it makes more sense in the context."
+        )
+        self.assertEqual(cleaned, expected)
+
+    def test_inline_lowercase_footnote_sentence_relocated(self):
+        text = (
+            'But if a team this is the platform equivalent of "shadow IT"\u2014systems deployed elsewhere.\n'
+            "realizes they need a storage option."
+        )
+        cleaned = remove_page_artifact_lines(text, 24)
+        expected = (
+            "But if a team\n"
+            "realizes they need a storage option.\n"
+            'this is the platform equivalent of "shadow IT"\u2014systems deployed elsewhere.'
+        )
+        self.assertEqual(cleaned, expected)
+
     def test_superscript_footnote_marker(self):
         text = "Can exist.\u00b3\n\u00b3 Footnote text.\n\nThis is next"
         cleaned = remove_page_artifact_lines(text, 2)

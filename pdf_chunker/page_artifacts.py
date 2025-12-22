@@ -54,11 +54,16 @@ def _looks_like_footnote(text: str) -> bool:
 
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
 _INLINE_FOOTNOTE_SENTENCE_RE = re.compile(
-    r"(?<=[a-z0-9])\s+(?P<footnote>(?:For|See|As|In|This|Other|Years|We(?:'ll|\s+(?:will|would)))\b.+)$"
+    r"(?<=[a-z0-9])\s+(?P<footnote>(?:For|See|As|In|[Tt]his|Other|Years|We(?:['\u2019]ll|\s+(?:will|would)))\b.+)$"
+)
+_INLINE_FOOTNOTE_LINE_RE = re.compile(
+    r"^(?P<footnote>(?:For|See|As|In|[Tt]his|Other|Years|We(?:['\u2019]ll|\s+(?:will|would)))\b.+)$"
 )
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
 _PHONE_RE = re.compile(r"\+?\d[\d()\s.-]{5,}\d")
 _CONTACT_KEYWORDS = ("contact", "tel", "phone", "fax", "email")
+_LOWERCASE_INLINE_FOOTNOTE_PREFIXES = frozenset({"team", "teams", "their"})
+_INLINE_FOOTNOTE_BODY_MARKERS = ('"', "http", "\u2014", "\u2013")
 
 
 _BULLET_STRATEGY: BulletHeuristicStrategy = default_bullet_strategy()
@@ -1164,7 +1169,42 @@ def _split_inline_footnote_sentence(line: str) -> tuple[str, Optional[str]]:
     prefix = line[: match.start()].rstrip()
     if not prefix:
         return line, None
+    if footnote[0].islower():
+        words = prefix.split()
+        if not words:
+            return line, None
+        last_word = re.sub(r"[^\w]+$", "", words[-1])
+        if last_word and last_word[-1].isdigit():
+            return prefix, footnote
+        if last_word.lower() not in _LOWERCASE_INLINE_FOOTNOTE_PREFIXES:
+            return line, None
+        if not any(marker in footnote for marker in _INLINE_FOOTNOTE_BODY_MARKERS):
+            return line, None
     return prefix, footnote
+
+
+def _split_inline_footnote_line(line: str, previous_line: Optional[str]) -> Optional[str]:
+    """Capture inline footnote sentences that landed on their own line."""
+
+    if not previous_line:
+        return None
+    match = _INLINE_FOOTNOTE_LINE_RE.match(line.strip())
+    if not match:
+        return None
+    footnote = match.group("footnote").strip()
+    if not footnote or len(footnote.split()) < 4:
+        return None
+    prev = previous_line.strip()
+    if not prev or re.search(r"[.!?;:]$", prev):
+        return None
+    last_word = re.sub(r"[^\w]+$", "", prev.split()[-1])
+    if not last_word:
+        return None
+    if not last_word[-1].isdigit() and last_word.lower() not in _LOWERCASE_INLINE_FOOTNOTE_PREFIXES:
+        return None
+    if footnote[0].islower() and not any(marker in footnote for marker in _INLINE_FOOTNOTE_BODY_MARKERS):
+        return None
+    return footnote
 
 
 def _normalize_footnote_markers(text: str) -> str:
@@ -1181,6 +1221,20 @@ def _normalize_footnote_markers(text: str) -> str:
         return f"[{digits}] "
 
     return FOOTNOTE_MARKER_RE.sub(repl, text)
+
+
+def _is_footnote_only_block(text: str) -> bool:
+    """Return True when every non-empty line looks like a footnote."""
+
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    for line in lines:
+        if _looks_like_numbered_list_item(line):
+            return False
+        if not (_looks_like_footnote(line) or FOOTNOTE_PREFIX_RE.match(line.lstrip())):
+            return False
+    return True
 
 
 def _strip_toc_dot_leaders(text: str) -> str:
@@ -1432,6 +1486,16 @@ def remove_page_artifact_lines(
                     "remove_page_artifact_lines split inline footnote sentence: %s",
                     inline_footnote[:30],
                 )
+        if normalized and not footnote:
+            previous_line = _first_non_empty_line(lines[pos] for pos in range(idx - 1, -1, -1))
+            inline_footnote = _split_inline_footnote_line(normalized, previous_line)
+            if inline_footnote:
+                footnote = inline_footnote
+                normalized = ""
+                logger.debug(
+                    "remove_page_artifact_lines split inline footnote line: %s",
+                    inline_footnote[:30],
+                )
         if footnote:
             logger.debug(
                 "remove_page_artifact_lines queued inline footnote: %s",
@@ -1532,10 +1596,14 @@ def strip_artifacts(blocks: Iterable["Block"], config=None) -> Iterable["Block"]
 
     for blk in blocks:
         page = blk.source.get("page")
+        footnote_block = _is_footnote_only_block(blk.text)
         cleaned = remove_page_artifact_lines(blk.text, page, keep_shipping=True)
         if not cleaned or is_page_artifact_text(cleaned, page):
             continue
-        updated = replace(blk, text=cleaned)
+        source = dict(blk.source)
+        if footnote_block:
+            source["footnote_block"] = True
+        updated = replace(blk, text=cleaned, source=source)
         if current_page is None or page == current_page:
             pending.append(updated)
             current_page = page

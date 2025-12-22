@@ -83,3 +83,28 @@ def test_three_page_sentence_splits_after_second_page(block):
     merged = list(merge_continuation_blocks(blocks))
     assert len(merged) == 2
     assert merged[0].source.get("page_range") == (1, 2)
+
+
+def test_footnote_block_appends_after_merge(block):
+    blocks = [
+        block("Whether or not they've called their", page=9),
+        block(
+            'We\u2019ll sometimes call these teams your "users".',
+            page=9,
+            footnote_block=True,
+        ),
+        block("efforts platform engineering, they embody the mindset.", page=9),
+    ]
+    merged = list(merge_continuation_blocks(blocks))
+    assert len(merged) == 1
+    assert "called their efforts platform engineering" in merged[0].text
+    assert merged[0].text.endswith('We\u2019ll sometimes call these teams your "users".')
+
+
+def test_heading_like_block_does_not_merge_quote_continuation(block):
+    blocks = [
+        block('He said "Something unfinished', page=1),
+        block("Next Section:", page=1),
+    ]
+    merged = list(merge_continuation_blocks(blocks))
+    assert len(merged) == 2

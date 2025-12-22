@@ -710,6 +710,11 @@ def _block_has_list_markers(block: Block) -> bool:
     return any(candidate.get("list_kind") for candidate in nested if isinstance(candidate, dict))
 
 
+def _is_footnote_block(block: Block) -> bool:
+    source = block.source if isinstance(block.source, dict) else {}
+    return bool(source.get("footnote_block"))
+
+
 def _should_merge_blocks(
     curr: Block,
     nxt: Block,
@@ -772,6 +777,8 @@ def _should_merge_blocks(
     curr_has_quote = '"' in curr_text or "'" in curr_text
     next_has_quote = '"' in next_text or "'" in next_text
     if curr_has_quote or next_has_quote:
+        if _is_heading_like(next_text):
+            return False, "no_merge"
         if _is_quote_continuation(curr_text, next_text):
             return True, "quote_continuation"
 
@@ -821,12 +828,26 @@ def merge_continuation_blocks(
     i = 0
     while i < len(items):
         current = items[i]
+        if _is_footnote_block(current):
+            if merged:
+                merged[-1] = replace(
+                    merged[-1],
+                    text=f"{merged[-1].text.rstrip()}\n{current.text.strip()}",
+                )
+            else:
+                merged.append(current)
+            i += 1
+            continue
         current_text = current.text.strip()
         pages = [current.source.get("page")]
         j = i + 1
-        merged_any = False
+        deferred_footnotes: list[Block] = []
         while j < len(items):
             nxt = items[j]
+            if _is_footnote_block(nxt):
+                deferred_footnotes.append(nxt)
+                j += 1
+                continue
             next_text = nxt.text.strip()
             next_page = nxt.source.get("page")
             candidate_pages = [*pages, next_page]
@@ -866,7 +887,6 @@ def merge_continuation_blocks(
                         )
                     current = replace(current, text=merged_text)
                     current_text = merged_text
-                    merged_any = True
                     if remainder:
                         items[j] = replace(nxt, text=remainder.lstrip())
                         pages.append(next_page)
@@ -897,7 +917,6 @@ def merge_continuation_blocks(
 
                 current = replace(current, text=merged_text)
                 current_text = merged_text
-                merged_any = True
                 j += 1
                 pages.append(next_page)
             else:
@@ -912,6 +931,11 @@ def merge_continuation_blocks(
                         "page_range": (min(page_nums), max(page_nums)),
                     },
                 )
+        if deferred_footnotes:
+            footnote_texts = [fn.text.strip() for fn in deferred_footnotes if fn.text.strip()]
+            if footnote_texts:
+                merged_text = current.text.rstrip() + "\n" + "\n".join(footnote_texts)
+                current = replace(current, text=merged_text)
         merged.append(current)
-        i = j if merged_any else i + 1
+        i = j
     return merged

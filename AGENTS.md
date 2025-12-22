@@ -336,7 +336,7 @@ All CLI scripts follow these conventions:
 
 * Tests may not fully cover all critical features or edge cases
 * Some code descriptions in `AGENTS.md` may be outdated due to drift
-* **Footnote handling improved**: footnote lines detected and appended to the end of their paragraph (e.g., `"Sentence.\nFootnote text."`) to prevent mid-sentence splits; detection tuned to avoid false positives
+* **Footnote handling improved**: footnote lines detected and appended to the end of their paragraph (e.g., `"Sentence.\nFootnote text."`) to prevent mid-sentence splits; inline footnote sentences with lost markers are relocated when they match common footnote starters; detection tuned to avoid false positives
 * **Header/footer cleanup**: headers and footers stripped when they appear at page breaks or within paragraphs, including trailing "|" fragments
 * **Hyphenation defect**: carried-over hyphens (e.g. `con‐ tainer`) not rejoined <- fixed.
 * **Bullet hyphen fix**: words split at line breaks within bullet lists now rejoin correctly without duplicating the bullet marker.
