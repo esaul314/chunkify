@@ -433,6 +433,42 @@ def _is_indented_continuation(curr: Block, nxt: Block) -> bool:
     return indent_diff > 10 and vertical_gap < 8
 
 
+def _indent_delta(curr: Block, nxt: Block) -> float | None:
+    curr_bbox = curr.bbox
+    next_bbox = nxt.bbox
+    if not curr_bbox or not next_bbox:
+        return None
+    try:
+        return float(next_bbox[0]) - float(curr_bbox[0])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _is_numbered_list_continuation(
+    curr: Block,
+    nxt: Block,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    if not curr.text or not nxt.text:
+        return False
+    curr_text = curr.text.strip()
+    next_text = nxt.text.strip()
+    if not curr_text or not next_text:
+        return False
+    heuristics = _resolve_strategy(strategy)
+    if not heuristics.starts_with_number(curr_text):
+        return False
+    if heuristics.starts_with_number(next_text):
+        return False
+    if _is_heading_like(next_text):
+        return False
+    if nxt.text[:1].isspace():
+        return True
+    indent = _indent_delta(curr, nxt)
+    return indent is not None and indent > 8
+
+
 def _looks_like_quote_boundary(curr_text: str, next_text: str) -> bool:
     if (
         curr_text.endswith(('."', ".'", '!"', "!'", '?"', "?'"))
@@ -762,6 +798,8 @@ def _should_merge_blocks(
     if heuristics.is_numbered_continuation(curr_text, next_text) and not _is_heading_like(
         next_text
     ):
+        return True, "numbered_continuation"
+    if _is_numbered_list_continuation(curr, nxt, strategy=heuristics):
         return True, "numbered_continuation"
 
     if re.fullmatch(r"\d+[.)]", curr_text) and not heuristics.starts_with_number(

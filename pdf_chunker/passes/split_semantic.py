@@ -705,6 +705,10 @@ def _should_emit_list_boundary(
         return False
     if _starts_list_like(prev_block, prev_text, strategy=strategy):
         return False
+    prev_num = _last_list_number(prev_text, strategy=strategy)
+    next_num = _first_list_number(text, strategy=strategy)
+    if prev_num is not None and next_num is not None and next_num == prev_num + 1:
+        return False
     return not _record_is_footer_candidate(previous, strategy=strategy)
 
 
@@ -1004,6 +1008,15 @@ def _emit_segment_records(
     if overflow_active or len(segment) == 1:
         return _emit_individual_records(segment, start_index, strategy=strategy)
     if exceeds_soft or exceeds_hard:
+        if _segment_allows_list_overflow(segment, strategy=strategy):
+            merged = _merged_segment_record(
+                segment,
+                start_index=start_index,
+                overlap=overlap,
+                strategy=strategy,
+            )
+            if merged is not None:
+                return (merged,)
         return _emit_individual_records(segment, start_index, strategy=strategy)
     merged = _merged_segment_record(
         segment,
@@ -1014,6 +1027,34 @@ def _emit_segment_records(
     if merged is None:
         return _emit_individual_records(segment, start_index, strategy=strategy)
     return (merged,)
+
+
+def _segment_allows_list_overflow(
+    segment: tuple[tuple[int, Block, str], ...],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    heuristics = _resolve_bullet_strategy(strategy)
+    if not any(_text_has_number_two(text) for _, _, text in segment):
+        return False
+    last_num: int | None = None
+    for _, _, text in segment:
+        first_num = _first_list_number(text, strategy=heuristics)
+        last_in_text = _last_list_number(text, strategy=heuristics)
+        if first_num is not None:
+            if last_num is not None and first_num == last_num + 1:
+                return True
+            last_num = last_in_text or first_num
+            continue
+        if last_in_text is not None and last_num is not None:
+            if last_in_text == last_num + 1:
+                return True
+            if last_in_text >= last_num:
+                last_num = last_in_text
+            continue
+        if last_num is None and last_in_text is not None:
+            last_num = last_in_text
+    return False
 
 
 def _maybe_merge_dense_page(
@@ -1113,10 +1154,125 @@ def _page_or_footer_boundary(
     prev_page, _, _ = buffer[-1]
     page, _, _ = record
     if prev_page != page:
+        if _allow_cross_page_list(buffer[-1], record, strategy=strategy):
+            return False
         return True
     prev_is_footer = _record_is_footer_candidate(buffer[-1], strategy=strategy)
     current_is_footer = _record_is_footer_candidate(record, strategy=strategy)
     return (current_is_footer != prev_is_footer) and (current_is_footer or prev_is_footer)
+
+
+_NUMBERED_ANYWHERE_RE = re.compile(r"(?:^|\n|\s)(\d+)[.)]\s+")
+_NUMBERED_TWO_RE = re.compile(r"(?:^|\n|\s)2[.)]\s+")
+
+
+def _first_list_number(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> int | None:
+    heuristics = _resolve_bullet_strategy(strategy)
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    if not line or not heuristics.starts_with_number(line):
+        match = _NUMBERED_ANYWHERE_RE.search(text)
+        return int(match.group(1)) if match else None
+    match = re.match(r"^(\d+)[.)]\s+", line)
+    return int(match.group(1)) if match else None
+
+
+def _last_list_number(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> int | None:
+    heuristics = _resolve_bullet_strategy(strategy)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    for line in reversed(lines):
+        if heuristics.starts_with_number(line):
+            match = re.match(r"^(\d+)[.)]\s+", line)
+            return int(match.group(1)) if match else None
+    matches = _NUMBERED_ANYWHERE_RE.findall(text)
+    return int(matches[-1]) if matches else None
+
+
+def _allow_cross_page_list(
+    previous: Record,
+    current: Record,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    prev_page, prev_block, prev_text = previous
+    page, block, text = current
+    if (
+        prev_page is None
+        or page is None
+        or not isinstance(prev_page, int)
+        or not isinstance(page, int)
+        or page != prev_page + 1
+    ):
+        return False
+    heuristics = _resolve_bullet_strategy(strategy)
+    lead = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    if not lead or not heuristics.starts_with_number(lead):
+        return False
+    prev_num = _last_list_number(prev_text, strategy=heuristics)
+    next_num = _first_list_number(text, strategy=heuristics)
+    if prev_num is None or next_num is None:
+        return False
+    return next_num == prev_num + 1
+
+
+def _buffer_last_list_number(
+    buffer: tuple[Record, ...],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> int | None:
+    heuristics = _resolve_bullet_strategy(strategy)
+    for _, _, text in reversed(buffer):
+        found = _last_list_number(text, strategy=heuristics)
+        if found is not None:
+            return found
+    return None
+
+
+def _record_starts_numbered_item(
+    record: Record,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    _, _, text = record
+    heuristics = _resolve_bullet_strategy(strategy)
+    lead = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    return bool(lead and heuristics.starts_with_number(lead))
+
+
+def _allow_list_overflow(
+    buffer: tuple[Record, ...],
+    record: Record,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    if not buffer:
+        return False
+    heuristics = _resolve_bullet_strategy(strategy)
+    if not _record_starts_numbered_item(record, strategy=heuristics):
+        return False
+    if not (_buffer_has_number_two(buffer) or _text_has_number_two(record[2])):
+        return False
+    prev_num = _buffer_last_list_number(buffer, strategy=heuristics)
+    next_num = _first_list_number(record[2], strategy=heuristics)
+    if prev_num is None or next_num is None or next_num != prev_num + 1:
+        return False
+    projected_len = sum(len(text) for _, _, text in buffer) + len(record[2])
+    return projected_len <= SOFT_LIMIT
+
+
+def _text_has_number_two(text: str) -> bool:
+    return bool(_NUMBERED_TWO_RE.search(text))
+
+
+def _buffer_has_number_two(buffer: tuple[Record, ...]) -> bool:
+    return any(_text_has_number_two(text) for _, _, text in buffer)
 
 
 def _projected_overflow(
@@ -1158,6 +1314,8 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
     if (state.resolved_limit is not None and effective > state.resolved_limit) or (
         state.hard_limit is not None and effective > state.hard_limit
     ):
+        if state.buffer and _allow_list_overflow(state.buffer, record, strategy=state.strategy):
+            return state.append(idx, record, counts)
         return state.flush().emit_single(idx, record)
     if (
         state.buffer
@@ -1173,7 +1331,8 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
     if state.buffer:
         overflow_action = _projected_overflow(state, block, text, counts)
         if overflow_action is not None:
-            state = state.flush(overflow=overflow_action == "overflow")
+            if not _allow_list_overflow(state.buffer, record, strategy=state.strategy):
+                state = state.flush(overflow=overflow_action == "overflow")
     return state.append(idx, record, counts)
 
 

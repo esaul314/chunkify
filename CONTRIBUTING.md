@@ -78,6 +78,7 @@ Commit message style:
   - `fix: ...`, `feat: ...`, `refactor: ...`, `test: ...`, `docs: ...`
 - Otherwise, use an imperative sentence:
   - `Fix temp dir creation on Fedora`
+Include a brief commit message body describing the change, key tests run, and any notable risks.
 
 ## 4) Pull request expectations
 

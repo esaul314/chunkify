@@ -4,6 +4,7 @@ This `AGENTS.md` suite provides comprehensive guidance to AI agents working acro
 
 > **Remember**: keep this file and its siblings in sync with the codebase. Update instructions whenever workflows, dependencies, or project structure change.
 > **Reminder**: whenever application functionality evolves, update all relevant `AGENTS.md` files with usage examples so agents stay in sync.
+> **Note**: review `CONTRIBUTING.md` for commit message format and workflow expectations before making commits.
 
 ---
 
@@ -87,8 +88,6 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 - Treat `platform-eng-excerpt.pdf` as the canonical smoke-test fixture:
   - Run `python -m pdf_chunker.cli convert platform-eng-excerpt.pdf --spec pipeline.yaml --out platform-eng.jsonl --no-enrich`
     (or the equivalent `pdf_chunker convert ... --no-metadata`) before declaring multiline list fixes complete.
-  - Open the generated JSONL and confirm that line 7 reads `ownership of operating the application's infrastructure`
-    with no embedded newline or stray capitalization.
   - If the reproduction steps are unclear or the output disagrees with expectations, stop and request clarification
     rather than guessing.
 - Or use the script wrapper:
