@@ -758,10 +758,10 @@ def _coalesce(
 
 def _very_short_threshold() -> int:
     """Return threshold below which items should always be merged forward.
-    
+
     Default is 30 words - chunks below this are almost always semantically
     incomplete (orphaned headings, single bullet items, fragment sentences).
-    
+
     Respects PDF_CHUNKER_JSONL_MIN_WORDS if set lower, to avoid over-merging
     when the user explicitly wants smaller chunks.
     """
@@ -778,7 +778,7 @@ def _starts_with_orphan_bullet(
     strategy: BulletHeuristicStrategy | None = None,
 ) -> bool:
     """Return True if text starts with a single bullet item (orphaned list fragment).
-    
+
     An orphan bullet is when text begins with a single bullet point that appears
     to be a fragment of a list from a previous chunk. Complete single-item lists
     are NOT considered orphans, even if they lack terminal punctuation.
@@ -786,16 +786,16 @@ def _starts_with_orphan_bullet(
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
         return False
-    
+
     first_line = lines[0].strip()
     heuristics = _resolve_bullet_strategy(strategy)
-    
+
     # Check if first line is a bullet
     is_bullet = heuristics.starts_with_bullet(first_line)
     is_number = heuristics.starts_with_number(first_line)
     if not (is_bullet or is_number):
         return False
-    
+
     # If there's only one line, check if it looks like a complete item
     if len(lines) == 1:
         # A coherent item or numbered item with enough words is NOT orphaned
@@ -804,17 +804,16 @@ def _starts_with_orphan_bullet(
         # Numbered items with sufficient words are likely complete even without punctuation
         # e.g., "2. Second item continues with sufficient words but lacks punctuation"
         return not (is_number and _word_count(first_line) >= 6)
-    
+
     # If second line is NOT a bullet, first bullet is orphaned
     # (unless the first line looks complete)
     second_line = lines[1].strip()
-    is_list_line = (
-        heuristics.starts_with_bullet(second_line)
-        or heuristics.starts_with_number(second_line)
+    is_list_line = heuristics.starts_with_bullet(second_line) or heuristics.starts_with_number(
+        second_line
     )
     if is_list_line:
         return False
-    
+
     # First line is a bullet, but following content is not a list
     # Check if the first line alone looks complete
     if _coherent(first_line):
