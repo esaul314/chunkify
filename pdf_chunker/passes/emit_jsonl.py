@@ -1133,6 +1133,119 @@ def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
     return chunk_size is not None or (isinstance(overlap, int | float) and overlap > 0)
 
 
+def _min_row_words() -> int:
+    """Minimum word count for a standalone row.
+    
+    Rows below this threshold will be merged with neighbors.
+    Default is 15 words (~1 sentence). Can be overridden via
+    PDF_CHUNKER_MIN_ROW_WORDS env var.
+    
+    Respects PDF_CHUNKER_JSONL_MIN_WORDS if set lower, to avoid over-merging
+    when the user explicitly wants smaller chunks.
+    """
+    explicit = os.getenv("PDF_CHUNKER_MIN_ROW_WORDS")
+    if explicit:
+        return int(explicit)
+    # Use the lower of 15 and min_words to respect user's minimum chunk preference
+    return min(15, _min_words())
+
+
+def _critical_short_threshold() -> int:
+    """Minimum word count below which rows MUST be merged regardless of size limits.
+    
+    Rows below this threshold (default 5 words) are considered so short that
+    they're never acceptable as standalone chunks. These will be merged even
+    if it exceeds the max_merge_chars limit.
+    """
+    return int(os.getenv("PDF_CHUNKER_CRITICAL_SHORT_WORDS", "5"))
+
+
+def _merge_short_rows(rows: list[Row]) -> list[Row]:
+    """Merge rows below the minimum word threshold with neighbors.
+    
+    This is the final pass that catches any short fragments that:
+    - Came from items that couldn't be merged due to size limits
+    - Were produced by _split/_rows_from_item splitting
+    - Are single items with no neighbors
+    
+    Short rows are merged with the following row if possible,
+    otherwise with the preceding row.
+    
+    Rows below the critical threshold (5 words) are ALWAYS merged,
+    even if it exceeds the soft size limit.
+    """
+    if not rows:
+        return rows
+    
+    min_words = _min_row_words()
+    critical_threshold = _critical_short_threshold()
+    max_chars = _max_merge_chars()
+    result: list[Row] = []
+    pending: Row | None = None
+    
+    for row in rows:
+        text = row.get("text", "")
+        words = _word_count(text)
+        chars = len(text)
+        
+        if pending is not None:
+            pending_text = pending.get("text", "")
+            pending_words = _word_count(pending_text)
+            merged_chars = len(pending_text) + chars + 2
+            
+            # ALWAYS merge if pending is critically short (< 5 words)
+            # Otherwise, only merge if it fits within the soft limit
+            is_critical = pending_words < critical_threshold
+            should_merge = is_critical or merged_chars <= max_chars
+            
+            if should_merge:
+                merged_text = f"{pending_text.rstrip()}\n\n{text}".strip()
+                row = {**row, "text": merged_text}
+                pending = None
+                # Recalculate
+                text = row.get("text", "")
+                words = _word_count(text)
+                chars = len(text)
+            else:
+                # Can't merge, keep pending as-is
+                result.append(pending)
+                pending = None
+        
+        # Check if row is too short to stand alone
+        is_short = words < min_words
+        # Coherent rows (proper sentence) can stand alone even if short
+        is_coherent = _coherent(text) and words >= 8
+        
+        if is_short and not is_coherent:
+            pending = row
+        else:
+            result.append(row)
+    
+    # Handle trailing short row
+    if pending is not None:
+        if result:
+            prev = result[-1]
+            prev_text = prev.get("text", "")
+            pending_text = pending.get("text", "")
+            pending_words = _word_count(pending_text)
+            merged_chars = len(prev_text) + len(pending_text) + 2
+            
+            # ALWAYS merge critically short trailing items
+            is_critical = pending_words < critical_threshold
+            should_merge = is_critical or merged_chars <= max_chars
+            
+            if should_merge:
+                merged_text = f"{prev_text.rstrip()}\n\n{pending_text}".strip()
+                result[-1] = {**prev, "text": merged_text}
+            else:
+                # Can't merge, keep as separate row
+                result.append(pending)
+        else:
+            result.append(pending)
+    
+    return result
+
+
 def _rows(
     doc: Doc,
     *,
@@ -1169,6 +1282,9 @@ def _rows(
         for dup in _flag_potential_duplicates(processed):
             logger.warning("possible duplicate retained: %s", dup[:80])
     rows = [r for i in processed for r in _rows_from_item(i, strategy=heuristics)]
+    # Final pass: merge any rows that are still too short after splitting
+    if not explicit_small:
+        rows = _merge_short_rows(rows)
     if _max_chars() < 8000:
         return rows
     return _enrich_rows_with_context(rows)
