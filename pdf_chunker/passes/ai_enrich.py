@@ -29,11 +29,7 @@ def _normalized_tags(values: Any) -> list[str]:
         return []
     return [
         normalized
-        for normalized in (
-            str(item).strip().lower()
-            for item in values
-            if item is not None
-        )
+        for normalized in (str(item).strip().lower() for item in values if item is not None)
         if normalized
     ]
 
@@ -109,6 +105,7 @@ def _debug_preview(text: str, limit: int = 300) -> str:
     cleaned = " ".join(text.split())
     return cleaned[:limit] + ("…" if len(cleaned) > limit else "")
 
+
 def _tag_config_stats(configs: Mapping[str, Iterable[str]]) -> tuple[int, int]:
     return len(configs), sum(len(tags) for tags in configs.values())
 
@@ -124,11 +121,7 @@ def _resolve_tag_configs(
             return sanitized, "explicit"
 
     path_value = next(
-        (
-            options.get(key)
-            for key in ("tags_dir", "tags_path", "tags_file")
-            if options.get(key)
-        ),
+        (options.get(key) for key in ("tags_dir", "tags_path", "tags_file") if options.get(key)),
         None,
     )
     if isinstance(path_value, (str, Path, PathLike)):
@@ -203,9 +196,7 @@ def _ensure_client(
 
 def _iterable_items(value: Any) -> list[Any]:
     return (
-        list(value)
-        if isinstance(value, Iterable) and not isinstance(value, (str, bytes))
-        else []
+        list(value) if isinstance(value, Iterable) and not isinstance(value, (str, bytes)) else []
     )
 
 
@@ -272,12 +263,7 @@ def _normalized_classification(value: str) -> str:
 
 
 def _valid_tags(tag_configs: Mapping[str, TypingIterable[str]]) -> set[str]:
-    return {
-        tag
-        for tags in tag_configs.values()
-        for tag in tags
-        if isinstance(tag, str)
-    }
+    return {tag for tags in tag_configs.values() for tag in tags if isinstance(tag, str)}
 
 
 def _response_lines(response_text: str) -> list[str]:
@@ -316,11 +302,7 @@ def _literal_tags(text: str) -> list[str]:
     if isinstance(parsed, str):
         return [parsed]
     if isinstance(parsed, TypingIterable) and not isinstance(parsed, (bytes, Mapping)):
-        return [
-            str(item)
-            for item in parsed
-            if isinstance(item, (str, int, float))
-        ]
+        return [str(item) for item in parsed if isinstance(item, (str, int, float))]
     return []
 
 
@@ -336,7 +318,7 @@ def _split_tag_line(line: str) -> list[str]:
         cleaned = suffix.strip() or prefix.strip()
     cleaned = cleaned.strip("[]")
     tokens = [
-        re.sub(r"\(.*?\)$", "", token).strip().strip('"\'')
+        re.sub(r"\(.*?\)$", "", token).strip().strip("\"'")
         for token in cleaned.split(",")
         if token.strip()
     ]
@@ -361,9 +343,7 @@ def _dedupe(sequence: TypingIterable[str]) -> list[str]:
 
 
 def _normalize_tags(candidates: list[str], valid: set[str]) -> list[str]:
-    normalized = _dedupe(
-        token.strip().lower() for token in candidates if token and token.strip()
-    )
+    normalized = _dedupe(token.strip().lower() for token in candidates if token and token.strip())
     filtered = [tag for tag in normalized if not valid or tag in valid]
     return filtered or normalized
 
@@ -451,9 +431,7 @@ def _meta_payload(chunk: Chunk, key: str) -> Mapping[str, Any]:
     return _as_mapping(chunk.get(key))
 
 
-def _merge_meta(
-    payload: Mapping[str, Any], classification: str, tags: list[str]
-) -> dict[str, Any]:
+def _merge_meta(payload: Mapping[str, Any], classification: str, tags: list[str]) -> dict[str, Any]:
     return {
         **payload,
         "utterance_type": classification,
@@ -569,8 +547,7 @@ class _AiEnrichPass:
         )
         if not client:
             raise RuntimeError(
-                "ai_enrich enabled but no completion client "
-                f"(reason={client_reason or 'unknown'})"
+                f"ai_enrich enabled but no completion client (reason={client_reason or 'unknown'})"
             )
         if not chunks:
             if _debug_enabled() and not chunks:
