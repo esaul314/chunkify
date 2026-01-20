@@ -141,19 +141,26 @@ def _process_jsonl_file(
 ) -> None:
     """Read ``input_path`` JSONL, classify chunks, and write to ``output_path``."""
     tag_configs = tag_configs or _load_tag_configs()
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     with (
         open(input_path, encoding="utf-8") as infile,
         open(output_path, "w", encoding="utf-8") as outfile,
     ):
         chunks = [json.loads(line) for line in infile]
+        total = len(chunks)
+        processed = 0
+
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            results = list(
-                ex.map(
-                    lambda c: _process_chunk_for_file(
-                        c, tag_configs=tag_configs, completion_fn=completion_fn
-                    ),
-                    chunks,
-                )
-            )
-        for chunk in results:
-            outfile.write(json.dumps(chunk) + "\n")
+            for chunk in ex.map(
+                lambda c: _process_chunk_for_file(
+                    c, tag_configs=tag_configs, completion_fn=completion_fn
+                ),
+                chunks,
+            ):
+                outfile.write(json.dumps(chunk) + "\n")
+                processed += 1
+                if processed % 10 == 0 or processed == total:
+                    logger.info("Processed %d/%d chunks", processed, total)

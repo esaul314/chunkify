@@ -1,12 +1,14 @@
-from collections.abc import Iterable, Mapping
-from functools import lru_cache
 import ast
 import logging
 import os
 import re
+from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable as TypingIterable
+from concurrent.futures import ThreadPoolExecutor
+from functools import cache
 from os import PathLike
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable as TypingIterable, List, Protocol, Tuple
+from typing import Any, Protocol
 
 from pdf_chunker.framework import Artifact, register
 
@@ -14,15 +16,15 @@ logger = logging.getLogger(__name__)
 _DEBUG_SAMPLE_COUNT = 0
 _DEBUG_SAMPLE_LIMIT: int | None = None
 
-Chunk = Dict[str, Any]
-Chunks = List[Chunk]
+Chunk = dict[str, Any]
+Chunks = list[Chunk]
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _normalized_tags(values: Any) -> List[str]:
+def _normalized_tags(values: Any) -> list[str]:
     if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
         return []
     return [
@@ -36,7 +38,7 @@ def _normalized_tags(values: Any) -> List[str]:
     ]
 
 
-def _sanitize_tag_configs(raw: Mapping[str, Any]) -> Dict[str, List[str]]:
+def _sanitize_tag_configs(raw: Mapping[str, Any]) -> dict[str, list[str]]:
     return {
         str(category): _normalized_tags(values)
         for category, values in raw.items()
@@ -44,18 +46,18 @@ def _sanitize_tag_configs(raw: Mapping[str, Any]) -> Dict[str, List[str]]:
     }
 
 
-def _copy_tag_configs(configs: Mapping[str, Iterable[str]]) -> Dict[str, List[str]]:
+def _copy_tag_configs(configs: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
     return {str(category): [*tags] for category, tags in configs.items()}
 
 
-@lru_cache(maxsize=None)
-def _load_default_tag_configs() -> Dict[str, List[str]]:
+@cache
+def _load_default_tag_configs() -> dict[str, list[str]]:
     from pdf_chunker.adapters.ai_enrich import _load_tag_configs as load_dir
 
     return _copy_tag_configs(load_dir())
 
 
-def _load_tag_configs_from_path(path: Path) -> Dict[str, List[str]]:
+def _load_tag_configs_from_path(path: Path) -> dict[str, list[str]]:
     if path.is_dir():
         from pdf_chunker.adapters.ai_enrich import _load_tag_configs as load_dir
 
@@ -97,7 +99,7 @@ def _debug_sample_limit() -> int:
 def _debug_next_sample() -> bool:
     global _DEBUG_SAMPLE_COUNT
     limit = _debug_sample_limit()
-    if limit <= 0 or _DEBUG_SAMPLE_COUNT >= limit:
+    if limit <= 0 or limit <= _DEBUG_SAMPLE_COUNT:
         return False
     _DEBUG_SAMPLE_COUNT += 1
     return True
@@ -107,14 +109,14 @@ def _debug_preview(text: str, limit: int = 300) -> str:
     cleaned = " ".join(text.split())
     return cleaned[:limit] + ("…" if len(cleaned) > limit else "")
 
-def _tag_config_stats(configs: Mapping[str, Iterable[str]]) -> Tuple[int, int]:
+def _tag_config_stats(configs: Mapping[str, Iterable[str]]) -> tuple[int, int]:
     return len(configs), sum(len(tags) for tags in configs.values())
 
 
 def _resolve_tag_configs(
     options: Mapping[str, Any],
-    cached: Dict[str, List[str]] | None,
-) -> Tuple[Dict[str, List[str]], str]:
+    cached: dict[str, list[str]] | None,
+) -> tuple[dict[str, list[str]], str]:
     explicit = options.get("tag_configs")
     if isinstance(explicit, Mapping):
         sanitized = _sanitize_tag_configs(explicit)
@@ -140,7 +142,7 @@ def _resolve_tag_configs(
     return _load_default_tag_configs(), "default"
 
 
-def _resolve_options(meta: Mapping[str, Any] | None) -> Dict[str, Any]:
+def _resolve_options(meta: Mapping[str, Any] | None) -> dict[str, Any]:
     base = _as_mapping(meta)
     nested = _as_mapping(base.get("options"))
     staged = _as_mapping(nested.get("ai_enrich"))
@@ -150,7 +152,7 @@ def _resolve_options(meta: Mapping[str, Any] | None) -> Dict[str, Any]:
 
 def _resolve_completion(
     options: Mapping[str, Any],
-) -> Tuple[Callable[[str], str] | None, str | None]:
+) -> tuple[Callable[[str], str] | None, str | None]:
     completion = options.get("completion_fn")
     if callable(completion):
         return completion, "completion_fn"
@@ -167,10 +169,10 @@ def _resolve_completion(
 def _ensure_client(
     options: Mapping[str, Any],
     fallback: "ClassifyClient | None",
-    tag_configs: Dict[str, List[str]],
+    tag_configs: dict[str, list[str]],
     *,
     completion_reason: str | None,
-) -> Tuple["ClassifyClient | None", str | None]:
+) -> tuple["ClassifyClient | None", str | None]:
     client = options.get("client")
     if client:
         return client, "client_option"  # type: ignore[return-value]
@@ -199,7 +201,7 @@ def _ensure_client(
         return None, f"client_init_error:{exc.__class__.__name__}"
 
 
-def _iterable_items(value: Any) -> List[Any]:
+def _iterable_items(value: Any) -> list[Any]:
     return (
         list(value)
         if isinstance(value, Iterable) and not isinstance(value, (str, bytes))
@@ -215,7 +217,7 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
             return [], lambda _: items
         selected = set(indices)
 
-        def rebuild(enriched: Chunks) -> List[Any]:
+        def rebuild(enriched: Chunks) -> list[Any]:
             replacements = iter(enriched)
             return [
                 next(replacements) if index in selected else item
@@ -236,7 +238,7 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
         selected = set(indices)
         base = {k: v for k, v in payload.items() if k != "items"}
 
-        def rebuild(enriched: Chunks) -> Dict[str, Any]:
+        def rebuild(enriched: Chunks) -> dict[str, Any]:
             replacements = iter(enriched)
             updated = [
                 next(replacements) if index in selected else item
@@ -278,7 +280,7 @@ def _valid_tags(tag_configs: Mapping[str, TypingIterable[str]]) -> set[str]:
     }
 
 
-def _response_lines(response_text: str) -> List[str]:
+def _response_lines(response_text: str) -> list[str]:
     return [line.strip() for line in response_text.splitlines()]
 
 
@@ -293,7 +295,7 @@ def _should_continue_tag_block(line: str) -> bool:
     return True
 
 
-def _collect_tag_block(lines: List[str], start_index: int) -> List[str]:
+def _collect_tag_block(lines: list[str], start_index: int) -> list[str]:
     first = lines[start_index]
     remainder = first.split(":", 1)[1].strip() if ":" in first else ""
     block = [remainder] if remainder else []
@@ -304,7 +306,7 @@ def _collect_tag_block(lines: List[str], start_index: int) -> List[str]:
     return block
 
 
-def _literal_tags(text: str) -> List[str]:
+def _literal_tags(text: str) -> list[str]:
     if not text:
         return []
     try:
@@ -325,7 +327,7 @@ def _literal_tags(text: str) -> List[str]:
 _BULLET_PREFIX = re.compile(r"^(?:[-*•]+\s*|\d+[.)]\s*)")
 
 
-def _split_tag_line(line: str) -> List[str]:
+def _split_tag_line(line: str) -> list[str]:
     cleaned = _BULLET_PREFIX.sub("", line).strip().strip(",")
     if not cleaned:
         return []
@@ -341,16 +343,16 @@ def _split_tag_line(line: str) -> List[str]:
     return [token for token in tokens if token]
 
 
-def _tag_candidates(block: List[str]) -> List[str]:
+def _tag_candidates(block: list[str]) -> list[str]:
     literal = _literal_tags(" ".join(block).strip())
     if literal:
         return literal
     return [candidate for line in block for candidate in _split_tag_line(line)]
 
 
-def _dedupe(sequence: TypingIterable[str]) -> List[str]:
+def _dedupe(sequence: TypingIterable[str]) -> list[str]:
     seen: set[str] = set()
-    ordered: List[str] = []
+    ordered: list[str] = []
     for item in sequence:
         if item not in seen:
             seen.add(item)
@@ -358,7 +360,7 @@ def _dedupe(sequence: TypingIterable[str]) -> List[str]:
     return ordered
 
 
-def _normalize_tags(candidates: List[str], valid: set[str]) -> List[str]:
+def _normalize_tags(candidates: list[str], valid: set[str]) -> list[str]:
     normalized = _dedupe(
         token.strip().lower() for token in candidates if token and token.strip()
     )
@@ -368,9 +370,9 @@ def _normalize_tags(candidates: List[str], valid: set[str]) -> List[str]:
 
 def _parse_completion(
     response_text: str, tag_configs: Mapping[str, TypingIterable[str]]
-) -> tuple[str, List[str]]:
+) -> tuple[str, list[str]]:
     classification = "unclassified"
-    tags: List[str] = []
+    tags: list[str] = []
     lines = _response_lines(response_text)
     valid = _valid_tags(tag_configs)
     for index, line in enumerate(lines):
@@ -387,9 +389,9 @@ def _parse_completion(
 def classify_chunk_utterance(
     text_chunk: str,
     *,
-    tag_configs: Dict[str, List[str]],
+    tag_configs: dict[str, list[str]],
     completion_fn: Callable[[str], str],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Classify ``text_chunk`` and assign relevant tags using ``completion_fn``."""
     if not text_chunk or not text_chunk.strip():
         return {"classification": "unclassified", "tags": []}
@@ -441,8 +443,8 @@ def classify_chunk_utterance(
 
 class ClassifyClient(Protocol):
     def classify_chunk_utterance(
-        self, text_chunk: str, *, tag_configs: Dict[str, List[str]]
-    ) -> Dict[str, Any]: ...
+        self, text_chunk: str, *, tag_configs: dict[str, list[str]]
+    ) -> dict[str, Any]: ...
 
 
 def _meta_payload(chunk: Chunk, key: str) -> Mapping[str, Any]:
@@ -450,8 +452,8 @@ def _meta_payload(chunk: Chunk, key: str) -> Mapping[str, Any]:
 
 
 def _merge_meta(
-    payload: Mapping[str, Any], classification: str, tags: List[str]
-) -> Dict[str, Any]:
+    payload: Mapping[str, Any], classification: str, tags: list[str]
+) -> dict[str, Any]:
     return {
         **payload,
         "utterance_type": classification,
@@ -460,7 +462,7 @@ def _merge_meta(
 
 
 def _classify_chunk(
-    chunk: Chunk, *, client: ClassifyClient, tag_configs: Dict[str, List[str]]
+    chunk: Chunk, *, client: ClassifyClient, tag_configs: dict[str, list[str]]
 ) -> Chunk:
     result = client.classify_chunk_utterance(
         chunk.get("text", ""),
@@ -484,12 +486,37 @@ def _classify_chunk(
 
 
 def _classify_all(
-    chunks: Chunks, *, client: ClassifyClient, tag_configs: Dict[str, List[str]]
+    chunks: Chunks, *, client: ClassifyClient, tag_configs: dict[str, list[str]]
 ) -> Chunks:
-    return [_classify_chunk(c, client=client, tag_configs=tag_configs) for c in chunks]
+    count = len(chunks)
+    if count == 0:
+        return []
+
+    logger.info("ai_enrich: enriching %d chunks...", count)
+
+    # Sequential for single chunk to avoid overhead
+    if count == 1:
+        return [_classify_chunk(chunks[0], client=client, tag_configs=tag_configs)]
+
+    max_workers = min(count, 10)
+    results: list[Chunk] = []
+    processed = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = executor.map(
+            lambda c: _classify_chunk(c, client=client, tag_configs=tag_configs),
+            chunks,
+        )
+        for result in futures:
+            results.append(result)
+            processed += 1
+            if processed % 10 == 0 or processed == count:
+                logger.info("ai_enrich: processed %d/%d chunks", processed, count)
+
+    return results
 
 
-def _update_meta(meta: Dict[str, Any] | None, count: int) -> Dict[str, Any]:
+def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
     base = dict(meta or {})
     base.setdefault("metrics", {}).setdefault("ai_enrich", {})["chunks"] = count
     return base
@@ -503,7 +530,7 @@ class _AiEnrichPass:
     def __init__(
         self,
         client: ClassifyClient | None = None,
-        tag_configs: Dict[str, List[str]] | None = None,
+        tag_configs: dict[str, list[str]] | None = None,
     ) -> None:
         self._client = client
         self._tag_configs = _copy_tag_configs(tag_configs) if tag_configs else None
