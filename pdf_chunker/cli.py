@@ -67,6 +67,8 @@ def _run_convert(
     verbose: bool,
     trace: str | None,
     max_chars: int | None,
+    footer_patterns: tuple[str, ...] | None = None,
+    interactive: bool = False,
 ) -> None:
     if max_chars:
         os.environ["PDF_CHUNKER_JSONL_MAX_CHARS"] = str(max_chars)
@@ -85,6 +87,8 @@ def _run_convert(
             enrich,
             exclude_pages,
             no_metadata,
+            footer_patterns=footer_patterns,
+            interactive=interactive,
         ),
     )
     s = _enrich_spec(s) if enrich else s
@@ -146,6 +150,9 @@ def _cli_overrides(
     enrich: bool,
     exclude_pages: str | None,
     no_metadata: bool,
+    *,
+    footer_patterns: tuple[str, ...] | None = None,
+    interactive: bool = False,
 ) -> dict[str, dict[str, Any]]:
     split_opts: dict[str, Any] = {
         k: v
@@ -168,16 +175,28 @@ def _cli_overrides(
     parse_opts: dict[str, Any] = {
         k: v for k, v in {"exclude_pages": exclude_pages}.items() if v is not None
     }
-    return {
-        k: v
-        for k, v in {
-            "split_semantic": split_opts,
-            "emit_jsonl": emit_opts,
-            "ai_enrich": enrich_opts,
-            "pdf_parse": parse_opts,
-        }.items()
-        if v
+    # Footer detection options (apply even if pass not in pipeline)
+    artifact_opts: dict[str, Any] = {}
+    if footer_patterns:
+        artifact_opts["known_footer_patterns"] = footer_patterns
+    if interactive:
+        artifact_opts["interactive"] = True
+
+    # Build options, including artifact_opts in base even if pass isn't in pipeline
+    base_opts = {
+        "split_semantic": split_opts,
+        "emit_jsonl": emit_opts,
+        "ai_enrich": enrich_opts,
+        "pdf_parse": parse_opts,
     }
+    if artifact_opts:
+        # Merge into text_clean options for footer pattern handling
+        base_opts["text_clean"] = {
+            **base_opts.get("text_clean", {}),
+            "footer_patterns": artifact_opts.get("known_footer_patterns", ()),
+            "interactive_footers": artifact_opts.get("interactive", False),
+        }
+    return {k: v for k, v in base_opts.items() if v}
 
 
 def _enrich_spec(spec: PipelineSpec) -> PipelineSpec:
@@ -214,6 +233,16 @@ if typer:
         verbose: bool = typer.Option(False, "--verbose"),
         trace: str | None = typer.Option(None, "--trace"),
         max_chars: int | None = typer.Option(None, "--max-chars"),
+        footer_pattern: list[str] | None = typer.Option(
+            None,
+            "--footer-pattern",
+            help="Regex pattern for known footers (repeatable)",
+        ),
+        interactive: bool = typer.Option(
+            False,
+            "--interactive",
+            help="Prompt for confirmation on ambiguous footers",
+        ),
     ) -> None:
         _safe(
             lambda: _run_convert(
@@ -228,6 +257,8 @@ if typer:
                 verbose,
                 trace,
                 max_chars,
+                footer_patterns=tuple(footer_pattern) if footer_pattern else None,
+                interactive=interactive,
             )
         )
 
@@ -254,8 +285,21 @@ else:
         conv.add_argument("--verbose", action="store_true")
         conv.add_argument("--trace")
         conv.add_argument("--max-chars", type=int)
+        conv.add_argument(
+            "--footer-pattern",
+            action="append",
+            dest="footer_patterns",
+            help="Regex pattern for known footers (repeatable)",
+        )
+        conv.add_argument(
+            "--interactive",
+            action="store_true",
+            help="Prompt for confirmation on ambiguous footers",
+        )
         conv.set_defaults(
             enrich=False,
+            footer_patterns=None,
+            interactive=False,
             func=lambda ns: _safe(
                 lambda: _run_convert(
                     ns.input_path,
@@ -269,6 +313,8 @@ else:
                     ns.verbose,
                     ns.trace,
                     ns.max_chars,
+                    footer_patterns=tuple(ns.footer_patterns) if ns.footer_patterns else None,
+                    interactive=ns.interactive,
                 )
             ),
         )

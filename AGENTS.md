@@ -86,6 +86,14 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
+- Strip custom footer patterns using regex (repeatable flag):
+  ```bash
+  pdf_chunker convert ./book.pdf --spec pipeline.yaml --out ./out.jsonl --footer-pattern "Collective Wisdom.*\d+" --footer-pattern "Book Title \d+"
+  ```
+- Interactive mode for ambiguous footer confirmation (prompts on stdin):
+  ```bash
+  pdf_chunker convert ./book.pdf --interactive --out ./out.jsonl
+  ```
 - After conversion, verify the output contains the sentinel phrase
   "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
   ensure pages near the end are not truncated.
@@ -103,6 +111,18 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
     pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
     ```
     Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
+
+### Footer Detection Options
+- `--footer-pattern <regex>`: Regex pattern matching text to strip as footer (case-insensitive, repeatable)
+- `--interactive`: Prompt user to confirm ambiguous footer candidates during processing
+- Patterns can also be specified in pipeline YAML:
+  ```yaml
+  options:
+    text_clean:
+      footer_patterns:
+        - "Book Title.*\\d+"
+        - "Chapter \\d+ \\|"
+  ```
 
 ### Debugging Directions
 - When JSONL lines begin mid-sentence or phrases like "Most engineers" repeat, inspect the `split_semantic` pass before focusing on downstream emission or deduplication.

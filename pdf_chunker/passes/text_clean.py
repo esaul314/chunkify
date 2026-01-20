@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Dict, Sequence, cast
 
@@ -43,7 +44,9 @@ _COLLAPSE_SPACES = re.compile(r" {2,}")
 def _normalize_nbsp_like(text: str) -> str:
     """Convert NBSP-like characters to plain spaces and collapse multiples."""
 
-    return _apply_fixpoint(lambda value: _COLLAPSE_SPACES.sub(" ", value.translate(_NBSP_TRANSLATION)), text)
+    return _apply_fixpoint(
+        lambda value: _COLLAPSE_SPACES.sub(" ", value.translate(_NBSP_TRANSLATION)), text
+    )
 
 
 def _patch_clean_paragraph() -> None:
@@ -72,7 +75,9 @@ def _render_chunk(tokens: Sequence[str]) -> str:
     return _splitter._detokenize_with_newlines(tuple(tokens))
 
 
-def _token_windows(tokens: tuple[str, ...], chunk_size: int, overlap: int) -> tuple[tuple[str, ...], ...]:
+def _token_windows(
+    tokens: tuple[str, ...], chunk_size: int, overlap: int
+) -> tuple[tuple[str, ...], ...]:
     """Return token windows for ``tokens`` respecting ``chunk_size`` and ``overlap``."""
 
     if len(tokens) <= chunk_size:
@@ -125,11 +130,7 @@ def _style_of(span: Any) -> str | None:
 def _inline_style_metrics(pages: list[Dict[str, Any]]) -> dict[str, Any]:
     """Aggregate inline-style coverage and tag counts for ``pages``."""
 
-    blocks = [
-        block
-        for page in pages
-        for block in page.get("blocks", [])
-    ]
+    blocks = [block for page in pages for block in page.get("blocks", [])]
     total_blocks = len(blocks)
     if total_blocks == 0:
         return {
@@ -141,10 +142,7 @@ def _inline_style_metrics(pages: list[Dict[str, Any]]) -> dict[str, Any]:
     tag_counts = Counter(
         style
         for block in styled_blocks
-        for style in (
-            _style_of(span)
-            for span in block.get("inline_styles") or ()
-        )
+        for style in (_style_of(span) for span in block.get("inline_styles") or ())
         if style is not None
     )
     return {
@@ -153,7 +151,10 @@ def _inline_style_metrics(pages: list[Dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _clean_block(block: Dict[str, Any]) -> Dict[str, Any]:
+def _clean_block(
+    block: Dict[str, Any],
+    footer_patterns: tuple[re.Pattern[str], ...] = (),
+) -> Dict[str, Any]:
     """Return a new block with normalized text."""
     from pdf_chunker import text_cleaning
     from pdf_chunker.inline_styles import (
@@ -163,6 +164,16 @@ def _clean_block(block: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     text = block.get("text", "")
+
+    # Check if entire block matches a known footer pattern
+    for pat in footer_patterns:
+        if pat.search(text):
+            # Strip the matched footer portion
+            text = pat.sub("", text).strip()
+            if not text:
+                # Entire block was footer
+                return {**block, "text": "", "inline_styles": None}
+
     cleaned_text = text_cleaning.clean_text(text)
 
     original_styles = block.get("inline_styles")
@@ -179,30 +190,64 @@ def _clean_block(block: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _clean_page(page: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
+def _clean_page(
+    page: Dict[str, Any],
+    footer_patterns: tuple[re.Pattern[str], ...] = (),
+) -> tuple[Dict[str, Any], int]:
     """Clean all blocks in ``page`` and return the block count."""
-    blocks = [_clean_block(b) for b in page.get("blocks", [])]
-    return {**page, "blocks": blocks}, len(blocks)
+    blocks = [_clean_block(b, footer_patterns) for b in page.get("blocks", [])]
+    # Filter out blocks that became empty after footer stripping
+    non_empty = [b for b in blocks if b.get("text", "").strip()]
+    return {**page, "blocks": non_empty}, len(non_empty)
 
 
-def _clean_doc(doc: Dict[str, Any]) -> tuple[Dict[str, Any], int, dict[str, Any]]:
+def _clean_doc(
+    doc: Dict[str, Any],
+    footer_patterns: tuple[re.Pattern[str], ...] = (),
+) -> tuple[Dict[str, Any], int, dict[str, Any]]:
     """Clean document pages and aggregate block metrics."""
-    pages_with_counts = [_clean_page(p) for p in doc.get("pages", [])]
+    pages_with_counts = [_clean_page(p, footer_patterns) for p in doc.get("pages", [])]
     pages = [p for p, _ in pages_with_counts]
     blocks = sum(c for _, c in pages_with_counts)
     style_metrics = _inline_style_metrics(pages)
     return {**doc, "pages": pages}, blocks, style_metrics
 
 
+@dataclass
 class _TextCleanPass:
-    name = "text_clean"
-    input_type = object
-    output_type = object
+    """Pass to clean and normalize text in document blocks.
+
+    Attributes:
+        footer_patterns: Regex strings that identify footers to strip
+        interactive_footers: Whether to prompt for footer confirmation (reserved)
+    """
+
+    name: str = field(default="text_clean", init=False)
+    input_type: type = field(default=object, init=False)
+    output_type: type = field(default=object, init=False)
+
+    footer_patterns: tuple[str, ...] = ()
+    interactive_footers: bool = False
+
+    def __post_init__(self) -> None:
+        """Compile footer patterns after initialization."""
+        self._compiled_patterns: tuple[re.Pattern[str], ...] = tuple(
+            re.compile(p, re.IGNORECASE) for p in self.footer_patterns if isinstance(p, str)
+        )
 
     def __call__(self, a: Artifact) -> Artifact:
         payload = a.payload
         block_count: int | None = None
         cleaned: str | Dict[str, Any]
+
+        # Check for runtime options
+        opts = (a.meta or {}).get("options", {}).get("text_clean", {})
+        runtime_patterns = opts.get("footer_patterns", ())
+        patterns = self._compiled_patterns
+        if runtime_patterns and runtime_patterns != self.footer_patterns:
+            patterns = tuple(
+                re.compile(p, re.IGNORECASE) for p in runtime_patterns if isinstance(p, str)
+            )
 
         if isinstance(payload, str):
             from pdf_chunker.text_cleaning import _clean_text_impl
@@ -210,7 +255,7 @@ class _TextCleanPass:
             cleaned = _clean_text_impl(payload)
         elif isinstance(payload, dict) and payload.get("type") == "page_blocks":
             typed_payload = cast(Dict[str, Any], payload)
-            cleaned, block_count, style_metrics = _clean_doc(typed_payload)
+            cleaned, block_count, style_metrics = _clean_doc(typed_payload, patterns)
         else:
             return a
 
@@ -221,6 +266,8 @@ class _TextCleanPass:
             text_metrics = metrics.setdefault("text_clean", {})
             text_metrics["blocks"] = block_count
             text_metrics.update(style_metrics)
+            if patterns:
+                text_metrics["footer_patterns_applied"] = len(patterns)
         return Artifact(payload=cleaned, meta=meta)
 
 
