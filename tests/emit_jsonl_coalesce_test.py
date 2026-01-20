@@ -7,6 +7,7 @@ from pdf_chunker.passes.emit_jsonl import (
     _flag_potential_duplicates,
     _merge_very_short_forward,
     _rows,
+    _starts_with_orphan_bullet,
 )
 
 
@@ -256,3 +257,48 @@ def test_rows_merges_short_heading_in_preserve_mode():
     assert len(rows) == 1
     assert rows[0]["text"].startswith("Foreword")
     assert "substantial" in rows[0]["text"]
+
+
+def test_orphan_bullet_detection():
+    """Single bullet at start of text is detected as orphaned."""
+    # Single bullet line - orphaned
+    assert _starts_with_orphan_bullet("• First item only")
+    assert _starts_with_orphan_bullet("1. First numbered item")
+    
+    # Bullet followed by non-bullet - orphaned
+    assert _starts_with_orphan_bullet("• First item\nSome other text")
+    assert _starts_with_orphan_bullet("1. First item\nSome paragraph follows")
+    
+    # Multiple bullets - NOT orphaned (proper list)
+    assert not _starts_with_orphan_bullet("• First item\n• Second item")
+    assert not _starts_with_orphan_bullet("1. First\n2. Second")
+    
+    # Non-bullet start - NOT orphaned
+    assert not _starts_with_orphan_bullet("Regular paragraph text")
+    assert not _starts_with_orphan_bullet("Heading\n• Then a bullet")
+
+
+def test_orphan_bullet_merges_forward():
+    """A chunk starting with a single orphaned bullet merges into next chunk."""
+    items = [
+        {"text": "• Single orphan bullet item"},
+        {"text": "This is the main content of the section with enough words. " * 4},
+    ]
+    result = _merge_very_short_forward(items)
+    # Orphan bullet should merge forward
+    assert len(result) == 1
+    assert "• Single orphan" in result[0]["text"]
+    assert "main content" in result[0]["text"]
+
+
+def test_proper_list_stays_intact():
+    """A chunk with a proper multi-item list is NOT merged."""
+    items = [
+        {"text": "Here is a list:\n• First item\n• Second item\n• Third item with more words to reach threshold " * 2},
+        {"text": "This is separate content that follows the list. " * 4},
+    ]
+    result = _merge_very_short_forward(items)
+    # Proper list should stay separate
+    assert len(result) == 2
+    assert "• First item" in result[0]["text"]
+    assert "• Second item" in result[0]["text"]

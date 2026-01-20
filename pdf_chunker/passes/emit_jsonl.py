@@ -757,8 +757,42 @@ def _coalesce(
 
 
 def _very_short_threshold() -> int:
-    """Return threshold below which items should always be merged forward."""
-    return int(os.getenv("PDF_CHUNKER_VERY_SHORT_WORDS", "10"))
+    """Return threshold below which items should always be merged forward.
+    
+    Default is 30 words - chunks below this are almost always semantically
+    incomplete (orphaned headings, single bullet items, fragment sentences).
+    """
+    return int(os.getenv("PDF_CHUNKER_VERY_SHORT_WORDS", "30"))
+
+
+def _starts_with_orphan_bullet(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    """Return True if text starts with a single bullet item (orphaned list fragment)."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    
+    first_line = lines[0].strip()
+    heuristics = _resolve_bullet_strategy(strategy)
+    
+    # Check if first line is a bullet
+    if not (heuristics.starts_with_bullet(first_line) or heuristics.starts_with_number(first_line)):
+        return False
+    
+    # If there's only one line, it's orphaned
+    if len(lines) == 1:
+        return True
+    
+    # If second line is NOT a bullet, first bullet is orphaned
+    second_line = lines[1].strip()
+    is_list_line = (
+        heuristics.starts_with_bullet(second_line)
+        or heuristics.starts_with_number(second_line)
+    )
+    return not is_list_line
 
 
 def _merge_very_short_forward(
@@ -769,7 +803,8 @@ def _merge_very_short_forward(
     """Merge items below the very-short threshold into the following item.
 
     This handles cases like orphaned headings or single-sentence fragments
-    that should logically belong with the next semantic unit.
+    that should logically belong with the next semantic unit. Also prevents
+    chunks from starting with a single orphaned bullet item.
     """
     if not items:
         return items
@@ -787,9 +822,20 @@ def _merge_very_short_forward(
             merged_text = _merge_text(pending["text"], text, strategy=strategy)
             item = {**pending, "text": merged_text}
             pending = None
+            # Recalculate word count after merge
+            text = item.get("text", "")
+            words = _word_count(text)
 
-        if words < threshold:
-            # This item is very short - hold it for forward merge
+        # Check if this item should be held for forward merge:
+        # 1. Too short (< threshold words)
+        # 2. Starts with an orphaned bullet item
+        should_hold = words < threshold or _starts_with_orphan_bullet(text, strategy=strategy)
+        
+        if should_hold and words < threshold:
+            # Only hold if actually short - orphan bullets that are long enough stay
+            pending = item
+        elif should_hold and _starts_with_orphan_bullet(text, strategy=strategy):
+            # Orphaned bullet but long enough - still merge forward for coherence
             pending = item
         else:
             result.append(item)
