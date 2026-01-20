@@ -1,12 +1,18 @@
 from collections.abc import Iterable, Mapping
 from functools import lru_cache
 import ast
+import logging
+import os
 import re
 from os import PathLike
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable as TypingIterable, List, Protocol
+from typing import Any, Callable, Dict, Iterable as TypingIterable, List, Protocol, Tuple
 
 from pdf_chunker.framework import Artifact, register
+
+logger = logging.getLogger(__name__)
+_DEBUG_SAMPLE_COUNT = 0
+_DEBUG_SAMPLE_LIMIT: int | None = None
 
 Chunk = Dict[str, Any]
 Chunks = List[Chunk]
@@ -67,15 +73,53 @@ def _load_tag_configs_from_path(path: Path) -> Dict[str, List[str]]:
     return {}
 
 
+def _debug_enabled() -> bool:
+    return os.getenv("PDF_CHUNKER_AI_ENRICH_DEBUG", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _debug_sample_limit() -> int:
+    global _DEBUG_SAMPLE_LIMIT
+    if _DEBUG_SAMPLE_LIMIT is not None:
+        return _DEBUG_SAMPLE_LIMIT
+    raw = os.getenv("PDF_CHUNKER_AI_ENRICH_DEBUG_SAMPLES", "1").strip()
+    try:
+        _DEBUG_SAMPLE_LIMIT = max(0, int(raw))
+    except ValueError:
+        _DEBUG_SAMPLE_LIMIT = 1
+    return _DEBUG_SAMPLE_LIMIT
+
+
+def _debug_next_sample() -> bool:
+    global _DEBUG_SAMPLE_COUNT
+    limit = _debug_sample_limit()
+    if limit <= 0 or _DEBUG_SAMPLE_COUNT >= limit:
+        return False
+    _DEBUG_SAMPLE_COUNT += 1
+    return True
+
+
+def _debug_preview(text: str, limit: int = 300) -> str:
+    cleaned = " ".join(text.split())
+    return cleaned[:limit] + ("…" if len(cleaned) > limit else "")
+
+def _tag_config_stats(configs: Mapping[str, Iterable[str]]) -> Tuple[int, int]:
+    return len(configs), sum(len(tags) for tags in configs.values())
+
+
 def _resolve_tag_configs(
     options: Mapping[str, Any],
     cached: Dict[str, List[str]] | None,
-) -> Dict[str, List[str]]:
+) -> Tuple[Dict[str, List[str]], str]:
     explicit = options.get("tag_configs")
     if isinstance(explicit, Mapping):
         sanitized = _sanitize_tag_configs(explicit)
         if sanitized:
-            return sanitized
+            return sanitized, "explicit"
 
     path_value = next(
         (
@@ -88,12 +132,12 @@ def _resolve_tag_configs(
     if isinstance(path_value, (str, Path, PathLike)):
         loaded = _load_tag_configs_from_path(Path(path_value))
         if loaded:
-            return loaded
+            return loaded, f"path:{path_value}"
 
     if cached:
-        return _copy_tag_configs(cached)
+        return _copy_tag_configs(cached), "cached"
 
-    return _load_default_tag_configs()
+    return _load_default_tag_configs(), "default"
 
 
 def _resolve_options(meta: Mapping[str, Any] | None) -> Dict[str, Any]:
@@ -104,42 +148,55 @@ def _resolve_options(meta: Mapping[str, Any] | None) -> Dict[str, Any]:
     return {**staged, **direct}
 
 
-def _resolve_completion(options: Mapping[str, Any]) -> Callable[[str], str] | None:
+def _resolve_completion(
+    options: Mapping[str, Any],
+) -> Tuple[Callable[[str], str] | None, str | None]:
     completion = options.get("completion_fn")
     if callable(completion):
-        return completion
+        return completion, "completion_fn"
     try:
         from pdf_chunker.adapters.ai_enrich import init_llm
     except Exception:  # pragma: no cover - adapters unavailable
-        return None
+        return None, "missing_adapters"
     try:
-        return init_llm(api_key=options.get("api_key"))
-    except Exception:  # pragma: no cover - missing credentials
-        return None
+        return init_llm(api_key=options.get("api_key")), "init_llm"
+    except Exception as exc:  # pragma: no cover - missing credentials
+        return None, f"init_llm_error:{exc.__class__.__name__}"
 
 
 def _ensure_client(
     options: Mapping[str, Any],
     fallback: "ClassifyClient | None",
     tag_configs: Dict[str, List[str]],
-) -> "ClassifyClient | None":
+    *,
+    completion_reason: str | None,
+) -> Tuple["ClassifyClient | None", str | None]:
     client = options.get("client")
     if client:
-        return client  # type: ignore[return-value]
+        return client, "client_option"  # type: ignore[return-value]
     if fallback:
-        return fallback
+        return fallback, "client_cached"
 
-    completion = _resolve_completion(options)
+    completion, reason = _resolve_completion(options)
     if not completion:
-        return None
+        if _debug_enabled():
+            logger.warning(
+                "ai_enrich debug: no completion client (reason=%s)",
+                reason or completion_reason or "unknown",
+            )
+        return None, reason or completion_reason or "missing_completion"
     try:
         from pdf_chunker.adapters.ai_enrich import Client
     except Exception:  # pragma: no cover - adapters unavailable
-        return None
+        if _debug_enabled():
+            logger.warning("ai_enrich debug: adapters unavailable for Client")
+        return None, "missing_adapters"
     try:
-        return Client(completion_fn=completion, tag_configs=tag_configs or None)
-    except Exception:  # pragma: no cover - client init failure
-        return None
+        return Client(completion_fn=completion, tag_configs=tag_configs or None), "client_ready"
+    except Exception as exc:  # pragma: no cover - client init failure
+        if _debug_enabled():
+            logger.warning("ai_enrich debug: Client initialization failed")
+        return None, f"client_init_error:{exc.__class__.__name__}"
 
 
 def _iterable_items(value: Any) -> List[Any]:
@@ -363,8 +420,22 @@ def classify_chunk_utterance(
     try:
         response_text = completion_fn(prompt).strip()
         classification, tags = _parse_completion(response_text, tag_configs)
+        if _debug_enabled() and _debug_next_sample():
+            has_tags = "tags:" in response_text.lower()
+            logger.warning(
+                "ai_enrich debug: response_preview='%s' has_tags=%s classification=%s tags=%s",
+                _debug_preview(response_text),
+                has_tags,
+                classification,
+                tags,
+            )
         return {"classification": classification, "tags": tags}
-    except Exception:
+    except Exception as exc:
+        if _debug_enabled():
+            logger.warning(
+                "ai_enrich debug: completion failed (%s)",
+                exc.__class__.__name__,
+            )
         return {"classification": "error", "tags": []}
 
 
@@ -439,12 +510,44 @@ class _AiEnrichPass:
 
     def __call__(self, a: Artifact) -> Artifact:
         options = _resolve_options(a.meta)
-        if not bool(options.get("enabled")):
+        enabled = bool(options.get("enabled"))
+        if _debug_enabled():
+            logger.warning(
+                "ai_enrich debug: enabled=%s api_key_set=%s option_keys=%s",
+                enabled,
+                bool(os.getenv("OPENAI_API_KEY") or options.get("api_key")),
+                sorted(options.keys()),
+            )
+        if not enabled:
+            if _debug_enabled():
+                logger.warning("ai_enrich debug: pass disabled")
             return a
         chunks, rebuild_payload = _payload_chunks(a.payload)
-        tag_configs = _resolve_tag_configs(options, self._tag_configs)
-        client = _ensure_client(options, self._client, tag_configs)
-        if not client or not chunks:
+        tag_configs, source = _resolve_tag_configs(options, self._tag_configs)
+        if _debug_enabled():
+            categories, total = _tag_config_stats(tag_configs)
+            logger.warning(
+                "ai_enrich debug: tag configs source=%s categories=%d total_tags=%d",
+                source,
+                categories,
+                total,
+            )
+            if not tag_configs:
+                logger.warning("ai_enrich debug: no tag configs loaded")
+        client, client_reason = _ensure_client(
+            options,
+            self._client,
+            tag_configs,
+            completion_reason=source,
+        )
+        if not client:
+            raise RuntimeError(
+                "ai_enrich enabled but no completion client "
+                f"(reason={client_reason or 'unknown'})"
+            )
+        if not chunks:
+            if _debug_enabled() and not chunks:
+                logger.warning("ai_enrich debug: no chunks to enrich")
             return a
         self._client = client
         self._tag_configs = _copy_tag_configs(tag_configs)

@@ -1,0 +1,23 @@
+pipeline:
+  - pdf_parse
+  - text_clean
+  - heading_detect
+  - split_semantic
+  - ai_enrich
+  - emit_jsonl
+
+options:
+  pdf_parse:
+    engine: "native"
+  text_clean:
+    normalize_quotes: true
+    repair_ligatures: true
+  split_semantic:
+    chunk_size: 400
+    overlap: 100
+    generate_metadata: true
+  ai_enrich:
+    enabled: true
+    tags_dir: "config/tags"
+  emit_jsonl:
+    output_path: "out.jsonl"

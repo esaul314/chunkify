@@ -34,11 +34,25 @@ class Client:
         )
 
 
+def _resolve_config_path(config_dir: str) -> Path:
+    """Resolve tag config directory for repo and installed-package layouts."""
+    config_path = Path(config_dir)
+    if config_path.is_absolute():
+        return config_path
+
+    package_root = Path(__file__).resolve().parent.parent
+    repo_root = package_root.parent
+    candidates = (
+        package_root / config_path,
+        repo_root / config_path,
+        Path.cwd() / config_path,
+    )
+    return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+
+
 def _load_tag_configs(config_dir: str = "config/tags") -> dict[str, list[str]]:
     """Merge YAML tag configurations into a single dictionary."""
-    config_path = Path(config_dir)
-    if not config_path.is_absolute():
-        config_path = Path(__file__).resolve().parent.parent / config_path
+    config_path = _resolve_config_path(config_dir)
     if not config_path.exists():
         return {}
 

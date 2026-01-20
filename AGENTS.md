@@ -82,6 +82,10 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
   ```
+- RAG-optimized pipeline (100-word overlap, metadata on; tags apply when `OPENAI_API_KEY` is set):
+  ```bash
+  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
+  ```
 - After conversion, verify the output contains the sentinel phrase
   "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
   ensure pages near the end are not truncated.
@@ -138,6 +142,8 @@ project_response_with_snippets.md
 pdf_chunker/
 ├── _apply.sh                    # Batch apply scripts across multiple files
 ├── _e2e_check.sh                # End-to-end pipeline check
+├── pipeline.yaml                # Default pipeline spec
+├── pipeline_rag.yaml            # RAG-optimized pipeline spec
 ├── .env                         # API keys and configuration secrets
 ├── config/
 │   └── tags/                      # External tag configuration (YAML vocabularies)
@@ -218,6 +224,7 @@ pdf_chunker/
     ├── list_detection_edge_case_test.py
     ├── multiline_bullet_test.py
     ├── multiline_numbered_test.py
+    ├── rag_pipeline_readiness_test.py
     ├── newline_cleanup_test.py
     ├── numbered_list_chunk_test.py
     ├── numbered_list_footnote_test.py
@@ -298,17 +305,25 @@ The project implements a robust **Three-Pass Pipeline**:
 
 ## Metadata Output Specification
 
-Each JSONL chunk record contains the following fields; fields marked required (\*) are always present, optional fields may be null or omitted:
+Each JSONL chunk record contains `text` plus a `metadata` object when metadata is enabled (default). Fields marked required (\*) are always present, optional fields may be null or omitted:
 
-* `chunk_id` (string)\*: globally unique chunk identifier
-* `source_file` (string)\*: original filename
-* `page_range` (string)\*: pages encompassed, e.g., "1-3"
-* `heading` (string|null): nearest inferred heading; null if none
-* `tags` (array)\*: semantic tags from YAML; empty array if none
 * `text` (string)\*: cleaned, concatenated chunk text
-* `quality_score` (float|null): fallback extraction score (0–1); null if primary extraction succeeded
+* `metadata.chunk_id` (string)\*: globally unique chunk identifier
+* `metadata.source` / `metadata.source_file` (string)\*: original filename (both provided)
+* `metadata.page` (int|null): primary page number when available
+* `metadata.page_range` (string|null): pages encompassed, e.g., "1-3"
+* `metadata.utterance_type` (string)\*: classification label; defaults to `unclassified`
+* `metadata.tags` (array)\*: semantic tags from YAML; empty array if none
+* `metadata.language` (string)\*: detected or default language code
+* `metadata.block_type` (string)\*: paragraph/list_item/etc
+* `metadata.readability` (object)\*: readability metrics bundle
+* `metadata.importance` (string)\*: importance marker (default `medium`)
+* `metadata.list_kind` (string|null): list style when applicable
+* `metadata.footnote_anchors` (array|null): inline style anchors when detected
 
 - Mandatory fields. Optional fields may be omitted or null depending on context.
+- Use `--no-metadata` or `split_semantic.generate_metadata=false` to omit the `metadata` object entirely.
+- `PDF_CHUNKER_JSONL_META_KEY` can override the metadata key name if needed.
 
 Agents should treat overlapping chunks as intentional LoRA buffer unless the application log explicitly flags an error.
 

@@ -1,3 +1,5 @@
+import pytest
+
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.ai_enrich import ai_enrich
 from pdf_chunker.utils import _enrich_chunk
@@ -20,6 +22,19 @@ def test_ai_enrich_pass_disabled():
     assert result.payload == chunks
     assert client.calls == 0
     assert "ai_enrich" not in (result.meta or {}).get("metrics", {})
+
+
+def test_ai_enrich_pass_enabled_requires_client(monkeypatch) -> None:
+    from pdf_chunker import adapters
+
+    def _raise_import_error(*_args, **_kwargs):
+        raise ImportError("litellm missing")
+
+    monkeypatch.setattr(adapters.ai_enrich, "init_llm", _raise_import_error)
+    chunks = [{"text": "What is AI?"}]
+    meta = {"ai_enrich": {"enabled": True}}
+    with pytest.raises(RuntimeError, match="no completion client"):
+        ai_enrich(Artifact(payload=chunks, meta=meta))
 
 
 def test_ai_enrich_pass_enabled_enriches():

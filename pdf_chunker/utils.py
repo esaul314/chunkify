@@ -396,16 +396,31 @@ def _build_metadata(
     filename = source.get("filename", "Unknown")
     page = source.get("page", 0)
     location = source.get("location")
+    page_range = source.get("page_range")
 
     location_value = None if location is None and filename.lower().endswith(".pdf") else location
     page_value = page if isinstance(page, int) and page > 0 else None
+    page_range_value = None
+    if isinstance(page_range, (list, tuple)) and len(page_range) == 2:
+        start, end = page_range
+        if (
+            isinstance(start, int)
+            and isinstance(end, int)
+            and start > 0
+            and end > 0
+        ):
+            page_range_value = f"{start}-{end}" if start != end else str(start)
+    if page_range_value is None and page_value is not None:
+        page_range_value = str(page_value)
 
     utterance_type, tags = _resolve_utterance_fields(utterance_info)
 
     base_metadata = {
         "source": filename,
+        "source_file": filename,
         "chunk_id": _generate_chunk_id(filename, page_value, chunk_index),
         "page": page_value,
+        "page_range": page_range_value,
         "location": location_value,
         "block_type": normalized.get("type", "paragraph"),
         "language": normalized.get("language", "un"),
