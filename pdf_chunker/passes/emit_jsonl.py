@@ -756,6 +756,56 @@ def _coalesce(
     return merged
 
 
+def _very_short_threshold() -> int:
+    """Return threshold below which items should always be merged forward."""
+    return int(os.getenv("PDF_CHUNKER_VERY_SHORT_WORDS", "10"))
+
+
+def _merge_very_short_forward(
+    items: list[dict[str, Any]],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> list[dict[str, Any]]:
+    """Merge items below the very-short threshold into the following item.
+
+    This handles cases like orphaned headings or single-sentence fragments
+    that should logically belong with the next semantic unit.
+    """
+    if not items:
+        return items
+
+    threshold = _very_short_threshold()
+    result: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+
+    for item in items:
+        text = item.get("text", "")
+        words = _word_count(text)
+
+        if pending is not None:
+            # Merge pending short item into current
+            merged_text = _merge_text(pending["text"], text, strategy=strategy)
+            item = {**pending, "text": merged_text}
+            pending = None
+
+        if words < threshold:
+            # This item is very short - hold it for forward merge
+            pending = item
+        else:
+            result.append(item)
+
+    # Handle trailing short item - merge backward if possible
+    if pending is not None:
+        if result:
+            prev = result[-1]
+            merged_text = _merge_text(prev["text"], pending["text"], strategy=strategy)
+            result[-1] = {**prev, "text": merged_text}
+        else:
+            result.append(pending)
+
+    return result
+
+
 def _strip_superscripts(item: dict[str, Any]) -> dict[str, Any]:
     spans = tuple(item.get("_footnote_spans") or ())
     text = item.get("text", "")
@@ -950,6 +1000,11 @@ def _rows(
     )
     items = _sanitize_items(doc.get("items", []))
     heuristics = _resolve_bullet_strategy(strategy)
+
+    # Always merge very short items forward, regardless of preserve mode.
+    # This handles orphaned headings and single-sentence fragments.
+    items = _merge_very_short_forward(list(items), strategy=heuristics)
+
     processed = (
         items
         if preserve

@@ -3,10 +3,16 @@ import os
 import subprocess
 from pathlib import Path
 
-from pdf_chunker.passes.emit_jsonl import _rows, _flag_potential_duplicates
+from pdf_chunker.passes.emit_jsonl import (
+    _flag_potential_duplicates,
+    _merge_very_short_forward,
+    _rows,
+)
 
 
-def _convert_platform_eng(tmp_path: Path, *, extra_env: dict[str, str] | None = None) -> tuple[Path, subprocess.CompletedProcess[str]]:
+def _convert_platform_eng(
+    tmp_path: Path, *, extra_env: dict[str, str] | None = None
+) -> tuple[Path, subprocess.CompletedProcess[str]]:
     pdf = Path("platform-eng-excerpt.pdf").resolve()
     spec = Path("pipeline.yaml").resolve()
     out = tmp_path / "out.jsonl"
@@ -96,8 +102,7 @@ def test_non_adjacent_duplicate_sentence_trimmed():
             {"text": "Intro."},
             {
                 "text": (
-                    "Most engineers don't want to learn a whole new toolset for "
-                    "infrequent tasks."
+                    "Most engineers don't want to learn a whole new toolset for infrequent tasks."
                 )
             },
             {"text": "Filler paragraph in between."},
@@ -144,9 +149,7 @@ def test_flag_potential_duplicates():
 
 
 def test_split_does_not_duplicate(tmp_path: Path) -> None:
-    out, proc = _convert_platform_eng(
-        tmp_path, extra_env={"PDF_CHUNKER_DEDUP_DEBUG": "1"}
-    )
+    out, proc = _convert_platform_eng(tmp_path, extra_env={"PDF_CHUNKER_DEDUP_DEBUG": "1"})
     text = out.read_text()
     matches = text.count("Most engineers")
     assert matches == 1, proc.stderr
@@ -156,11 +159,7 @@ def test_split_does_not_duplicate(tmp_path: Path) -> None:
 
 def test_platform_eng_sentence_boundary(tmp_path: Path) -> None:
     out, _ = _convert_platform_eng(tmp_path)
-    rows = [
-        json.loads(line)
-        for line in out.read_text().splitlines()
-        if line.strip()
-    ]
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
     phrase = "It only works because you have one person"
     chunk = next(row for row in rows if phrase in row["text"])
     position = chunk["text"].find(phrase)
@@ -171,19 +170,14 @@ def test_platform_eng_sentence_boundary(tmp_path: Path) -> None:
     intro = next(
         row
         for row in rows
-        if row["metadata"].get("chunk_id") == chunk_id
-        and row["metadata"].get("chunk_part", 0) == 0
+        if row["metadata"].get("chunk_id") == chunk_id and row["metadata"].get("chunk_part", 0) == 0
     )
     assert ":" in intro["text"]
 
 
 def test_platform_eng_heading_preserved(tmp_path: Path) -> None:
     out, _ = _convert_platform_eng(tmp_path)
-    rows = [
-        json.loads(line)
-        for line in out.read_text().splitlines()
-        if line.strip()
-    ]
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
     heading = "How Platform Engineering Clears the Swamp"
     target = next(row for row in rows if "Clears the Swamp" in row["text"])
     assert heading in target["text"]
@@ -192,11 +186,7 @@ def test_platform_eng_heading_preserved(tmp_path: Path) -> None:
 
 def test_platform_eng_conjunction_chunks_have_context(tmp_path: Path) -> None:
     out, _ = _convert_platform_eng(tmp_path)
-    rows = [
-        json.loads(line)
-        for line in out.read_text().splitlines()
-        if line.strip()
-    ]
+    rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
 
     def _lead_token(text: str) -> str:
         words = text.lstrip().split()
@@ -209,3 +199,60 @@ def test_platform_eng_conjunction_chunks_have_context(tmp_path: Path) -> None:
     phrase = "But building platforms takes significant investment"
     chunk = next(row for row in rows if phrase in row["text"])
     assert not chunk["text"].lstrip().startswith(phrase)
+
+
+def test_very_short_heading_merged_forward():
+    """Very short items like orphaned headings merge into the following chunk."""
+    items = [
+        {"text": "Chapter One"},
+        {"text": "This is the first paragraph of the chapter. " * 5},
+    ]
+    result = _merge_very_short_forward(items)
+    # "Chapter One" (2 words) should merge into the next item
+    assert len(result) == 1
+    assert result[0]["text"].startswith("Chapter One")
+    assert "first paragraph" in result[0]["text"]
+
+
+def test_very_short_consecutive_headings_merge_forward():
+    """Multiple consecutive short items all merge into the first long item."""
+    items = [
+        {"text": "Part I"},
+        {"text": "Introduction"},
+        {"text": "This is the actual content of the section. " * 5},
+    ]
+    result = _merge_very_short_forward(items)
+    # Both short items should end up merged into the body
+    assert len(result) == 1
+    assert "Part I" in result[0]["text"]
+    assert "Introduction" in result[0]["text"]
+    assert "actual content" in result[0]["text"]
+
+
+def test_very_short_trailing_item_merges_backward():
+    """A very short item at the end merges into the previous chunk."""
+    items = [
+        {"text": "This is a complete paragraph with enough words to pass the threshold. " * 3},
+        {"text": "The End."},
+    ]
+    result = _merge_very_short_forward(items)
+    # "The End." should merge backward into the previous chunk
+    assert len(result) == 1
+    assert "The End." in result[0]["text"]
+    assert "complete paragraph" in result[0]["text"]
+
+
+def test_rows_merges_short_heading_in_preserve_mode():
+    """Even when preserve=True (overlap>0), very short chunks are merged."""
+    doc = {
+        "type": "chunks",
+        "items": [
+            {"text": "Foreword"},
+            {"text": "The following content is substantial enough to stand alone. " * 3},
+        ],
+    }
+    rows = _rows(doc, preserve=True)
+    # "Foreword" should be merged into the next chunk
+    assert len(rows) == 1
+    assert rows[0]["text"].startswith("Foreword")
+    assert "substantial" in rows[0]["text"]
