@@ -56,8 +56,23 @@ def _compat_chunk_id(chunk_id: str) -> str:
 
 
 def _max_chars() -> int:
+    """Hard limit for JSONL line size."""
     val = os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000")
     return int(val)
+
+
+def _target_chunk_chars() -> int:
+    """Target chunk size for optimal RAG/LoRA performance.
+    
+    Default is 2000 chars (~320 words) which provides:
+    - Single-topic focus (avoids multi-topic chunks)
+    - Fits well in LLM context windows
+    - Good semantic coherence for retrieval
+    
+    Can be overridden via PDF_CHUNKER_TARGET_CHUNK_CHARS env var.
+    For LoRA training, slightly larger chunks (2500) may work better.
+    """
+    return int(os.getenv("PDF_CHUNKER_TARGET_CHUNK_CHARS", "2000"))
 
 
 def _resolve_bullet_strategy(
@@ -821,6 +836,19 @@ def _starts_with_orphan_bullet(
     return not (is_number and _word_count(first_line) >= 6)
 
 
+def _max_merge_chars() -> int:
+    """Return maximum character count for merged chunks.
+    
+    This prevents over-merging that creates multi-topic chunks.
+    Default is 2000 chars (~320 words) which is optimal for:
+    - RAG: fits in context windows, single topic focus
+    - LoRA: focused training examples
+    
+    Can be overridden via PDF_CHUNKER_MAX_MERGE_CHARS env var.
+    """
+    return int(os.getenv("PDF_CHUNKER_MAX_MERGE_CHARS", "2000"))
+
+
 def _merge_very_short_forward(
     items: list[dict[str, Any]],
     *,
@@ -834,11 +862,15 @@ def _merge_very_short_forward(
 
     Coherent items (proper sentence start and ending) are preserved even if
     short, as they represent complete semantic units.
+    
+    Merging stops when the result would exceed _max_merge_chars() to prevent
+    creating overly large multi-topic chunks.
     """
     if not items:
         return items
 
     threshold = _very_short_threshold()
+    max_merge = _max_merge_chars()
     # Minimum words for a coherent block to stand alone
     coherent_min = max(15, threshold // 2)
     result: list[dict[str, Any]] = []
@@ -847,15 +879,26 @@ def _merge_very_short_forward(
     for item in items:
         text = item.get("text", "")
         words = _word_count(text)
+        chars = len(text)
 
         if pending is not None:
-            # Merge pending short item into current
-            merged_text = _merge_text(pending["text"], text, strategy=strategy)
-            item = {**pending, "text": merged_text}
-            pending = None
-            # Recalculate word count after merge
-            text = item.get("text", "")
-            words = _word_count(text)
+            pending_text = pending.get("text", "")
+            merged_chars = len(pending_text) + len(text) + 2  # +2 for separator
+            
+            # Only merge if result won't be too large
+            if merged_chars <= max_merge:
+                merged_text = _merge_text(pending_text, text, strategy=strategy)
+                item = {**pending, "text": merged_text}
+                pending = None
+                # Recalculate after merge
+                text = item.get("text", "")
+                words = _word_count(text)
+                chars = len(text)
+            else:
+                # Pending is too short but merging would exceed limit
+                # Keep pending as-is and continue
+                result.append(pending)
+                pending = None
 
         # Check if this item should be held for forward merge:
         # 1. Too short (< threshold words), unless coherent with enough words
@@ -863,11 +906,14 @@ def _merge_very_short_forward(
         is_short = words < threshold
         is_coherent_block = _coherent(text) and words >= coherent_min
         has_orphan_bullet = _starts_with_orphan_bullet(text, strategy=strategy)
+        
+        # Don't hold items that are already large enough
+        is_large_enough = chars >= max_merge * 0.5  # At least half the max size
 
         # Coherent blocks with sufficient words are preserved
-        if is_short and not is_coherent_block:
+        if is_short and not is_coherent_block and not is_large_enough:
             pending = item
-        elif has_orphan_bullet:
+        elif has_orphan_bullet and not is_large_enough:
             # Orphaned bullet - merge forward for list coherence
             pending = item
         else:
@@ -877,8 +923,16 @@ def _merge_very_short_forward(
     if pending is not None:
         if result:
             prev = result[-1]
-            merged_text = _merge_text(prev["text"], pending["text"], strategy=strategy)
-            result[-1] = {**prev, "text": merged_text}
+            prev_text = prev.get("text", "")
+            pending_text = pending.get("text", "")
+            merged_chars = len(prev_text) + len(pending_text) + 2
+            
+            if merged_chars <= max_merge:
+                merged_text = _merge_text(prev_text, pending_text, strategy=strategy)
+                result[-1] = {**prev, "text": merged_text}
+            else:
+                # Can't merge backward, keep as separate chunk
+                result.append(pending)
         else:
             result.append(pending)
 
@@ -988,13 +1042,16 @@ def _rows_from_item(
 ) -> list[Row]:
     meta_key = _metadata_key()
     max_chars = _max_chars()
+    target_chars = _target_chunk_chars()
     meta: dict[str, Any] = item.get("meta") or {}
     chunk_id = meta.get("chunk_id")
     if chunk_id:
         meta = {**meta, "chunk_id": _compat_chunk_id(chunk_id)}
     base_meta = {meta_key: meta} if meta else {}
     overhead = len(json.dumps({"text": "", **base_meta}, ensure_ascii=False)) - 2
-    avail = max(max_chars - overhead, 0)
+    # Use target size for splitting, but ensure we don't exceed hard limit
+    split_limit = min(target_chars, max_chars - overhead)
+    avail = max(split_limit, 0)
     if avail <= 0:
         return []
 
