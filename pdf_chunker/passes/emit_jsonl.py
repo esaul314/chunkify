@@ -761,8 +761,15 @@ def _very_short_threshold() -> int:
     
     Default is 30 words - chunks below this are almost always semantically
     incomplete (orphaned headings, single bullet items, fragment sentences).
+    
+    Respects PDF_CHUNKER_JSONL_MIN_WORDS if set lower, to avoid over-merging
+    when the user explicitly wants smaller chunks.
     """
-    return int(os.getenv("PDF_CHUNKER_VERY_SHORT_WORDS", "30"))
+    explicit = os.getenv("PDF_CHUNKER_VERY_SHORT_WORDS")
+    if explicit:
+        return int(explicit)
+    # Use the lower of 30 and min_words to respect user's minimum chunk preference
+    return min(30, _min_words())
 
 
 def _starts_with_orphan_bullet(
@@ -770,7 +777,12 @@ def _starts_with_orphan_bullet(
     *,
     strategy: BulletHeuristicStrategy | None = None,
 ) -> bool:
-    """Return True if text starts with a single bullet item (orphaned list fragment)."""
+    """Return True if text starts with a single bullet item (orphaned list fragment).
+    
+    An orphan bullet is when text begins with a single bullet point that appears
+    to be a fragment of a list from a previous chunk. Complete single-item lists
+    are NOT considered orphans, even if they lack terminal punctuation.
+    """
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
         return False
@@ -779,20 +791,35 @@ def _starts_with_orphan_bullet(
     heuristics = _resolve_bullet_strategy(strategy)
     
     # Check if first line is a bullet
-    if not (heuristics.starts_with_bullet(first_line) or heuristics.starts_with_number(first_line)):
+    is_bullet = heuristics.starts_with_bullet(first_line)
+    is_number = heuristics.starts_with_number(first_line)
+    if not (is_bullet or is_number):
         return False
     
-    # If there's only one line, it's orphaned
+    # If there's only one line, check if it looks like a complete item
     if len(lines) == 1:
-        return True
+        # A coherent item or numbered item with enough words is NOT orphaned
+        if _coherent(first_line):
+            return False
+        # Numbered items with sufficient words are likely complete even without punctuation
+        # e.g., "2. Second item continues with sufficient words but lacks punctuation"
+        return not (is_number and _word_count(first_line) >= 6)
     
     # If second line is NOT a bullet, first bullet is orphaned
+    # (unless the first line looks complete)
     second_line = lines[1].strip()
     is_list_line = (
         heuristics.starts_with_bullet(second_line)
         or heuristics.starts_with_number(second_line)
     )
-    return not is_list_line
+    if is_list_line:
+        return False
+    
+    # First line is a bullet, but following content is not a list
+    # Check if the first line alone looks complete
+    if _coherent(first_line):
+        return False
+    return not (is_number and _word_count(first_line) >= 6)
 
 
 def _merge_very_short_forward(
@@ -805,11 +832,16 @@ def _merge_very_short_forward(
     This handles cases like orphaned headings or single-sentence fragments
     that should logically belong with the next semantic unit. Also prevents
     chunks from starting with a single orphaned bullet item.
+
+    Coherent items (proper sentence start and ending) are preserved even if
+    short, as they represent complete semantic units.
     """
     if not items:
         return items
 
     threshold = _very_short_threshold()
+    # Minimum words for a coherent block to stand alone
+    coherent_min = max(15, threshold // 2)
     result: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
 
@@ -827,15 +859,17 @@ def _merge_very_short_forward(
             words = _word_count(text)
 
         # Check if this item should be held for forward merge:
-        # 1. Too short (< threshold words)
+        # 1. Too short (< threshold words), unless coherent with enough words
         # 2. Starts with an orphaned bullet item
-        should_hold = words < threshold or _starts_with_orphan_bullet(text, strategy=strategy)
-        
-        if should_hold and words < threshold:
-            # Only hold if actually short - orphan bullets that are long enough stay
+        is_short = words < threshold
+        is_coherent_block = _coherent(text) and words >= coherent_min
+        has_orphan_bullet = _starts_with_orphan_bullet(text, strategy=strategy)
+
+        # Coherent blocks with sufficient words are preserved
+        if is_short and not is_coherent_block:
             pending = item
-        elif should_hold and _starts_with_orphan_bullet(text, strategy=strategy):
-            # Orphaned bullet but long enough - still merge forward for coherence
+        elif has_orphan_bullet:
+            # Orphaned bullet - merge forward for list coherence
             pending = item
         else:
             result.append(item)
@@ -1028,6 +1062,14 @@ def _enrich_rows_with_context(rows: list[Row]) -> list[Row]:
     return enriched
 
 
+def _explicit_small_chunks(meta: dict[str, Any] | None) -> bool:
+    """Return True if user explicitly requested small chunks via chunk_size."""
+    opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
+    chunk_size = opts.get("chunk_size")
+    # If chunk_size is explicitly set to a small value, user wants small chunks
+    return chunk_size is not None and chunk_size < 50
+
+
 def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
     opts = ((meta or {}).get("options") or {}).get("split_semantic", {})
     chunk_size = opts.get("chunk_size")
@@ -1039,6 +1081,7 @@ def _rows(
     doc: Doc,
     *,
     preserve: bool = False,
+    explicit_small: bool = False,
     strategy: BulletHeuristicStrategy | None = None,
 ) -> list[Row]:
     debug_log: list[str] | None = (
@@ -1047,9 +1090,11 @@ def _rows(
     items = _sanitize_items(doc.get("items", []))
     heuristics = _resolve_bullet_strategy(strategy)
 
-    # Always merge very short items forward, regardless of preserve mode.
-    # This handles orphaned headings and single-sentence fragments.
-    items = _merge_very_short_forward(list(items), strategy=heuristics)
+    # Merge very short items forward unless user explicitly requested small chunks.
+    # This handles orphaned headings and single-sentence fragments while respecting
+    # explicit --chunk-size configurations.
+    if not explicit_small:
+        items = _merge_very_short_forward(list(items), strategy=heuristics)
 
     processed = (
         items
@@ -1088,9 +1133,12 @@ class _EmitJsonlPass:
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload if isinstance(a.payload, dict) else {}
         preserve = _preserve_chunks(a.meta)
+        explicit_small = _explicit_small_chunks(a.meta)
         strategy = _resolve_bullet_strategy(self.bullet_strategy)
         rows = (
-            _rows(doc, preserve=preserve, strategy=strategy) if doc.get("type") == "chunks" else []
+            _rows(doc, preserve=preserve, explicit_small=explicit_small, strategy=strategy)
+            if doc.get("type") == "chunks"
+            else []
         )
         meta = _update_meta(a.meta, len(rows))
         return Artifact(payload=rows, meta=meta)
