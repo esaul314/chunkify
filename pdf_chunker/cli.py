@@ -11,7 +11,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
-
 try:  # pragma: no cover - exercised via CLI tests
     typer = cast(Any, import_module("typer"))
 except ModuleNotFoundError:  # pragma: no cover - fallback when Typer is absent

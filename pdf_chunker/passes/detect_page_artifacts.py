@@ -17,18 +17,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from functools import reduce
-from typing import Any, Callable, Dict, Mapping, Tuple
+from typing import Any
 
-from pdf_chunker.framework import Artifact, register
 from pdf_chunker import page_artifacts
+from pdf_chunker.framework import Artifact, register
 from pdf_chunker.interactive import (
     FooterCallback,
     FooterConfig,
     FooterDecisionCache,
-    classify_footer,
 )
 
-Block = Dict[str, Any]
+Block = dict[str, Any]
 
 
 def _clean_block(
@@ -36,7 +35,7 @@ def _clean_block(
     page_num: int,
     footer_config: FooterConfig | None = None,
     footer_cache: FooterDecisionCache | None = None,
-) -> Tuple[Block, bool, list[str]]:
+) -> tuple[Block, bool, list[str]]:
     """Clean a single block, returning (cleaned_block, changed, decisions)."""
     text = block.get("text", "")
     cleaned = page_artifacts._flatten_markdown_table(text)
@@ -54,10 +53,10 @@ def _clean_block(
 
 
 def _clean_page(
-    page: Dict[str, Any],
+    page: dict[str, Any],
     footer_config: FooterConfig | None = None,
     footer_cache: FooterDecisionCache | None = None,
-) -> Tuple[Dict[str, Any], int, list[str]]:
+) -> tuple[dict[str, Any], int, list[str]]:
     """Clean all blocks on a page."""
     page_num = page.get("page", 0)
     blocks = page.get("blocks", [])
@@ -75,17 +74,17 @@ def _clean_page(
 
 
 def _clean_doc(
-    doc: Dict[str, Any],
+    doc: dict[str, Any],
     footer_config: FooterConfig | None = None,
     footer_cache: FooterDecisionCache | None = None,
-) -> Tuple[Dict[str, Any], int, list[str]]:
+) -> tuple[dict[str, Any], int, list[str]]:
     """Clean all pages in a document."""
     all_decisions: list[str] = []
 
     def step(
-        acc: Tuple[list[Dict[str, Any]], int],
-        page: Dict[str, Any],
-    ) -> Tuple[list[Dict[str, Any]], int]:
+        acc: tuple[list[dict[str, Any]], int],
+        page: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], int]:
         pages, total = acc
         cleaned, changed, decisions = _clean_page(page, footer_config, footer_cache)
         all_decisions.extend(decisions)

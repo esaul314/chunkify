@@ -1,7 +1,5 @@
 """Tests for interactive footer confirmation module."""
 
-import pytest
-
 from pdf_chunker.interactive import (
     FooterConfig,
     FooterDecisionCache,
