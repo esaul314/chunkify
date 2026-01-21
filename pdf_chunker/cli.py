@@ -68,6 +68,9 @@ def _run_convert(
     max_chars: int | None,
     footer_patterns: tuple[str, ...] | None = None,
     interactive: bool = False,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
+    auto_detect_zones: bool = False,
 ) -> None:
     if max_chars:
         os.environ["PDF_CHUNKER_JSONL_MAX_CHARS"] = str(max_chars)
@@ -75,6 +78,55 @@ def _run_convert(
             chunk_size = max_chars // 5
         if overlap is None:
             overlap = 0
+
+    # Parse exclude_pages to a set for zone detection
+    excluded_page_set: set[int] = set()
+    if exclude_pages:
+        from pdf_chunker.page_utils import parse_page_ranges
+        excluded_page_set = parse_page_ranges(exclude_pages)
+
+    # Auto-detect footer/header zones if requested
+    zones_config: dict[str, float] = {}
+    if auto_detect_zones or (interactive and footer_margin is None):
+        try:
+            import fitz
+
+            from pdf_chunker.geometry import detect_document_zones, discover_zones_interactive
+            
+            doc = fitz.open(str(input_path))
+            if interactive:
+                # Interactive zone discovery - respects page exclusions
+                zones = discover_zones_interactive(
+                    doc,
+                    exclude_pages=excluded_page_set,
+                )
+            else:
+                # Automatic detection - respects page exclusions
+                zones = detect_document_zones(
+                    doc,
+                    exclude_pages=excluded_page_set,
+                )
+            doc.close()
+            
+            if zones.footer_margin:
+                zones_config["footer_margin"] = zones.footer_margin
+                if not interactive:
+                    conf = zones.confidence
+                    margin = zones.footer_margin
+                    print(f"Auto-detected footer margin: {margin:.1f}pt (confidence: {conf:.0%})")
+            if zones.header_margin:
+                zones_config["header_margin"] = zones.header_margin
+        except ImportError:
+            pass  # fitz not available
+        except Exception as e:
+            if interactive:
+                print(f"Zone detection failed: {e}")
+
+    # CLI overrides take precedence over auto-detection
+    if footer_margin is not None:
+        zones_config["footer_margin"] = footer_margin
+    if header_margin is not None:
+        zones_config["header_margin"] = header_margin
 
     _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
@@ -88,6 +140,7 @@ def _run_convert(
             no_metadata,
             footer_patterns=footer_patterns,
             interactive=interactive,
+            zones_config=zones_config,
         ),
     )
     s = _enrich_spec(s) if enrich else s
@@ -152,6 +205,7 @@ def _cli_overrides(
     *,
     footer_patterns: tuple[str, ...] | None = None,
     interactive: bool = False,
+    zones_config: dict[str, float] | None = None,
 ) -> dict[str, dict[str, Any]]:
     split_opts: dict[str, Any] = {
         k: v
@@ -174,6 +228,9 @@ def _cli_overrides(
     parse_opts: dict[str, Any] = {
         k: v for k, v in {"exclude_pages": exclude_pages}.items() if v is not None
     }
+    # Add zone exclusion margins to pdf_parse options
+    if zones_config:
+        parse_opts.update(zones_config)
     # Footer detection options (apply even if pass not in pipeline)
     artifact_opts: dict[str, Any] = {}
     if footer_patterns:
@@ -242,6 +299,21 @@ if typer:
             "--interactive",
             help="Prompt for confirmation on ambiguous footers",
         ),
+        footer_margin: float | None = typer.Option(
+            None,
+            "--footer-margin",
+            help="Footer zone margin in points from page bottom",
+        ),
+        header_margin: float | None = typer.Option(
+            None,
+            "--header-margin",
+            help="Header zone margin in points from page top",
+        ),
+        auto_detect_zones: bool = typer.Option(
+            False,
+            "--auto-detect-zones",
+            help="Auto-detect header/footer zones using geometry",
+        ),
     ) -> None:
         _safe(
             lambda: _run_convert(
@@ -258,6 +330,9 @@ if typer:
                 max_chars,
                 footer_patterns=tuple(footer_pattern) if footer_pattern else None,
                 interactive=interactive,
+                footer_margin=footer_margin,
+                header_margin=header_margin,
+                auto_detect_zones=auto_detect_zones,
             )
         )
 
@@ -295,10 +370,28 @@ else:
             action="store_true",
             help="Prompt for confirmation on ambiguous footers",
         )
+        conv.add_argument(
+            "--footer-margin",
+            type=float,
+            help="Footer zone margin in points from page bottom",
+        )
+        conv.add_argument(
+            "--header-margin",
+            type=float,
+            help="Header zone margin in points from page top",
+        )
+        conv.add_argument(
+            "--auto-detect-zones",
+            action="store_true",
+            help="Auto-detect header/footer zones using geometry",
+        )
         conv.set_defaults(
             enrich=False,
             footer_patterns=None,
             interactive=False,
+            footer_margin=None,
+            header_margin=None,
+            auto_detect_zones=False,
             func=lambda ns: _safe(
                 lambda: _run_convert(
                     ns.input_path,
@@ -314,6 +407,9 @@ else:
                     ns.max_chars,
                     footer_patterns=tuple(ns.footer_patterns) if ns.footer_patterns else None,
                     interactive=ns.interactive,
+                    footer_margin=ns.footer_margin,
+                    header_margin=ns.header_margin,
+                    auto_detect_zones=ns.auto_detect_zones,
                 )
             ),
         )

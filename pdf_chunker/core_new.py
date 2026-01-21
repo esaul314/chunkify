@@ -190,18 +190,27 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
     # Propagate interactive mode to PDF extraction so aggressive footer
     # detection is skipped, allowing downstream interactive confirmation
     interactive = text_clean_opts.get("interactive_footers", False)
+    # Zone exclusion margins
+    footer_margin = pdf_opts.get("footer_margin")
+    header_margin = pdf_opts.get("header_margin")
 
     abs_path = str(Path(path).resolve())
     adapter = _adapter_for(path)
-    # Pass interactive flag if the adapter supports it
+    # Pass interactive flag and zone margins if the adapter supports them
     try:
         payload = (
             {"type": "page_blocks", "source_path": abs_path, "pages": []}
             if _excluded_all(abs_path, exclude)
-            else adapter.read(path, exclude_pages=exclude, interactive=interactive)
+            else adapter.read(
+                path,
+                exclude_pages=exclude,
+                interactive=interactive,
+                footer_margin=footer_margin,
+                header_margin=header_margin,
+            )
         )
     except TypeError:
-        # Adapter doesn't support interactive parameter (e.g., EPUB)
+        # Adapter doesn't support interactive/zone parameters (e.g., EPUB)
         payload = (
             {"type": "page_blocks", "source_path": abs_path, "pages": []}
             if _excluded_all(abs_path, exclude)

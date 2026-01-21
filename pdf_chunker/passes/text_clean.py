@@ -172,32 +172,36 @@ def _clean_block(
     page = block.get("page", 0)
     stripped_footers: list[str] = []
 
-    # 1. Strip inline footers first (footers merged into text with \n\n prefix)
-    #    These are more surgical and preserve surrounding content.
+    # 1. Strip inline footers using explicit patterns (no confirmation needed)
+    #    These patterns were provided by the user, so we strip automatically.
     if inline_patterns:
         from pdf_chunker.interactive import strip_inline_footers
 
+        # Pass callback=None so patterns strip without prompting
         text, stripped_footers = strip_inline_footers(
             text,
             inline_patterns,
-            callback=footer_callback,
+            callback=None,  # No prompting for explicit patterns
             cache=footer_cache,
             page=page,
         )
-    elif interactive_heuristic and footer_callback is not None:
-        # No patterns provided, but interactive mode enabled: use heuristic detection
+
+    # 2. If interactive mode enabled, also run heuristic detection to catch
+    #    any additional footers not matched by explicit patterns
+    if interactive_heuristic and footer_callback is not None:
         from pdf_chunker.interactive import (
             is_standalone_footer_candidate,
             strip_inline_footers_interactive,
         )
 
-        # First check for inline footers (within the text)
-        text, stripped_footers = strip_inline_footers_interactive(
+        # Check for additional inline footers (within the text) using heuristics
+        text, additional_stripped = strip_inline_footers_interactive(
             text,
             callback=footer_callback,
             cache=footer_cache,
             page=page,
         )
+        stripped_footers.extend(additional_stripped)
 
         # Also check if the entire block is a standalone footer
         standalone = is_standalone_footer_candidate(text)
@@ -331,11 +335,11 @@ class _TextCleanPass:
         self._compiled_patterns: tuple[re.Pattern[str], ...] = tuple(
             re.compile(p, re.IGNORECASE) for p in self.footer_patterns if isinstance(p, str)
         )
-        # Compile inline patterns (for mid-text footers with \n\n prefix)
+        # Compile inline patterns (for mid-text footers with \n\n prefix and midtext)
         from pdf_chunker.interactive import compile_footer_patterns
 
         self._inline_patterns: tuple[re.Pattern[str], ...] = compile_footer_patterns(
-            self.footer_patterns, inline=True
+            self.footer_patterns, inline=True, midtext=True
         )
 
         # Set up interactive callback if enabled
@@ -361,13 +365,9 @@ class _TextCleanPass:
         footer_callback = self._footer_callback
         footer_cache = self._footer_cache
 
-        # Determine if we should use heuristic detection (interactive but no patterns)
-        interactive_heuristic = (
-            (self.interactive_footers or runtime_interactive)
-            and not block_patterns
-            and not inline_patterns
-            and not runtime_patterns
-        )
+        # Interactive mode: always enable heuristic detection when interactive is set
+        # Patterns provide precision for known footers, interactive catches the rest
+        interactive_heuristic = self.interactive_footers or runtime_interactive
 
         if runtime_patterns and runtime_patterns != self.footer_patterns:
             from pdf_chunker.interactive import compile_footer_patterns
@@ -375,8 +375,7 @@ class _TextCleanPass:
             block_patterns = tuple(
                 re.compile(p, re.IGNORECASE) for p in runtime_patterns if isinstance(p, str)
             )
-            inline_patterns = compile_footer_patterns(runtime_patterns, inline=True)
-            interactive_heuristic = False  # We have patterns now
+            inline_patterns = compile_footer_patterns(runtime_patterns, inline=True, midtext=True)
 
         # Set up interactive callback if enabled at runtime
         if runtime_interactive and footer_callback is None:

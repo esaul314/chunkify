@@ -275,11 +275,16 @@ class TestInlineFooterStripping:
         patterns = compile_footer_patterns(
             ("Scale Communication", "Chapter Title"),
             inline=True,
+            midtext=True,
         )
-        assert len(patterns) == 2
+        # 4 patterns: 2 per input (one \n\n prefix, one mid-text)
+        assert len(patterns) == 4
         # Both should match inline structure
         text = "previous text\n\nScale Communication 202 next text"
         assert any(p.search(text) for p in patterns)
+        # Also test mid-text match
+        midtext = "some previous text. Scale Communication 202 next text"
+        assert any(p.search(midtext) for p in patterns)
 
     def test_compile_footer_patterns_non_inline_mode(self):
         from pdf_chunker.interactive import compile_footer_patterns
@@ -685,3 +690,75 @@ class TestStandaloneFooterDetection:
         texts = [b["text"] for b in blocks]
         # The footer text should still be present (though cleaned)
         assert any("Scale Communication" in t for t in texts)
+
+
+class TestPatternsPlusInteractiveMode:
+    """Test that patterns + interactive mode work together correctly."""
+
+    def test_patterns_auto_strip_without_prompting(self):
+        """Explicit patterns should strip footers without prompting."""
+        from pdf_chunker.framework import Artifact
+        from pdf_chunker.passes.text_clean import _TextCleanPass
+
+        # Pattern-only mode (no interactive)
+        pass_obj = _TextCleanPass(
+            footer_patterns=("Collective Wisdom.*",),
+            interactive_footers=False,
+        )
+
+        doc = {
+            "type": "page_blocks",
+            "pages": [
+                {
+                    "page": 1,
+                    "blocks": [
+                        {"text": "Body text.\n\nCollective Wisdom from the Experts 153 More content."},
+                    ],
+                }
+            ],
+        }
+        result = pass_obj(Artifact(payload=doc))
+        text = result.payload["pages"][0]["blocks"][0]["text"]
+        # Pattern should auto-strip without prompting
+        assert "Collective Wisdom" not in text
+        assert "Body text" in text
+
+    def test_interactive_catches_additional_footers_with_patterns(self):
+        """Interactive mode should catch footers not matched by patterns."""
+        from pdf_chunker.framework import Artifact
+        from pdf_chunker.interactive import make_batch_footer_prompt
+        from pdf_chunker.passes.text_clean import _TextCleanPass
+
+        pass_obj = _TextCleanPass(
+            footer_patterns=("Known Footer.*",),
+            interactive_footers=True,
+        )
+
+        # Override callback to auto-accept everything
+        pass_obj._footer_callback = make_batch_footer_prompt(
+            {"Heuristic Footer": True, "Known Footer": True}
+        )
+
+        doc = {
+            "type": "page_blocks",
+            "pages": [
+                {
+                    "page": 1,
+                    "blocks": [
+                        {"text": "Body.\n\nKnown Footer Pattern 100 followed by text."},
+                        {"text": "More body. Heuristic Footer 200 continuation."},
+                    ],
+                }
+            ],
+        }
+        result = pass_obj(Artifact(payload=doc))
+        blocks = result.payload["pages"][0]["blocks"]
+        texts = [b["text"] for b in blocks]
+        full_text = " ".join(texts)
+
+        # Known Footer should be stripped by pattern (no prompting)
+        assert "Known Footer" not in full_text
+        # Heuristic Footer should be stripped by interactive callback
+        assert "Heuristic Footer" not in full_text
+        # Body text should be preserved
+        assert "Body" in full_text

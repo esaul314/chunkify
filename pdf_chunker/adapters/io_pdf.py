@@ -90,6 +90,8 @@ def _primary_blocks(
     use_pymupdf4llm: bool,
     *,
     interactive: bool = False,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
 ) -> list[dict[str, Any]]:
     """Extract blocks using the legacy parser with optional enhancement."""
 
@@ -99,7 +101,12 @@ def _primary_blocks(
 
         return [
             asdict(b)
-            for b in extract_text_blocks_from_pdf(path, exclude, interactive=interactive)
+            for b in extract_text_blocks_from_pdf(
+                path, exclude,
+                interactive=interactive,
+                footer_margin=footer_margin,
+                header_margin=header_margin,
+            )
         ]
 
 
@@ -130,11 +137,16 @@ def _all_blocks(
     use_pymupdf4llm: bool,
     *,
     interactive: bool = False,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
 ) -> list[dict[str, Any]]:
     """Return primary blocks, falling back to second extractor for gaps."""
 
     primary = _primary_blocks(
-        path, sorted(excluded), use_pymupdf4llm, interactive=interactive
+        path, sorted(excluded), use_pymupdf4llm,
+        interactive=interactive,
+        footer_margin=footer_margin,
+        header_margin=header_margin,
     )
     existing = {b.get("source", {}).get("page") for b in primary}
     missing = [p for p in _page_numbers(path) if p not in excluded and p not in existing]
@@ -160,6 +172,58 @@ def _ensure_all_pages(
     ]
 
 
+def _filter_by_zones(
+    path: str,
+    blocks: list[dict[str, Any]],
+    footer_margin: float | None,
+    header_margin: float | None,
+) -> list[dict[str, Any]]:
+    """Filter out blocks in header/footer zones using positional data.
+    
+    This uses the bbox coordinates stored in block['bbox'] (top-level) to
+    determine if a block falls within the header or footer zones.
+    """
+    if not footer_margin and not header_margin:
+        return blocks
+    
+    # Get page heights from the PDF
+    page_heights: dict[int, float] = {}
+    try:
+        with fitz.open(path) as doc:
+            for page_num in range(doc.page_count):
+                page = doc[page_num]
+                page_heights[page_num + 1] = page.rect.height
+    except Exception:
+        return blocks  # Can't filter without page dimensions
+    
+    filtered = []
+    for block in blocks:
+        source = block.get("source", {})
+        page = source.get("page")
+        # bbox is at top level of block dict, not in source
+        bbox = block.get("bbox")
+        
+        # If no positioning info, keep the block
+        if not bbox or page not in page_heights:
+            filtered.append(block)
+            continue
+        
+        page_height = page_heights[page]
+        y0, y1 = bbox[1], bbox[3]  # bbox is (x0, y0, x1, y1)
+        
+        # Check if block is in header zone (top of page)
+        if header_margin and y0 < header_margin:
+            continue  # Skip header block
+        
+        # Check if block is in footer zone (bottom of page)
+        if footer_margin and y1 > (page_height - footer_margin):
+            continue  # Skip footer block
+        
+        filtered.append(block)
+    
+    return filtered
+
+
 def read(
     path: str,
     exclude_pages: Sequence[int] | str | None = None,
@@ -167,6 +231,8 @@ def read(
     timeout: int = 60,
     *,
     interactive: bool = False,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
 ) -> dict[str, Any]:
     """Return a ``page_blocks`` document for the given PDF.
 
@@ -177,13 +243,22 @@ def read(
         timeout: Timeout for pdftotext subprocess
         interactive: If True, skip aggressive footer detection to allow
             downstream interactive confirmation
+        footer_margin: Points from bottom to exclude as footer zone
+        header_margin: Points from top to exclude as header zone
     """
 
     global _PDFTOTEXT_TIMEOUT
     _PDFTOTEXT_TIMEOUT = timeout
     abs_path = str(Path(path))
     excluded = _excluded(exclude_pages)
-    blocks = _all_blocks(abs_path, excluded, use_pymupdf4llm, interactive=interactive)
+    # Zone margins are now applied at extraction time (before block merging)
+    blocks = _all_blocks(
+        abs_path, excluded, use_pymupdf4llm,
+        interactive=interactive,
+        footer_margin=footer_margin,
+        header_margin=header_margin,
+    )
+    
     filtered = [b for b in blocks if b.get("source", {}).get("page") not in excluded]
     grouped = _group_blocks(filtered)
     pages = _ensure_all_pages(abs_path, grouped, excluded)

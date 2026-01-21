@@ -114,6 +114,37 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 
 ### Footer Detection Options
 
+**Recommended: Geometric Zone Detection (NEW)**
+
+The most reliable footer removal uses positional data to exclude footer zones during extraction:
+
+```bash
+# Auto-detect footer zones using page geometry
+pdf_chunker convert ./book.pdf --auto-detect-zones --out ./out.jsonl
+
+# Manually specify footer margin (points from page bottom)
+pdf_chunker convert ./book.pdf --footer-margin 40 --out ./out.jsonl
+
+# Specify header margin (points from page top)
+pdf_chunker convert ./book.pdf --header-margin 50 --out ./out.jsonl
+```
+
+This approach:
+- Filters blocks at extraction time (before text merging)
+- Uses consistent Y coordinates rather than text patterns
+- Eliminates "context bleeding" and concatenation bugs
+- Works with any footer content, not just specific patterns
+
+**Pipeline YAML configuration:**
+```yaml
+options:
+  pdf_parse:
+    footer_margin: 40.0  # Points from bottom
+    header_margin: null  # Points from top (optional)
+```
+
+**Legacy: Text Pattern Matching**
+
 Footers often appear merged mid-text with a `\n\n` prefix and page number suffix, like:
 ```
 "...scientific literature.\n\nScale Communication Through Writing 202 Aside from that..."
@@ -123,13 +154,13 @@ The `text_clean` pass handles both:
 1. **Block-level footers**: Entire blocks that are just footers (removed entirely)
 2. **Inline footers**: Footers merged mid-text (surgically stripped while preserving content)
 
-**CLI flags:**
+**CLI flags for text-based detection:**
 - `--footer-pattern <regex>`: Regex pattern matching footer title (case-insensitive, repeatable)
   - Example: `--footer-pattern "Scale Communication.*"` matches "Scale Communication Through Writing 202"
   - Example: `--footer-pattern "Chapter \d+"` matches "Chapter 5"
 - `--interactive`: Prompt user to confirm ambiguous footer candidates during processing
 
-**Pipeline YAML configuration:**
+**Pipeline YAML configuration for text patterns:**
   ```yaml
   options:
     text_clean:
@@ -140,7 +171,7 @@ The `text_clean` pass handles both:
       interactive_footers: false  # Set true for interactive mode
   ```
 
-**How patterns work:**
+**How text patterns work:**
 - User supplies the title pattern (e.g., `"Scale Communication.*"`)
 - The pipeline wraps it to match inline structure: `\n\n{pattern}\s+\d{1,3}(?=\s|$)`
 - Inline footers are stripped surgically; block-level footers require full match
@@ -205,6 +236,7 @@ pdf_chunker/
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── fallbacks.py              # Quality assessment and extraction fallbacks
+│   ├── geometry.py                # Geometric zone detection for header/footer removal
 │   ├── language.py               # Default language utilities
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── list_detection.py          # Bullet and numbered list detection helpers

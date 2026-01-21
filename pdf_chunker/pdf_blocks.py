@@ -1,31 +1,31 @@
 from __future__ import annotations
 
+import os
+import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from itertools import chain
 from statistics import median
-from typing import Callable, Iterable, List, Mapping, Optional, Sequence, Tuple
-import os
-import re
 
 import fitz  # PyMuPDF
 
+from .heading_detection import TRAILING_PUNCTUATION, _detect_heading_fallback
 from .inline_styles import (
     InlineStyleSpan,
     build_index_map,
     build_index_remapper,
     normalize_spans,
 )
-from .text_cleaning import (
-    clean_text,
-    HYPHEN_CHARS_ESC,
-    remove_stray_bullet_lines,
-    insert_numbered_list_newlines,
-    bullet_trace_scope,
-    emit_bullet_trace,
-)
-from .heading_detection import _detect_heading_fallback, TRAILING_PUNCTUATION
 from .language import default_language
 from .strategies.bullets import BulletHeuristicStrategy, default_bullet_strategy
+from .text_cleaning import (
+    HYPHEN_CHARS_ESC,
+    bullet_trace_scope,
+    clean_text,
+    emit_bullet_trace,
+    insert_numbered_list_newlines,
+    remove_stray_bullet_lines,
+)
 
 # -- Data models -------------------------------------------------------------------------
 
@@ -35,15 +35,15 @@ class Block:
     text: str
     source: dict
     type: str = "paragraph"
-    language: Optional[str] = None
-    bbox: Optional[tuple] = None
-    inline_styles: Optional[list[InlineStyleSpan]] = None
+    language: str | None = None
+    bbox: tuple | None = None
+    inline_styles: list[InlineStyleSpan] | None = None
 
 
 @dataclass
 class PagePayload:
     number: int
-    blocks: List[Block]
+    blocks: list[Block]
 
 
 def _preview_text(text: str, limit: int = 100) -> str:
@@ -114,7 +114,7 @@ def _structured_block(page, block_tuple, page_num, filename) -> Block | None:
     )
 
 
-def _extract_block_inline_styles(page, block_tuple, cleaned_text: str) -> Optional[list[InlineStyleSpan]]:
+def _extract_block_inline_styles(page, block_tuple, cleaned_text: str) -> list[InlineStyleSpan] | None:
     if not cleaned_text:
         return None
 
@@ -154,7 +154,7 @@ def _extract_block_inline_styles(page, block_tuple, cleaned_text: str) -> Option
 
 def _iter_text_spans(
     block_dict: Mapping[str, object]
-) -> Iterable[tuple[Mapping[str, object], Optional[float]]]:
+) -> Iterable[tuple[Mapping[str, object], float | None]]:
     blocks = block_dict.get("blocks", [])
     for block in blocks if isinstance(blocks, Sequence) else ():
         if not hasattr(block, "get"):
@@ -180,7 +180,7 @@ def _iter_text_spans(
                 yield span, baseline
 
 
-def _span_offsets(spans: Sequence[tuple[Mapping[str, object], Optional[float]]]) -> Iterable[tuple[int, int]]:
+def _span_offsets(spans: Sequence[tuple[Mapping[str, object], float | None]]) -> Iterable[tuple[int, int]]:
     cursor = 0
     for span, _ in spans:
         text = str(span.get("text", ""))
@@ -191,8 +191,8 @@ def _span_offsets(spans: Sequence[tuple[Mapping[str, object], Optional[float]]])
 
 
 def _collect_styles(
-    span: Mapping[str, object], line_baseline: Optional[float]
-) -> Iterable[tuple[str, Optional[Mapping[str, str]]]]:
+    span: Mapping[str, object], line_baseline: float | None
+) -> Iterable[tuple[str, Mapping[str, str] | None]]:
     flags = int(span.get("flags", 0))
     font = str(span.get("font", "")).lower()
 
@@ -214,7 +214,7 @@ def _collect_styles(
         yield ("link", attrs)
 
 
-def _line_baseline(spans: Sequence[Mapping[str, object]]) -> Optional[float]:
+def _line_baseline(spans: Sequence[Mapping[str, object]]) -> float | None:
     positions = [
         float(origin[1])
         for span in spans
@@ -225,7 +225,7 @@ def _line_baseline(spans: Sequence[Mapping[str, object]]) -> Optional[float]:
     return median(positions) if positions else None
 
 
-def _baseline_style(span: Mapping[str, object], line_baseline: Optional[float]) -> str | None:
+def _baseline_style(span: Mapping[str, object], line_baseline: float | None) -> str | None:
     if line_baseline is None:
         return None
     origin = span.get("origin") if hasattr(span, "get") else None
@@ -244,7 +244,7 @@ def _baseline_style(span: Mapping[str, object], line_baseline: Optional[float]) 
     return None
 
 
-def _link_attrs(span: Mapping[str, object]) -> Optional[Mapping[str, str]]:
+def _link_attrs(span: Mapping[str, object]) -> Mapping[str, str] | None:
     link = span.get("link") if hasattr(span, "get") else None
     if isinstance(link, str):
         return {"href": link}
@@ -265,10 +265,61 @@ def _link_attrs(span: Mapping[str, object]) -> Optional[Mapping[str, str]]:
 
 def _is_monospace(font: str) -> bool:
     return any(token in font for token in ("mono", "code", "courier", "console"))
-def _extract_page_blocks(page, page_num: int, filename: str) -> list[Block]:
+
+
+def _filter_by_zone_margins(
+    blocks: list,
+    page_height: float,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
+) -> list:
+    """Filter out blocks in header/footer zones based on margins.
+    
+    Args:
+        blocks: Raw block tuples from page.get_text("blocks")
+        page_height: Height of the page in points
+        footer_margin: Points from bottom to exclude
+        header_margin: Points from top to exclude
+    
+    Returns:
+        Filtered list of blocks
+    """
+    if not footer_margin and not header_margin:
+        return blocks
+    
+    filtered = []
+    for block in blocks:
+        # Block tuple: (x0, y0, x1, y1, text, block_no, block_type)
+        y0, y1 = block[1], block[3]
+        
+        # Check header zone (top of page)
+        if header_margin and y0 < header_margin:
+            continue
+        
+        # Check footer zone (bottom of page)
+        if footer_margin and y1 > (page_height - footer_margin):
+            continue
+        
+        filtered.append(block)
+    
+    return filtered
+
+
+def _extract_page_blocks(
+    page,
+    page_num: int,
+    filename: str,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
+) -> list[Block]:
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")
-    filtered = _filter_margin_artifacts(raw_blocks, page_height)
+    # First apply zone margin filtering (geometric)
+    zone_filtered = _filter_by_zone_margins(
+        raw_blocks, page_height, footer_margin, header_margin
+    )
+    # Then apply existing heuristic filtering
+    filtered = _filter_margin_artifacts(zone_filtered, page_height)
     return [
         b
         for block in filtered
@@ -279,16 +330,33 @@ def _extract_page_blocks(page, page_num: int, filename: str) -> list[Block]:
 def read_pages(
     filepath: str,
     excluded: set[int],
-    extractor: Callable[[fitz.Page, int, str], list[Block]] = _extract_page_blocks,
+    extractor: Callable[[fitz.Page, int, str], list[Block]] | None = None,
+    *,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
 ) -> Iterable[PagePayload]:
-    """Yield ``PagePayload`` objects for each non-excluded page."""
-
+    """Yield ``PagePayload`` objects for each non-excluded page.
+    
+    Args:
+        filepath: Path to PDF file
+        excluded: Set of page numbers to exclude
+        extractor: Custom block extractor function (deprecated, use margins)
+        footer_margin: Points from bottom to exclude as footer zone
+        header_margin: Points from top to exclude as header zone
+    """
     doc = fitz.open(filepath)
     try:
         for page_num, page in enumerate(doc, start=1):
             if page_num in excluded:
                 continue
-            blocks = extractor(page, page_num, os.path.basename(filepath))
+            if extractor is not None:
+                blocks = extractor(page, page_num, os.path.basename(filepath))
+            else:
+                blocks = _extract_page_blocks(
+                    page, page_num, os.path.basename(filepath),
+                    footer_margin=footer_margin,
+                    header_margin=header_margin,
+                )
             yield PagePayload(number=page_num, blocks=blocks)
     finally:
         doc.close()
@@ -586,7 +654,6 @@ def _is_same_page_continuation(
 
 
 def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
-    import re
 
     curr_open_quotes = curr_text.count('"') - curr_text.count('\\"')
     curr_open_single = curr_text.count("'") - curr_text.count("\\'")
@@ -603,20 +670,20 @@ def _merge_bullet_text(
     nxt: str,
     *,
     strategy: BulletHeuristicStrategy | None = None,
-) -> Tuple[str, Optional[str]]:
+) -> tuple[str, str | None]:
     heuristics = _resolve_strategy(strategy)
 
-    def merge_fragment() -> Tuple[str, Optional[str]]:
+    def merge_fragment() -> tuple[str, str | None]:
         fragment, remainder = heuristics.split_bullet_fragment(nxt)
         return f"{current} {fragment}", remainder
 
-    def merge_continuation() -> Tuple[str, Optional[str]]:
+    def merge_continuation() -> tuple[str, str | None]:
         return current.rstrip(" " + heuristics.bullet_chars) + " " + nxt, None
 
-    def merge_short_fragment() -> Tuple[str, Optional[str]]:
+    def merge_short_fragment() -> tuple[str, str | None]:
         return f"{current} {nxt}", None
 
-    def merge_list() -> Tuple[str, Optional[str]]:
+    def merge_list() -> tuple[str, str | None]:
         adjusted = re.sub(
             rf":\s*(?=-|[{heuristics.bullet_chars_esc}])",
             ":\n",
@@ -751,18 +818,52 @@ def _is_footnote_block(block: Block) -> bool:
     return bool(source.get("footnote_block"))
 
 
+def _is_in_footer_zone(
+    block: Block,
+    page_heights: dict[int, float] | None,
+    footer_margin: float | None,
+) -> bool:
+    """Check if a block is in the footer zone based on Y position."""
+    if not footer_margin or not page_heights:
+        return False
+    
+    page = block.source.get("page") if block.source else None
+    if page is None or page not in page_heights:
+        return False
+    
+    # bbox is (x0, y0, x1, y1)
+    if not block.bbox or len(block.bbox) < 4:
+        return False
+    
+    y1 = block.bbox[3]  # Bottom edge of block
+    page_height = page_heights[page]
+    
+    # Block is in footer zone if its bottom edge is within footer_margin from page bottom
+    return y1 > (page_height - footer_margin)
+
+
 def _should_merge_blocks(
     curr: Block,
     nxt: Block,
     *,
     strategy: BulletHeuristicStrategy | None = None,
-) -> Tuple[bool, str]:
+    page_heights: dict[int, float] | None = None,
+    footer_margin: float | None = None,
+) -> tuple[bool, str]:
     heuristics = _resolve_strategy(strategy)
     curr_text = curr.text.strip()
     next_text = nxt.text.strip()
 
     if not curr_text or not next_text:
         return False, "empty_text"
+
+    # Don't merge if CURRENT block is in the footer zone (don't append content to footer)
+    if _is_in_footer_zone(curr, page_heights, footer_margin):
+        return False, "curr_in_footer_zone"
+
+    # Don't merge if next block is in the footer zone
+    if _is_in_footer_zone(nxt, page_heights, footer_margin):
+        return False, "next_in_footer_zone"
 
     curr_page = curr.source.get("page")
     next_page = nxt.source.get("page")
@@ -836,17 +937,13 @@ def _should_merge_blocks(
         and (tail_is_lower or (tail_is_titlecase and head_word.islower()))
     ):
         return True, "hyphenated_continuation"
-    elif _is_same_page_continuation(curr, nxt, strategy=heuristics):
-        return True, "sentence_continuation"
-    elif _is_cross_page_continuation(curr, nxt):
-        return True, "sentence_continuation"
-    elif _is_cross_page_paragraph_continuation(curr, nxt):
+    elif _is_same_page_continuation(curr, nxt, strategy=heuristics) or _is_cross_page_continuation(curr, nxt) or _is_cross_page_paragraph_continuation(curr, nxt):
         return True, "sentence_continuation"
 
     return False, "no_merge"
 
 
-def within_page_span(pages: Iterable[Optional[int]], limit: int = 1) -> bool:
+def within_page_span(pages: Iterable[int | None], limit: int = 1) -> bool:
     """Return True if pages stay within ``limit`` span."""
     nums = [p for p in pages if p is not None]
     return not nums or max(nums) - min(nums) <= limit
@@ -856,7 +953,17 @@ def merge_continuation_blocks(
     blocks: Iterable[Block],
     *,
     strategy: BulletHeuristicStrategy | None = None,
+    page_heights: dict[int, float] | None = None,
+    footer_margin: float | None = None,
 ) -> Iterable[Block]:
+    """Merge adjacent blocks that form continuations.
+    
+    Args:
+        blocks: Iterable of Block objects to merge
+        strategy: Bullet heuristic strategy
+        page_heights: Dict mapping page numbers to page heights (in points)
+        footer_margin: Points from bottom to treat as footer zone
+    """
     heuristics = _resolve_strategy(strategy)
     items = list(blocks)
     if not items:
@@ -899,6 +1006,8 @@ def merge_continuation_blocks(
                 curr_for_merge,
                 nxt,
                 strategy=heuristics,
+                page_heights=page_heights,
+                footer_margin=footer_margin,
             )
             if should_merge:
                 if reason == "hyphenated_continuation":
