@@ -310,7 +310,7 @@ def test_proper_list_stays_intact():
 def test_critical_short_trailing_merges_even_when_large():
     """Critically short items (<5 words) merge even when prev is at max size."""
     from pdf_chunker.passes.emit_jsonl import _merge_short_rows
-    
+
     # Create a row that's at max size (2000 chars)
     large_text = "word " * 400  # ~2000 chars
     rows = [
@@ -327,7 +327,7 @@ def test_critical_short_trailing_merges_even_when_large():
 def test_merge_short_rows_respects_min_words():
     """Rows below min_row_words threshold are merged."""
     from pdf_chunker.passes.emit_jsonl import _merge_short_rows
-    
+
     rows = [
         {"text": "Short heading"},  # 2 words
         {"text": "This is longer content with enough words to stand alone. " * 3},

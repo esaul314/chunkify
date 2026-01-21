@@ -63,12 +63,12 @@ def _max_chars() -> int:
 
 def _target_chunk_chars() -> int:
     """Target chunk size for optimal RAG/LoRA performance.
-    
+
     Default is 2000 chars (~320 words) which provides:
     - Single-topic focus (avoids multi-topic chunks)
     - Fits well in LLM context windows
     - Good semantic coherence for retrieval
-    
+
     Can be overridden via PDF_CHUNKER_TARGET_CHUNK_CHARS env var.
     For LoRA training, slightly larger chunks (2500) may work better.
     """
@@ -838,12 +838,12 @@ def _starts_with_orphan_bullet(
 
 def _max_merge_chars() -> int:
     """Return maximum character count for merged chunks.
-    
+
     This prevents over-merging that creates multi-topic chunks.
     Default is 2000 chars (~320 words) which is optimal for:
     - RAG: fits in context windows, single topic focus
     - LoRA: focused training examples
-    
+
     Can be overridden via PDF_CHUNKER_MAX_MERGE_CHARS env var.
     """
     return int(os.getenv("PDF_CHUNKER_MAX_MERGE_CHARS", "2000"))
@@ -862,7 +862,7 @@ def _merge_very_short_forward(
 
     Coherent items (proper sentence start and ending) are preserved even if
     short, as they represent complete semantic units.
-    
+
     Merging stops when the result would exceed _max_merge_chars() to prevent
     creating overly large multi-topic chunks.
     """
@@ -884,7 +884,7 @@ def _merge_very_short_forward(
         if pending is not None:
             pending_text = pending.get("text", "")
             merged_chars = len(pending_text) + len(text) + 2  # +2 for separator
-            
+
             # Only merge if result won't be too large
             if merged_chars <= max_merge:
                 merged_text = _merge_text(pending_text, text, strategy=strategy)
@@ -906,7 +906,7 @@ def _merge_very_short_forward(
         is_short = words < threshold
         is_coherent_block = _coherent(text) and words >= coherent_min
         has_orphan_bullet = _starts_with_orphan_bullet(text, strategy=strategy)
-        
+
         # Don't hold items that are already large enough
         is_large_enough = chars >= max_merge * 0.5  # At least half the max size
 
@@ -926,7 +926,7 @@ def _merge_very_short_forward(
             prev_text = prev.get("text", "")
             pending_text = pending.get("text", "")
             merged_chars = len(prev_text) + len(pending_text) + 2
-            
+
             if merged_chars <= max_merge:
                 merged_text = _merge_text(prev_text, pending_text, strategy=strategy)
                 result[-1] = {**prev, "text": merged_text}
@@ -1135,11 +1135,11 @@ def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
 
 def _min_row_words() -> int:
     """Minimum word count for a standalone row.
-    
+
     Rows below this threshold will be merged with neighbors.
     Default is 15 words (~1 sentence). Can be overridden via
     PDF_CHUNKER_MIN_ROW_WORDS env var.
-    
+
     Respects PDF_CHUNKER_JSONL_MIN_WORDS if set lower, to avoid over-merging
     when the user explicitly wants smaller chunks.
     """
@@ -1152,7 +1152,7 @@ def _min_row_words() -> int:
 
 def _critical_short_threshold() -> int:
     """Minimum word count below which rows MUST be merged regardless of size limits.
-    
+
     Rows below this threshold (default 5 words) are considered so short that
     they're never acceptable as standalone chunks. These will be merged even
     if it exceeds the max_merge_chars limit.
@@ -1162,42 +1162,42 @@ def _critical_short_threshold() -> int:
 
 def _merge_short_rows(rows: list[Row]) -> list[Row]:
     """Merge rows below the minimum word threshold with neighbors.
-    
+
     This is the final pass that catches any short fragments that:
     - Came from items that couldn't be merged due to size limits
     - Were produced by _split/_rows_from_item splitting
     - Are single items with no neighbors
-    
+
     Short rows are merged with the following row if possible,
     otherwise with the preceding row.
-    
+
     Rows below the critical threshold (5 words) are ALWAYS merged,
     even if it exceeds the soft size limit.
     """
     if not rows:
         return rows
-    
+
     min_words = _min_row_words()
     critical_threshold = _critical_short_threshold()
     max_chars = _max_merge_chars()
     result: list[Row] = []
     pending: Row | None = None
-    
+
     for row in rows:
         text = row.get("text", "")
         words = _word_count(text)
         chars = len(text)
-        
+
         if pending is not None:
             pending_text = pending.get("text", "")
             pending_words = _word_count(pending_text)
             merged_chars = len(pending_text) + chars + 2
-            
+
             # ALWAYS merge if pending is critically short (< 5 words)
             # Otherwise, only merge if it fits within the soft limit
             is_critical = pending_words < critical_threshold
             should_merge = is_critical or merged_chars <= max_chars
-            
+
             if should_merge:
                 merged_text = f"{pending_text.rstrip()}\n\n{text}".strip()
                 row = {**row, "text": merged_text}
@@ -1210,17 +1210,17 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
                 # Can't merge, keep pending as-is
                 result.append(pending)
                 pending = None
-        
+
         # Check if row is too short to stand alone
         is_short = words < min_words
         # Coherent rows (proper sentence) can stand alone even if short
         is_coherent = _coherent(text) and words >= 8
-        
+
         if is_short and not is_coherent:
             pending = row
         else:
             result.append(row)
-    
+
     # Handle trailing short row
     if pending is not None:
         if result:
@@ -1229,11 +1229,11 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
             pending_text = pending.get("text", "")
             pending_words = _word_count(pending_text)
             merged_chars = len(prev_text) + len(pending_text) + 2
-            
+
             # ALWAYS merge critically short trailing items
             is_critical = pending_words < critical_threshold
             should_merge = is_critical or merged_chars <= max_chars
-            
+
             if should_merge:
                 merged_text = f"{prev_text.rstrip()}\n\n{pending_text}".strip()
                 result[-1] = {**prev, "text": merged_text}
@@ -1242,7 +1242,7 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
                 result.append(pending)
         else:
             result.append(pending)
-    
+
     return result
 
 
