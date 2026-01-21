@@ -16,11 +16,18 @@ Usage:
 
     # Pass it through pipeline options
     spec = load_spec("pipeline.yaml", overrides={
-        "detect_page_artifacts": {
-            "footer_callback": my_footer_prompt,
-            "known_footer_patterns": ["Collective Wisdom.*\\d+"],
+        "text_clean": {
+            "footer_patterns": ["Collective Wisdom.*\\d+", "Chapter \\d+.*\\d+$"],
         }
     })
+
+Inline Footer Pattern:
+    Footers often appear merged mid-text with a pattern like:
+        "...previous text\\n\\nChapter Title 202 next text continues..."
+
+    Use patterns that match this structure:
+        - "\\n\\n[A-Z][^\\n]{0,50}\\s+\\d{1,3}(?=\\s)"  # Generic chapter footer
+        - "\\n\\nScale Communication.*?\\d{1,3}(?=\\s)"  # Specific book title
 """
 
 from __future__ import annotations
@@ -218,3 +225,231 @@ def make_batch_footer_prompt(decisions: Mapping[str, bool]) -> FooterCallback:
         return context.get("heuristic_confidence", 0.5) >= 0.5
 
     return _lookup
+
+
+# ---------------------------------------------------------------------------
+# Heuristic inline footer detection (pattern-free)
+# ---------------------------------------------------------------------------
+
+# Generic pattern for inline footers: \n\n + TitleCase words + page number
+# Matches things like:
+#   "\n\nScale Communication Through Writing 202\n\naside we can"
+#   "\n\nScale Communication Through Writing 202 Aside from"
+#   "\n\nChapter 5\n\n"
+#   "\n\nThe Art of Leadership 123 "
+_INLINE_FOOTER_HEURISTIC = re.compile(
+    r"\n\n"  # paragraph break
+    r"([A-Z][A-Za-z]*(?:\s+[A-Za-z]+){1,6})"  # Title: Cap word + 1-6 more words
+    r"\s+"  # whitespace before page number
+    r"(\d{1,3})"  # 1-3 digit page number
+    r"(?=\s)",  # followed by any whitespace (space, newline, etc.)
+    re.UNICODE,
+)
+
+# Pattern for standalone footer blocks (entire block is a footer)
+# Matches things like:
+#   "Scale Communication Through Writing 1"
+#   "Chapter 5"
+#   "On Accountability 160"
+_STANDALONE_FOOTER_HEURISTIC = re.compile(
+    r"^([A-Z][A-Za-z]*(?:\s+[A-Za-z]+){1,6})\s+(\d{1,3})$",
+    re.UNICODE,
+)
+
+
+def is_standalone_footer_candidate(text: str) -> tuple[str, str] | None:
+    """Check if text is a standalone footer block (entire block is footer-like).
+
+    Returns:
+        Tuple of (title, page_number) if it matches, None otherwise.
+    """
+    text = text.strip()
+    match = _STANDALONE_FOOTER_HEURISTIC.match(text)
+    if match:
+        return match.group(1), match.group(2)
+    return None
+
+
+def detect_inline_footer_candidates(text: str) -> list[tuple[str, int, int]]:
+    """Detect potential inline footers heuristically (without user-provided patterns).
+
+    Looks for the pattern: \\n\\n{TitleCase Text} {PageNumber} {Continuation}
+
+    Returns:
+        List of (footer_text, start_pos, end_pos) tuples for each candidate.
+    """
+    candidates = []
+    for match in _INLINE_FOOTER_HEURISTIC.finditer(text):
+        footer_text = match.group(0).strip()
+        candidates.append((footer_text, match.start(), match.end()))
+    return candidates
+
+
+def strip_inline_footers_interactive(
+    text: str,
+    *,
+    callback: FooterCallback,
+    cache: FooterDecisionCache | None = None,
+    page: int = 0,
+) -> tuple[str, list[str]]:
+    """Remove inline footers detected heuristically, confirming each with callback.
+
+    This is the true interactive mode: it detects footer candidates without
+    user-provided patterns and asks for confirmation on each.
+
+    Args:
+        text: The text to clean
+        callback: Callback for interactive confirmation (required)
+        cache: Optional cache for remembering decisions
+        page: Page number for context
+
+    Returns:
+        Tuple of (cleaned text, list of stripped footer strings)
+    """
+    stripped: list[str] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        footer_text = match.group(0)
+        title = match.group(1)
+        page_num = match.group(2)
+
+        # Check cache first
+        if cache is not None:
+            cached = cache.get(title)
+            if cached is not None:
+                if cached:
+                    stripped.append(footer_text.strip())
+                    return "\n\n"
+                return match.group(0)
+
+        # Ask user
+        ctx = {
+            "inline": True,
+            "page": page,
+            "detected_page_num": page_num,
+            "heuristic_confidence": 0.7,
+            "heuristic": True,
+        }
+        is_footer = callback(footer_text.strip(), page, ctx)
+
+        # Cache by title (not full text) so similar footers are auto-handled
+        if cache is not None:
+            cache.set(title, is_footer)
+
+        if is_footer:
+            stripped.append(footer_text.strip())
+            return "\n\n"
+        return match.group(0)
+
+    result = _INLINE_FOOTER_HEURISTIC.sub(_replace, text)
+    return result, stripped
+
+
+# ---------------------------------------------------------------------------
+# Inline footer stripping (footers merged into text)
+# ---------------------------------------------------------------------------
+
+
+def build_inline_footer_pattern(title_pattern: str) -> re.Pattern[str]:
+    """Build a regex that matches inline footers with the given title pattern.
+
+    Inline footers typically appear as:
+        "...previous text\\n\\nChapter Title 123 next text..."
+
+    Args:
+        title_pattern: Regex pattern for the footer title (e.g., "Scale Communication")
+
+    Returns:
+        Compiled regex that matches the full inline footer including newlines.
+    """
+    # Match: \n\n + title + optional whitespace + 1-3 digit page number + word boundary
+    return re.compile(
+        rf"\n\n({title_pattern})\s+(\d{{1,3}})(?=\s|$)",
+        re.IGNORECASE,
+    )
+
+
+def strip_inline_footers(
+    text: str,
+    patterns: tuple[re.Pattern[str], ...],
+    *,
+    callback: FooterCallback | None = None,
+    cache: FooterDecisionCache | None = None,
+    page: int = 0,
+) -> tuple[str, list[str]]:
+    """Remove inline footers from text and return (cleaned_text, stripped_footers).
+
+    Inline footers are detected by patterns that match text preceded by \\n\\n
+    and ending with a page number.
+
+    Args:
+        text: The text to clean
+        patterns: Compiled regex patterns to match inline footers
+        callback: Optional callback for interactive confirmation
+        cache: Optional cache for remembering decisions
+        page: Page number for context
+
+    Returns:
+        Tuple of (cleaned text, list of stripped footer strings)
+    """
+    stripped: list[str] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        footer_text = match.group(0)
+        # If we have a callback, ask for confirmation
+        if callback is not None:
+            ctx = {"inline": True, "page": page, "heuristic_confidence": 0.8}
+            if cache is not None:
+                cached = cache.get(footer_text)
+                if cached is not None:
+                    if cached:
+                        stripped.append(footer_text.strip())
+                        return "\n\n"  # Keep paragraph break
+                    return match.group(0)  # Keep footer as-is
+
+            is_footer = callback(footer_text.strip(), page, ctx)
+            if cache is not None:
+                cache.set(footer_text, is_footer)
+            if not is_footer:
+                return match.group(0)
+
+        stripped.append(footer_text.strip())
+        return "\n\n"  # Preserve paragraph break where footer was
+
+    result = text
+    for pattern in patterns:
+        result = pattern.sub(_replace, result)
+
+    return result, stripped
+
+
+def compile_footer_patterns(
+    patterns: tuple[str, ...],
+    *,
+    inline: bool = True,
+) -> tuple[re.Pattern[str], ...]:
+    """Compile footer pattern strings to regex objects.
+
+    Args:
+        patterns: Tuple of regex pattern strings
+        inline: If True, wrap patterns to match inline footers (\\n\\n prefix + page number)
+
+    Returns:
+        Tuple of compiled regex patterns
+    """
+    if not inline:
+        return tuple(re.compile(p, re.IGNORECASE) for p in patterns if isinstance(p, str))
+
+    compiled = []
+    for p in patterns:
+        if not isinstance(p, str):
+            continue
+        # Check if pattern already handles inline structure
+        if r"\n\n" in p or p.startswith("^"):
+            compiled.append(re.compile(p, re.IGNORECASE))
+        else:
+            # Wrap pattern to match inline footer structure
+            # Pattern: \n\n + user_pattern + whitespace + page_number + word_boundary
+            inline_pat = rf"\n\n({p})\s+(\d{{1,3}})(?=\s|$)"
+            compiled.append(re.compile(inline_pat, re.IGNORECASE))
+    return tuple(compiled)

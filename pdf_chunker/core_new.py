@@ -182,14 +182,31 @@ def _excluded_all(path: str, exclude: str | None) -> bool:
 
 def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
     """Load ``path`` honoring PDF exclusions from ``spec``."""
-    opts = (spec or PipelineSpec()).options.get("pdf_parse", {})
-    exclude = opts.get("exclude_pages")
+    spec_opts = (spec or PipelineSpec()).options
+    pdf_opts = spec_opts.get("pdf_parse", {})
+    text_clean_opts = spec_opts.get("text_clean", {})
+
+    exclude = pdf_opts.get("exclude_pages")
+    # Propagate interactive mode to PDF extraction so aggressive footer
+    # detection is skipped, allowing downstream interactive confirmation
+    interactive = text_clean_opts.get("interactive_footers", False)
+
     abs_path = str(Path(path).resolve())
-    payload = (
-        {"type": "page_blocks", "source_path": abs_path, "pages": []}
-        if _excluded_all(abs_path, exclude)
-        else _adapter_for(path).read(path, exclude_pages=exclude)
-    )
+    adapter = _adapter_for(path)
+    # Pass interactive flag if the adapter supports it
+    try:
+        payload = (
+            {"type": "page_blocks", "source_path": abs_path, "pages": []}
+            if _excluded_all(abs_path, exclude)
+            else adapter.read(path, exclude_pages=exclude, interactive=interactive)
+        )
+    except TypeError:
+        # Adapter doesn't support interactive parameter (e.g., EPUB)
+        payload = (
+            {"type": "page_blocks", "source_path": abs_path, "pages": []}
+            if _excluded_all(abs_path, exclude)
+            else adapter.read(path, exclude_pages=exclude)
+        )
     return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
 
 

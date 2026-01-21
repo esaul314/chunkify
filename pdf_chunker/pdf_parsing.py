@@ -55,8 +55,17 @@ def _restore_page_leading_case(blocks: Iterable[Block]) -> Iterator[Block]:
         yield block
 
 
-def _block_pipeline(filepath: str, excluded: set[int]) -> list[Block]:
-    """Return merged blocks for ``filepath`` respecting ``excluded`` pages."""
+def _block_pipeline(
+    filepath: str, excluded: set[int], *, interactive: bool = False
+) -> list[Block]:
+    """Return merged blocks for ``filepath`` respecting ``excluded`` pages.
+
+    Args:
+        filepath: Path to PDF file
+        excluded: Set of page numbers to exclude
+        interactive: If True, skip aggressive footer detection to allow
+            downstream interactive confirmation
+    """
 
     merged = merge_continuation_blocks(
         apply_fallbacks(
@@ -67,6 +76,7 @@ def _block_pipeline(filepath: str, excluded: set[int]) -> list[Block]:
                     for blk in page.blocks
                 ),
                 None,
+                skip_footer_detection=interactive,
             ),
             filepath,
             excluded,
@@ -77,25 +87,42 @@ def _block_pipeline(filepath: str, excluded: set[int]) -> list[Block]:
 
 
 def extract_text_blocks_from_pdf(
-    filepath: str, exclude_pages: str | None = None
+    filepath: str,
+    exclude_pages: str | None = None,
+    *,
+    interactive: bool = False,
 ) -> Iterable[Block]:
     """Yield ``Block`` objects from ``filepath`` respecting ``exclude_pages``.
 
     A list-based wrapper is available via :func:`extract_text_blocks_from_pdf_list`
     for consumers that require materialised dictionaries. The iterator form
     enables streaming consumption and reduces peak memory usage.
+
+    Args:
+        filepath: Path to PDF file
+        exclude_pages: Page ranges to exclude (e.g., "1-3,5")
+        interactive: If True, skip aggressive footer detection to allow
+            downstream interactive confirmation
     """
 
     excluded = _excluded_pages(filepath, exclude_pages)
-    return iter(_block_pipeline(filepath, excluded))
+    return iter(_block_pipeline(filepath, excluded, interactive=interactive))
 
 
 def extract_text_blocks_from_pdf_list(
-    filepath: str, exclude_pages: str | None = None
+    filepath: str,
+    exclude_pages: str | None = None,
+    *,
+    interactive: bool = False,
 ) -> list[dict]:
     """Deprecated shim returning a materialised list of block dictionaries."""
 
-    return [asdict(b) for b in _block_pipeline(filepath, _excluded_pages(filepath, exclude_pages))]
+    return [
+        asdict(b)
+        for b in _block_pipeline(
+            filepath, _excluded_pages(filepath, exclude_pages), interactive=interactive
+        )
+    ]
 
 
 def _legacy_extract_text_blocks_from_pdf(

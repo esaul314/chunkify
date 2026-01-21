@@ -258,6 +258,97 @@ class TestDetectPageArtifactsPassIntegration:
         assert len(blocks) == 2
 
 
+class TestInlineFooterStripping:
+    """Tests for inline footer stripping (footers merged mid-text)."""
+
+    def test_build_inline_footer_pattern(self):
+        from pdf_chunker.interactive import build_inline_footer_pattern
+
+        pattern = build_inline_footer_pattern(r"Scale Communication")
+        assert pattern.search("\n\nScale Communication 202 continuation")
+        assert not pattern.search("Scale Communication without page")
+        assert not pattern.search("not matching\nSingle newline 1")
+
+    def test_compile_footer_patterns_inline_mode(self):
+        from pdf_chunker.interactive import compile_footer_patterns
+
+        patterns = compile_footer_patterns(
+            ("Scale Communication", "Chapter Title"),
+            inline=True,
+        )
+        assert len(patterns) == 2
+        # Both should match inline structure
+        text = "previous text\n\nScale Communication 202 next text"
+        assert any(p.search(text) for p in patterns)
+
+    def test_compile_footer_patterns_non_inline_mode(self):
+        from pdf_chunker.interactive import compile_footer_patterns
+
+        patterns = compile_footer_patterns(
+            ("Scale Communication",),
+            inline=False,
+        )
+        assert len(patterns) == 1
+        # Should match directly, not require \n\n prefix
+        assert patterns[0].search("Scale Communication")
+
+    def test_strip_inline_footers_basic(self):
+        from pdf_chunker.interactive import compile_footer_patterns, strip_inline_footers
+
+        # Pattern with .* to match full title before page number
+        patterns = compile_footer_patterns(("Scale Communication.*",), inline=True)
+        text = (
+            "There's conflicting scientific literature on the subject."
+            "\n\nScale Communication Through Writing 202 Aside from that, "
+            "we can all likely agree on a few basic elements."
+        )
+        cleaned, stripped = strip_inline_footers(text, patterns)
+        # Footer should be removed but paragraph break preserved
+        assert "Scale Communication" not in cleaned
+        assert "conflicting scientific" in cleaned
+        assert "Aside from that" in cleaned
+        assert len(stripped) == 1
+        assert "Scale Communication" in stripped[0]
+
+    def test_strip_inline_footers_preserves_paragraph_break(self):
+        from pdf_chunker.interactive import compile_footer_patterns, strip_inline_footers
+
+        patterns = compile_footer_patterns(("Chapter",), inline=True)
+        text = "First paragraph.\n\nChapter 5 Second paragraph."
+        cleaned, _ = strip_inline_footers(text, patterns)
+        # Should preserve double newline
+        assert "\n\n" in cleaned
+        assert cleaned == "First paragraph.\n\n Second paragraph."
+
+    def test_strip_inline_footers_with_callback(self):
+        from pdf_chunker.interactive import (
+            compile_footer_patterns,
+            make_batch_footer_prompt,
+            strip_inline_footers,
+        )
+
+        patterns = compile_footer_patterns(("Header",), inline=True)
+        # Create callback that rejects "Header 1" as footer
+        decisions = {"Header 1": False}
+        callback = make_batch_footer_prompt(decisions)
+
+        text = "Text before.\n\nHeader 1 Text after."
+        cleaned, stripped = strip_inline_footers(text, patterns, callback=callback, page=1)
+        # Should NOT strip because callback rejected
+        assert "Header 1" in cleaned
+        assert len(stripped) == 0
+
+    def test_strip_inline_footers_multiple_occurrences(self):
+        from pdf_chunker.interactive import compile_footer_patterns, strip_inline_footers
+
+        patterns = compile_footer_patterns(("Footer",), inline=True)
+        text = "Para 1.\n\nFooter 10 Para 2.\n\nFooter 20 Para 3."
+        cleaned, stripped = strip_inline_footers(text, patterns)
+        assert "Footer 10" not in cleaned
+        assert "Footer 20" not in cleaned
+        assert len(stripped) == 2
+
+
 class TestTextCleanPassFooterPatterns:
     """Integration tests for footer patterns in text_clean pass."""
 
@@ -333,3 +424,264 @@ class TestTextCleanPassFooterPatterns:
         result = pass_obj(Artifact(payload=doc))
         metrics = result.meta["metrics"]["text_clean"]
         assert metrics["footer_patterns_applied"] == 1
+
+    def test_text_clean_strips_inline_footer(self):
+        """Test that inline footers (merged into text) are stripped."""
+        from pdf_chunker.framework import Artifact
+        from pdf_chunker.passes.text_clean import _TextCleanPass
+
+        pass_obj = _TextCleanPass(
+            footer_patterns=(r"Scale Communication.*",),
+        )
+
+        doc = {
+            "type": "page_blocks",
+            "pages": [
+                {
+                    "page": 202,
+                    "blocks": [
+                        {
+                            "text": (
+                                "There's conflicting scientific literature on the subject."
+                                "\n\nScale Communication Through Writing 202 "
+                                "Aside from that, we can all likely agree."
+                            )
+                        },
+                    ],
+                }
+            ],
+        }
+        result = pass_obj(Artifact(payload=doc))
+        blocks = result.payload["pages"][0]["blocks"]
+        assert len(blocks) == 1
+        text = blocks[0]["text"]
+        assert "Scale Communication" not in text
+        assert "conflicting scientific" in text
+        assert "Aside from that" in text
+
+    def test_text_clean_reports_inline_footer_metrics(self):
+        """Test that inline footers stripped count is reported in metrics."""
+        from pdf_chunker.framework import Artifact
+        from pdf_chunker.passes.text_clean import _TextCleanPass
+
+        pass_obj = _TextCleanPass(
+            footer_patterns=(r"Chapter",),
+        )
+
+        doc = {
+            "type": "page_blocks",
+            "pages": [
+                {
+                    "page": 5,
+                    "blocks": [
+                        {"text": "Intro text.\n\nChapter 5 Body text."},
+                    ],
+                }
+            ],
+        }
+        result = pass_obj(Artifact(payload=doc))
+        metrics = result.meta["metrics"]["text_clean"]
+        assert metrics.get("inline_footers_stripped", 0) == 1
+
+
+class TestHeuristicFooterDetection:
+    """Tests for heuristic footer detection (no patterns provided)."""
+
+    def test_detect_inline_footer_candidates(self):
+        from pdf_chunker.interactive import detect_inline_footer_candidates
+
+        text = (
+            "First paragraph content here."
+            "\n\nScale Communication Through Writing 202 "
+            "Next paragraph continues here."
+        )
+        candidates = detect_inline_footer_candidates(text)
+        assert len(candidates) == 1
+        assert "Scale Communication" in candidates[0][0]
+
+    def test_detect_multiple_candidates(self):
+        from pdf_chunker.interactive import detect_inline_footer_candidates
+
+        text = "Para 1.\n\nChapter One 10 Para 2.\n\nThe Art of Leadership 25 Para 3."
+        candidates = detect_inline_footer_candidates(text)
+        assert len(candidates) == 2
+
+    def test_strip_inline_footers_interactive_basic(self):
+        from pdf_chunker.interactive import (
+            FooterDecisionCache,
+            make_batch_footer_prompt,
+            strip_inline_footers_interactive,
+        )
+
+        # Create a callback that accepts all as footers
+        callback = make_batch_footer_prompt({"Scale Communication": True})
+        cache = FooterDecisionCache()
+
+        text = (
+            "Previous content here."
+            "\n\nScale Communication Through Writing 202 "
+            "Continuation text follows."
+        )
+        cleaned, stripped = strip_inline_footers_interactive(
+            text, callback=callback, cache=cache, page=202
+        )
+        assert "Scale Communication" not in cleaned
+        assert len(stripped) == 1
+
+    def test_strip_inline_footers_interactive_reject(self):
+        from pdf_chunker.interactive import (
+            FooterDecisionCache,
+            make_batch_footer_prompt,
+            strip_inline_footers_interactive,
+        )
+
+        # Create a callback that rejects footers
+        callback = make_batch_footer_prompt({"Chapter": False})
+        cache = FooterDecisionCache()
+
+        text = "Text before.\n\nChapter One 10 Text after."
+        cleaned, stripped = strip_inline_footers_interactive(
+            text, callback=callback, cache=cache, page=10
+        )
+        # Should NOT strip because callback rejected
+        assert "Chapter One" in cleaned
+        assert len(stripped) == 0
+
+    def test_text_clean_pass_interactive_heuristic_mode(self):
+        """Test that interactive mode without patterns uses heuristic detection."""
+        from pdf_chunker.framework import Artifact
+        from pdf_chunker.interactive import make_batch_footer_prompt
+        from pdf_chunker.passes.text_clean import _TextCleanPass
+
+        # Create pass with interactive enabled but no patterns
+        pass_obj = _TextCleanPass(interactive_footers=True)
+
+        # Override the callback for testing (normally uses stdin)
+        pass_obj._footer_callback = make_batch_footer_prompt({"Scale Communication": True})
+
+        doc = {
+            "type": "page_blocks",
+            "pages": [
+                {
+                    "page": 202,
+                    "blocks": [
+                        {
+                            "text": (
+                                "Previous content here."
+                                "\n\nScale Communication Through Writing 202 "
+                                "Continuation text follows."
+                            )
+                        },
+                    ],
+                }
+            ],
+        }
+        result = pass_obj(Artifact(payload=doc))
+        blocks = result.payload["pages"][0]["blocks"]
+        text = blocks[0]["text"]
+        assert "Scale Communication" not in text
+        assert "Continuation text" in text
+        metrics = result.meta["metrics"]["text_clean"]
+        assert metrics.get("interactive_heuristic") is True
+
+
+class TestStandaloneFooterDetection:
+    """Tests for standalone footer block detection (entire block is footer)."""
+
+    def test_is_standalone_footer_candidate_positive(self):
+        from pdf_chunker.interactive import is_standalone_footer_candidate
+
+        result = is_standalone_footer_candidate("Scale Communication Through Writing 1")
+        assert result is not None
+        assert result[0] == "Scale Communication Through Writing"
+        assert result[1] == "1"
+
+    def test_is_standalone_footer_candidate_with_page_number(self):
+        from pdf_chunker.interactive import is_standalone_footer_candidate
+
+        result = is_standalone_footer_candidate("On Accountability 160")
+        assert result is not None
+        assert result[0] == "On Accountability"
+        assert result[1] == "160"
+
+    def test_is_standalone_footer_candidate_negative_no_number(self):
+        from pdf_chunker.interactive import is_standalone_footer_candidate
+
+        result = is_standalone_footer_candidate("Just a normal sentence.")
+        assert result is None
+
+    def test_is_standalone_footer_candidate_negative_too_many_words(self):
+        from pdf_chunker.interactive import is_standalone_footer_candidate
+
+        # More than 6 words after the initial cap word
+        result = is_standalone_footer_candidate("This Has Way Too Many Words For A Footer Title 1")
+        assert result is None
+
+    def test_text_clean_pass_standalone_footer_interactive(self):
+        """Test that interactive mode detects standalone footer blocks."""
+        from pdf_chunker.framework import Artifact
+        from pdf_chunker.interactive import make_batch_footer_prompt
+        from pdf_chunker.passes.text_clean import _TextCleanPass
+
+        # Create pass with interactive enabled but no patterns
+        pass_obj = _TextCleanPass(interactive_footers=True)
+
+        # Override the callback for testing - confirm it's a footer
+        pass_obj._footer_callback = make_batch_footer_prompt(
+            {"Scale Communication Through Writing": True}
+        )
+
+        doc = {
+            "type": "page_blocks",
+            "pages": [
+                {
+                    "page": 1,
+                    "blocks": [
+                        {"text": "Body text before."},
+                        {"text": "Scale Communication Through Writing 1"},  # Standalone footer
+                        {"text": "Body text after."},
+                    ],
+                }
+            ],
+        }
+        result = pass_obj(Artifact(payload=doc))
+        blocks = result.payload["pages"][0]["blocks"]
+        # Footer block should be empty (removed)
+        texts = [b["text"] for b in blocks]
+        assert "Body text before." in texts
+        assert "Body text after." in texts
+        # The footer should be stripped (empty string)
+        assert "" in texts or len(texts) == 2  # Either empty or removed
+
+    def test_text_clean_pass_standalone_footer_rejected(self):
+        """Test that rejected standalone footer blocks are preserved."""
+        from pdf_chunker.framework import Artifact
+        from pdf_chunker.interactive import make_batch_footer_prompt
+        from pdf_chunker.passes.text_clean import _TextCleanPass
+
+        pass_obj = _TextCleanPass(interactive_footers=True)
+
+        # Override the callback - reject the footer
+        pass_obj._footer_callback = make_batch_footer_prompt(
+            {"Scale Communication Through Writing": False}
+        )
+
+        doc = {
+            "type": "page_blocks",
+            "pages": [
+                {
+                    "page": 1,
+                    "blocks": [
+                        {"text": "Body text before."},
+                        {"text": "Scale Communication Through Writing 1"},
+                        {"text": "Body text after."},
+                    ],
+                }
+            ],
+        }
+        result = pass_obj(Artifact(payload=doc))
+        blocks = result.payload["pages"][0]["blocks"]
+        # Footer block should be preserved
+        texts = [b["text"] for b in blocks]
+        # The footer text should still be present (though cleaned)
+        assert any("Scale Communication" in t for t in texts)

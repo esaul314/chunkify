@@ -264,7 +264,7 @@ def test_text_clean_pass_updates_inline_styles() -> None:
         "inline_styles": [InlineStyleSpan(start=0, end=10, style="bold")],
     }
 
-    cleaned = _clean_block(block)
+    cleaned, _stripped = _clean_block(block)
 
     assert cleaned["text"] == "Bold-text"
     assert cleaned["inline_styles"] == [
@@ -288,7 +288,7 @@ def test_text_clean_pass_handles_dict_inline_styles() -> None:
         "inline_styles": [span_dict],
     }
 
-    cleaned = _clean_block(block)
+    cleaned, _stripped = _clean_block(block)
 
     assert cleaned["text"] == "Bold-text"
     assert cleaned["inline_styles"] == [

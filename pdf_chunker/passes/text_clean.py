@@ -154,8 +154,13 @@ def _inline_style_metrics(pages: list[dict[str, Any]]) -> dict[str, Any]:
 def _clean_block(
     block: dict[str, Any],
     footer_patterns: tuple[re.Pattern[str], ...] = (),
-) -> dict[str, Any]:
-    """Return a new block with normalized text."""
+    inline_patterns: tuple[re.Pattern[str], ...] = (),
+    footer_callback: Any = None,
+    footer_cache: Any = None,
+    *,
+    interactive_heuristic: bool = False,
+) -> tuple[dict[str, Any], list[str]]:
+    """Return a new block with normalized text and list of stripped footers."""
     from pdf_chunker import text_cleaning
     from pdf_chunker.inline_styles import (
         build_index_map,
@@ -164,15 +169,59 @@ def _clean_block(
     )
 
     text = block.get("text", "")
+    page = block.get("page", 0)
+    stripped_footers: list[str] = []
 
-    # Check if entire block matches a known footer pattern
+    # 1. Strip inline footers first (footers merged into text with \n\n prefix)
+    #    These are more surgical and preserve surrounding content.
+    if inline_patterns:
+        from pdf_chunker.interactive import strip_inline_footers
+
+        text, stripped_footers = strip_inline_footers(
+            text,
+            inline_patterns,
+            callback=footer_callback,
+            cache=footer_cache,
+            page=page,
+        )
+    elif interactive_heuristic and footer_callback is not None:
+        # No patterns provided, but interactive mode enabled: use heuristic detection
+        from pdf_chunker.interactive import (
+            is_standalone_footer_candidate,
+            strip_inline_footers_interactive,
+        )
+
+        # First check for inline footers (within the text)
+        text, stripped_footers = strip_inline_footers_interactive(
+            text,
+            callback=footer_callback,
+            cache=footer_cache,
+            page=page,
+        )
+
+        # Also check if the entire block is a standalone footer
+        standalone = is_standalone_footer_candidate(text)
+        if standalone:
+            title, page_num = standalone
+            ctx = {
+                "inline": False,
+                "standalone": True,
+                "page": page,
+                "detected_page_num": page_num,
+                "heuristic_confidence": 0.8,
+                "heuristic": True,
+            }
+            is_footer = footer_callback(text, page, ctx)
+            if is_footer:
+                stripped_footers.append(text)
+                text = ""  # Remove entire block
+
+    # 2. Check if entire block matches a known footer pattern (block-level)
+    #    This is for blocks that are entirely footers (no body content).
     for pat in footer_patterns:
-        if pat.search(text):
-            # Strip the matched footer portion
-            text = pat.sub("", text).strip()
-            if not text:
-                # Entire block was footer
-                return {**block, "text": "", "inline_styles": None}
+        if pat.fullmatch(text.strip()):
+            # Entire block is a footer
+            return {**block, "text": "", "inline_styles": None}, stripped_footers
 
     cleaned_text = text_cleaning.clean_text(text)
 
@@ -183,34 +232,78 @@ def _clean_block(
         normalized = normalize_spans(original_styles, len(cleaned_text), remapper)
         remapped_styles = list(normalized)
 
-    return {
-        **block,
-        "text": cleaned_text,
-        "inline_styles": remapped_styles,
-    }
+    return (
+        {
+            **block,
+            "text": cleaned_text,
+            "inline_styles": remapped_styles,
+        },
+        stripped_footers,
+    )
 
 
 def _clean_page(
     page: dict[str, Any],
     footer_patterns: tuple[re.Pattern[str], ...] = (),
-) -> tuple[dict[str, Any], int]:
-    """Clean all blocks in ``page`` and return the block count."""
-    blocks = [_clean_block(b, footer_patterns) for b in page.get("blocks", [])]
+    inline_patterns: tuple[re.Pattern[str], ...] = (),
+    footer_callback: Any = None,
+    footer_cache: Any = None,
+    *,
+    interactive_heuristic: bool = False,
+) -> tuple[dict[str, Any], int, list[str]]:
+    """Clean all blocks in ``page`` and return the block count and stripped footers."""
+    page_num = page.get("page", 0)
+    all_stripped: list[str] = []
+    cleaned_blocks = []
+
+    for b in page.get("blocks", []):
+        # Pass page number to block
+        b_with_page = {**b, "page": page_num}
+        cleaned_block, stripped = _clean_block(
+            b_with_page,
+            footer_patterns,
+            inline_patterns,
+            footer_callback,
+            footer_cache,
+            interactive_heuristic=interactive_heuristic,
+        )
+        all_stripped.extend(stripped)
+        cleaned_blocks.append(cleaned_block)
+
     # Filter out blocks that became empty after footer stripping
-    non_empty = [b for b in blocks if b.get("text", "").strip()]
-    return {**page, "blocks": non_empty}, len(non_empty)
+    non_empty = [b for b in cleaned_blocks if b.get("text", "").strip()]
+    return {**page, "blocks": non_empty}, len(non_empty), all_stripped
 
 
 def _clean_doc(
     doc: dict[str, Any],
     footer_patterns: tuple[re.Pattern[str], ...] = (),
-) -> tuple[dict[str, Any], int, dict[str, Any]]:
+    inline_patterns: tuple[re.Pattern[str], ...] = (),
+    footer_callback: Any = None,
+    footer_cache: Any = None,
+    *,
+    interactive_heuristic: bool = False,
+) -> tuple[dict[str, Any], int, dict[str, Any], list[str]]:
     """Clean document pages and aggregate block metrics."""
-    pages_with_counts = [_clean_page(p, footer_patterns) for p in doc.get("pages", [])]
+    all_stripped: list[str] = []
+    pages_with_counts = []
+
+    for p in doc.get("pages", []):
+        cleaned_page, count, stripped = _clean_page(
+            p,
+            footer_patterns,
+            inline_patterns,
+            footer_callback,
+            footer_cache,
+            interactive_heuristic=interactive_heuristic,
+        )
+        pages_with_counts.append((cleaned_page, count))
+        all_stripped.extend(stripped)
+
     pages = [p for p, _ in pages_with_counts]
     blocks = sum(c for _, c in pages_with_counts)
     style_metrics = _inline_style_metrics(pages)
-    return {**doc, "pages": pages}, blocks, style_metrics
+    return {**doc, "pages": pages}, blocks, style_metrics, all_stripped
 
 
 @dataclass
@@ -229,11 +322,28 @@ class _TextCleanPass:
     footer_patterns: tuple[str, ...] = ()
     interactive_footers: bool = False
 
+    # Internal state for interactive mode
+    _footer_callback: Any = field(default=None, init=False, repr=False)
+    _footer_cache: Any = field(default=None, init=False, repr=False)
+
     def __post_init__(self) -> None:
-        """Compile footer patterns after initialization."""
+        """Compile footer patterns and set up interactive callback."""
         self._compiled_patterns: tuple[re.Pattern[str], ...] = tuple(
             re.compile(p, re.IGNORECASE) for p in self.footer_patterns if isinstance(p, str)
         )
+        # Compile inline patterns (for mid-text footers with \n\n prefix)
+        from pdf_chunker.interactive import compile_footer_patterns
+
+        self._inline_patterns: tuple[re.Pattern[str], ...] = compile_footer_patterns(
+            self.footer_patterns, inline=True
+        )
+
+        # Set up interactive callback if enabled
+        if self.interactive_footers:
+            from pdf_chunker.interactive import FooterDecisionCache, make_cli_footer_prompt
+
+            self._footer_callback = make_cli_footer_prompt(default_is_footer=True)
+            self._footer_cache = FooterDecisionCache()
 
     def __call__(self, a: Artifact) -> Artifact:
         payload = a.payload
@@ -243,11 +353,37 @@ class _TextCleanPass:
         # Check for runtime options
         opts = (a.meta or {}).get("options", {}).get("text_clean", {})
         runtime_patterns = opts.get("footer_patterns", ())
-        patterns = self._compiled_patterns
+        runtime_interactive = opts.get("interactive_footers", False)
+
+        # Use runtime patterns if provided
+        block_patterns = self._compiled_patterns
+        inline_patterns = self._inline_patterns
+        footer_callback = self._footer_callback
+        footer_cache = self._footer_cache
+
+        # Determine if we should use heuristic detection (interactive but no patterns)
+        interactive_heuristic = (
+            (self.interactive_footers or runtime_interactive)
+            and not block_patterns
+            and not inline_patterns
+            and not runtime_patterns
+        )
+
         if runtime_patterns and runtime_patterns != self.footer_patterns:
-            patterns = tuple(
+            from pdf_chunker.interactive import compile_footer_patterns
+
+            block_patterns = tuple(
                 re.compile(p, re.IGNORECASE) for p in runtime_patterns if isinstance(p, str)
             )
+            inline_patterns = compile_footer_patterns(runtime_patterns, inline=True)
+            interactive_heuristic = False  # We have patterns now
+
+        # Set up interactive callback if enabled at runtime
+        if runtime_interactive and footer_callback is None:
+            from pdf_chunker.interactive import FooterDecisionCache, make_cli_footer_prompt
+
+            footer_callback = make_cli_footer_prompt(default_is_footer=True)
+            footer_cache = FooterDecisionCache()
 
         if isinstance(payload, str):
             from pdf_chunker.text_cleaning import _clean_text_impl
@@ -255,7 +391,14 @@ class _TextCleanPass:
             cleaned = _clean_text_impl(payload)
         elif isinstance(payload, dict) and payload.get("type") == "page_blocks":
             typed_payload = cast(dict[str, Any], payload)
-            cleaned, block_count, style_metrics = _clean_doc(typed_payload, patterns)
+            cleaned, block_count, style_metrics, stripped_footers = _clean_doc(
+                typed_payload,
+                block_patterns,
+                inline_patterns,
+                footer_callback,
+                footer_cache,
+                interactive_heuristic=interactive_heuristic,
+            )
         else:
             return a
 
@@ -266,8 +409,13 @@ class _TextCleanPass:
             text_metrics = metrics.setdefault("text_clean", {})
             text_metrics["blocks"] = block_count
             text_metrics.update(style_metrics)
-            if patterns:
-                text_metrics["footer_patterns_applied"] = len(patterns)
+            if block_patterns or inline_patterns:
+                text_metrics["footer_patterns_applied"] = len(block_patterns)
+                text_metrics["inline_patterns_applied"] = len(inline_patterns)
+            if interactive_heuristic:
+                text_metrics["interactive_heuristic"] = True
+            if stripped_footers:
+                text_metrics["inline_footers_stripped"] = len(stripped_footers)
         return Artifact(payload=cleaned, meta=meta)
 
 

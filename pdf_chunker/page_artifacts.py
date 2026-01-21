@@ -1,9 +1,10 @@
 import logging
 import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from functools import reduce
 from itertools import chain, combinations, groupby, takewhile
-from typing import Iterable, Mapping, Optional, Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
@@ -99,9 +100,7 @@ def _strip_bullet_marker(text: str, strategy: BulletHeuristicStrategy = _BULLET_
 
     hyphen_prefix = strategy.hyphen_bullet_prefix
     without_hyphen = (
-        stripped[len(hyphen_prefix) :].lstrip()
-        if stripped.startswith(hyphen_prefix)
-        else stripped
+        stripped[len(hyphen_prefix) :].lstrip() if stripped.startswith(hyphen_prefix) else stripped
     )
     marker_free = without_hyphen.lstrip(strategy.bullet_chars)
     return marker_free.lstrip()
@@ -112,11 +111,7 @@ def _looks_like_bullet_footer(text: str) -> bool:
 
     stripped = text.strip()
     words = stripped.split()
-    return (
-        starts_with_bullet(stripped, _BULLET_STRATEGY)
-        and "?" in stripped
-        and len(words) <= 2
-    )
+    return starts_with_bullet(stripped, _BULLET_STRATEGY) and "?" in stripped and len(words) <= 2
 
 
 def _looks_like_footer_context(text: str) -> bool:
@@ -240,9 +235,7 @@ def _question_footer_indices(lines: list[str]) -> frozenset[int]:
         return bool(span) and (total - span[-1] - 1) <= 4
 
     qualifying = (
-        span
-        for span in spans
-        if _near_footer(span) and _is_question_bullet_footer_run(span, lines)
+        span for span in spans if _near_footer(span) and _is_question_bullet_footer_run(span, lines)
     )
 
     bullet_indices = frozenset(idx for span in qualifying for idx in span)
@@ -256,7 +249,7 @@ def _question_footer_indices(lines: list[str]) -> frozenset[int]:
             return False
         from_end = total - idx - 1
         initial = stripped[0]
-        question_tail = stripped.endswith("?") or stripped.endswith("?)") or stripped.endswith("?\"")
+        question_tail = stripped.endswith("?") or stripped.endswith("?)") or stripped.endswith('?"')
         return from_end <= 4 and initial.islower() and question_tail
 
     continuation = frozenset(
@@ -283,14 +276,16 @@ def _classify_footer_block(text: str) -> str:
     return ""
 
 
-_INLINE_KEEP_LEADS = frozenset({
-    "for",
-    "when",
-    "where",
-    "how",
-    "why",
-    "what",
-})
+_INLINE_KEEP_LEADS = frozenset(
+    {
+        "for",
+        "when",
+        "where",
+        "how",
+        "why",
+        "what",
+    }
+)
 
 
 _INLINE_FOOTER_BOTTOM_MARGIN = 96.0
@@ -323,23 +318,20 @@ def _previous_non_bullet_text(blocks: Sequence["Block"], idx: int) -> str:
     )
 
 
-def _is_trailing_inline_footer(
-    blocks: Sequence["Block"], idx: int, previous_text: str
-) -> bool:
-    tail_lines = (
-        _block_first_line(block)
-        for block in blocks[idx + 1 :]
-    )
+def _is_trailing_inline_footer(blocks: Sequence["Block"], idx: int, previous_text: str) -> bool:
+    tail_lines = (_block_first_line(block) for block in blocks[idx + 1 :])
     return all(
-        not line
-        or _footer_bullet_signals(line, previous_text)
-        or _looks_like_bullet_footer(line)
+        not line or _footer_bullet_signals(line, previous_text) or _looks_like_bullet_footer(line)
         for line in tail_lines
     )
 
 
 def _should_drop_inline_footer(
-    blocks: Sequence["Block"], idx: int, block: "Block", lines: tuple[str, ...], bottom: Optional[float]
+    blocks: Sequence["Block"],
+    idx: int,
+    block: "Block",
+    lines: tuple[str, ...],
+    bottom: float | None,
 ) -> bool:
     word_totals = tuple(len(line.split()) for line in lines)
     total_words = sum(word_totals)
@@ -434,8 +426,7 @@ def _prune_footer_blocks(blocks: list["Block"]) -> list["Block"]:
     has_sentence = any("." in body for body in bodies if len(body.split()) >= 8)
     total_words = sum(word_totals)
     footerish_bodies = tuple(
-        _footer_bullet_signals(body, previous_text) or "?" in body
-        for body in bodies
+        _footer_bullet_signals(body, previous_text) or "?" in body for body in bodies
     )
 
     if dense_items >= 3 or has_sentence or total_words >= 60:
@@ -464,9 +455,7 @@ def _looks_like_contact_detail(text: str) -> bool:
     """Return ``True`` when ``text`` resembles an inline contact detail."""
 
     lowered = text.lower()
-    keyword_match = any(
-        re.search(rf"\b{keyword}\b", lowered) for keyword in _CONTACT_KEYWORDS
-    )
+    keyword_match = any(re.search(rf"\b{keyword}\b", lowered) for keyword in _CONTACT_KEYWORDS)
     return bool(_EMAIL_RE.search(text) or _PHONE_RE.search(text) or keyword_match)
 
 
@@ -494,9 +483,7 @@ def _footer_bullet_signals(*candidates: str) -> bool:
     )
 
 
-def _header_footer_signal_map(
-    previous_line: str, trailing_count: int
-) -> dict[str, bool]:
+def _header_footer_signal_map(previous_line: str, trailing_count: int) -> dict[str, bool]:
     """Return header-derived footer signals for ``previous_line``."""
 
     stripped = previous_line.strip()
@@ -567,16 +554,12 @@ def _trailing_footer_positive_context(signals: Mapping[str, bool]) -> bool:
     return any(signals[key] for key in _POSITIVE_CONTEXT_KEYS)
 
 
-def _trailing_footer_fallback_guard(
-    signals: Mapping[str, bool], direct_body_signal: bool
-) -> bool:
+def _trailing_footer_fallback_guard(signals: Mapping[str, bool], direct_body_signal: bool) -> bool:
     """Return ``True`` when fallback context permits pruning."""
 
     context_flags = tuple(signals[key] for key in _TRAILING_CONTEXT_KEYS)
     header_support = any(context_flags[:2])
-    multi_signal_support = any(
-        all(pair) for pair in combinations(context_flags, 2)
-    )
+    multi_signal_support = any(all(pair) for pair in combinations(context_flags, 2))
     return any(
         (
             direct_body_signal,
@@ -594,19 +577,14 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     if not trailing:
         return lines
 
-    trailing_info = tuple(
-        (pos, line, _bullet_body(line))
-        for pos, line in trailing
-    )
+    trailing_info = tuple((pos, line, _bullet_body(line)) for pos, line in trailing)
     trailing_indices = tuple(pos for pos, _, _ in trailing_info)
     trailing_count = len(trailing_info)
     body_word_count = sum(len((body or "").split()) for _, _, body in trailing_info if body)
     if any(_looks_like_shipping_footer(body or "") for _, _, body in trailing_info):
         return lines
 
-    previous = _first_non_empty_line(
-        lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1)
-    )
+    previous = _first_non_empty_line(lines[pos] for pos in range(trailing[-1][0] - 1, -1, -1))
     after_idx = trailing[-1][0] + 1
     after_line = lines[after_idx] if after_idx < len(lines) else ""
 
@@ -640,9 +618,7 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     positive_context = _trailing_footer_positive_context(signals)
 
     stats = tuple(
-        (_question_footer_token_stats(body), pos)
-        for pos, _, body in trailing_info
-        if body
+        (_question_footer_token_stats(body), pos) for pos, _, body in trailing_info if body
     )
     dense_footer_run = (
         len(trailing_indices) >= 4
@@ -668,9 +644,7 @@ def _drop_trailing_bullet_footers(lines: list[str]) -> list[str]:
     if not positive_context:
         return lines
 
-    fallback_context = _trailing_footer_fallback_guard(
-        signals, direct_body_signal
-    )
+    fallback_context = _trailing_footer_fallback_guard(signals, direct_body_signal)
 
     removals = [
         pos
@@ -748,10 +722,7 @@ def _looks_like_isolated_title(line: str) -> bool:
     if not 3 <= len(tokens) <= 8:
         return False
 
-    return all(
-        _is_titlecase_token(token) or token.lower() in _TITLE_CONNECTORS
-        for token in tokens
-    )
+    return all(_is_titlecase_token(token) or token.lower() in _TITLE_CONNECTORS for token in tokens)
 
 
 def _looks_like_running_text(line: str) -> bool:
@@ -775,7 +746,7 @@ def _should_remove_isolated_title(
     line: str,
     idx: int,
     lines: list[str],
-    page_num: Optional[int],
+    page_num: int | None,
 ) -> bool:
     """Return ``True`` when an isolated title most likely belongs to a header/footer."""
 
@@ -909,13 +880,13 @@ def _match_common_patterns(text: str) -> bool:
     return bool(re.match(r"^[0-9]{1,3}[.)]?\s+[A-Z]", text) and len(text.split()) <= 8)
 
 
-def _normalize_page_num(page_num: Optional[int]) -> int:
+def _normalize_page_num(page_num: int | None) -> int:
     """Return a safe page number for comparisons."""
 
     return page_num if isinstance(page_num, int) else 0
 
 
-def _match_page_number_suffix(text: str, page_num: Optional[int]) -> bool:
+def _match_page_number_suffix(text: str, page_num: int | None) -> bool:
     """Detect page-number fragments at line ends or near the end.
 
     If ``page_num`` is ``0`` or negative, the numeric check is skipped.
@@ -969,7 +940,7 @@ def _match_page_number_suffix(text: str, page_num: Optional[int]) -> bool:
     return False
 
 
-def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
+def is_page_artifact_text(text: str, page_num: int | None) -> bool:
     """Return True if the text looks like a header or footer artifact."""
     text_lower = text.lower().strip()
     if not text_lower:
@@ -1013,7 +984,7 @@ def is_page_artifact_text(text: str, page_num: Optional[int]) -> bool:
     return False
 
 
-def strip_page_artifact_suffix(text: str, page_num: Optional[int]) -> str:
+def strip_page_artifact_suffix(text: str, page_num: int | None) -> str:
     """Return the line with any trailing ``"| N"`` footer fragment removed."""
 
     pattern = re.compile(rf"\|\s*(\d{{1,3}}|{ROMAN_RE})(?![0-9ivxlcdm])", re.IGNORECASE)
@@ -1031,7 +1002,7 @@ def strip_page_artifact_suffix(text: str, page_num: Optional[int]) -> str:
     return text
 
 
-def _remove_inline_footer(text: str, page_num: Optional[int]) -> str:
+def _remove_inline_footer(text: str, page_num: int | None) -> str:
     """Remove footer or header fragments embedded in text."""
 
     patterns = [
@@ -1120,6 +1091,7 @@ def _strip_footnote_lines(text: str) -> str:
 
     lines = text.splitlines()
     total = len(lines)
+
     def _should_keep(idx: int, ln: str) -> bool:
         if _is_number_marker(ln):
             return False
@@ -1134,7 +1106,7 @@ def _strip_footnote_lines(text: str) -> str:
 FOOTNOTE_MARKER_RE = re.compile(rf"(?<=[^\s0-9{_SUP_DIGITS_ESC}])([0-9{_SUP_DIGITS_ESC}]+)[\r\n]+")
 
 
-def _remove_inline_footnote_prefix(line: str) -> tuple[str, Optional[str]]:
+def _remove_inline_footnote_prefix(line: str) -> tuple[str, str | None]:
     """Strip numeric footnote prefixes and return inline/footnote text."""
 
     if not _looks_like_footnote(line) or _looks_like_numbered_list_item(line):
@@ -1157,7 +1129,7 @@ def _remove_inline_footnote_prefix(line: str) -> tuple[str, Optional[str]]:
     return "", footnote or None
 
 
-def _split_inline_footnote_sentence(line: str) -> tuple[str, Optional[str]]:
+def _split_inline_footnote_sentence(line: str) -> tuple[str, str | None]:
     """Split inline footnote sentences when markers are lost."""
 
     match = _INLINE_FOOTNOTE_SENTENCE_RE.search(line)
@@ -1183,7 +1155,7 @@ def _split_inline_footnote_sentence(line: str) -> tuple[str, Optional[str]]:
     return prefix, footnote
 
 
-def _split_inline_footnote_line(line: str, previous_line: Optional[str]) -> Optional[str]:
+def _split_inline_footnote_line(line: str, previous_line: str | None) -> str | None:
     """Capture inline footnote sentences that landed on their own line."""
 
     if not previous_line:
@@ -1202,7 +1174,9 @@ def _split_inline_footnote_line(line: str, previous_line: Optional[str]) -> Opti
         return None
     if not last_word[-1].isdigit() and last_word.lower() not in _LOWERCASE_INLINE_FOOTNOTE_PREFIXES:
         return None
-    if footnote[0].islower() and not any(marker in footnote for marker in _INLINE_FOOTNOTE_BODY_MARKERS):
+    if footnote[0].islower() and not any(
+        marker in footnote for marker in _INLINE_FOOTNOTE_BODY_MARKERS
+    ):
         return None
     return footnote
 
@@ -1267,7 +1241,7 @@ DIGIT_SEQUENCE_RE = re.compile(r"\d{3,}")
 WORD_RE = re.compile(r"[A-Za-z]+")
 
 
-def _strip_trailing_footer(text: str, page_num: Optional[int]) -> str:
+def _strip_trailing_footer(text: str, page_num: int | None) -> str:
     """Remove a terminal ``"| N"`` fragment if it matches the page."""
 
     match = TRAILING_FOOTER_RE.search(text)
@@ -1334,11 +1308,7 @@ def _flatten_markdown_table(text: str) -> str:
 
     filtered = (c for c in cells if c and not col_re.fullmatch(c) and not rule_re.fullmatch(c))
 
-    expanded = (
-        (segment.strip(), cell)
-        for cell in filtered
-        for segment in BR_SPLIT_RE.split(cell)
-    )
+    expanded = ((segment.strip(), cell) for cell in filtered for segment in BR_SPLIT_RE.split(cell))
 
     def _dedupe(
         acc: tuple[list[str], tuple[tuple[str, str], ...]],
@@ -1378,7 +1348,7 @@ def _flatten_markdown_table(text: str) -> str:
     return "\n".join(filter(None, [flattened, *remaining]))
 
 
-def _leading_alpha(text: str) -> tuple[Optional[int], Optional[str]]:
+def _leading_alpha(text: str) -> tuple[int | None, str | None]:
     """Return the position and character of the first alphabetical symbol."""
 
     return next(((idx, ch) for idx, ch in enumerate(text) if ch.isalpha()), (None, None))
@@ -1408,7 +1378,7 @@ def _normalize_leading_case(original: str, cleaned: str) -> str:
     return _uppercase_char(cleaned, offset + clean_idx)
 
 
-def _first_alpha_after(text: str, start: int) -> Optional[int]:
+def _first_alpha_after(text: str, start: int) -> int | None:
     """Return the index of the first alphabetic character in ``text`` after ``start``."""
 
     return next((idx for idx, ch in enumerate(text[start:], start=start) if ch.isalpha()), None)
@@ -1452,7 +1422,7 @@ def _apply_leading_case(pairs: list[tuple[str, str]]) -> list[str]:
 
 
 def remove_page_artifact_lines(
-    text: str, page_num: Optional[int], *, keep_shipping: bool = False
+    text: str, page_num: int | None, *, keep_shipping: bool = False
 ) -> str:
     """Remove header or footer artifact lines from a block."""
 
@@ -1471,11 +1441,9 @@ def remove_page_artifact_lines(
 
     question_footer_indices = _question_footer_indices(lines)
 
-    def _clean_line(idx: int, ln: str) -> tuple[Optional[str], Optional[str]]:
+    def _clean_line(idx: int, ln: str) -> tuple[str | None, str | None]:
         normalized = (
-            ln
-            if starts_with_bullet(ln, _BULLET_STRATEGY)
-            else _strip_page_header_prefix(ln)
+            ln if starts_with_bullet(ln, _BULLET_STRATEGY) else _strip_page_header_prefix(ln)
         )
         normalized, footnote = _remove_inline_footnote_prefix(normalized)
         if normalized and not footnote:
@@ -1511,11 +1479,7 @@ def remove_page_artifact_lines(
             prev_has_body = starts_with_bullet(prev_raw, _BULLET_STRATEGY) and bool(
                 _bullet_body(prev_raw)
             )
-            next_is_bullet = (
-                starts_with_bullet(next_line, _BULLET_STRATEGY)
-                if next_line
-                else False
-            )
+            next_is_bullet = starts_with_bullet(next_line, _BULLET_STRATEGY) if next_line else False
             if (
                 not next_line
                 or _footer_bullet_signals(next_line, previous_line)
@@ -1582,11 +1546,20 @@ def remove_page_artifact_lines(
     return "\n".join(pruned)
 
 
-def strip_artifacts(blocks: Iterable["Block"], config=None) -> Iterable["Block"]:
-    """Yield blocks with header and footer artifacts stripped."""
+def strip_artifacts(
+    blocks: Iterable["Block"], config=None, *, skip_footer_detection: bool = False
+) -> Iterable["Block"]:
+    """Yield blocks with header and footer artifacts stripped.
 
-    pending: list["Block"] = []
-    current_page: Optional[int] = None
+    Args:
+        blocks: Iterable of Block objects to process
+        config: Optional configuration (unused, kept for compatibility)
+        skip_footer_detection: If True, skip aggressive footer detection to allow
+            downstream interactive confirmation. Use when --interactive is enabled.
+    """
+
+    pending: list[Block] = []
+    current_page: int | None = None
 
     def _flush() -> Iterable["Block"]:
         nonlocal pending
@@ -1597,8 +1570,16 @@ def strip_artifacts(blocks: Iterable["Block"], config=None) -> Iterable["Block"]
     for blk in blocks:
         page = blk.source.get("page")
         footnote_block = _is_footnote_only_block(blk.text)
-        cleaned = remove_page_artifact_lines(blk.text, page, keep_shipping=True)
-        if not cleaned or is_page_artifact_text(cleaned, page):
+        # Skip line-level artifact stripping when interactive mode is enabled
+        # to preserve potential footer lines for downstream user confirmation
+        if skip_footer_detection:
+            cleaned = blk.text
+        else:
+            cleaned = remove_page_artifact_lines(blk.text, page, keep_shipping=True)
+        if not cleaned:
+            continue
+        # Skip aggressive footer detection when interactive mode is enabled
+        if not skip_footer_detection and is_page_artifact_text(cleaned, page):
             continue
         source = dict(blk.source)
         if footnote_block:

@@ -88,6 +88,8 @@ def _primary_blocks(
     path: str,
     exclude_pages: Sequence[int] | str | None,
     use_pymupdf4llm: bool,
+    *,
+    interactive: bool = False,
 ) -> list[dict[str, Any]]:
     """Extract blocks using the legacy parser with optional enhancement."""
 
@@ -95,7 +97,10 @@ def _primary_blocks(
     with _env("PDF_CHUNKER_USE_PYMUPDF4LLM", "1" if use_pymupdf4llm else "0"):
         from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 
-        return [asdict(b) for b in extract_text_blocks_from_pdf(path, exclude)]
+        return [
+            asdict(b)
+            for b in extract_text_blocks_from_pdf(path, exclude, interactive=interactive)
+        ]
 
 
 def _fallback_blocks(
@@ -119,10 +124,18 @@ def _page_numbers(path: str) -> range:
         return range(1, doc.page_count + 1)
 
 
-def _all_blocks(path: str, excluded: set[int], use_pymupdf4llm: bool) -> list[dict[str, Any]]:
+def _all_blocks(
+    path: str,
+    excluded: set[int],
+    use_pymupdf4llm: bool,
+    *,
+    interactive: bool = False,
+) -> list[dict[str, Any]]:
     """Return primary blocks, falling back to second extractor for gaps."""
 
-    primary = _primary_blocks(path, sorted(excluded), use_pymupdf4llm)
+    primary = _primary_blocks(
+        path, sorted(excluded), use_pymupdf4llm, interactive=interactive
+    )
     existing = {b.get("source", {}).get("page") for b in primary}
     missing = [p for p in _page_numbers(path) if p not in excluded and p not in existing]
     if not missing:
@@ -152,14 +165,25 @@ def read(
     exclude_pages: Sequence[int] | str | None = None,
     use_pymupdf4llm: bool = False,
     timeout: int = 60,
+    *,
+    interactive: bool = False,
 ) -> dict[str, Any]:
-    """Return a ``page_blocks`` document for the given PDF."""
+    """Return a ``page_blocks`` document for the given PDF.
+
+    Args:
+        path: Path to PDF file
+        exclude_pages: Page numbers/ranges to exclude
+        use_pymupdf4llm: Whether to use PyMuPDF4LLM enhancement
+        timeout: Timeout for pdftotext subprocess
+        interactive: If True, skip aggressive footer detection to allow
+            downstream interactive confirmation
+    """
 
     global _PDFTOTEXT_TIMEOUT
     _PDFTOTEXT_TIMEOUT = timeout
     abs_path = str(Path(path))
     excluded = _excluded(exclude_pages)
-    blocks = _all_blocks(abs_path, excluded, use_pymupdf4llm)
+    blocks = _all_blocks(abs_path, excluded, use_pymupdf4llm, interactive=interactive)
     filtered = [b for b in blocks if b.get("source", {}).get("page") not in excluded]
     grouped = _group_blocks(filtered)
     pages = _ensure_all_pages(abs_path, grouped, excluded)

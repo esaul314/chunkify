@@ -113,16 +113,37 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
     Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
 
 ### Footer Detection Options
-- `--footer-pattern <regex>`: Regex pattern matching text to strip as footer (case-insensitive, repeatable)
+
+Footers often appear merged mid-text with a `\n\n` prefix and page number suffix, like:
+```
+"...scientific literature.\n\nScale Communication Through Writing 202 Aside from that..."
+```
+
+The `text_clean` pass handles both:
+1. **Block-level footers**: Entire blocks that are just footers (removed entirely)
+2. **Inline footers**: Footers merged mid-text (surgically stripped while preserving content)
+
+**CLI flags:**
+- `--footer-pattern <regex>`: Regex pattern matching footer title (case-insensitive, repeatable)
+  - Example: `--footer-pattern "Scale Communication.*"` matches "Scale Communication Through Writing 202"
+  - Example: `--footer-pattern "Chapter \d+"` matches "Chapter 5"
 - `--interactive`: Prompt user to confirm ambiguous footer candidates during processing
-- Patterns can also be specified in pipeline YAML:
+
+**Pipeline YAML configuration:**
   ```yaml
   options:
     text_clean:
       footer_patterns:
-        - "Book Title.*\\d+"
-        - "Chapter \\d+ \\|"
+        - "Book Title.*"
+        - "Chapter \\d+"
+        - "Scale Communication.*"
+      interactive_footers: false  # Set true for interactive mode
   ```
+
+**How patterns work:**
+- User supplies the title pattern (e.g., `"Scale Communication.*"`)
+- The pipeline wraps it to match inline structure: `\n\n{pattern}\s+\d{1,3}(?=\s|$)`
+- Inline footers are stripped surgically; block-level footers require full match
 
 ### Debugging Directions
 - When JSONL lines begin mid-sentence or phrases like "Most engineers" repeat, inspect the `split_semantic` pass before focusing on downstream emission or deduplication.
