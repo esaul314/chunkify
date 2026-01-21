@@ -83,6 +83,7 @@ def _run_convert(
     excluded_page_set: set[int] = set()
     if exclude_pages:
         from pdf_chunker.page_utils import parse_page_ranges
+
         excluded_page_set = parse_page_ranges(exclude_pages)
 
     # Auto-detect footer/header zones if requested
@@ -92,7 +93,7 @@ def _run_convert(
             import fitz
 
             from pdf_chunker.geometry import detect_document_zones, discover_zones_interactive
-            
+
             doc = fitz.open(str(input_path))
             if interactive:
                 # Interactive zone discovery - respects page exclusions
@@ -107,7 +108,7 @@ def _run_convert(
                     exclude_pages=excluded_page_set,
                 )
             doc.close()
-            
+
             if zones.footer_margin:
                 zones_config["footer_margin"] = zones.footer_margin
                 if not interactive:

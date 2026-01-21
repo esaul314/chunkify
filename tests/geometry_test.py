@@ -5,10 +5,9 @@ import pytest
 pytest.importorskip("fitz")
 
 from pdf_chunker.geometry import (
-    detect_footer_zone,
-    detect_header_zone,
-    detect_document_zones,
     DocumentZones,
+    detect_document_zones,
+    detect_footer_zone,
 )
 
 
@@ -68,7 +67,7 @@ def test_detect_footer_zone_no_footers():
     doc = fitz.open()
     page = doc.new_page()
     page.insert_text((100, 100), "Content in middle of page")
-    
+
     margin, confidence = detect_footer_zone(doc)
     doc.close()
 

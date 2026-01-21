@@ -712,7 +712,9 @@ class TestPatternsPlusInteractiveMode:
                 {
                     "page": 1,
                     "blocks": [
-                        {"text": "Body text.\n\nCollective Wisdom from the Experts 153 More content."},
+                        {
+                            "text": "Body text.\n\nCollective Wisdom from the Experts 153 More content."
+                        },
                     ],
                 }
             ],

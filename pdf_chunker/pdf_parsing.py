@@ -17,14 +17,13 @@ from .text_cleaning import restore_leading_capitalization
 
 logger = logging.getLogger(__name__)
 
+
 def _excluded_pages(filepath: str, exclude: str | None) -> set[int]:
     if not exclude:
         return set()
     with fitz.open(filepath) as doc:
         total = len(doc)
-    return validate_page_exclusions(
-        parse_page_ranges(exclude), total, os.path.basename(filepath)
-    )
+    return validate_page_exclusions(parse_page_ranges(exclude), total, os.path.basename(filepath))
 
 
 def _block_pages(block: Block) -> tuple[int, ...]:
@@ -59,6 +58,7 @@ def _get_page_heights(filepath: str) -> dict[int, float]:
     """Return a dict mapping page numbers (1-indexed) to heights in points."""
     try:
         import fitz
+
         page_heights = {}
         with fitz.open(filepath) as doc:
             for i, page in enumerate(doc, start=1):
@@ -95,7 +95,8 @@ def _block_pipeline(
                 (
                     blk
                     for page in read_pages(
-                        filepath, excluded,
+                        filepath,
+                        excluded,
                         footer_margin=footer_margin,
                         header_margin=header_margin,
                     )
@@ -138,12 +139,15 @@ def extract_text_blocks_from_pdf(
     """
 
     excluded = _excluded_pages(filepath, exclude_pages)
-    return iter(_block_pipeline(
-        filepath, excluded,
-        interactive=interactive,
-        footer_margin=footer_margin,
-        header_margin=header_margin,
-    ))
+    return iter(
+        _block_pipeline(
+            filepath,
+            excluded,
+            interactive=interactive,
+            footer_margin=footer_margin,
+            header_margin=header_margin,
+        )
+    )
 
 
 def extract_text_blocks_from_pdf_list(

@@ -298,7 +298,7 @@ def detect_inline_footer_candidates(text: str) -> list[tuple[str, int, int]]:
     """
     candidates = []
     seen_ranges: set[tuple[int, int]] = set()
-    
+
     # First check for \n\n prefixed footers (high confidence)
     for match in _INLINE_FOOTER_HEURISTIC.finditer(text):
         footer_text = match.group(0).strip()
@@ -306,19 +306,17 @@ def detect_inline_footer_candidates(text: str) -> list[tuple[str, int, int]]:
         if pos not in seen_ranges:
             candidates.append((footer_text, match.start(), match.end()))
             seen_ranges.add(pos)
-    
+
     # Then check for mid-text footers (lower confidence, may need user confirmation)
     for match in _MIDTEXT_FOOTER_HEURISTIC.finditer(text):
         footer_text = match.group(0).strip()
         start, end = match.start(), match.end()
         # Avoid duplicates with \n\n matches
-        overlaps = any(
-            not (end <= s or start >= e) for (s, e) in seen_ranges
-        )
+        overlaps = any(not (end <= s or start >= e) for (s, e) in seen_ranges)
         if not overlaps:
             candidates.append((footer_text, start, end))
             seen_ranges.add((start, end))
-    
+
     return candidates
 
 
@@ -344,26 +342,25 @@ def strip_inline_footers_interactive(
         Tuple of (cleaned text, list of stripped footer strings)
     """
     stripped: list[str] = []
-    
+
     # Collect all candidates with their positions
     candidates = detect_inline_footer_candidates(text)
     if not candidates:
         return text, stripped
-    
+
     # Sort by position (reverse order so we can replace from end to start)
     candidates_sorted = sorted(candidates, key=lambda x: x[1], reverse=True)
-    
+
     result = text
     for footer_text, start, end in candidates_sorted:
         # Extract title (first part before the page number)
         title_match = re.match(
-            r"([A-Z][A-Za-z]*(?:\s+(?:from\s+the\s+)?[A-Za-z]+)+)\s+\d+",
-            footer_text.strip()
+            r"([A-Z][A-Za-z]*(?:\s+(?:from\s+the\s+)?[A-Za-z]+)+)\s+\d+", footer_text.strip()
         )
         title = title_match.group(1) if title_match else footer_text.strip()
         page_num_match = re.search(r"\d+$", footer_text.strip())
         page_num = page_num_match.group(0) if page_num_match else "?"
-        
+
         # Check cache first
         if cache is not None:
             cached = cache.get(title)
@@ -374,12 +371,12 @@ def strip_inline_footers_interactive(
                     replacement = "\n\n" if result[start:end].startswith("\n\n") else " "
                     result = result[:start] + replacement + result[end:]
                 continue  # Skip callback if cached
-        
+
         # Determine confidence based on pattern type
         # \n\n footers are higher confidence
         has_newline_prefix = result[start:end].startswith("\n\n")
         confidence = 0.8 if has_newline_prefix else 0.6
-        
+
         # Ask user
         ctx = {
             "inline": True,
@@ -390,17 +387,17 @@ def strip_inline_footers_interactive(
             "midtext": not has_newline_prefix,
         }
         is_footer = callback(footer_text.strip(), page, ctx)
-        
+
         # Cache by title (not full text) so similar footers are auto-handled
         if cache is not None:
             cache.set(title, is_footer)
-        
+
         if is_footer:
             stripped.append(footer_text.strip())
             # Preserve paragraph break if there was \n\n, else just space
             replacement = "\n\n" if has_newline_prefix else " "
             result = result[:start] + replacement + result[end:]
-    
+
     return result, stripped
 
 
@@ -456,7 +453,7 @@ def strip_inline_footers(
     def _replace(match: re.Match[str]) -> str:
         footer_text = match.group(0)
         has_newline_prefix = footer_text.startswith("\n\n")
-        
+
         # If we have a callback, ask for confirmation
         if callback is not None:
             confidence = 0.9 if has_newline_prefix else 0.8
@@ -517,11 +514,13 @@ def compile_footer_patterns(
             # Pattern: \n\n + user_pattern + whitespace + page_number + word_boundary
             inline_pat = rf"\n\n({p})\s+(\d{{1,3}})(?=\s|$)"
             compiled.append(re.compile(inline_pat, re.IGNORECASE))
-            
+
             # Also create mid-text pattern (without \n\n requirement)
             if midtext:
                 # Match after sentence boundary, space, or start of text
                 # This catches footers that appear mid-paragraph
-                midtext_pat = rf"(?:(?<=\. )|(?<=\.\n)|(?<= )|(?<=\n)|^)({p})\s+(\d{{1,3}})(?=\s|$|[.!?,])"
+                midtext_pat = (
+                    rf"(?:(?<=\. )|(?<=\.\n)|(?<= )|(?<=\n)|^)({p})\s+(\d{{1,3}})(?=\s|$|[.!?,])"
+                )
                 compiled.append(re.compile(midtext_pat, re.IGNORECASE))
     return tuple(compiled)

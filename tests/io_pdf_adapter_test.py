@@ -1,5 +1,7 @@
 import os
+
 import pytest
+
 from pdf_chunker.pdf_blocks import Block
 
 pytest.importorskip("fitz")
@@ -49,6 +51,7 @@ def test_footer_margin_filters_footer_blocks(monkeypatch):
 
     target = "pdf_chunker.pdf_parsing.extract_text_blocks_from_pdf"
     import pdf_chunker.pdf_parsing as pdf_parsing
+
     original_extract = pdf_parsing.extract_text_blocks_from_pdf
     monkeypatch.setattr(target, fake_extract)
 

@@ -114,7 +114,9 @@ def _structured_block(page, block_tuple, page_num, filename) -> Block | None:
     )
 
 
-def _extract_block_inline_styles(page, block_tuple, cleaned_text: str) -> list[InlineStyleSpan] | None:
+def _extract_block_inline_styles(
+    page, block_tuple, cleaned_text: str
+) -> list[InlineStyleSpan] | None:
     if not cleaned_text:
         return None
 
@@ -153,7 +155,7 @@ def _extract_block_inline_styles(page, block_tuple, cleaned_text: str) -> list[I
 
 
 def _iter_text_spans(
-    block_dict: Mapping[str, object]
+    block_dict: Mapping[str, object],
 ) -> Iterable[tuple[Mapping[str, object], float | None]]:
     blocks = block_dict.get("blocks", [])
     for block in blocks if isinstance(blocks, Sequence) else ():
@@ -180,7 +182,9 @@ def _iter_text_spans(
                 yield span, baseline
 
 
-def _span_offsets(spans: Sequence[tuple[Mapping[str, object], float | None]]) -> Iterable[tuple[int, int]]:
+def _span_offsets(
+    spans: Sequence[tuple[Mapping[str, object], float | None]],
+) -> Iterable[tuple[int, int]]:
     cursor = 0
     for span, _ in spans:
         text = str(span.get("text", ""))
@@ -274,34 +278,34 @@ def _filter_by_zone_margins(
     header_margin: float | None = None,
 ) -> list:
     """Filter out blocks in header/footer zones based on margins.
-    
+
     Args:
         blocks: Raw block tuples from page.get_text("blocks")
         page_height: Height of the page in points
         footer_margin: Points from bottom to exclude
         header_margin: Points from top to exclude
-    
+
     Returns:
         Filtered list of blocks
     """
     if not footer_margin and not header_margin:
         return blocks
-    
+
     filtered = []
     for block in blocks:
         # Block tuple: (x0, y0, x1, y1, text, block_no, block_type)
         y0, y1 = block[1], block[3]
-        
+
         # Check header zone (top of page)
         if header_margin and y0 < header_margin:
             continue
-        
+
         # Check footer zone (bottom of page)
         if footer_margin and y1 > (page_height - footer_margin):
             continue
-        
+
         filtered.append(block)
-    
+
     return filtered
 
 
@@ -315,9 +319,7 @@ def _extract_page_blocks(
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")
     # First apply zone margin filtering (geometric)
-    zone_filtered = _filter_by_zone_margins(
-        raw_blocks, page_height, footer_margin, header_margin
-    )
+    zone_filtered = _filter_by_zone_margins(raw_blocks, page_height, footer_margin, header_margin)
     # Then apply existing heuristic filtering
     filtered = _filter_margin_artifacts(zone_filtered, page_height)
     return [
@@ -336,7 +338,7 @@ def read_pages(
     header_margin: float | None = None,
 ) -> Iterable[PagePayload]:
     """Yield ``PagePayload`` objects for each non-excluded page.
-    
+
     Args:
         filepath: Path to PDF file
         excluded: Set of page numbers to exclude
@@ -353,7 +355,9 @@ def read_pages(
                 blocks = extractor(page, page_num, os.path.basename(filepath))
             else:
                 blocks = _extract_page_blocks(
-                    page, page_num, os.path.basename(filepath),
+                    page,
+                    page_num,
+                    os.path.basename(filepath),
                     footer_margin=footer_margin,
                     header_margin=header_margin,
                 )
@@ -451,7 +455,12 @@ def _inline_style_ratio(block: Block, styles: Iterable[str]) -> float:
     total = len(block.text or "")
     style_set = frozenset(styles)
     return (
-        sum(max(0, min(total, span.end) - max(0, span.start)) for span in spans if span.style in style_set) / total
+        sum(
+            max(0, min(total, span.end) - max(0, span.start))
+            for span in spans
+            if span.style in style_set
+        )
+        / total
         if spans and total > 0
         else 0.0
     )
@@ -459,7 +468,9 @@ def _inline_style_ratio(block: Block, styles: Iterable[str]) -> float:
 
 def _looks_like_caption(text: str, *, emphasis_ratio: float = 0.0) -> bool:
     stripped = text.strip()
-    return bool(stripped and _CAPTION_RE.match(stripped)) or emphasis_ratio >= _CAPTION_STYLE_THRESHOLD
+    return (
+        bool(stripped and _CAPTION_RE.match(stripped)) or emphasis_ratio >= _CAPTION_STYLE_THRESHOLD
+    )
 
 
 def _word_count(text: str) -> int:
@@ -564,7 +575,9 @@ def _is_cross_page_continuation(curr: Block, nxt: Block) -> bool:
     next_text = nxt.text.strip()
     curr_page = curr.source.get("page")
     next_page = nxt.source.get("page")
-    if _looks_like_caption(curr_text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
+    if _looks_like_caption(
+        curr_text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)
+    ):
         return False
     if not (curr_text and next_text):
         return False
@@ -588,7 +601,9 @@ def _is_cross_page_continuation(curr: Block, nxt: Block) -> bool:
 
 
 def _is_cross_page_paragraph_continuation(curr: Block, nxt: Block) -> bool:
-    if _looks_like_caption(curr.text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)):
+    if _looks_like_caption(
+        curr.text, emphasis_ratio=_inline_style_ratio(curr, _CAPTION_STYLE_TAGS)
+    ):
         return False
     curr_page = curr.source.get("page")
     next_page = nxt.source.get("page")
@@ -634,7 +649,9 @@ def _is_same_page_continuation(
     if _is_heading_like(next_text):
         return False
     first_word = next_text.split()[0]
-    if curr_text.endswith((".", "!", "?", ":", ";")) and not _is_common_sentence_starter(first_word):
+    if curr_text.endswith((".", "!", "?", ":", ";")) and not _is_common_sentence_starter(
+        first_word
+    ):
         return False
     if _is_comma_uppercase_continuation(curr_text, next_text):
         return True
@@ -654,7 +671,6 @@ def _is_same_page_continuation(
 
 
 def _is_quote_continuation(curr_text: str, next_text: str) -> bool:
-
     curr_open_quotes = curr_text.count('"') - curr_text.count('\\"')
     curr_open_single = curr_text.count("'") - curr_text.count("\\'")
     next_closing_quotes = next_text.count('"') - next_text.count('\\"')
@@ -764,12 +780,7 @@ def _normalize_hyphenated_tail(curr_text: str, next_text: str) -> str:
 
     prefix, sep, remainder = next_text.partition(" ")
     letters = re.sub(r"[^A-Za-z]", "", prefix)
-    if (
-        letters
-        and letters[0].isupper()
-        and letters[1:].islower()
-        and head.islower()
-    ):
+    if letters and letters[0].isupper() and letters[1:].islower() and head.islower():
         lowered = prefix[0].lower() + prefix[1:]
         return lowered + (sep + remainder if sep else "")
     return next_text
@@ -808,7 +819,11 @@ def _block_has_list_markers(block: Block) -> bool:
     source = block.source if isinstance(block.source, dict) else {}
     nested = (
         source,
-        *(candidate for candidate in (source.get("attrs"), source.get("block_attrs")) if isinstance(candidate, dict)),
+        *(
+            candidate
+            for candidate in (source.get("attrs"), source.get("block_attrs"))
+            if isinstance(candidate, dict)
+        ),
     )
     return any(candidate.get("list_kind") for candidate in nested if isinstance(candidate, dict))
 
@@ -826,18 +841,18 @@ def _is_in_footer_zone(
     """Check if a block is in the footer zone based on Y position."""
     if not footer_margin or not page_heights:
         return False
-    
+
     page = block.source.get("page") if block.source else None
     if page is None or page not in page_heights:
         return False
-    
+
     # bbox is (x0, y0, x1, y1)
     if not block.bbox or len(block.bbox) < 4:
         return False
-    
+
     y1 = block.bbox[3]  # Bottom edge of block
     page_height = page_heights[page]
-    
+
     # Block is in footer zone if its bottom edge is within footer_margin from page bottom
     return y1 > (page_height - footer_margin)
 
@@ -885,9 +900,7 @@ def _should_merge_blocks(
     ):
         return True, "bullet_short_fragment"
 
-    colon_intro = curr_text.rstrip().endswith(":") and not heuristics.starts_with_bullet(
-        curr_text
-    )
+    colon_intro = curr_text.rstrip().endswith(":") and not heuristics.starts_with_bullet(curr_text)
     if heuristics.is_bullet_list_pair(curr_text, next_text):
         if colon_intro and not _block_has_list_markers(curr):
             return False, "colon_intro_without_list_markers"
@@ -903,14 +916,10 @@ def _should_merge_blocks(
     if _is_numbered_list_continuation(curr, nxt, strategy=heuristics):
         return True, "numbered_continuation"
 
-    if re.fullmatch(r"\d+[.)]", curr_text) and not heuristics.starts_with_number(
-        next_text
-    ):
+    if re.fullmatch(r"\d+[.)]", curr_text) and not heuristics.starts_with_number(next_text):
         return True, "numbered_standalone"
 
-    if re.search(r"\n\d+[.)]\s*$", curr_text) and not heuristics.starts_with_number(
-        next_text
-    ):
+    if re.search(r"\n\d+[.)]\s*$", curr_text) and not heuristics.starts_with_number(next_text):
         return True, "numbered_suffix"
 
     curr_has_quote = '"' in curr_text or "'" in curr_text
@@ -937,7 +946,11 @@ def _should_merge_blocks(
         and (tail_is_lower or (tail_is_titlecase and head_word.islower()))
     ):
         return True, "hyphenated_continuation"
-    elif _is_same_page_continuation(curr, nxt, strategy=heuristics) or _is_cross_page_continuation(curr, nxt) or _is_cross_page_paragraph_continuation(curr, nxt):
+    elif (
+        _is_same_page_continuation(curr, nxt, strategy=heuristics)
+        or _is_cross_page_continuation(curr, nxt)
+        or _is_cross_page_paragraph_continuation(curr, nxt)
+    ):
         return True, "sentence_continuation"
 
     return False, "no_merge"
@@ -957,7 +970,7 @@ def merge_continuation_blocks(
     footer_margin: float | None = None,
 ) -> Iterable[Block]:
     """Merge adjacent blocks that form continuations.
-    
+
     Args:
         blocks: Iterable of Block objects to merge
         strategy: Bullet heuristic strategy
@@ -1012,7 +1025,9 @@ def merge_continuation_blocks(
             if should_merge:
                 if reason == "hyphenated_continuation":
                     normalized_tail = _normalize_hyphenated_tail(current_text, next_text)
-                    merged_text = re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + normalized_tail
+                    merged_text = (
+                        re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + normalized_tail
+                    )
                 elif reason == "sentence_continuation":
                     normalized_sentence = _normalize_sentence_tail(current_text, next_text)
                     merged_text = current_text + " " + normalized_sentence
