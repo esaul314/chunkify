@@ -43,6 +43,9 @@ pdf_chunker convert "book.pdf" --out tts.jsonl --max-chars 1000 --no-metadata
 | --- | --- | --- | --- |
 | `ai_enrich.enabled` | `--enrich/--no-enrich` | Toggle AI enrichment pass | `false` |
 | `pdf_parse.exclude_pages` | `--exclude-pages` | Comma-separated pages to skip | – |
+| `pdf_parse.footer_margin` | `--footer-margin` | Points from bottom to exclude as footer zone | – |
+| `pdf_parse.header_margin` | `--header-margin` | Points from top to exclude as header zone | – |
+| – | `--auto-detect-zones` | Auto-detect footer/header zones from page geometry | `false` |
 | `split_semantic.chunk_size` | `--chunk-size` | Target tokens per chunk | `400` |
 | `split_semantic.overlap` | `--overlap` | Tokens to overlap neighboring chunks | `50` |
 | `split_semantic.generate_metadata` | `--no-metadata` (negates) | Include per-chunk metadata | `true` |
@@ -62,7 +65,69 @@ Many books include chapter titles or book titles as running footers on each page
 Scale Communication Through Writing 202 Aside from that, we can all likely agree..."
 ```
 
-### Stripping Footers with Patterns
+### Geometric Zone Detection (Recommended)
+
+The most reliable footer removal uses **positional data** to exclude footer zones during extraction—before text blocks are merged. This approach eliminates context bleeding and works with any footer content.
+
+```bash
+# Auto-detect footer zones based on page geometry
+pdf_chunker convert book.pdf --out out.jsonl --auto-detect-zones
+
+# Interactive mode: review detected zones before processing
+pdf_chunker convert book.pdf --out out.jsonl --interactive --auto-detect-zones
+
+# Manually specify footer margin (points from page bottom)
+pdf_chunker convert book.pdf --out out.jsonl --footer-margin 40
+
+# Combine with page exclusions (skip cover, TOC, etc.)
+pdf_chunker convert book.pdf --out out.jsonl --auto-detect-zones --exclude-pages 1-5
+```
+
+**How it works:**
+- `--auto-detect-zones`: Analyzes Y coordinates of bottom blocks across sampled pages to find consistent footer positions
+- `--footer-margin N`: Excludes all content within N points of the page bottom
+- `--header-margin N`: Excludes all content within N points of the page top
+- `--exclude-pages`: Skips specified pages during zone detection (useful for excluding cover pages, TOC, or appendices that have different layouts)
+
+**Interactive zone discovery:**
+
+When using `--interactive` with `--auto-detect-zones`, the CLI shows all detected footer candidates and lets you choose:
+
+```
+Analyzing 20 pages for zone detection...
+(Excluding pages: [1, 2, 3])
+
+Found 2 potential footer zone(s):
+
+[1] Footer Zone Candidate
+    Position: 621.0pt from top (45.5pt margin from bottom)
+    Confidence: 93% (18/20 pages)
+    Sample content:
+      • Scale Communication Through Writing 202
+      • Chapter 5: Advanced Topics 203
+
+[2] Footer Zone Candidate
+    Position: 640.0pt from top (26.5pt margin from bottom)
+    Confidence: 45% (9/20 pages)
+    Sample content:
+      • 202
+      • 203
+
+Enter the number of the zone to exclude, or 0 to skip footer exclusion.
+Your choice [1]: 
+```
+
+**YAML Configuration:**
+
+```yaml
+# pipeline.yaml
+options:
+  pdf_parse:
+    footer_margin: 40.0  # Points from bottom
+    header_margin: null  # Points from top (optional)
+```
+
+### Stripping Footers with Patterns (Legacy)
 
 Use `--footer-pattern` to specify regex patterns matching footer text. The pattern should match the footer title portion—the pipeline automatically handles the page number and inline structure.
 
