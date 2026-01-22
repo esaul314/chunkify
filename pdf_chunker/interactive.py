@@ -58,6 +58,25 @@ class FooterCallback(Protocol):
         ...
 
 
+class ListContinuationCallback(Protocol):
+    """Protocol for interactive list continuation confirmation.
+
+    Implementations receive the previous list item text, candidate continuation,
+    page number, and context. Return True if the candidate should be merged
+    into the previous list item.
+    """
+
+    def __call__(
+        self,
+        list_item: str,
+        candidate: str,
+        page: int,
+        context: Mapping[str, Any],
+    ) -> bool:
+        """Return True if ``candidate`` continues ``list_item``."""
+        ...
+
+
 @dataclass(frozen=True)
 class FooterConfig:
     """Configuration for footer detection behaviour.
@@ -524,3 +543,331 @@ def compile_footer_patterns(
                 )
                 compiled.append(re.compile(midtext_pat, re.IGNORECASE))
     return tuple(compiled)
+
+
+# ---------------------------------------------------------------------------
+# List continuation detection and confirmation
+# ---------------------------------------------------------------------------
+
+# Bullet characters for list detection
+_LIST_BULLET_CHARS = frozenset("•●○◦▪▫‣⁃-–—")
+_NUMBERED_PREFIX_RE = re.compile(r"^\s*(\d+)[.)]\s+")
+
+
+def _looks_like_list_item(text: str) -> bool:
+    """Return True if text contains a bullet or numbered marker.
+
+    This checks both leading markers AND inline markers (e.g., after a colon).
+    """
+    stripped = text.lstrip()
+    if not stripped:
+        return False
+    # Check for leading bullet
+    if stripped[0] in _LIST_BULLET_CHARS:
+        return True
+    # Check for leading number
+    if _NUMBERED_PREFIX_RE.match(stripped):
+        return True
+    # Check for inline bullet (after colon or at line start)
+    for line in text.splitlines():
+        line_stripped = line.lstrip()
+        if line_stripped and line_stripped[0] in _LIST_BULLET_CHARS:
+            return True
+        if _NUMBERED_PREFIX_RE.match(line_stripped):
+            return True
+    # Check for bullet after colon (common pattern: "Here is a guide: • First item")
+    if ":" in text:
+        after_colon = text.split(":", 1)[-1].lstrip()
+        if after_colon and after_colon[0] in _LIST_BULLET_CHARS:
+            return True
+    return False
+
+
+def _extract_list_body(text: str) -> str | None:
+    """Extract the list item body from text, or None if not a list item."""
+    stripped = text.lstrip()
+    if not stripped:
+        return None
+
+    # Leading bullet
+    if stripped[0] in _LIST_BULLET_CHARS:
+        return stripped[1:].lstrip()
+
+    # Leading number
+    match = _NUMBERED_PREFIX_RE.match(stripped)
+    if match:
+        return stripped[match.end() :]
+
+    # Inline bullet after colon
+    if ":" in text:
+        after_colon = text.split(":", 1)[-1].lstrip()
+        if after_colon and after_colon[0] in _LIST_BULLET_CHARS:
+            return after_colon[1:].lstrip()
+
+    return None
+
+
+def _list_item_looks_incomplete(text: str) -> bool:
+    """Return True if a list item text looks incomplete.
+
+    A list item looks incomplete if:
+    - It ends with punctuation that suggests continuation (comma, semicolon, colon)
+    - It's very short (<=5 words after the marker)
+    - It ends mid-sentence (no sentence-ending punctuation and short)
+    - It's a short sentence that could reasonably continue (<=6 words with period)
+    - It has unbalanced parentheses, brackets, or quotes
+    """
+    stripped = text.rstrip()
+    if not stripped:
+        return True
+
+    # Extract the list item body
+    body = _extract_list_body(stripped)
+    if body is None:
+        # Not a list item, use full text
+        body = stripped
+
+    # Continuation punctuation at end
+    if body and body[-1] in ",;:":
+        return True
+
+    # Very short items are suspicious (<=3 words is definitely incomplete)
+    words = body.split()
+    if len(words) <= 3:
+        return True
+
+    # Short items without sentence-ending punctuation
+    if len(words) <= 7 and body[-1] not in ".!?":
+        return True
+
+    # Short items even with period may be incomplete (<=5 words)
+    # This catches cases like "• Reduce wordiness." which is really just
+    # the first sentence of a longer list item
+    if len(words) <= 5:
+        return True
+
+    # Check for unbalanced delimiters (parens, brackets, quotes)
+    open_parens = body.count("(") - body.count(")")
+    open_brackets = body.count("[") - body.count("]")
+    open_braces = body.count("{") - body.count("}")
+    if open_parens > 0 or open_brackets > 0 or open_braces > 0:
+        return True
+
+    # Check for unbalanced quotes (odd count of each type)
+    # Apostrophe is tricky (used in contractions), skip for now
+    return body.count('"') % 2 != 0
+
+
+def _candidate_continues_list_item(
+    list_item: str,
+    candidate: str,
+    *,
+    confidence_threshold: float = 0.7,
+) -> tuple[bool, float, str]:
+    """Heuristically determine if candidate continues a list item.
+
+    Returns:
+        Tuple of (should_merge, confidence, reason)
+    """
+    if not list_item or not candidate:
+        return False, 0.0, "empty_input"
+
+    if not _looks_like_list_item(list_item):
+        return False, 0.0, "not_a_list_item"
+
+    # If candidate starts with a bullet, it's a new item not a continuation
+    if _looks_like_list_item(candidate):
+        return False, 0.0, "candidate_is_new_item"
+
+    # Check if the list item looks incomplete
+    incomplete = _list_item_looks_incomplete(list_item)
+    if not incomplete:
+        # List item looks complete - lower confidence for merging
+        confidence = 0.3
+        reason = "item_looks_complete"
+    else:
+        confidence = 0.8
+        reason = "item_looks_incomplete"
+
+    # Adjust confidence based on candidate characteristics
+    candidate_stripped = candidate.strip()
+    first_char = candidate_stripped[0] if candidate_stripped else ""
+
+    # Lower case start suggests continuation
+    if first_char.islower():
+        confidence = min(1.0, confidence + 0.15)
+        reason = f"{reason}+lowercase_start"
+    # Conjunction/continuation words
+    elif first_char.isupper():
+        first_word = candidate_stripped.split()[0].lower() if candidate_stripped.split() else ""
+        continuation_words = {
+            "and",
+            "or",
+            "but",
+            "which",
+            "that",
+            "because",
+            "since",
+            "although",
+            "however",
+            "therefore",
+            "thus",
+            "also",
+            "as",
+            "if",
+            "when",
+            "where",
+            "for",
+            "to",
+            "with",
+            "without",
+        }
+        if first_word in continuation_words:
+            confidence = min(1.0, confidence + 0.1)
+            reason = f"{reason}+continuation_word"
+
+    return confidence >= confidence_threshold, confidence, reason
+
+
+@dataclass
+class ListContinuationConfig:
+    """Configuration for list continuation detection.
+
+    Attributes:
+        callback: Optional callback for interactive confirmation
+        cache_decisions: Whether to remember user decisions
+        confidence_threshold: Heuristic confidence below which to prompt
+        auto_merge_threshold: Confidence above which to auto-merge without prompt
+    """
+
+    callback: ListContinuationCallback | None = None
+    cache_decisions: bool = True
+    confidence_threshold: float = 0.6
+    auto_merge_threshold: float = 0.9
+
+
+@dataclass
+class ListContinuationCache:
+    """Remembers user decisions for list continuation patterns."""
+
+    _decisions: dict[str, bool] = field(default_factory=dict)
+
+    def _normalize(self, list_item: str, candidate: str) -> str:
+        """Create a cache key from the item and candidate."""
+        # Use first 50 chars of each for the key
+        item_key = list_item.strip()[:50]
+        cand_key = candidate.strip()[:50]
+        return f"{item_key}|{cand_key}"
+
+    def get(self, list_item: str, candidate: str) -> bool | None:
+        """Return cached decision or None if not cached."""
+        key = self._normalize(list_item, candidate)
+        return self._decisions.get(key)
+
+    def set(self, list_item: str, candidate: str, should_merge: bool) -> None:
+        """Cache a decision."""
+        key = self._normalize(list_item, candidate)
+        self._decisions[key] = should_merge
+
+
+def classify_list_continuation(
+    list_item: str,
+    candidate: str,
+    page: int,
+    *,
+    config: ListContinuationConfig,
+    cache: ListContinuationCache | None = None,
+) -> tuple[bool, str]:
+    """Classify whether candidate should merge with list_item.
+
+    Returns:
+        (should_merge, reason) tuple
+    """
+    should_merge, confidence, heuristic_reason = _candidate_continues_list_item(
+        list_item,
+        candidate,
+        confidence_threshold=config.confidence_threshold,
+    )
+
+    # Check cache first
+    if cache is not None and config.cache_decisions:
+        cached = cache.get(list_item, candidate)
+        if cached is not None:
+            return cached, "cached_decision"
+
+    # High confidence - auto-decide
+    if confidence >= config.auto_merge_threshold:
+        return True, f"auto_merge ({confidence:.0%})"
+
+    if confidence <= (1.0 - config.auto_merge_threshold):
+        return False, f"auto_reject ({confidence:.0%})"
+
+    # Interactive callback for uncertain cases
+    if config.callback is not None:
+        ctx = {
+            "heuristic_confidence": confidence,
+            "heuristic_reason": heuristic_reason,
+            "page": page,
+        }
+        decision = config.callback(list_item, candidate, page, ctx)
+        if cache is not None and config.cache_decisions:
+            cache.set(list_item, candidate, decision)
+        return decision, "user_confirmation"
+
+    # Fallback to heuristic
+    return should_merge, f"heuristic ({confidence:.0%})"
+
+
+def make_cli_list_continuation_prompt(
+    *,
+    max_preview: int = 60,
+    default_merge: bool = True,
+) -> ListContinuationCallback:
+    """Create a CLI-friendly list continuation prompt callback."""
+
+    def _prompt(
+        list_item: str,
+        candidate: str,
+        page: int,
+        context: Mapping[str, Any],
+    ) -> bool:
+        item_preview = list_item[:max_preview].replace("\n", "\\n")
+        cand_preview = candidate[:max_preview].replace("\n", "\\n")
+        item_ellipsis = "..." if len(list_item) > max_preview else ""
+        cand_ellipsis = "..." if len(candidate) > max_preview else ""
+        confidence = context.get("heuristic_confidence", 0.5)
+        reason = context.get("heuristic_reason", "unknown")
+
+        print(f"\n--- List continuation candidate (page {page}, confidence {confidence:.0%}) ---")
+        print(f"  List item: {item_preview}{item_ellipsis}")
+        print(f"  Candidate: {cand_preview}{cand_ellipsis}")
+        print(f"  Heuristic: {reason}")
+        default_hint = "[Y/n]" if default_merge else "[y/N]"
+        response = input(f"Merge into list item? {default_hint} ").strip().lower()
+
+        if not response:
+            return default_merge
+        return response in ("y", "yes", "1", "true")
+
+    return _prompt
+
+
+def make_batch_list_continuation_prompt(
+    decisions: Mapping[str, bool],
+) -> ListContinuationCallback:
+    """Create a callback that looks up decisions from a pre-defined mapping."""
+
+    def _lookup(
+        list_item: str,
+        candidate: str,
+        page: int,
+        context: Mapping[str, Any],
+    ) -> bool:
+        # Try with item text as key
+        for key, val in decisions.items():
+            if key in list_item or key in candidate:
+                return val
+        # Default to heuristic
+        return context.get("heuristic_confidence", 0.5) >= 0.5
+
+    return _lookup

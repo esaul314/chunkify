@@ -18,6 +18,13 @@ from math import ceil
 from typing import Any, TypedDict, cast
 
 from pdf_chunker.framework import Artifact, Pass, register
+from pdf_chunker.interactive import (
+    ListContinuationCache,
+    ListContinuationCallback,
+    ListContinuationConfig,
+    _candidate_continues_list_item,
+    _looks_like_list_item,
+)
 from pdf_chunker.page_artifacts import (
     _bullet_body,
     _drop_trailing_bullet_footers,
@@ -1505,6 +1512,8 @@ def _merge_blocks(
     cur: tuple[int, Block, str],
     *,
     strategy: BulletHeuristicStrategy | None = None,
+    list_continuation_config: ListContinuationConfig | None = None,
+    list_continuation_cache: ListContinuationCache | None = None,
 ) -> list[tuple[int, Block, str]]:
     heuristics = _resolve_bullet_strategy(strategy)
     page, block, text = cur
@@ -1530,6 +1539,36 @@ def _merge_blocks(
         return acc + [cur]
     if _should_break_after_colon(prev_text, block, text, strategy=heuristics):
         return acc + [cur]
+
+    # Check for list continuation - previous is a list item, current might continue it
+    if _looks_like_list_item(prev_text) and not _looks_like_list_item(text):
+        should_merge, confidence, reason = _candidate_continues_list_item(
+            prev_text,
+            text,
+            confidence_threshold=0.5 if list_continuation_config else 0.7,
+        )
+        # Interactive confirmation for uncertain cases
+        if list_continuation_config is not None and list_continuation_config.callback is not None:
+            # Check if already cached
+            cached = None
+            if list_continuation_cache is not None:
+                cached = list_continuation_cache.get(prev_text, text)
+            if cached is not None:
+                should_merge = cached
+            elif 0.4 <= confidence <= 0.85:
+                # Ask user for confirmation in uncertain cases
+                ctx = {
+                    "heuristic_confidence": confidence,
+                    "heuristic_reason": reason,
+                    "page": page,
+                }
+                should_merge = list_continuation_config.callback(prev_text, text, page, ctx)
+                if list_continuation_cache is not None:
+                    list_continuation_cache.set(prev_text, text, should_merge)
+        if should_merge:
+            acc[-1] = (prev_page, prev_block, f"{prev_text} {text}".strip())
+            return acc
+
     lead = text.lstrip()
     continuation_chars = ",.;:)]\"'"
     prev_ends_sentence = _ENDS_SENTENCE.search(prev_text.rstrip())
@@ -1547,13 +1586,20 @@ def _block_texts(
     split_fn: SplitFn,
     *,
     strategy: BulletHeuristicStrategy | None = None,
+    list_continuation_config: ListContinuationConfig | None = None,
+    list_continuation_cache: ListContinuationCache | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
     """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
     merged = pipeline_merge_adjacent_blocks(
         pipeline_iter_blocks(doc),
         text_of=_block_text,
-        fold=partial(_merge_blocks, strategy=strategy),
+        fold=partial(
+            _merge_blocks,
+            strategy=strategy,
+            list_continuation_config=list_continuation_config,
+            list_continuation_cache=list_continuation_cache,
+        ),
         split_fn=split_fn,
     )
     return _split_inline_heading_records(merged)
@@ -1572,6 +1618,8 @@ def _chunk_items(
     *,
     options: SplitOptions | None = None,
     strategy: BulletHeuristicStrategy | None = None,
+    list_continuation_config: ListContinuationConfig | None = None,
+    list_continuation_cache: ListContinuationCache | None = None,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
@@ -1587,7 +1635,13 @@ def _chunk_items(
         _merge_styled_list_records,
         partial(_stitch_block_continuations, limit=limit, strategy=heuristics),
     )
-    records: Iterable[Record] = _block_texts(doc, split_fn, strategy=heuristics)
+    records: Iterable[Record] = _block_texts(
+        doc,
+        split_fn,
+        strategy=heuristics,
+        list_continuation_config=list_continuation_config,
+        list_continuation_cache=list_continuation_cache,
+    )
     for stage in stages:
         records = stage(records)
     collapsed = _collapse_records(records, options, limit, strategy=heuristics)
@@ -1661,6 +1715,8 @@ class _SplitSemanticPass:
     bullet_strategy: BulletHeuristicStrategy | None = field(
         default_factory=default_bullet_strategy,
     )
+    interactive_lists: bool = False
+    list_continuation_callback: ListContinuationCallback | None = None
 
     def __post_init__(self) -> None:
         self.min_chunk_size = derive_min_chunk_size(self.chunk_size, self.min_chunk_size)  # noqa: E501
@@ -1677,12 +1733,29 @@ class _SplitSemanticPass:
         )
         limit = options.compute_limit()
         strategy = _resolve_bullet_strategy(self.bullet_strategy)
+
+        # Build list continuation config from options
+        list_config: ListContinuationConfig | None = None
+        list_cache: ListContinuationCache | None = None
+        runtime_interactive = a.meta.get("interactive_lists", False) if a.meta else False
+        if self.interactive_lists or runtime_interactive or self.list_continuation_callback:
+            callback = self.list_continuation_callback
+            if callback is None and (self.interactive_lists or runtime_interactive):
+                # Import here to avoid circular dependency at module level
+                from pdf_chunker.interactive import make_cli_list_continuation_prompt
+
+                callback = make_cli_list_continuation_prompt()
+            list_config = ListContinuationConfig(callback=callback)
+            list_cache = ListContinuationCache()
+
         chunk_records = _chunk_items(
             doc,
             split_fn,
             self.generate_metadata,
             options=options,
             strategy=strategy,
+            list_continuation_config=list_config,
+            list_continuation_cache=list_cache,
         )
         items = list(
             _inject_continuation_context(
@@ -1711,6 +1784,12 @@ def make_splitter(**opts: Any) -> _SplitSemanticPass:
     strategy = opts.get("bullet_strategy")
     if isinstance(strategy, BulletHeuristicStrategy):
         base = replace(base, bullet_strategy=strategy)
+    # Handle interactive list continuation
+    if opts.get("interactive_lists"):
+        base = replace(base, interactive_lists=True)
+    callback = opts.get("list_continuation_callback")
+    if callback is not None:
+        base = replace(base, list_continuation_callback=callback)
     base.__post_init__()
     return base
 

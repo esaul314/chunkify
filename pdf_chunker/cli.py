@@ -68,10 +68,15 @@ def _run_convert(
     max_chars: int | None,
     footer_patterns: tuple[str, ...] | None = None,
     interactive: bool = False,
+    interactive_footers: bool = False,
+    interactive_lists: bool = False,
     footer_margin: float | None = None,
     header_margin: float | None = None,
     auto_detect_zones: bool = False,
 ) -> None:
+    # Resolve interactive flags: --interactive enables all
+    effective_interactive_footers = interactive or interactive_footers
+
     if max_chars:
         os.environ["PDF_CHUNKER_JSONL_MAX_CHARS"] = str(max_chars)
         if chunk_size is None:
@@ -88,14 +93,14 @@ def _run_convert(
 
     # Auto-detect footer/header zones if requested
     zones_config: dict[str, float] = {}
-    if auto_detect_zones or (interactive and footer_margin is None):
+    if auto_detect_zones or (effective_interactive_footers and footer_margin is None):
         try:
             import fitz
 
             from pdf_chunker.geometry import detect_document_zones, discover_zones_interactive
 
             doc = fitz.open(str(input_path))
-            if interactive:
+            if effective_interactive_footers:
                 # Interactive zone discovery - respects page exclusions
                 zones = discover_zones_interactive(
                     doc,
@@ -111,7 +116,7 @@ def _run_convert(
 
             if zones.footer_margin:
                 zones_config["footer_margin"] = zones.footer_margin
-                if not interactive:
+                if not effective_interactive_footers:
                     conf = zones.confidence
                     margin = zones.footer_margin
                     print(f"Auto-detected footer margin: {margin:.1f}pt (confidence: {conf:.0%})")
@@ -120,7 +125,7 @@ def _run_convert(
         except ImportError:
             pass  # fitz not available
         except Exception as e:
-            if interactive:
+            if effective_interactive_footers:
                 print(f"Zone detection failed: {e}")
 
     # CLI overrides take precedence over auto-detection
@@ -141,6 +146,8 @@ def _run_convert(
             no_metadata,
             footer_patterns=footer_patterns,
             interactive=interactive,
+            interactive_footers=interactive_footers,
+            interactive_lists=interactive_lists,
             zones_config=zones_config,
         ),
     )
@@ -206,14 +213,21 @@ def _cli_overrides(
     *,
     footer_patterns: tuple[str, ...] | None = None,
     interactive: bool = False,
+    interactive_footers: bool = False,
+    interactive_lists: bool = False,
     zones_config: dict[str, float] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    # Resolve interactive flags: --interactive enables all, specific flags override
+    effective_interactive_footers = interactive or interactive_footers
+    effective_interactive_lists = interactive or interactive_lists
+
     split_opts: dict[str, Any] = {
         k: v
         for k, v in {
             "chunk_size": chunk_size,
             "overlap": overlap,
             "generate_metadata": False if no_metadata else None,
+            "interactive_lists": True if effective_interactive_lists else None,
         }.items()
         if v is not None
     }
@@ -236,7 +250,7 @@ def _cli_overrides(
     artifact_opts: dict[str, Any] = {}
     if footer_patterns:
         artifact_opts["known_footer_patterns"] = footer_patterns
-    if interactive:
+    if effective_interactive_footers:
         artifact_opts["interactive"] = True
 
     # Build options, including artifact_opts in base even if pass isn't in pipeline
@@ -298,7 +312,17 @@ if typer:
         interactive: bool = typer.Option(
             False,
             "--interactive",
-            help="Prompt for confirmation on ambiguous footers",
+            help="Enable all interactive prompts (footers and lists)",
+        ),
+        interactive_footers: bool = typer.Option(
+            False,
+            "--interactive-footers",
+            help="Prompt for confirmation on ambiguous footers only",
+        ),
+        interactive_lists: bool = typer.Option(
+            False,
+            "--interactive-lists",
+            help="Prompt for confirmation on ambiguous list continuations only",
         ),
         footer_margin: float | None = typer.Option(
             None,
@@ -331,6 +355,8 @@ if typer:
                 max_chars,
                 footer_patterns=tuple(footer_pattern) if footer_pattern else None,
                 interactive=interactive,
+                interactive_footers=interactive_footers,
+                interactive_lists=interactive_lists,
                 footer_margin=footer_margin,
                 header_margin=header_margin,
                 auto_detect_zones=auto_detect_zones,
@@ -369,7 +395,17 @@ else:
         conv.add_argument(
             "--interactive",
             action="store_true",
-            help="Prompt for confirmation on ambiguous footers",
+            help="Enable all interactive prompts (footers and lists)",
+        )
+        conv.add_argument(
+            "--interactive-footers",
+            action="store_true",
+            help="Prompt for confirmation on ambiguous footers only",
+        )
+        conv.add_argument(
+            "--interactive-lists",
+            action="store_true",
+            help="Prompt for confirmation on ambiguous list continuations only",
         )
         conv.add_argument(
             "--footer-margin",
@@ -390,6 +426,8 @@ else:
             enrich=False,
             footer_patterns=None,
             interactive=False,
+            interactive_footers=False,
+            interactive_lists=False,
             footer_margin=None,
             header_margin=None,
             auto_detect_zones=False,
@@ -408,6 +446,8 @@ else:
                     ns.max_chars,
                     footer_patterns=tuple(ns.footer_patterns) if ns.footer_patterns else None,
                     interactive=ns.interactive,
+                    interactive_footers=ns.interactive_footers,
+                    interactive_lists=ns.interactive_lists,
                     footer_margin=ns.footer_margin,
                     header_margin=ns.header_margin,
                     auto_detect_zones=ns.auto_detect_zones,

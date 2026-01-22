@@ -49,9 +49,11 @@ pdf_chunker convert "book.pdf" --out tts.jsonl --max-chars 1000 --no-metadata
 | `split_semantic.chunk_size` | `--chunk-size` | Target tokens per chunk | `400` |
 | `split_semantic.overlap` | `--overlap` | Tokens to overlap neighboring chunks | `50` |
 | `split_semantic.generate_metadata` | `--no-metadata` (negates) | Include per-chunk metadata | `true` |
+| `split_semantic.interactive_lists` | `--interactive-lists` | Prompt for list continuation confirmation | `false` |
 | `emit_jsonl.output_path` | — | Path for resulting JSONL | `output.jsonl` |
 | `text_clean.footer_patterns` | `--footer-pattern` | Regex patterns to strip as footers | – |
-| `text_clean.interactive_footers` | `--interactive` | Prompt for footer confirmation | `false` |
+| `text_clean.interactive_footers` | `--interactive-footers` | Prompt for footer confirmation | `false` |
+| – | `--interactive` | Enable all interactive prompts (footers + lists) | `false` |
 
 > Supply a custom spec via `--spec pipeline.yaml` to override defaults.
 
@@ -146,13 +148,20 @@ pdf_chunker convert book.pdf --out out.jsonl \
 
 ### Interactive Mode
 
-When you're unsure what footer patterns exist in a document, use `--interactive` to have the CLI automatically detect potential footers and prompt you for confirmation:
+When you're unsure what footer patterns exist in a document, use `--interactive` to enable all interactive prompts (footers and list continuations), or use the granular flags for specific features:
 
 ```bash
+# Enable all interactive prompts
 pdf_chunker convert book.pdf --out out.jsonl --interactive
+
+# Enable only footer prompts
+pdf_chunker convert book.pdf --out out.jsonl --interactive-footers
+
+# Enable only list continuation prompts  
+pdf_chunker convert book.pdf --out out.jsonl --interactive-lists
 ```
 
-**Heuristic detection**: Without `--footer-pattern`, the CLI uses a heuristic to find inline footers matching the pattern `\n\n{TitleCase Words} {PageNumber}` (e.g., "Scale Communication Through Writing 202").
+**Footer heuristic detection**: Without `--footer-pattern`, the CLI uses a heuristic to find inline footers matching the pattern `\n\n{TitleCase Words} {PageNumber}` (e.g., "Scale Communication Through Writing 202").
 
 The CLI will display candidate footer text and ask for confirmation:
 ```
@@ -192,6 +201,54 @@ The pipeline handles two footer scenarios:
 2. **Inline footers**: Footers merged mid-text with a `\n\n` prefix and page number suffix are surgically removed while preserving surrounding content.
 
 The inline pattern structure is: `\n\n{title_pattern}\s+{page_number}`
+
+## List Continuation Detection
+
+PDF extraction often splits multi-line list items into separate text blocks. For example, a bullet point that wraps across lines may be extracted as:
+
+```
+Block 1: "• Reduce wordiness."
+Block 2: "For every word ask: what information is it conveying?"
+```
+
+When this happens, naïve chunking produces semantically broken output where list item text is separated from its continuation.
+
+### Automatic Merging
+
+The `split_semantic` pass automatically detects and merges list continuations using heuristics:
+
+- **Incomplete list items**: Short items (≤5 words), items ending with continuation punctuation (`,;:`), or items with unbalanced delimiters (parentheses, brackets, quotes)
+- **Continuation signals**: Text that starts with lowercase letters or continuation words ("and", "or", "which", etc.)
+
+### Interactive List Confirmation
+
+For uncertain cases, enable interactive mode to manually confirm list continuations:
+
+```bash
+# Enable list continuation prompts only
+pdf_chunker convert book.pdf --out out.jsonl --interactive-lists
+
+# Enable all interactive prompts (footers + lists)
+pdf_chunker convert book.pdf --out out.jsonl --interactive
+```
+
+The CLI will display the list item and candidate continuation:
+```
+--- List continuation candidate (page 15, confidence 75%) ---
+  List item: • Reduce wordiness.
+  Candidate: For every word ask: what information is it conveying?
+  Heuristic: item_looks_incomplete+continuation_word
+Merge into list item? [Y/n]
+```
+
+### YAML Configuration
+
+```yaml
+# pipeline.yaml
+options:
+  split_semantic:
+    interactive_lists: true  # Enable list continuation prompts
+```
 
 For example, with pattern `Scale Communication.*`:
 - **Before**: `"...scientific literature.\n\nScale Communication Through Writing 202 Aside from that..."`

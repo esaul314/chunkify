@@ -90,9 +90,17 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   pdf_chunker convert ./book.pdf --spec pipeline.yaml --out ./out.jsonl --footer-pattern "Collective Wisdom.*\d+" --footer-pattern "Book Title \d+"
   ```
-- Interactive mode for ambiguous footer confirmation (prompts on stdin):
+- Interactive mode for all ambiguous decisions (footers and list continuations):
   ```bash
   pdf_chunker convert ./book.pdf --interactive --out ./out.jsonl
+  ```
+- Interactive mode for footers only:
+  ```bash
+  pdf_chunker convert ./book.pdf --interactive-footers --out ./out.jsonl
+  ```
+- Interactive mode for list continuations only:
+  ```bash
+  pdf_chunker convert ./book.pdf --interactive-lists --out ./out.jsonl
   ```
 - After conversion, verify the output contains the sentinel phrase
   "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
@@ -158,7 +166,9 @@ The `text_clean` pass handles both:
 - `--footer-pattern <regex>`: Regex pattern matching footer title (case-insensitive, repeatable)
   - Example: `--footer-pattern "Scale Communication.*"` matches "Scale Communication Through Writing 202"
   - Example: `--footer-pattern "Chapter \d+"` matches "Chapter 5"
-- `--interactive`: Prompt user to confirm ambiguous footer candidates during processing
+- `--interactive`: Enable all interactive prompts (footers + list continuations)
+- `--interactive-footers`: Prompt user to confirm ambiguous footer candidates only
+- `--interactive-lists`: Prompt user to confirm ambiguous list continuations only
 
 **Pipeline YAML configuration for text patterns:**
   ```yaml
