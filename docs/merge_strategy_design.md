@@ -1,5 +1,29 @@
 # Merge Strategy Consolidation Design
 
+## Status: Implementation Complete
+
+This document describes the design and implementation of the unified merge infrastructure
+in `emit_jsonl.py`. **Phase 1 is complete.** See commits `44a7027` through `4fea3ef`.
+
+---
+
+## Summary for Continuing Agents
+
+The three overlapping merge functions now share a common core:
+
+```
+_merge_items_core()          ← Unified loop with pluggable predicates
+    ├── _merge_very_short_forward()   Uses core with should_hold/should_preserve lambdas
+    ├── _merge_short_rows()           Uses core with force_critical=True
+    └── _merge_incomplete_lists()     NOT converted (uses in-place mutation pattern)
+```
+
+**Key files:**
+- `pdf_chunker/passes/emit_jsonl.py` lines 720-860: Core infrastructure
+- `tests/emit_jsonl_merge_test.py`: 50 characterization tests
+
+---
+
 ## Current State
 
 `emit_jsonl.py` has three overlapping merge functions that share similar logic
