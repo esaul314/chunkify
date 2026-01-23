@@ -17,6 +17,8 @@ from pdf_chunker.strategies.bullets import (
 )
 from pdf_chunker.utils import _truncate_chunk
 
+_log = logging.getLogger(__name__)
+
 Row = dict[str, Any]
 Doc = dict[str, Any]
 
@@ -719,14 +721,24 @@ def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
 
             # Decide if we should merge based on context
             should_merge = False
+            merge_reason = ""
 
             # Case 1: Current row is short and next has incomplete list
             if words < min_words and _has_incomplete_list(next_text) or _has_incomplete_list(text):
                 should_merge = True
+                merge_reason = (
+                    "incomplete_list" if _has_incomplete_list(text) else "short+incomplete_next"
+                )
 
             if should_merge:
                 if merged_chars <= max_chars:
                     # Forward merge fits - do it
+                    _log.debug(
+                        "merge_incomplete_lists: forward merge (%s), %d+%d chars",
+                        merge_reason,
+                        len(text),
+                        len(next_text),
+                    )
                     merged_text = f"{text.rstrip()}\n\n{next_text}".strip()
                     # Replace current row with merged content but don't advance yet
                     # We might need to merge more if still incomplete
@@ -738,6 +750,11 @@ def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
                     prev_text = prev.get("text", "")
                     backward_chars = len(prev_text) + len(text) + 2
                     if backward_chars <= max_chars:
+                        _log.debug(
+                            "merge_incomplete: backward (fwd too large), %d+%d chars",
+                            len(prev_text),
+                            len(text),
+                        )
                         merged_text = f"{prev_text.rstrip()}\n\n{text}".strip()
                         result[-1] = {**prev, "text": merged_text}
                         i += 1
@@ -1085,6 +1102,7 @@ def _merge_very_short_forward(
     coherent_min = max(15, threshold // 2)
     result: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
+    pending_reason: str = ""
 
     for item in items:
         text = item.get("text", "")
@@ -1097,18 +1115,33 @@ def _merge_very_short_forward(
 
             # Only merge if result won't be too large
             if merged_chars <= max_merge:
+                _log.debug(
+                    "merge_very_short: forward merge (%s), %d words + %d words, %d chars",
+                    pending_reason,
+                    _word_count(pending_text),
+                    words,
+                    merged_chars,
+                )
                 merged_text = _merge_text(pending_text, text, strategy=strategy)
                 item = {**pending, "text": merged_text}
                 pending = None
+                pending_reason = ""
                 # Recalculate after merge
                 text = item.get("text", "")
                 words = _word_count(text)
                 chars = len(text)
             else:
                 # Pending is too short but merging would exceed limit
+                _log.debug(
+                    "merge_very_short: skip merge (size limit), %d + %d > %d chars",
+                    len(pending_text),
+                    len(text),
+                    max_merge,
+                )
                 # Keep pending as-is and continue
                 result.append(pending)
                 pending = None
+                pending_reason = ""
 
         # Check if this item should be held for forward merge:
         # 1. Too short (< threshold words), unless coherent with enough words
@@ -1123,9 +1156,11 @@ def _merge_very_short_forward(
         # Coherent blocks with sufficient words are preserved
         if is_short and not is_coherent_block and not is_large_enough:
             pending = item
+            pending_reason = "short"
         elif has_orphan_bullet and not is_large_enough:
             # Orphaned bullet - merge forward for list coherence
             pending = item
+            pending_reason = "orphan_bullet"
         else:
             result.append(item)
 
@@ -1138,6 +1173,12 @@ def _merge_very_short_forward(
             merged_chars = len(prev_text) + len(pending_text) + 2
 
             if merged_chars <= max_merge:
+                _log.debug(
+                    "merge_very_short: backward merge trailing (%s), %d + %d chars",
+                    pending_reason,
+                    len(prev_text),
+                    len(pending_text),
+                )
                 merged_text = _merge_text(prev_text, pending_text, strategy=strategy)
                 result[-1] = {**prev, "text": merged_text}
             else:
@@ -1403,6 +1444,14 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
             should_merge = is_critical or merged_chars <= max_chars
 
             if should_merge:
+                merge_reason = "critical_short" if is_critical else "short"
+                _log.debug(
+                    "merge_short_rows: forward merge (%s), %d words + %d words, %d chars",
+                    merge_reason,
+                    pending_words,
+                    words,
+                    merged_chars,
+                )
                 merged_text = f"{pending_text.rstrip()}\n\n{text}".strip()
                 row = {**row, "text": merged_text}
                 pending = None
@@ -1412,6 +1461,12 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
                 chars = len(text)
             else:
                 # Can't merge, keep pending as-is
+                _log.debug(
+                    "merge_short_rows: skip merge (size limit), %d + %d > %d chars",
+                    len(pending_text),
+                    chars,
+                    max_chars,
+                )
                 result.append(pending)
                 pending = None
 
@@ -1439,10 +1494,23 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
             should_merge = is_critical or merged_chars <= max_chars
 
             if should_merge:
+                merge_reason = "critical_short" if is_critical else "short"
+                _log.debug(
+                    "merge_short_rows: backward merge trailing (%s), %d + %d chars",
+                    merge_reason,
+                    len(prev_text),
+                    len(pending_text),
+                )
                 merged_text = f"{prev_text.rstrip()}\n\n{pending_text}".strip()
                 result[-1] = {**prev, "text": merged_text}
             else:
                 # Can't merge, keep as separate row
+                _log.debug(
+                    "merge_short_rows: keep trailing separate (size limit), %d + %d > %d",
+                    len(prev_text),
+                    len(pending_text),
+                    max_chars,
+                )
                 result.append(pending)
         else:
             result.append(pending)
@@ -1478,12 +1546,11 @@ def _rows(
         )
     )
     if debug_log is not None:
-        logger = logging.getLogger(__name__)
-        logger.warning("dedupe dropped %d duplicates", len(debug_log))
+        _log.warning("dedupe dropped %d duplicates", len(debug_log))
         for dup in debug_log:
-            logger.warning("dedupe dropped: %s", dup[:80])
+            _log.warning("dedupe dropped: %s", dup[:80])
         for dup in _flag_potential_duplicates(processed):
-            logger.warning("possible duplicate retained: %s", dup[:80])
+            _log.warning("possible duplicate retained: %s", dup[:80])
     rows = [
         r for i in processed for r in _rows_from_item(i, strategy=heuristics, preserve=preserve)
     ]
