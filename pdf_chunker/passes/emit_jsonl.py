@@ -1284,9 +1284,7 @@ def _merge_very_short_forward(
     # Minimum words for a coherent block to stand alone
     coherent_min = max(15, threshold // 2)
 
-    def should_hold(
-        item: dict[str, Any], words: int, chars: int
-    ) -> tuple[bool, str]:
+    def should_hold(item: dict[str, Any], words: int, chars: int) -> tuple[bool, str]:
         """Hold short items or orphaned bullets for forward merge."""
         text = item.get("text", "")
         is_short = words < threshold
@@ -1559,9 +1557,7 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
     critical_threshold = _critical_short_threshold()
     max_chars = _max_merge_chars()
 
-    def should_hold(
-        item: dict[str, Any], words: int, chars: int
-    ) -> tuple[bool, str]:
+    def should_hold(item: dict[str, Any], words: int, chars: int) -> tuple[bool, str]:
         """Hold short rows for forward merge."""
         is_short = words < min_words
         return (is_short, "short") if is_short else (False, "")

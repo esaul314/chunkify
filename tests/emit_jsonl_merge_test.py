@@ -4,7 +4,6 @@ These tests lock down the current behavior of the three merge functions
 before any refactoring. Each test documents expected behavior for edge cases.
 """
 
-
 from pdf_chunker.passes.emit_jsonl import (
     _coherent,
     _count_list_items,
@@ -287,6 +286,7 @@ class TestCoherent:
         result = _coherent("continuation of previous sentence.")
         # Document actual behavior
         assert isinstance(result, bool)
+
 
 # ---------------------------------------------------------------------------
 # Incomplete list predicate unit tests
