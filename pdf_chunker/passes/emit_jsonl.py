@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import reduce
-from itertools import accumulate, repeat, takewhile
+from itertools import takewhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
@@ -245,42 +245,46 @@ def _split(
     *,
     is_list_line: Callable[[str], bool] | None = None,
 ) -> list[str]:
-    """Yield ``text`` slices no longer than ``limit`` using soft boundaries."""
+    """Split ``text`` into slices no longer than ``limit`` using soft boundaries.
 
+    Uses list-aware splitting to preserve bullet/numbered list coherence.
+    Handles overlap trimming between consecutive pieces.
+    """
     predicate = is_list_line or _is_list_line
+    pieces: list[str] = []
+    remaining = text
+    intro_hint: str | None = None
 
-    def step(
-        state: tuple[list[str], str, str | None], _: object
-    ) -> tuple[list[str], str, str | None]:
-        pieces, remaining, intro_hint = state
-        if not remaining:
-            return state
-
+    while remaining:
+        # Reserve list content if applicable
         candidate, rem, next_intro = _reserve_for_list(
             remaining,
             limit,
             is_list_line_fn=predicate,
         )
         source = candidate or remaining
+
+        # Check if source appears to be a list
         first = _first_non_empty_line(source)
         second = source.splitlines()[1] if "\n" in source else ""
         is_list = predicate(first) or (predicate(second) and len(first) < limit)
 
+        # Split into raw chunk and remainder
         if is_list and len(source) > limit:
+            # Keep entire list together even if over limit
             suffix = f"\n{rem}" if rem else ""
             raw, rest = f"{source}{suffix}", ""
         else:
             raw, leftover = _truncate_with_remainder(source, limit)
             suffix = f"\n{rem}" if rem else ""
             rest = f"{leftover}{suffix}"
-        raw, rest = (
-            _collapse_list_gaps(
-                raw,
-                is_list_line_fn=predicate,
-            ),
-            _collapse_list_gaps(rest, is_list_line_fn=predicate),
-        )
+
+        # Collapse excess gaps and rebalance lists between chunks
+        raw = _collapse_list_gaps(raw, is_list_line_fn=predicate)
+        rest = _collapse_list_gaps(rest, is_list_line_fn=predicate)
         raw, rest = _rebalance_lists(raw, rest, is_list_line_fn=predicate)
+
+        # Pull list block from rest into raw if intro_hint matches
         raw_intro_line = _first_non_empty_line(raw)
         rest_first_line = _first_non_empty_line(rest)
         if (
@@ -296,29 +300,31 @@ def _split(
             if block_text:
                 raw = f"{raw.rstrip()}\n{block_text}".strip("\n")
                 rest = "\n".join(rest_lines[len(block_lines) :])
+
+        # Trim overlap with previous piece (unless this is a list continuation)
         raw_first_line = _first_non_empty_line(raw)
         skip_trim = bool(pieces) and (
             predicate(raw_first_line)
             or (intro_hint and intro_hint.strip() and raw_first_line.strip() == intro_hint.strip())
         )
         trimmed = raw if not pieces or skip_trim else _trim_overlap(pieces[-1], raw)
+
+        # Append trimmed chunk (merge with previous if list continuation fits)
         if trimmed and trimmed.strip():
             if pieces and predicate(_first_non_empty_line(trimmed)):
                 merged = f"{pieces[-1].rstrip()}\n{trimmed.lstrip()}"
-                if len(merged) <= limit:  # noqa: SIM108
-                    pieces = [*pieces[:-1], merged]
+                if len(merged) <= limit:
+                    pieces[-1] = merged
                 else:
-                    pieces = [*pieces, trimmed]
+                    pieces.append(trimmed)
             else:
-                pieces = [*pieces, trimmed]
-        return pieces, rest.lstrip(), next_intro
+                pieces.append(trimmed)
 
-    states: Iterable[tuple[list[str], str, str | None]] = accumulate(
-        repeat(None),
-        step,
-        initial=([], text, None),
-    )
-    return next(p for p, r, _ in states if not r)
+        # Update state for next iteration
+        remaining = rest.lstrip()
+        intro_hint = next_intro
+
+    return pieces
 
 
 def _coherent(text: str, min_chars: int = 40) -> bool:
