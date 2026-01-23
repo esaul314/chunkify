@@ -511,13 +511,164 @@ def _split(
     return next(p for p, r, _ in states if not r)
 
 
+_INLINE_BULLET_RE = re.compile(r":\s*[•\-\*\u2022]\s+\w")
+_INLINE_NUMBER_RE = re.compile(r":\s*\d+[.)]\s+\w")
+
+
+def _has_inline_list_start(text: str) -> bool:
+    """Return True if text contains an inline list start (colon followed by bullet/number)."""
+    return bool(_INLINE_BULLET_RE.search(text) or _INLINE_NUMBER_RE.search(text))
+
+
+def _has_incomplete_list(text: str) -> bool:
+    """Return True if text appears to have an incomplete list.
+
+    A text is considered to have an incomplete list if it:
+    1. Ends with a colon (list introduction without the list items)
+    2. Introduces a list (ends with colon before list items)
+    3. Has only a single list item when the context suggests more items follow
+    4. Has an inline list start (colon followed by single bullet item)
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+
+    # Check for list introduction ending with colon (no bullets present yet)
+    # e.g., "Here is a guide:" - the list items are in the next chunk
+    last_line = lines[-1].rstrip()
+    if last_line.endswith(":"):
+        # Verify there are no bullets in this text - pure introduction
+        all_text = "\n".join(lines)
+        bullet_matches = len(re.findall(r"[•\-\*\u2022]\s+\w", all_text))
+        numbered_matches = len(re.findall(r"\d+[.)]\s+\w", all_text))
+        if bullet_matches == 0 and numbered_matches == 0:
+            return True
+
+    # Check for inline list start pattern: "intro: • single item"
+    # This is incomplete because it starts a list but only shows one item inline
+    if _has_inline_list_start(last_line):
+        # Check if there's more than just the intro line with bullet
+        # If only one line total or only one bullet in text, it's incomplete
+        all_text = "\n".join(lines)
+        bullet_matches = len(re.findall(r"[•\-\*\u2022]\s+\w", all_text))
+        numbered_matches = len(re.findall(r"\d+[.)]\s+\w", all_text))
+        total_items = bullet_matches + numbered_matches
+        if total_items == 1:
+            return True
+
+    if len(lines) < 2:
+        return False
+
+    # Count bullet/numbered items (at line start)
+    bullet_count = sum(1 for ln in lines if _is_list_line(ln.strip()))
+    if bullet_count == 0:
+        return False
+
+    # If only one list item and text introduces it, it's incomplete
+    if bullet_count == 1:
+        # Check if there's a colon introducing the list
+        first_bullet_idx = next(i for i, ln in enumerate(lines) if _is_list_line(ln.strip()))
+        if first_bullet_idx > 0:
+            # There's intro text before the bullet - check if it ends with colon
+            pre_bullet = "\n".join(lines[:first_bullet_idx])
+            if pre_bullet.rstrip().endswith(":"):
+                return True
+        # Single bullet item that doesn't end with sentence terminator is incomplete
+        last_line_stripped = lines[-1].strip()
+        if _is_list_line(last_line_stripped) and not re.search(
+            r"[.!?][\"')\]]*$", last_line_stripped
+        ):
+            return True
+
+    return False
+
+
 def _coherent(text: str, min_chars: int = 40) -> bool:
+    """Return True if text appears to be a semantically complete unit.
+
+    A text is coherent if it:
+    1. Has sufficient length (min_chars)
+    2. Starts with a capital letter/digit (proper sentence start)
+    3. Ends with sentence-ending punctuation
+    4. Does NOT appear to have an incomplete list
+    """
     stripped = text.strip()
-    return (
-        len(stripped) >= min_chars
-        and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is not None
-        and re.search(r"[.!?][\"')\]]*$", stripped) is not None
-    )
+    if len(stripped) < min_chars:
+        return False
+    if re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None:
+        return False
+    if re.search(r"[.!?][\"')\]]*$", stripped) is None:
+        return False
+    # A text with an incomplete list is not coherent
+    return not _has_incomplete_list(stripped)
+
+
+def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
+    """Merge rows with incomplete lists with their continuations.
+
+    This handles cases like:
+    - Row N: "The challenge is X." (13 words, coherent)
+    - Row N+1: "Here is a guide: • Item" (7 words, incomplete list)
+    - Row N+2: "Full item explanation..." (continuation)
+
+    These should all be merged because:
+    1. The short intro belongs with the list introduction
+    2. The list intro is incomplete without its item content
+
+    If forward merge exceeds size limits, try backward merge instead.
+    """
+    if len(rows) < 2:
+        return rows
+
+    min_words = _min_row_words()
+    max_chars = _max_merge_chars()
+    result: list[Row] = []
+    i = 0
+
+    while i < len(rows):
+        row = rows[i]
+        text = row.get("text", "")
+        words = _word_count(text)
+
+        # Check if this row is short enough to consider merging
+        # OR if it has an incomplete list that needs continuation
+        needs_merge = words < min_words or _has_incomplete_list(text)
+
+        if needs_merge and i + 1 < len(rows):
+            next_row = rows[i + 1]
+            next_text = next_row.get("text", "")
+            merged_chars = len(text) + len(next_text) + 2
+
+            # Decide if we should merge based on context
+            should_merge = False
+
+            # Case 1: Current row is short and next has incomplete list
+            if words < min_words and _has_incomplete_list(next_text) or _has_incomplete_list(text):
+                should_merge = True
+
+            if should_merge:
+                if merged_chars <= max_chars:
+                    # Forward merge fits - do it
+                    merged_text = f"{text.rstrip()}\n\n{next_text}".strip()
+                    # Replace current row with merged content but don't advance yet
+                    # We might need to merge more if still incomplete
+                    rows = [*rows[:i], {**next_row, "text": merged_text}, *rows[i + 2 :]]
+                    continue  # Re-check merged row
+                elif result and _has_incomplete_list(text):
+                    # Forward merge too large - try backward merge
+                    prev = result[-1]
+                    prev_text = prev.get("text", "")
+                    backward_chars = len(prev_text) + len(text) + 2
+                    if backward_chars <= max_chars:
+                        merged_text = f"{prev_text.rstrip()}\n\n{text}".strip()
+                        result[-1] = {**prev, "text": merged_text}
+                        i += 1
+                        continue
+
+        result.append(row)
+        i += 1
+
+    return result
 
 
 def _normalize(text: str) -> str:
@@ -1039,6 +1190,7 @@ def _rows_from_item(
     item: dict[str, Any],
     *,
     strategy: BulletHeuristicStrategy | None = None,
+    preserve: bool = False,
 ) -> list[Row]:
     meta_key = _metadata_key()
     max_chars = _max_chars()
@@ -1049,6 +1201,12 @@ def _rows_from_item(
         meta = {**meta, "chunk_id": _compat_chunk_id(chunk_id)}
     base_meta = {meta_key: meta} if meta else {}
     overhead = len(json.dumps({"text": "", **base_meta}, ensure_ascii=False)) - 2
+
+    # If preserving chunks (e.g. custom chunk_size set), suppress the opinionated
+    # RAG target limit and only enforce the hard safety limit (max_chars).
+    if preserve:
+        target_chars = max_chars
+
     # Use target size for splitting, but ensure we don't exceed hard limit
     split_limit = min(target_chars, max_chars - overhead)
     avail = max(split_limit, 0)
@@ -1177,6 +1335,10 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
     if not rows:
         return rows
 
+    # First pass: merge rows with incomplete lists with their continuations
+    # This ensures list introductions stay with their items
+    rows = _merge_incomplete_lists(rows)
+
     min_words = _min_row_words()
     critical_threshold = _critical_short_threshold()
     max_chars = _max_merge_chars()
@@ -1281,7 +1443,9 @@ def _rows(
             logger.warning("dedupe dropped: %s", dup[:80])
         for dup in _flag_potential_duplicates(processed):
             logger.warning("possible duplicate retained: %s", dup[:80])
-    rows = [r for i in processed for r in _rows_from_item(i, strategy=heuristics)]
+    rows = [
+        r for i in processed for r in _rows_from_item(i, strategy=heuristics, preserve=preserve)
+    ]
     # Final pass: merge any rows that are still too short after splitting
     if not explicit_small:
         rows = _merge_short_rows(rows)

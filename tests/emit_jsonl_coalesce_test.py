@@ -293,11 +293,12 @@ def test_orphan_bullet_merges_forward():
 
 def test_proper_list_stays_intact():
     """A chunk with a proper multi-item list is NOT merged."""
+    list_text = (
+        "Here is a list:\n• First item\n• Second item\n"
+        "• Third item with more words to reach threshold "
+    )
     items = [
-        {
-            "text": "Here is a list:\n• First item\n• Second item\n• Third item with more words to reach threshold "
-            * 2
-        },
+        {"text": list_text * 2},
         {"text": "This is separate content that follows the list. " * 4},
     ]
     result = _merge_very_short_forward(items)
@@ -336,3 +337,73 @@ def test_merge_short_rows_respects_min_words():
     assert len(result) == 1
     assert "Short heading" in result[0]["text"]
     assert "longer content" in result[0]["text"]
+
+
+def test_incomplete_list_detected():
+    """Text with intro and single bullet item is detected as incomplete."""
+    from pdf_chunker.passes.emit_jsonl import _coherent, _has_incomplete_list
+
+    # Inline bullet after colon - incomplete
+    text1 = "Here is a guide: • Reduce wordiness."
+    assert _has_incomplete_list(text1)
+    assert not _coherent(text1)
+
+    # Multi-line with intro and single bullet - incomplete
+    text2 = "The challenge is packing info into six pages.\n\nHere is a guide: • Reduce wordiness."
+    assert _has_incomplete_list(text2)
+    assert not _coherent(text2)
+
+    # Multiple bullets - complete
+    text3 = "Here is a guide:\n• Reduce wordiness.\n• Avoid digressions.\n• Prefer short lists."
+    assert not _has_incomplete_list(text3)
+    assert _coherent(text3)
+
+    # No list - coherent sentence
+    text4 = "The challenge is packing the necessary information into six pages."
+    assert not _has_incomplete_list(text4)
+    assert _coherent(text4)
+
+
+def test_incomplete_list_merges_forward():
+    """Items with incomplete lists merge forward with their continuation."""
+    items = [
+        {"text": "Some long enough introductory paragraph. " * 5},
+        {"text": "The challenge is packing info into six pages."},  # 8 words
+        {"text": "Here is a guide: • Reduce wordiness."},  # Incomplete list
+        {
+            "text": (
+                "For every word ask: what information is it conveying? "
+                "Eliminate pointless adjectives and vague terms. "
+                "• Avoid digressions and pedantic detail. "
+                "• Prefer short lists of inarguable points."
+            )
+        },
+    ]
+    result = _merge_very_short_forward(items)
+
+    # The intro sentence + incomplete list should merge with the following content
+    assert len(result) == 2
+
+    # Second chunk should contain the merged content
+    merged = result[1]["text"]
+    assert "The challenge is packing" in merged
+    assert "Here is a guide:" in merged
+    assert "Reduce wordiness" in merged
+    assert "For every word ask" in merged
+
+
+def test_colon_only_list_intro_detected():
+    """Text ending with colon (list intro) is detected as incomplete."""
+    from pdf_chunker.passes.emit_jsonl import _has_incomplete_list
+
+    # Colon-only endings (list intro without bullets) should be incomplete
+    assert _has_incomplete_list("Here is a guide:") is True
+    assert _has_incomplete_list("The following items:") is True
+    assert _has_incomplete_list("Consider these points:\n") is True
+
+    # Complete sentences should not be incomplete
+    assert _has_incomplete_list("This is complete.") is False
+    assert _has_incomplete_list("Question: Answer here.") is False
+
+    # Colon mid-text (not at end) should not be incomplete
+    assert _has_incomplete_list("Question: Answer") is False
