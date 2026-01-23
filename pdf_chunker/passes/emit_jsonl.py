@@ -600,67 +600,99 @@ def _has_inline_list_start(text: str) -> bool:
     return bool(_INLINE_BULLET_RE.search(text) or _INLINE_NUMBER_RE.search(text))
 
 
+# ---------------------------------------------------------------------------
+# Incomplete list detection predicates
+# ---------------------------------------------------------------------------
+
+
+def _count_list_items(text: str) -> tuple[int, int]:
+    """Count bullet and numbered list items in text.
+
+    Returns (bullet_count, numbered_count).
+    """
+    bullet_matches = len(re.findall(r"[•\-\*\u2022]\s+\w", text))
+    numbered_matches = len(re.findall(r"\d+[.)]\s+\w", text))
+    return bullet_matches, numbered_matches
+
+
+def _ends_with_list_intro_colon(lines: list[str]) -> bool:
+    """Check if text is a pure list introduction ending with colon.
+
+    Example: "Here is a guide:" with no bullet items present.
+    """
+    if not lines:
+        return False
+    last_line = lines[-1].rstrip()
+    if not last_line.endswith(":"):
+        return False
+    # Verify no bullets present - this is a pure introduction
+    all_text = "\n".join(lines)
+    bullets, numbers = _count_list_items(all_text)
+    return bullets == 0 and numbers == 0
+
+
+def _has_single_inline_bullet(lines: list[str]) -> bool:
+    """Check if text has a colon followed by single inline bullet.
+
+    Example: "List intro: • single item" - incomplete because only one item.
+    """
+    if not lines:
+        return False
+    last_line = lines[-1].rstrip()
+    if not _has_inline_list_start(last_line):
+        return False
+    # Check if there's only one list item total
+    all_text = "\n".join(lines)
+    bullets, numbers = _count_list_items(all_text)
+    return (bullets + numbers) == 1
+
+
+def _has_unterminated_bullet_item(lines: list[str]) -> bool:
+    """Check if text has a single bullet item without sentence terminator.
+
+    Example: "Intro:\n• First item" where "First item" lacks a period.
+    """
+    if len(lines) < 2:
+        return False
+
+    # Count list items at line start
+    bullet_count = sum(1 for ln in lines if _is_list_line(ln.strip()))
+    if bullet_count != 1:
+        return False
+
+    # Find the bullet line
+    first_bullet_idx = next((i for i, ln in enumerate(lines) if _is_list_line(ln.strip())), None)
+    if first_bullet_idx is None:
+        return False
+
+    # Check if there's intro text ending with colon before the bullet
+    if first_bullet_idx > 0:
+        pre_bullet = "\n".join(lines[:first_bullet_idx])
+        if pre_bullet.rstrip().endswith(":"):
+            return True
+
+    # Check if single bullet item lacks sentence terminator
+    last_line = lines[-1].strip()
+    return _is_list_line(last_line) and not re.search(r"[.!?][\"')\]]*$", last_line)
+
+
 def _has_incomplete_list(text: str) -> bool:
     """Return True if text appears to have an incomplete list.
 
     A text is considered to have an incomplete list if it:
     1. Ends with a colon (list introduction without the list items)
-    2. Introduces a list (ends with colon before list items)
+    2. Has an inline list start (colon followed by single bullet item)
     3. Has only a single list item when the context suggests more items follow
-    4. Has an inline list start (colon followed by single bullet item)
     """
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if not lines:
         return False
 
-    # Check for list introduction ending with colon (no bullets present yet)
-    # e.g., "Here is a guide:" - the list items are in the next chunk
-    last_line = lines[-1].rstrip()
-    if last_line.endswith(":"):
-        # Verify there are no bullets in this text - pure introduction
-        all_text = "\n".join(lines)
-        bullet_matches = len(re.findall(r"[•\-\*\u2022]\s+\w", all_text))
-        numbered_matches = len(re.findall(r"\d+[.)]\s+\w", all_text))
-        if bullet_matches == 0 and numbered_matches == 0:
-            return True
-
-    # Check for inline list start pattern: "intro: • single item"
-    # This is incomplete because it starts a list but only shows one item inline
-    if _has_inline_list_start(last_line):
-        # Check if there's more than just the intro line with bullet
-        # If only one line total or only one bullet in text, it's incomplete
-        all_text = "\n".join(lines)
-        bullet_matches = len(re.findall(r"[•\-\*\u2022]\s+\w", all_text))
-        numbered_matches = len(re.findall(r"\d+[.)]\s+\w", all_text))
-        total_items = bullet_matches + numbered_matches
-        if total_items == 1:
-            return True
-
-    if len(lines) < 2:
-        return False
-
-    # Count bullet/numbered items (at line start)
-    bullet_count = sum(1 for ln in lines if _is_list_line(ln.strip()))
-    if bullet_count == 0:
-        return False
-
-    # If only one list item and text introduces it, it's incomplete
-    if bullet_count == 1:
-        # Check if there's a colon introducing the list
-        first_bullet_idx = next(i for i, ln in enumerate(lines) if _is_list_line(ln.strip()))
-        if first_bullet_idx > 0:
-            # There's intro text before the bullet - check if it ends with colon
-            pre_bullet = "\n".join(lines[:first_bullet_idx])
-            if pre_bullet.rstrip().endswith(":"):
-                return True
-        # Single bullet item that doesn't end with sentence terminator is incomplete
-        last_line_stripped = lines[-1].strip()
-        if _is_list_line(last_line_stripped) and not re.search(
-            r"[.!?][\"')\]]*$", last_line_stripped
-        ):
-            return True
-
-    return False
+    return (
+        _ends_with_list_intro_colon(lines)
+        or _has_single_inline_bullet(lines)
+        or _has_unterminated_bullet_item(lines)
+    )
 
 
 def _coherent(text: str, min_chars: int = 40) -> bool:

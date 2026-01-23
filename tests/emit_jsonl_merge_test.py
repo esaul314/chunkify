@@ -4,16 +4,18 @@ These tests lock down the current behavior of the three merge functions
 before any refactoring. Each test documents expected behavior for edge cases.
 """
 
-import pytest
 
 from pdf_chunker.passes.emit_jsonl import (
+    _coherent,
+    _count_list_items,
+    _ends_with_list_intro_colon,
     _has_incomplete_list,
+    _has_single_inline_bullet,
+    _has_unterminated_bullet_item,
     _merge_incomplete_lists,
     _merge_short_rows,
     _merge_very_short_forward,
-    _coherent,
 )
-
 
 # ---------------------------------------------------------------------------
 # _merge_very_short_forward characterization tests
@@ -285,3 +287,106 @@ class TestCoherent:
         result = _coherent("continuation of previous sentence.")
         # Document actual behavior
         assert isinstance(result, bool)
+
+# ---------------------------------------------------------------------------
+# Incomplete list predicate unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestCountListItems:
+    """Tests for _count_list_items helper."""
+
+    def test_empty_string(self):
+        assert _count_list_items("") == (0, 0)
+
+    def test_bullet_items(self):
+        text = "• First\n• Second\n• Third"
+        bullets, numbers = _count_list_items(text)
+        assert bullets == 3
+        assert numbers == 0
+
+    def test_numbered_items(self):
+        text = "1. First\n2. Second"
+        bullets, numbers = _count_list_items(text)
+        assert bullets == 0
+        assert numbers == 2
+
+    def test_mixed_items(self):
+        text = "• Bullet\n1. Number\n• Another"
+        bullets, numbers = _count_list_items(text)
+        assert bullets == 2
+        assert numbers == 1
+
+
+class TestEndsWithListIntroColon:
+    """Tests for _ends_with_list_intro_colon predicate."""
+
+    def test_empty_lines(self):
+        assert not _ends_with_list_intro_colon([])
+
+    def test_colon_ending_no_bullets(self):
+        lines = ["Here are the items:"]
+        assert _ends_with_list_intro_colon(lines)
+
+    def test_colon_ending_with_bullets(self):
+        lines = ["Items:", "• First bullet"]
+        assert not _ends_with_list_intro_colon(lines)
+
+    def test_no_colon_ending(self):
+        lines = ["This is a regular sentence."]
+        assert not _ends_with_list_intro_colon(lines)
+
+
+class TestHasSingleInlineBullet:
+    """Tests for _has_single_inline_bullet predicate."""
+
+    def test_empty_lines(self):
+        assert not _has_single_inline_bullet([])
+
+    def test_inline_bullet_single(self):
+        lines = ["List: • single item"]
+        assert _has_single_inline_bullet(lines)
+
+    def test_inline_bullet_multiple(self):
+        lines = ["List: • item one", "• item two"]
+        assert not _has_single_inline_bullet(lines)
+
+    def test_no_inline_bullet(self):
+        lines = ["Regular paragraph."]
+        assert not _has_single_inline_bullet(lines)
+
+
+class TestHasUnterminatedBulletItem:
+    """Tests for _has_unterminated_bullet_item predicate."""
+
+    def test_empty_lines(self):
+        assert not _has_unterminated_bullet_item([])
+
+    def test_single_line(self):
+        # Requires at least 2 lines
+        assert not _has_unterminated_bullet_item(["• Single item"])
+
+    def test_intro_with_unterminated_bullet(self):
+        lines = ["Introduction:", "• Item without period"]
+        assert _has_unterminated_bullet_item(lines)
+
+    def test_intro_with_colon_always_true(self):
+        # When intro ends with colon, function returns True regardless of terminator
+        # (the "incomplete list" heuristic: intro + single bullet = needs more)
+        lines = ["Introduction:", "• Item with period."]
+        assert _has_unterminated_bullet_item(lines)
+
+    def test_no_colon_intro_terminated_bullet(self):
+        # No colon intro, but bullet line is terminated - check terminator
+        lines = ["Some intro", "• Complete sentence."]
+        assert not _has_unterminated_bullet_item(lines)
+
+    def test_no_colon_intro_unterminated_bullet(self):
+        # No colon intro, bullet is last line without terminator
+        lines = ["Some intro", "• Incomplete item"]
+        assert _has_unterminated_bullet_item(lines)
+
+    def test_multiple_bullets(self):
+        # Multiple bullets - not incomplete
+        lines = ["Intro:", "• First", "• Second"]
+        assert not _has_unterminated_bullet_item(lines)
