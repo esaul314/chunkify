@@ -7,10 +7,26 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import reduce
-from itertools import accumulate, chain, dropwhile, repeat, takewhile
+from itertools import accumulate, chain, repeat, takewhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.passes.emit_jsonl_text import (
+    _SENTENCE_END_RE,
+    contains as _contains,
+    first_non_empty_line as _first_non_empty_line,
+    last_non_empty_line as _last_non_empty_line,
+    last_sentence as _last_sentence,
+    looks_like_caption_label as _looks_like_caption_label,
+    normalize as _normalize,
+    overlap_len as _overlap_len,
+    prefix_contained_len as _prefix_contained_len,
+    starts_mid_sentence as _starts_mid_sentence,
+    starts_with_continuation as _starts_with_continuation,
+    trim_overlap as _trim_overlap,
+    trim_trailing_empty as _trim_trailing_empty,
+    word_count as _word_count,
+)
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
     default_bullet_strategy,
@@ -110,27 +126,8 @@ def _config() -> EmitConfig:
 # ---------------------------------------------------------------------------
 
 
-_CAPTION_PREFIXES = (
-    "figure",
-    "fig.",
-    "table",
-    "tbl.",
-    "image",
-    "img.",
-    "diagram",
-)
-
-_CAPTION_LABEL_RE = re.compile(
-    rf"^(?:{'|'.join(_CAPTION_PREFIXES)})\s+(?:[a-z]*\d[\w.-]*|[ivxlcdm]+)"
-)
-
-
 def _min_words() -> int:
     return _config().min_words
-
-
-def _word_count(text: str) -> int:
-    return len(re.findall(r"\b\w+\b", text))
 
 
 def _metadata_key() -> str:
@@ -171,18 +168,6 @@ def _is_list_line(
         return False
     heuristics = _resolve_bullet_strategy(strategy)
     return heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(stripped)
-
-
-def _first_non_empty_line(text: str) -> str:
-    return next((ln for ln in text.splitlines() if ln.strip()), "")
-
-
-def _last_non_empty_line(text: str) -> str:
-    return next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
-
-
-def _trim_trailing_empty(lines: list[str]) -> list[str]:
-    return list(reversed(list(dropwhile(lambda ln: not ln.strip(), reversed(lines)))))
 
 
 def _partition_preamble(lines: list[str]) -> tuple[list[str], list[str]]:
@@ -342,49 +327,6 @@ def _peel_list_intro(text: str) -> tuple[str, str]:
     if start <= 0:
         return text, ""
     return prefix[:start].rstrip(), prefix[start:].lstrip()
-
-
-_CONTINUATION_LEADS = frozenset(
-    word.lower()
-    for word in (
-        "And",
-        "But",
-        "So",
-        "However",
-        "Therefore",
-        "Yet",
-        "Still",
-        "Also",
-        "Meanwhile",
-        "Additionally",
-        "Then",
-        "Thus",
-        "Instead",
-        "Nevertheless",
-        "Nonetheless",
-        "Consequently",
-        "Moreover",
-    )
-)
-_LEAD_WORD = re.compile(r"[\w']+")
-_LAST_SENTENCE_RE = re.compile(r"([^.?!]+[.?!][\"')\]]*)\s*$", re.DOTALL)
-
-
-def _leading_word(text: str) -> str:
-    match = _LEAD_WORD.match(text)
-    return match.group(0).lower() if match else ""
-
-
-def _starts_with_continuation(text: str) -> bool:
-    return _leading_word(text.lstrip()) in _CONTINUATION_LEADS
-
-
-def _last_sentence(text: str) -> str | None:
-    stripped = text.strip()
-    if not stripped:
-        return None
-    match = _LAST_SENTENCE_RE.search(stripped)
-    return match.group(1).strip() if match else stripped
 
 
 def _compose_intro_with_chunk(intro: str, chunk: str, separators: int) -> str:
@@ -947,108 +889,6 @@ def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
         i += 1
 
     return result
-
-
-def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip().lower()
-
-
-def _contains(haystack: str, needle: str) -> bool:
-    return bool(needle and needle in haystack)
-
-
-def _contains_caption_line(text: str) -> bool:
-    lines = tuple(line.strip().lower() for line in text.splitlines())
-    return any(line.startswith(prefix) for prefix in _CAPTION_PREFIXES for line in lines)
-
-
-def _caption_overlap(prev: str, curr: str, prefix: str) -> bool:
-    snippet = prefix.strip()
-    if not snippet:
-        return False
-    first_line = _first_non_empty_line(curr).strip()
-    if not first_line or not first_line.lower().startswith(snippet.lower()):
-        return False
-    return _contains_caption_line(prev)
-
-
-def _overlap_len(prev_lower: str, curr_lower: str) -> int:
-    length = min(len(prev_lower), len(curr_lower))
-    return next(
-        (i for i in range(length, 0, -1) if prev_lower.endswith(curr_lower[:i])),
-        0,
-    )
-
-
-_SENTENCE_TERMINATORS = ".?!"
-_CLOSING_PUNCTUATION = "\"')]}"
-
-
-def _has_sentence_ending(text: str) -> bool:
-    stripped = text.rstrip()
-    trimmed = stripped.rstrip(_CLOSING_PUNCTUATION)
-    return bool(trimmed) and trimmed[-1] in _SENTENCE_TERMINATORS
-
-
-def _prefix_contained_len(haystack: str, needle: str) -> int:
-    length = len(needle)
-
-    def _match(index: int) -> bool:
-        segment = needle[:index]
-        if not segment.strip():
-            return False
-        if index < length and not needle[index].isspace():
-            return False
-        if not _has_sentence_ending(segment):
-            return False
-        position = haystack.find(segment)
-        if position == -1:
-            return False
-        preceding = haystack[position - 1] if position else ""
-        return not preceding.isalnum()
-
-    return next((idx for idx in range(length, 0, -1) if _match(idx)), 0)
-
-
-def _looks_like_caption_label(text: str) -> bool:
-    normalized = text.strip().lower()
-    return bool(normalized and _CAPTION_LABEL_RE.match(normalized))
-
-
-def _trim_overlap(prev: str, curr: str) -> str:
-    """Remove duplicated prefix from ``curr`` that already exists in ``prev``."""
-
-    prev_lower, curr_lower = prev.lower(), curr.lower()
-    if _contains(prev_lower, curr_lower):
-        return ""
-    overlap = _overlap_len(prev_lower, curr_lower)
-    if overlap and overlap < len(curr) * 0.9:
-        prefix = curr[:overlap]
-        if _caption_overlap(prev, curr, prefix):
-            return curr
-        prev_index = len(prev) - overlap
-        prev_char = prev[prev_index - 1] if prev_index > 0 else ""
-        next_non_space = next((ch for ch in curr[overlap:] if not ch.isspace()), "")
-        stripped_prefix = prefix.strip()
-        words = re.findall(r"\b\w+\b", stripped_prefix)
-        single_title = len(words) == 1 and words[0][0].isupper() and words[0][1:].islower()
-        if _looks_like_caption_label(stripped_prefix):
-            return curr
-        if prev_char.isalnum():
-            return curr
-        if single_title and (next_non_space.islower() or next_non_space.isdigit()):
-            return curr
-        return curr[overlap:].lstrip()
-    prefix = curr_lower.split("\n\n", 1)[0]
-    return curr[len(prefix) :].lstrip() if _contains(prev_lower, prefix) else curr
-
-
-def _starts_mid_sentence(text: str) -> bool:
-    stripped = text.strip()
-    return bool(stripped) and re.match(r"^[\"'(]*[A-Z0-9]", stripped) is None
-
-
-_SENTENCE_END_RE = re.compile(r"[.!?][\"')\]]*")
 
 
 def _steal_sentence_prefix(prev: str, fragment: str, limit: int | None) -> tuple[str, str] | None:
