@@ -1,13 +1,17 @@
 import pytest
 
 from pdf_chunker.passes.emit_jsonl import (
-    _first_non_empty_line,
-    _is_list_line,
     _merge_text,
-    _prepend_intro,
     _rebalance_lists,
     _rows_from_item,
     _split,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
+    is_list_line as _is_list_line,
+    prepend_intro as _prepend_intro,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
+    first_non_empty_line as _first_non_empty_line,
 )
 
 

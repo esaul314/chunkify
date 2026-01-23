@@ -7,24 +7,65 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import reduce
-from itertools import accumulate, chain, repeat, takewhile
+from itertools import accumulate, repeat, takewhile
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.passes.emit_jsonl_lists import (
+    collapse_list_gaps as _collapse_list_gaps,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
+    has_incomplete_list as _has_incomplete_list,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
+    is_list_line as _is_list_line,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
+    rebalance_lists as _rebalance_lists,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
+    reserve_for_list as _reserve_for_list,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
+    starts_with_orphan_bullet as _starts_with_orphan_bullet_base,
+)
 from pdf_chunker.passes.emit_jsonl_text import (
     _SENTENCE_END_RE,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     contains as _contains,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     first_non_empty_line as _first_non_empty_line,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     last_non_empty_line as _last_non_empty_line,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     last_sentence as _last_sentence,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     looks_like_caption_label as _looks_like_caption_label,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     normalize as _normalize,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     overlap_len as _overlap_len,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     prefix_contained_len as _prefix_contained_len,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     starts_mid_sentence as _starts_mid_sentence,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     starts_with_continuation as _starts_with_continuation,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     trim_overlap as _trim_overlap,
-    trim_trailing_empty as _trim_trailing_empty,
+)
+from pdf_chunker.passes.emit_jsonl_text import (
     word_count as _word_count,
 )
 from pdf_chunker.strategies.bullets import (
@@ -158,259 +199,6 @@ def _resolve_bullet_strategy(
     return strategy or default_bullet_strategy()
 
 
-def _is_list_line(
-    line: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    stripped = line.lstrip()
-    if not stripped:
-        return False
-    heuristics = _resolve_bullet_strategy(strategy)
-    return heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(stripped)
-
-
-def _partition_preamble(lines: list[str]) -> tuple[list[str], list[str]]:
-    if not lines:
-        return [], []
-
-    idx = len(lines)
-    while idx > 0 and lines[idx - 1].strip():
-        idx -= 1
-    while idx > 0 and not lines[idx - 1].strip():
-        idx -= 1
-
-    if idx == 0:
-        return lines, []
-    return lines[:idx], lines[idx:]
-
-
-_LIST_GAP_RE = re.compile(r"\n{2,}(?=\s*(?:[-\*\u2022]|\d+\.))")
-
-
-def _collapse_list_gaps(
-    text: str,
-    *,
-    is_list_line: Callable[[str], bool] | None = None,
-) -> str:
-    predicate = is_list_line or _is_list_line
-
-    def repl(match: re.Match[str]) -> str:
-        prior = text[: match.start()]
-        prev_line = prior.splitlines()[-1] if "\n" in prior else prior
-        return "\n" if not predicate(prev_line) else match.group(0)
-
-    return _LIST_GAP_RE.sub(repl, text)
-
-
-def _split_inline_list_start(
-    line: str,
-    *,
-    is_list_line: Callable[[str], bool] | None = None,
-) -> tuple[str, str] | None:
-    predicate = is_list_line or _is_list_line
-    for idx, char in enumerate(line):
-        if char in "-\u2022*" and (idx == 0 or line[idx - 1].isspace()):
-            tail = line[idx:].lstrip()
-            if predicate(tail):
-                return line[:idx].rstrip(), tail
-        if char.isdigit() and (idx == 0 or line[idx - 1].isspace()):
-            end = idx
-            while end < len(line) and line[end].isdigit():
-                end += 1
-            if (
-                end < len(line)
-                and line[end] == "."
-                and end + 1 < len(line)
-                and line[end + 1].isspace()
-            ):
-                tail = line[idx:].lstrip()
-                if predicate(tail):
-                    return line[:idx].rstrip(), tail
-    return None
-
-
-def _reserve_for_list(
-    text: str,
-    limit: int,
-    *,
-    is_list_line: Callable[[str], bool] | None = None,
-) -> tuple[str, str, str | None]:
-    predicate = is_list_line or _is_list_line
-    collapsed = _collapse_list_gaps(text, is_list_line=predicate)
-    lines = collapsed.splitlines()
-
-    inline = next(
-        (
-            (idx, result)
-            for idx, line in enumerate(lines)
-            if (result := _split_inline_list_start(line, is_list_line=predicate))
-        ),
-        None,
-    )
-    list_idx = next((i for i, ln in enumerate(lines) if predicate(ln)), len(lines))
-
-    if inline and inline[0] <= list_idx:
-        idx, (head, tail) = inline
-        pre_lines = [*lines[:idx], head] if head else lines[:idx]
-        tail_lines = [tail, *lines[idx + 1 :]]
-    elif list_idx < len(lines):
-        pre_lines = lines[:list_idx]
-        tail_lines = lines[list_idx:]
-    else:
-        return collapsed, "", None
-
-    if not pre_lines:
-        return collapsed, "", None
-
-    block_lines = list(takewhile(lambda ln: not ln.strip() or predicate(ln), tail_lines))
-    if not block_lines:
-        return collapsed, "", None
-
-    rest_lines = tail_lines[len(block_lines) :]
-    trimmed_pre = _trim_trailing_empty(pre_lines)
-    trailing_gaps = pre_lines[len(trimmed_pre) :]
-
-    if not trimmed_pre:
-        return collapsed, "", None
-
-    pre_text = "\n".join(trimmed_pre)
-    block_text = "\n".join(block_lines)
-    combined_len = len(pre_text) + (1 if pre_text and block_text else 0) + len(block_text)
-    if combined_len <= limit:
-        return collapsed, "", None
-
-    keep_lines, intro_lines = _partition_preamble(trimmed_pre)
-    if not intro_lines and len(keep_lines) > 1 and any(predicate(ln) for ln in block_lines):
-        candidate_intro = keep_lines[-1]
-        if candidate_intro.strip() and not predicate(candidate_intro):
-            keep_lines = keep_lines[:-1]
-            intro_lines = [candidate_intro, *intro_lines]
-    if not keep_lines:
-        return collapsed, "", None
-
-    chunk_text = "\n".join(keep_lines)
-    remainder_parts = [
-        *intro_lines,
-        *trailing_gaps,
-        *block_lines,
-        *rest_lines,
-    ]
-    remainder = "\n".join(remainder_parts).lstrip("\n")
-    intro_line = _first_non_empty_line("\n".join(intro_lines)) if intro_lines else ""
-    intro_hint = intro_line if intro_line.strip() else None
-    return chunk_text, remainder, intro_hint
-
-
-def _list_intro_start(text: str) -> int:
-    """Return the index where a trailing list introduction begins."""
-
-    return max(
-        (
-            pos + span
-            for token, span in (("\n\n", 2), (". ", 2), ("! ", 2), ("? ", 2))
-            if (pos := text.rfind(token)) != -1
-        ),
-        default=-1,
-    )
-
-
-def _peel_list_intro(text: str) -> tuple[str, str]:
-    """Split ``text`` into non-intro content and the trailing list preamble."""
-
-    stripped = text.rstrip()
-    colon_idx = max(stripped.rfind(":"), stripped.rfind("："))
-    if colon_idx == -1:
-        return text, ""
-    prefix = stripped[: colon_idx + 1]
-    start = _list_intro_start(prefix)
-    if start <= 0:
-        return text, ""
-    return prefix[:start].rstrip(), prefix[start:].lstrip()
-
-
-def _compose_intro_with_chunk(intro: str, chunk: str, separators: int) -> str:
-    """Compose ``intro`` and ``chunk`` with controlled blank-line separators."""
-
-    intro_lines = intro.splitlines()
-    chunk_body = chunk.strip("\n")
-    chunk_lines = chunk_body.splitlines() if chunk_body else []
-
-    if not intro_lines:
-        return chunk_body
-    if not chunk_lines:
-        return "\n".join(intro_lines)
-
-    desired_gaps = max(separators, 1)
-    spacer = [""] * max(desired_gaps - 1, 0)
-    return "\n".join(chain(intro_lines, spacer, chunk_lines))
-
-
-def _prepend_intro(intro: str, rest: str) -> str:
-    """Attach ``intro`` ahead of ``rest`` while normalizing spacing."""
-
-    intro_core = intro.strip("\n")
-    if not rest:
-        return intro_core
-
-    leading_newlines = len(rest) - len(rest.lstrip("\n"))
-    tail = rest[leading_newlines:]
-    if not intro_core:
-        return tail.strip("\n")
-
-    trailing_intro_newlines = len(intro) - len(intro.rstrip("\n"))
-    separators = trailing_intro_newlines + (leading_newlines or 1)
-    return _compose_intro_with_chunk(intro_core, tail, separators)
-
-
-def _rebalance_lists(
-    raw: str,
-    rest: str,
-    *,
-    is_list_line: Callable[[str], bool] | None = None,
-) -> tuple[str, str]:
-    """Shift trailing context or list block into ``rest`` when it starts with a list."""
-
-    predicate = is_list_line or _is_list_line
-
-    if not rest or not predicate(_first_non_empty_line(rest)):
-        return raw, rest
-
-    lines = _trim_trailing_empty(raw.splitlines())
-    trimmed = "\n".join(lines)
-    has_list = any(predicate(ln) for ln in lines)
-
-    if not has_list:
-        kept, intro = _peel_list_intro(trimmed)
-        if intro:
-            return kept, _prepend_intro(intro, rest)
-
-    # Determine split point: last non-list line if ``raw`` already contains list items,
-    # otherwise the preceding blank line so that list introductions move with the list.
-    # fmt: off
-    idx = next(
-        (
-            i
-            for i, ln in enumerate(reversed(lines))
-            if (
-                (ln.strip() and not predicate(ln)) if has_list else not ln.strip()
-            )
-        ),
-        len(lines),
-    )
-    # fmt: on
-    start = len(lines) - idx
-    if not has_list and start == 0:
-        return trimmed, rest
-    block = lines[start:]
-    if not block:
-        return trimmed, rest
-
-    moved = "\n".join(block).strip()
-    kept = "\n".join(lines[:start]).rstrip()
-    return kept, _prepend_intro(moved, rest)
-
-
 def _truncate_with_remainder(text: str, limit: int) -> tuple[str, str]:
     if len(text) <= limit or limit <= 0:
         return text, ""
@@ -471,7 +259,7 @@ def _split(
         candidate, rem, next_intro = _reserve_for_list(
             remaining,
             limit,
-            is_list_line=predicate,
+            is_list_line_fn=predicate,
         )
         source = candidate or remaining
         first = _first_non_empty_line(source)
@@ -488,11 +276,11 @@ def _split(
         raw, rest = (
             _collapse_list_gaps(
                 raw,
-                is_list_line=predicate,
+                is_list_line_fn=predicate,
             ),
-            _collapse_list_gaps(rest, is_list_line=predicate),
+            _collapse_list_gaps(rest, is_list_line_fn=predicate),
         )
-        raw, rest = _rebalance_lists(raw, rest, is_list_line=predicate)
+        raw, rest = _rebalance_lists(raw, rest, is_list_line_fn=predicate)
         raw_intro_line = _first_non_empty_line(raw)
         rest_first_line = _first_non_empty_line(rest)
         if (
@@ -533,110 +321,6 @@ def _split(
     return next(p for p, r, _ in states if not r)
 
 
-_INLINE_BULLET_RE = re.compile(r":\s*[•\-\*\u2022]\s+\w")
-_INLINE_NUMBER_RE = re.compile(r":\s*\d+[.)]\s+\w")
-
-
-def _has_inline_list_start(text: str) -> bool:
-    """Return True if text contains an inline list start (colon followed by bullet/number)."""
-    return bool(_INLINE_BULLET_RE.search(text) or _INLINE_NUMBER_RE.search(text))
-
-
-# ---------------------------------------------------------------------------
-# Incomplete list detection predicates
-# ---------------------------------------------------------------------------
-
-
-def _count_list_items(text: str) -> tuple[int, int]:
-    """Count bullet and numbered list items in text.
-
-    Returns (bullet_count, numbered_count).
-    """
-    bullet_matches = len(re.findall(r"[•\-\*\u2022]\s+\w", text))
-    numbered_matches = len(re.findall(r"\d+[.)]\s+\w", text))
-    return bullet_matches, numbered_matches
-
-
-def _ends_with_list_intro_colon(lines: list[str]) -> bool:
-    """Check if text is a pure list introduction ending with colon.
-
-    Example: "Here is a guide:" with no bullet items present.
-    """
-    if not lines:
-        return False
-    last_line = lines[-1].rstrip()
-    if not last_line.endswith(":"):
-        return False
-    # Verify no bullets present - this is a pure introduction
-    all_text = "\n".join(lines)
-    bullets, numbers = _count_list_items(all_text)
-    return bullets == 0 and numbers == 0
-
-
-def _has_single_inline_bullet(lines: list[str]) -> bool:
-    """Check if text has a colon followed by single inline bullet.
-
-    Example: "List intro: • single item" - incomplete because only one item.
-    """
-    if not lines:
-        return False
-    last_line = lines[-1].rstrip()
-    if not _has_inline_list_start(last_line):
-        return False
-    # Check if there's only one list item total
-    all_text = "\n".join(lines)
-    bullets, numbers = _count_list_items(all_text)
-    return (bullets + numbers) == 1
-
-
-def _has_unterminated_bullet_item(lines: list[str]) -> bool:
-    """Check if text has a single bullet item without sentence terminator.
-
-    Example: "Intro:\n• First item" where "First item" lacks a period.
-    """
-    if len(lines) < 2:
-        return False
-
-    # Count list items at line start
-    bullet_count = sum(1 for ln in lines if _is_list_line(ln.strip()))
-    if bullet_count != 1:
-        return False
-
-    # Find the bullet line
-    first_bullet_idx = next((i for i, ln in enumerate(lines) if _is_list_line(ln.strip())), None)
-    if first_bullet_idx is None:
-        return False
-
-    # Check if there's intro text ending with colon before the bullet
-    if first_bullet_idx > 0:
-        pre_bullet = "\n".join(lines[:first_bullet_idx])
-        if pre_bullet.rstrip().endswith(":"):
-            return True
-
-    # Check if single bullet item lacks sentence terminator
-    last_line = lines[-1].strip()
-    return _is_list_line(last_line) and not re.search(r"[.!?][\"')\]]*$", last_line)
-
-
-def _has_incomplete_list(text: str) -> bool:
-    """Return True if text appears to have an incomplete list.
-
-    A text is considered to have an incomplete list if it:
-    1. Ends with a colon (list introduction without the list items)
-    2. Has an inline list start (colon followed by single bullet item)
-    3. Has only a single list item when the context suggests more items follow
-    """
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if not lines:
-        return False
-
-    return (
-        _ends_with_list_intro_colon(lines)
-        or _has_single_inline_bullet(lines)
-        or _has_unterminated_bullet_item(lines)
-    )
-
-
 def _coherent(text: str, min_chars: int = 40) -> bool:
     """Return True if text appears to be a semantically complete unit.
 
@@ -655,6 +339,20 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
         return False
     # A text with an incomplete list is not coherent
     return not _has_incomplete_list(stripped)
+
+
+def _starts_with_orphan_bullet(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    """Wrapper that passes local _coherent and _word_count to list module."""
+    return _starts_with_orphan_bullet_base(
+        text,
+        strategy=strategy,
+        coherent_fn=_coherent,
+        word_count_fn=_word_count,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1043,55 +741,6 @@ def _coalesce(
 def _very_short_threshold() -> int:
     """Return threshold below which items should always be merged forward."""
     return _config().get_very_short_threshold()
-
-
-def _starts_with_orphan_bullet(
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    """Return True if text starts with a single bullet item (orphaned list fragment).
-
-    An orphan bullet is when text begins with a single bullet point that appears
-    to be a fragment of a list from a previous chunk. Complete single-item lists
-    are NOT considered orphans, even if they lack terminal punctuation.
-    """
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if not lines:
-        return False
-
-    first_line = lines[0].strip()
-    heuristics = _resolve_bullet_strategy(strategy)
-
-    # Check if first line is a bullet
-    is_bullet = heuristics.starts_with_bullet(first_line)
-    is_number = heuristics.starts_with_number(first_line)
-    if not (is_bullet or is_number):
-        return False
-
-    # If there's only one line, check if it looks like a complete item
-    if len(lines) == 1:
-        # A coherent item or numbered item with enough words is NOT orphaned
-        if _coherent(first_line):
-            return False
-        # Numbered items with sufficient words are likely complete even without punctuation
-        # e.g., "2. Second item continues with sufficient words but lacks punctuation"
-        return not (is_number and _word_count(first_line) >= 6)
-
-    # If second line is NOT a bullet, first bullet is orphaned
-    # (unless the first line looks complete)
-    second_line = lines[1].strip()
-    is_list_line = heuristics.starts_with_bullet(second_line) or heuristics.starts_with_number(
-        second_line
-    )
-    if is_list_line:
-        return False
-
-    # First line is a bullet, but following content is not a list
-    # Check if the first line alone looks complete
-    if _coherent(first_line):
-        return False
-    return not (is_number and _word_count(first_line) >= 6)
 
 
 def _max_merge_chars() -> int:

@@ -6,14 +6,16 @@ before any refactoring. Each test documents expected behavior for edge cases.
 
 from pdf_chunker.passes.emit_jsonl import (
     _coherent,
-    _count_list_items,
-    _ends_with_list_intro_colon,
-    _has_incomplete_list,
-    _has_single_inline_bullet,
-    _has_unterminated_bullet_item,
     _merge_incomplete_lists,
     _merge_short_rows,
     _merge_very_short_forward,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
+    count_list_items as _count_list_items,
+    ends_with_list_intro_colon as _ends_with_list_intro_colon,
+    has_incomplete_list as _has_incomplete_list,
+    has_single_inline_bullet as _has_single_inline_bullet,
+    has_unterminated_bullet_item as _has_unterminated_bullet_item,
 )
 
 # ---------------------------------------------------------------------------
