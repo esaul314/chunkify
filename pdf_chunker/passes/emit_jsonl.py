@@ -5,6 +5,7 @@ import logging
 import os
 import re
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from functools import reduce
 from itertools import accumulate, chain, dropwhile, repeat, takewhile
 from typing import Any, cast
@@ -18,6 +19,93 @@ from pdf_chunker.utils import _truncate_chunk
 
 Row = dict[str, Any]
 Doc = dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EmitConfig:
+    """Centralized configuration for emit_jsonl pass.
+
+    All thresholds and limits are defined here with sensible defaults.
+    Use `from_env()` to read overrides from environment variables.
+    """
+
+    # Minimum words for a standalone chunk (below this, chunks are merged)
+    min_words: int = 50
+
+    # Metadata key name in JSONL output
+    metadata_key: str = "metadata"
+
+    # Hard limit for JSONL line size (characters)
+    max_chars: int = 8000
+
+    # Target chunk size for optimal RAG/LoRA performance (~320 words)
+    target_chunk_chars: int = 2000
+
+    # Threshold below which items are always merged forward (very short)
+    very_short_words: int | None = None  # None = min(30, min_words)
+
+    # Maximum character count for merged chunks
+    max_merge_chars: int = 2000
+
+    # Minimum word count for a standalone row
+    min_row_words: int | None = None  # None = min(15, min_words)
+
+    # Minimum word count below which rows MUST be merged (critical short)
+    critical_short_words: int = 5
+
+    # Enable debug logging for deduplication
+    dedup_debug: bool = False
+
+    @classmethod
+    def from_env(cls) -> EmitConfig:
+        """Create configuration from environment variables."""
+        min_words = int(os.getenv("PDF_CHUNKER_JSONL_MIN_WORDS", "50"))
+
+        very_short_explicit = os.getenv("PDF_CHUNKER_VERY_SHORT_WORDS")
+        min_row_explicit = os.getenv("PDF_CHUNKER_MIN_ROW_WORDS")
+
+        return cls(
+            min_words=min_words,
+            metadata_key=os.getenv("PDF_CHUNKER_JSONL_META_KEY", "metadata"),
+            max_chars=int(os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000")),
+            target_chunk_chars=int(os.getenv("PDF_CHUNKER_TARGET_CHUNK_CHARS", "2000")),
+            very_short_words=int(very_short_explicit) if very_short_explicit else None,
+            max_merge_chars=int(os.getenv("PDF_CHUNKER_MAX_MERGE_CHARS", "2000")),
+            min_row_words=int(min_row_explicit) if min_row_explicit else None,
+            critical_short_words=int(os.getenv("PDF_CHUNKER_CRITICAL_SHORT_WORDS", "5")),
+            dedup_debug=bool(os.getenv("PDF_CHUNKER_DEDUP_DEBUG")),
+        )
+
+    def get_very_short_threshold(self) -> int:
+        """Compute effective very-short threshold."""
+        if self.very_short_words is not None:
+            return self.very_short_words
+        return min(30, self.min_words)
+
+    def get_min_row_words(self) -> int:
+        """Compute effective minimum row words."""
+        if self.min_row_words is not None:
+            return self.min_row_words
+        return min(15, self.min_words)
+
+
+def _config() -> EmitConfig:
+    """Get configuration from environment.
+
+    Note: Reads env vars fresh each call to support test monkeypatching.
+    The overhead is negligible for this use case.
+    """
+    return EmitConfig.from_env()
+
+
+# ---------------------------------------------------------------------------
+# Legacy compatibility wrappers (delegating to EmitConfig)
+# ---------------------------------------------------------------------------
 
 
 _CAPTION_PREFIXES = (
@@ -36,7 +124,7 @@ _CAPTION_LABEL_RE = re.compile(
 
 
 def _min_words() -> int:
-    return int(os.getenv("PDF_CHUNKER_JSONL_MIN_WORDS", "50"))
+    return _config().min_words
 
 
 def _word_count(text: str) -> int:
@@ -44,7 +132,7 @@ def _word_count(text: str) -> int:
 
 
 def _metadata_key() -> str:
-    return os.getenv("PDF_CHUNKER_JSONL_META_KEY", "metadata")
+    return _config().metadata_key
 
 
 def _compat_chunk_id(chunk_id: str) -> str:
@@ -57,22 +145,12 @@ def _compat_chunk_id(chunk_id: str) -> str:
 
 def _max_chars() -> int:
     """Hard limit for JSONL line size."""
-    val = os.getenv("PDF_CHUNKER_JSONL_MAX_CHARS", "8000")
-    return int(val)
+    return _config().max_chars
 
 
 def _target_chunk_chars() -> int:
-    """Target chunk size for optimal RAG/LoRA performance.
-
-    Default is 2000 chars (~320 words) which provides:
-    - Single-topic focus (avoids multi-topic chunks)
-    - Fits well in LLM context windows
-    - Good semantic coherence for retrieval
-
-    Can be overridden via PDF_CHUNKER_TARGET_CHUNK_CHARS env var.
-    For LoRA training, slightly larger chunks (2500) may work better.
-    """
-    return int(os.getenv("PDF_CHUNKER_TARGET_CHUNK_CHARS", "2000"))
+    """Target chunk size for optimal RAG/LoRA performance."""
+    return _config().target_chunk_chars
 
 
 def _resolve_bullet_strategy(
@@ -923,19 +1001,8 @@ def _coalesce(
 
 
 def _very_short_threshold() -> int:
-    """Return threshold below which items should always be merged forward.
-
-    Default is 30 words - chunks below this are almost always semantically
-    incomplete (orphaned headings, single bullet items, fragment sentences).
-
-    Respects PDF_CHUNKER_JSONL_MIN_WORDS if set lower, to avoid over-merging
-    when the user explicitly wants smaller chunks.
-    """
-    explicit = os.getenv("PDF_CHUNKER_VERY_SHORT_WORDS")
-    if explicit:
-        return int(explicit)
-    # Use the lower of 30 and min_words to respect user's minimum chunk preference
-    return min(30, _min_words())
+    """Return threshold below which items should always be merged forward."""
+    return _config().get_very_short_threshold()
 
 
 def _starts_with_orphan_bullet(
@@ -988,16 +1055,8 @@ def _starts_with_orphan_bullet(
 
 
 def _max_merge_chars() -> int:
-    """Return maximum character count for merged chunks.
-
-    This prevents over-merging that creates multi-topic chunks.
-    Default is 2000 chars (~320 words) which is optimal for:
-    - RAG: fits in context windows, single topic focus
-    - LoRA: focused training examples
-
-    Can be overridden via PDF_CHUNKER_MAX_MERGE_CHARS env var.
-    """
-    return int(os.getenv("PDF_CHUNKER_MAX_MERGE_CHARS", "2000"))
+    """Return maximum character count for merged chunks."""
+    return _config().max_merge_chars
 
 
 def _merge_very_short_forward(
@@ -1292,30 +1351,13 @@ def _preserve_chunks(meta: dict[str, Any] | None) -> bool:
 
 
 def _min_row_words() -> int:
-    """Minimum word count for a standalone row.
-
-    Rows below this threshold will be merged with neighbors.
-    Default is 15 words (~1 sentence). Can be overridden via
-    PDF_CHUNKER_MIN_ROW_WORDS env var.
-
-    Respects PDF_CHUNKER_JSONL_MIN_WORDS if set lower, to avoid over-merging
-    when the user explicitly wants smaller chunks.
-    """
-    explicit = os.getenv("PDF_CHUNKER_MIN_ROW_WORDS")
-    if explicit:
-        return int(explicit)
-    # Use the lower of 15 and min_words to respect user's minimum chunk preference
-    return min(15, _min_words())
+    """Minimum word count for a standalone row."""
+    return _config().get_min_row_words()
 
 
 def _critical_short_threshold() -> int:
-    """Minimum word count below which rows MUST be merged regardless of size limits.
-
-    Rows below this threshold (default 5 words) are considered so short that
-    they're never acceptable as standalone chunks. These will be merged even
-    if it exceeds the max_merge_chars limit.
-    """
-    return int(os.getenv("PDF_CHUNKER_CRITICAL_SHORT_WORDS", "5"))
+    """Minimum word count below which rows MUST be merged."""
+    return _config().critical_short_words
 
 
 def _merge_short_rows(rows: list[Row]) -> list[Row]:
@@ -1415,9 +1457,8 @@ def _rows(
     explicit_small: bool = False,
     strategy: BulletHeuristicStrategy | None = None,
 ) -> list[Row]:
-    debug_log: list[str] | None = (
-        [] if (not preserve and os.getenv("PDF_CHUNKER_DEDUP_DEBUG")) else None
-    )
+    cfg = _config()
+    debug_log: list[str] | None = [] if (not preserve and cfg.dedup_debug) else None
     items = _sanitize_items(doc.get("items", []))
     heuristics = _resolve_bullet_strategy(strategy)
 
