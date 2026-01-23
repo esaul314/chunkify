@@ -640,27 +640,54 @@ def _merge_sentence_pieces(
     pieces: Iterable[str],
     limit: int | None = None,
 ) -> list[str]:
+    """Merge pieces that start mid-sentence with their predecessors.
+
+    When a piece starts with a lowercase letter or continuation marker,
+    it's likely a sentence fragment from a split. This function:
+
+    1. Detects mid-sentence starts using _starts_mid_sentence
+    2. Attempts to steal complete sentences from the fragment
+       using _steal_sentence_prefix (respects limit if provided)
+    3. Falls back to simple concatenation if stealing fails
+
+    Args:
+        pieces: Text chunks that may have sentence boundaries split
+        limit: Optional character limit for merged pieces
+
+    Returns:
+        List of pieces with mid-sentence fragments merged appropriately
+    """
+
     def step(acc: list[str], piece: str) -> list[str]:
-        if acc and _starts_mid_sentence(piece):
-            merged_prev = acc[-1]
-            remainder = piece
-            while remainder:
-                result = _steal_sentence_prefix(merged_prev, remainder, limit)
-                if result is None:
-                    break
-                merged_prev, remainder = result
-                if remainder:
-                    remainder = remainder.lstrip()
-                else:
-                    return [*acc[:-1], merged_prev]
-                if not _starts_mid_sentence(remainder):
-                    break
-            if merged_prev is not acc[-1]:
-                acc = [*acc[:-1], merged_prev]
-                piece = remainder
-            elif limit is None or len(acc[-1]) + 1 + len(piece) <= limit:
-                merged = f"{acc[-1].rstrip()} {piece}".strip()
-                return [*acc[:-1], merged]
+        # If piece doesn't start mid-sentence, just append it
+        if not acc or not _starts_mid_sentence(piece):
+            return [*acc, piece]
+
+        # Try to steal complete sentences from piece into previous chunk
+        merged_prev = acc[-1]
+        remainder = piece
+        while remainder:
+            result = _steal_sentence_prefix(merged_prev, remainder, limit)
+            if result is None:
+                break
+            merged_prev, remainder = result
+            if remainder:
+                remainder = remainder.lstrip()
+            else:
+                # Entire piece was stolen - return with merged previous
+                return [*acc[:-1], merged_prev]
+            if not _starts_mid_sentence(remainder):
+                break
+
+        # If we stole some content, update acc and continue with remainder
+        if merged_prev is not acc[-1]:
+            acc = [*acc[:-1], merged_prev]
+            piece = remainder
+        # Otherwise try simple concatenation if within limit
+        elif limit is None or len(acc[-1]) + 1 + len(piece) <= limit:
+            merged = f"{acc[-1].rstrip()} {piece}".strip()
+            return [*acc[:-1], merged]
+
         return [*acc, piece]
 
     return reduce(step, pieces, [])
@@ -847,11 +874,26 @@ def _dedupe(
     log: list[str] | None = None,
     strategy: BulletHeuristicStrategy | None = None,
 ) -> list[dict[str, Any]]:
-    """Remove items whose text already appears in prior items.
+    """Remove duplicate or overlapping text from sequential items.
 
-    When ``log`` is provided, dropped duplicate snippets are appended to it for
-    debug inspection. The function itself remains pure; callers decide whether
-    to record diagnostics.
+    Processes items one at a time, maintaining accumulated text for comparison.
+    For each item:
+    1. Skip entirely if text is contained in accumulated text
+    2. Trim overlapping prefix if item starts with text already seen
+    3. Merge fragments that start mid-sentence with previous item
+
+    Args:
+        items: Items with "text" keys to deduplicate
+        log: Optional list to append dropped duplicates for debugging
+        strategy: Bullet detection strategy for fragment merging
+
+    Returns:
+        List of items with duplicates removed and overlaps trimmed
+
+    The state tuple tracks:
+    - acc: List of deduplicated items
+    - acc_text: Accumulated raw text (for fragment merging)
+    - acc_norm: Accumulated normalized text (for containment checks)
     """
 
     def step(
@@ -860,16 +902,21 @@ def _dedupe(
         acc, acc_text, acc_norm = state
         text = item["text"]
         text_norm = _normalize(text)
+
+        # Case 1: Entire item is duplicate - skip it
         if _contains(acc_norm, text_norm):
             if log is not None:
                 log.append(text)
             return state
+
+        # Case 2: Item has overlapping prefix - trim it
         overlap = _overlap_len(acc_norm, text_norm) or _prefix_contained_len(
             acc_norm,
             text_norm,
         )
         if overlap:
             prefix = text[:overlap]
+            # Preserve caption labels even if they overlap
             if _looks_like_caption_label(prefix):
                 overlap = 0
             if overlap:
@@ -879,6 +926,8 @@ def _dedupe(
                 if not text:
                     return state
                 text_norm = _normalize(text)
+
+        # Case 3: Add item (merging if it's a mid-sentence fragment)
         return _merge_if_fragment(
             acc,
             acc_text,
