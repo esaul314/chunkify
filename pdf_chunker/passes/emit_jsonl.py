@@ -715,6 +715,157 @@ def _coherent(text: str, min_chars: int = 40) -> bool:
     return not _has_incomplete_list(stripped)
 
 
+# ---------------------------------------------------------------------------
+# Core merge infrastructure
+# ---------------------------------------------------------------------------
+
+
+# Type aliases for merge predicates
+ShouldHoldFn = Callable[[dict[str, Any], int, int], tuple[bool, str]]
+ShouldPreserveFn = Callable[[dict[str, Any], int, int], bool]
+MergeTextFn = Callable[[str, str], str]
+
+
+def _default_merge_text(prev: str, curr: str) -> str:
+    """Default text merge: join with double newline."""
+    return f"{prev.rstrip()}\n\n{curr}".strip()
+
+
+def _merge_items_core(
+    items: list[dict[str, Any]],
+    *,
+    should_hold: ShouldHoldFn,
+    should_preserve: ShouldPreserveFn,
+    max_chars: int,
+    merge_text: MergeTextFn | None = None,
+    force_critical: bool = False,
+    critical_threshold: int = 5,
+    label: str = "merge",
+) -> list[dict[str, Any]]:
+    """Core merge loop with pluggable predicates.
+
+    This is the unified merge infrastructure used by all merge functions.
+    The behavior is controlled by two predicates:
+
+    - `should_hold(item, words, chars)` -> (hold: bool, reason: str)
+      Determines if an item should be held pending for forward merge.
+
+    - `should_preserve(item, words, chars)` -> bool
+      Determines if an item should be kept as-is even if it would
+      otherwise be held (e.g., coherent sentences).
+
+    Args:
+        items: List of items to process
+        should_hold: Predicate for hold decision
+        should_preserve: Predicate for preserve decision
+        max_chars: Maximum characters for merged result
+        merge_text: Function to join text (default: double newline)
+        force_critical: Always merge items below critical_threshold
+        critical_threshold: Word count below which merge is forced
+        label: Label for debug logging
+    """
+    if not items:
+        return items
+
+    join_fn = merge_text or _default_merge_text
+    result: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+    pending_reason: str = ""
+
+    for item in items:
+        text = item.get("text", "")
+        words = _word_count(text)
+        chars = len(text)
+
+        # Try to merge pending item forward
+        if pending is not None:
+            pending_text = pending.get("text", "")
+            pending_words = _word_count(pending_text)
+            merged_chars = len(pending_text) + chars + 2
+
+            # Force merge if pending is critically short
+            is_critical = force_critical and pending_words < critical_threshold
+            can_merge = is_critical or merged_chars <= max_chars
+
+            if can_merge:
+                _log.debug(
+                    "%s: forward merge (%s), %d+%d words, %d chars",
+                    label,
+                    pending_reason + (",critical" if is_critical else ""),
+                    pending_words,
+                    words,
+                    merged_chars,
+                )
+                merged_text = join_fn(pending_text, text)
+                item = {**pending, "text": merged_text}
+                pending = None
+                pending_reason = ""
+                # Recalculate after merge
+                text = item.get("text", "")
+                words = _word_count(text)
+                chars = len(text)
+            else:
+                # Can't merge - emit pending as-is
+                _log.debug(
+                    "%s: skip merge (size %d+%d > %d)",
+                    label,
+                    len(pending_text),
+                    chars,
+                    max_chars,
+                )
+                result.append(pending)
+                pending = None
+                pending_reason = ""
+
+        # Check if item should be preserved or held
+        if should_preserve(item, words, chars):
+            result.append(item)
+        else:
+            hold, reason = should_hold(item, words, chars)
+            if hold:
+                pending = item
+                pending_reason = reason
+            else:
+                result.append(item)
+
+    # Handle trailing pending item - try backward merge
+    if pending is not None:
+        pending_text = pending.get("text", "")
+        pending_words = _word_count(pending_text)
+
+        if result:
+            prev = result[-1]
+            prev_text = prev.get("text", "")
+            merged_chars = len(prev_text) + len(pending_text) + 2
+
+            is_critical = force_critical and pending_words < critical_threshold
+            can_merge = is_critical or merged_chars <= max_chars
+
+            if can_merge:
+                _log.debug(
+                    "%s: backward merge trailing (%s), %d+%d chars",
+                    label,
+                    pending_reason + (",critical" if is_critical else ""),
+                    len(prev_text),
+                    len(pending_text),
+                )
+                merged_text = join_fn(prev_text, pending_text)
+                result[-1] = {**prev, "text": merged_text}
+            else:
+                _log.debug(
+                    "%s: keep trailing separate (size %d+%d > %d)",
+                    label,
+                    len(prev_text),
+                    len(pending_text),
+                    max_chars,
+                )
+                result.append(pending)
+        else:
+            result.append(pending)
+
+    return result
+
+
 def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
     """Merge rows with incomplete lists with their continuations.
 
@@ -1132,94 +1283,44 @@ def _merge_very_short_forward(
     max_merge = _max_merge_chars()
     # Minimum words for a coherent block to stand alone
     coherent_min = max(15, threshold // 2)
-    result: list[dict[str, Any]] = []
-    pending: dict[str, Any] | None = None
-    pending_reason: str = ""
 
-    for item in items:
+    def should_hold(
+        item: dict[str, Any], words: int, chars: int
+    ) -> tuple[bool, str]:
+        """Hold short items or orphaned bullets for forward merge."""
         text = item.get("text", "")
-        words = _word_count(text)
-        chars = len(text)
-
-        if pending is not None:
-            pending_text = pending.get("text", "")
-            merged_chars = len(pending_text) + len(text) + 2  # +2 for separator
-
-            # Only merge if result won't be too large
-            if merged_chars <= max_merge:
-                _log.debug(
-                    "merge_very_short: forward merge (%s), %d words + %d words, %d chars",
-                    pending_reason,
-                    _word_count(pending_text),
-                    words,
-                    merged_chars,
-                )
-                merged_text = _merge_text(pending_text, text, strategy=strategy)
-                item = {**pending, "text": merged_text}
-                pending = None
-                pending_reason = ""
-                # Recalculate after merge
-                text = item.get("text", "")
-                words = _word_count(text)
-                chars = len(text)
-            else:
-                # Pending is too short but merging would exceed limit
-                _log.debug(
-                    "merge_very_short: skip merge (size limit), %d + %d > %d chars",
-                    len(pending_text),
-                    len(text),
-                    max_merge,
-                )
-                # Keep pending as-is and continue
-                result.append(pending)
-                pending = None
-                pending_reason = ""
-
-        # Check if this item should be held for forward merge:
-        # 1. Too short (< threshold words), unless coherent with enough words
-        # 2. Starts with an orphaned bullet item
         is_short = words < threshold
-        is_coherent_block = _coherent(text) and words >= coherent_min
-        has_orphan_bullet = _starts_with_orphan_bullet(text, strategy=strategy)
+        is_large_enough = chars >= max_merge * 0.5
 
-        # Don't hold items that are already large enough
-        is_large_enough = chars >= max_merge * 0.5  # At least half the max size
+        if is_large_enough:
+            return (False, "")
 
-        # Coherent blocks with sufficient words are preserved
-        if is_short and not is_coherent_block and not is_large_enough:
-            pending = item
-            pending_reason = "short"
-        elif has_orphan_bullet and not is_large_enough:
-            # Orphaned bullet - merge forward for list coherence
-            pending = item
-            pending_reason = "orphan_bullet"
-        else:
-            result.append(item)
+        if is_short:
+            return (True, "short")
 
-    # Handle trailing short item - merge backward if possible
-    if pending is not None:
-        if result:
-            prev = result[-1]
-            prev_text = prev.get("text", "")
-            pending_text = pending.get("text", "")
-            merged_chars = len(prev_text) + len(pending_text) + 2
+        if _starts_with_orphan_bullet(text, strategy=strategy):
+            return (True, "orphan_bullet")
 
-            if merged_chars <= max_merge:
-                _log.debug(
-                    "merge_very_short: backward merge trailing (%s), %d + %d chars",
-                    pending_reason,
-                    len(prev_text),
-                    len(pending_text),
-                )
-                merged_text = _merge_text(prev_text, pending_text, strategy=strategy)
-                result[-1] = {**prev, "text": merged_text}
-            else:
-                # Can't merge backward, keep as separate chunk
-                result.append(pending)
-        else:
-            result.append(pending)
+        return (False, "")
 
-    return result
+    def should_preserve(item: dict[str, Any], words: int, chars: int) -> bool:
+        """Preserve coherent blocks with sufficient words."""
+        text = item.get("text", "")
+        return _coherent(text) and words >= coherent_min
+
+    def merge_fn(prev: str, curr: str) -> str:
+        """Use _merge_text for bullet-aware merging."""
+        return _merge_text(prev, curr, strategy=strategy)
+
+    return _merge_items_core(
+        items,
+        should_hold=should_hold,
+        should_preserve=should_preserve,
+        max_chars=max_merge,
+        merge_text=merge_fn,
+        force_critical=False,
+        label="merge_very_short",
+    )
 
 
 def _strip_superscripts(item: dict[str, Any]) -> dict[str, Any]:
@@ -1457,97 +1558,28 @@ def _merge_short_rows(rows: list[Row]) -> list[Row]:
     min_words = _min_row_words()
     critical_threshold = _critical_short_threshold()
     max_chars = _max_merge_chars()
-    result: list[Row] = []
-    pending: Row | None = None
 
-    for row in rows:
-        text = row.get("text", "")
-        words = _word_count(text)
-        chars = len(text)
-
-        if pending is not None:
-            pending_text = pending.get("text", "")
-            pending_words = _word_count(pending_text)
-            merged_chars = len(pending_text) + chars + 2
-
-            # ALWAYS merge if pending is critically short (< 5 words)
-            # Otherwise, only merge if it fits within the soft limit
-            is_critical = pending_words < critical_threshold
-            should_merge = is_critical or merged_chars <= max_chars
-
-            if should_merge:
-                merge_reason = "critical_short" if is_critical else "short"
-                _log.debug(
-                    "merge_short_rows: forward merge (%s), %d words + %d words, %d chars",
-                    merge_reason,
-                    pending_words,
-                    words,
-                    merged_chars,
-                )
-                merged_text = f"{pending_text.rstrip()}\n\n{text}".strip()
-                row = {**row, "text": merged_text}
-                pending = None
-                # Recalculate
-                text = row.get("text", "")
-                words = _word_count(text)
-                chars = len(text)
-            else:
-                # Can't merge, keep pending as-is
-                _log.debug(
-                    "merge_short_rows: skip merge (size limit), %d + %d > %d chars",
-                    len(pending_text),
-                    chars,
-                    max_chars,
-                )
-                result.append(pending)
-                pending = None
-
-        # Check if row is too short to stand alone
+    def should_hold(
+        item: dict[str, Any], words: int, chars: int
+    ) -> tuple[bool, str]:
+        """Hold short rows for forward merge."""
         is_short = words < min_words
-        # Coherent rows (proper sentence) can stand alone even if short
-        is_coherent = _coherent(text) and words >= 8
+        return (is_short, "short") if is_short else (False, "")
 
-        if is_short and not is_coherent:
-            pending = row
-        else:
-            result.append(row)
+    def should_preserve(item: dict[str, Any], words: int, chars: int) -> bool:
+        """Preserve coherent rows even if short."""
+        text = item.get("text", "")
+        return _coherent(text) and words >= 8
 
-    # Handle trailing short row
-    if pending is not None:
-        if result:
-            prev = result[-1]
-            prev_text = prev.get("text", "")
-            pending_text = pending.get("text", "")
-            pending_words = _word_count(pending_text)
-            merged_chars = len(prev_text) + len(pending_text) + 2
-
-            # ALWAYS merge critically short trailing items
-            is_critical = pending_words < critical_threshold
-            should_merge = is_critical or merged_chars <= max_chars
-
-            if should_merge:
-                merge_reason = "critical_short" if is_critical else "short"
-                _log.debug(
-                    "merge_short_rows: backward merge trailing (%s), %d + %d chars",
-                    merge_reason,
-                    len(prev_text),
-                    len(pending_text),
-                )
-                merged_text = f"{prev_text.rstrip()}\n\n{pending_text}".strip()
-                result[-1] = {**prev, "text": merged_text}
-            else:
-                # Can't merge, keep as separate row
-                _log.debug(
-                    "merge_short_rows: keep trailing separate (size limit), %d + %d > %d",
-                    len(prev_text),
-                    len(pending_text),
-                    max_chars,
-                )
-                result.append(pending)
-        else:
-            result.append(pending)
-
-    return result
+    return _merge_items_core(
+        rows,
+        should_hold=should_hold,
+        should_preserve=should_preserve,
+        max_chars=max_chars,
+        force_critical=True,
+        critical_threshold=critical_threshold,
+        label="merge_short_rows",
+    )
 
 
 def _rows(
