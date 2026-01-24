@@ -453,10 +453,13 @@ Move all list-related logic to `pdf_chunker/passes/emit_jsonl_lists.py`:
 - [x] Create design doc for merge consolidation (commit `cc8c96c`)
 - [x] Consolidate merge functions into unified strategy (commit `4fea3ef`)
 
-### ⚠️ Phase 3 (NOT STARTED):
-- [ ] Replace `step` closures with explicit state machines
-- [ ] Extract list handling to submodule
-- [ ] Convert `_merge_incomplete_lists` to use core infrastructure
+### ✅ Phase 3 (COMPLETE):
+- [x] Extract text utilities to `emit_jsonl_text.py` (commit `8c39a15`)
+- [x] Extract list utilities to `emit_jsonl_lists.py` (commit `bc08239`)
+- [x] Replace `_split` step closure with explicit while loop (commit `f6303cb`)
+- [x] Document `_dedupe` and `_merge_sentence_pieces` (commit `336cd55`)
+- [x] Fix infinite loop test and document overlap/dedup interaction (commit `7344315`, `26107da`)
+- [ ] Convert `_merge_incomplete_lists` to core — **DEFERRED** (uses peek-ahead pattern)
 
 ---
 
@@ -476,17 +479,13 @@ Move all list-related logic to `pdf_chunker/passes/emit_jsonl_lists.py`:
   - `TestHasSingleInlineBullet` (5 tests)
   - `TestHasUnterminatedBulletItem` (4 tests)
 
-### Recommendations for Phase 3
+### Testing Recommendations for Future Work
 
-Before refactoring `step` closures:
+If extending the overlap/dedup logic:
 1. **Add property-based tests** for split/merge invariants (e.g., merged text should contain all original content)
-2. **Add characterization tests** for `_split` edge cases
-3. **Snapshot test** current behavior on known PDFs
-
-During refactoring:
-1. Use **snapshot testing** to detect behavior changes
-2. Run **full pipeline tests** after each phase
-3. Use the `--trace` flag on known problematic PDFs to verify behavior
+2. **Use trace mode** (`--trace "phrase"`) to track content through the pipeline
+3. **Enable dedup debug** (`PDF_CHUNKER_DEDUP_DEBUG=1`) to log dropped content
+4. Run **full pipeline tests** (`nox -s tests`) after changes
 
 ---
 
@@ -651,37 +650,73 @@ degrade RAG retrieval quality.
 which can cause silent data loss with pathological input (e.g., test fixtures
 with repetitive content).
 
+### Intentional RAG Overlap vs Accidental Duplication
+
+**Critical distinction:** The dedup logic must differentiate between two types of overlap:
+
+| Type | Source | Desired Behavior | Example |
+|------|--------|------------------|---------|
+| **Intentional overlap** | `split_semantic` with `overlap > 0` | **PRESERVE** | Sliding window: chunk 1 ends "...foo bar baz", chunk 2 starts "bar baz qux..." |
+| **Accidental duplication** | PDF extraction bugs, page boundary issues | **REMOVE** | Same paragraph extracted twice from different pages |
+
+**How the system distinguishes them:**
+
+1. **Intentional overlap is produced by `split_semantic`** at word boundaries with a
+   configured `overlap` parameter (e.g., `overlap: 100` in `pipeline_rag.yaml`).
+   This overlap appears at the **boundary** between consecutive chunks.
+
+2. **Accidental duplication** typically involves:
+   - Complete containment (`chunk_B ⊂ chunk_A`)
+   - Identical sentences appearing in non-adjacent chunks
+   - Repeated headers/footers across multiple pages
+
+**The dedup logic in `emit_jsonl` operates AFTER `split_semantic`**, so it sees
+chunks that already have intentional overlap baked in. The key heuristics:
+
+- `trim_overlap()` checks if `curr` is **entirely contained** in `prev` — this catches
+  accidental full-chunk duplication, not boundary overlap
+- `_dedupe()` accumulates **all previous text** and checks containment — intentional
+  overlap (a few sentences) won't trigger this because the chunk contains new content
+- `detect_duplicates.py:_is_expected_overlap()` explicitly identifies boundary overlap
+  by checking if the duplicate appears at position 0 in one chunk and at the end of
+  the previous chunk
+
+**When intentional overlap might be incorrectly removed:**
+
+- If `overlap` is set very high relative to `chunk_size`, chunks may have >90% overlap
+  and trigger the containment check
+- If the overlapping region happens to be the **only** unique content in a chunk
+  (pathological edge case)
+
+**Recommendation:** Keep `overlap` ≤ 25% of `chunk_size` to avoid triggering dedup.
+The default RAG config (`chunk_size: 400, overlap: 100`) is safe.
+
 ---
 
-## Risks of Not Continuing
+## Remaining Future Work
 
-With Phases 1-2 complete, the immediate pain points are addressed:
-- ✅ Configuration is centralized and testable
-- ✅ Merge logic has unified infrastructure
-- ✅ Detection predicates are decomposed and tested
+All planned phases are complete. The only deferred item is:
 
-**Remaining risks if Phase 3 is not done:**
-1. **`step` closures remain hard to debug** - complex state transitions in `_split`
-2. **List handling is still scattered** - ~300 lines across multiple functions
-3. **`_merge_incomplete_lists` is an outlier** - doesn't use the core infrastructure
-
-These are lower priority than the original assessment indicated.
+- **`_merge_incomplete_lists` conversion** — Uses a peek-ahead/in-place mutation pattern
+  that doesn't fit the single-pass `_merge_items_core` model. Impact is contained since
+  it's only called from `_merge_short_rows`.
 
 ---
 
 ## Conclusion
 
-**Phases 1 and 2 are complete.** The refactoring achieved:
+**All phases complete.** The refactoring achieved:
 
 1. **Centralized configuration** via `EmitConfig` dataclass
 2. **Unified merge infrastructure** via `_merge_items_core()` with pluggable predicates
 3. **Decomposed detection logic** via 4 named, testable predicates
-4. **Comprehensive test coverage** with 50 characterization tests
+4. **Comprehensive test coverage** with 66 tests across merge, list, and text modules
+5. **Module decomposition** into 3 focused files totaling 1,913 lines
+6. **Explicit `_split` loop** replacing opaque `accumulate/step` pattern
+7. **Documented overlap/dedup interaction** with debugging guidance
 
 **Continuing agents should:**
-- Review the 6 commits to understand what changed
-- Run `pytest tests/emit_jsonl_merge_test.py -v` to verify tests pass
+- Review the 11 commits to understand what changed
+- Run `pytest tests/emit_jsonl_merge_test.py tests/jsonl_list_rebalance_test.py -v` to verify tests pass
 - Consult `docs/merge_strategy_design.md` for technical details
-- Consider Phase 3 only if `step` closure complexity becomes a problem
-
-**Recommended next step:** Evaluate whether Phase 3 is needed based on actual debugging pain. The current state is stable and well-tested.
+- See "Overlap and Deduplication Interaction" section for the dedup design rationale
