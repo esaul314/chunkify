@@ -27,6 +27,9 @@ from pdf_chunker.passes.emit_jsonl_lists import (
     reserve_for_list as _reserve_for_list,
 )
 from pdf_chunker.passes.emit_jsonl_lists import (
+    starts_with_list_block as _starts_with_list_block,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
     starts_with_orphan_bullet as _starts_with_orphan_bullet_base,
 )
 from pdf_chunker.passes.emit_jsonl_text import (
@@ -512,6 +515,12 @@ def _merge_items_core(
     return result
 
 
+# Threshold for "short intro before list" - number of words below which we merge
+# with following list block. This is more conservative than min_row_words to
+# avoid merging substantial paragraphs.
+_SHORT_INTRO_THRESHOLD = 40
+
+
 def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
     """Merge rows with incomplete lists with their continuations.
 
@@ -520,9 +529,14 @@ def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
     - Row N+1: "Here is a guide: • Item" (7 words, incomplete list)
     - Row N+2: "Full item explanation..." (continuation)
 
+    AND also handles:
+    - Row N: "What Is X? A short intro paragraph." (26 words, coherent)
+    - Row N+1: "• Bullet item 1\n• Bullet item 2..." (list block)
+
     These should all be merged because:
     1. The short intro belongs with the list introduction
     2. The list intro is incomplete without its item content
+    3. Short intro paragraphs semantically introduce their following lists
 
     If forward merge exceeds size limits, try backward merge instead.
     """
@@ -543,6 +557,14 @@ def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
         # OR if it has an incomplete list that needs continuation
         needs_merge = words < min_words or _has_incomplete_list(text)
 
+        # Also consider merging if this is a short intro before a list block
+        is_short_intro_before_list = False
+        if i + 1 < len(rows) and words < _SHORT_INTRO_THRESHOLD:
+            next_text = rows[i + 1].get("text", "")
+            if _starts_with_list_block(next_text):
+                is_short_intro_before_list = True
+                needs_merge = True
+
         if needs_merge and i + 1 < len(rows):
             next_row = rows[i + 1]
             next_text = next_row.get("text", "")
@@ -558,6 +580,11 @@ def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
                 merge_reason = (
                     "incomplete_list" if _has_incomplete_list(text) else "short+incomplete_next"
                 )
+
+            # Case 2: Current row is a short intro and next starts with a list block
+            if not should_merge and is_short_intro_before_list:
+                should_merge = True
+                merge_reason = "short_intro+list_block"
 
             if should_merge:
                 if merged_chars <= max_chars:

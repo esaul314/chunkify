@@ -25,6 +25,9 @@ from pdf_chunker.passes.emit_jsonl_lists import (
 from pdf_chunker.passes.emit_jsonl_lists import (
     has_unterminated_bullet_item as _has_unterminated_bullet_item,
 )
+from pdf_chunker.passes.emit_jsonl_lists import (
+    starts_with_list_block as _starts_with_list_block,
+)
 
 # ---------------------------------------------------------------------------
 # _merge_very_short_forward characterization tests
@@ -146,15 +149,63 @@ class TestMergeIncompleteLists:
         # Should merge since first row has incomplete list
         assert len(result) == 1
 
-    def test_complete_list_not_merged(self):
-        """Complete list blocks are not merged."""
+    def test_short_intro_merges_with_list_block(self):
+        """Short intro paragraph merges with following list block."""
         rows = [
             {"text": "Introduction paragraph that ends properly."},
             {"text": "• First item\n• Second item\n• Third item."},
         ]
         result = _merge_incomplete_lists(rows)
-        # Second row is a complete list, should stay separate
+        # 5-word intro is below SHORT_INTRO_THRESHOLD and next row is a list block
+        assert len(result) == 1
+        assert "Introduction paragraph" in result[0]["text"]
+        assert "First item" in result[0]["text"]
+
+    def test_long_intro_not_merged_with_list_block(self):
+        """Long coherent intro paragraph stays separate from following list block."""
+        # Make the intro long enough to exceed _SHORT_INTRO_THRESHOLD (40 words)
+        long_intro = " ".join(
+            [
+                "This is a long introduction paragraph that discusses",
+                "many topics in detail including the history of the subject,",
+                "its current state, various perspectives on the matter,",
+                "and how it relates to broader themes in the field.",
+                "It provides substantial context that stands on its own.",
+            ]
+        )
+        rows = [
+            {"text": long_intro},
+            {"text": "• First item\n• Second item\n• Third item."},
+        ]
+        result = _merge_incomplete_lists(rows)
+        # Long intro (>40 words) should NOT merge with following list
         assert len(result) == 2
+
+    def test_professional_development_plan_intro_merges_with_list(self):
+        """Regression test: short intro about professional development plan merges with list.
+
+        This is the user's reported case: a 26-32 word intro without colon
+        followed by a multi-item bullet list.
+        """
+        intro = (
+            "What Is a Professional Development Plan? "
+            "A professional development plan is more than a list of goals. "
+            "It's a thoughtful roadmap that helps you grow both professionally "
+            "and personally over time."
+        )
+        list_block = (
+            "• It's a holistic plan—not just about work skills "
+            "but also life goals, values, and self-improvement.\n\n"
+            "• It helps people think long-term rather than just focusing on "
+            '"What do I want next?"\n\n'
+            "• It forces self-reflection and clarifies how work connects "
+            "to meaning and fulfillment."
+        )
+        rows = [{"text": intro}, {"text": list_block}]
+        result = _merge_incomplete_lists(rows)
+        assert len(result) == 1, "Short intro and list should merge"
+        assert "professional development plan" in result[0]["text"].lower()
+        assert "• It's a holistic plan" in result[0]["text"]
 
     def test_backward_merge_when_forward_too_large(self, monkeypatch):
         """Falls back to backward merge when forward would exceed limit."""
@@ -400,3 +451,51 @@ class TestHasUnterminatedBulletItem:
         # Multiple bullets - not incomplete
         lines = ["Intro:", "• First", "• Second"]
         assert not _has_unterminated_bullet_item(lines)
+
+
+# ---------------------------------------------------------------------------
+# starts_with_list_block tests
+# ---------------------------------------------------------------------------
+
+
+class TestStartsWithListBlock:
+    """Tests for starts_with_list_block function."""
+
+    def test_empty_string_returns_false(self):
+        assert not _starts_with_list_block("")
+
+    def test_no_bullets_returns_false(self):
+        assert not _starts_with_list_block("Just a regular paragraph.")
+
+    def test_single_bullet_returns_false_default(self):
+        # By default, requires 2+ items to be a "block"
+        assert not _starts_with_list_block("• Single item")
+
+    def test_two_bullets_returns_true(self):
+        text = "• First item\n• Second item"
+        assert _starts_with_list_block(text)
+
+    def test_three_bullets_returns_true(self):
+        text = "• First\n• Second\n• Third"
+        assert _starts_with_list_block(text)
+
+    def test_numbered_list_returns_true(self):
+        text = "1. First item\n2. Second item"
+        assert _starts_with_list_block(text)
+
+    def test_min_items_threshold(self):
+        text = "• First\n• Second\n• Third"
+        # With min_items=4, should return False
+        assert not _starts_with_list_block(text, min_items=4)
+        # With min_items=3, should return True
+        assert _starts_with_list_block(text, min_items=3)
+
+    def test_text_starting_with_paragraph_then_list(self):
+        # If text starts with paragraph, not list block
+        text = "Intro paragraph.\n• First\n• Second"
+        assert not _starts_with_list_block(text)
+
+    def test_mixed_content_after_list(self):
+        # List followed by non-list text still counts
+        text = "• First item\n• Second item\nThen some prose."
+        assert _starts_with_list_block(text)

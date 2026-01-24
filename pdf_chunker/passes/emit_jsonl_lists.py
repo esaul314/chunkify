@@ -433,6 +433,59 @@ def reserve_for_list(
 
 
 # ---------------------------------------------------------------------------
+# List block detection
+# ---------------------------------------------------------------------------
+
+
+def starts_with_list_block(
+    text: str,
+    *,
+    min_items: int = 2,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    """Return True if text starts with a multi-item bullet or numbered list.
+
+    Unlike `starts_with_orphan_bullet`, this detects when a chunk begins with
+    a proper list block (multiple items), indicating that a preceding short
+    intro paragraph might belong with this list.
+
+    Args:
+        text: The text to check.
+        min_items: Minimum number of list items to consider it a "block" (default 2).
+        strategy: Bullet detection strategy to use.
+
+    Returns:
+        True if the text starts with a list block of at least `min_items` items.
+    """
+    from pdf_chunker.strategies.bullets import default_bullet_strategy
+
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+
+    heuristics = strategy or default_bullet_strategy()
+    first_line = lines[0].strip()
+
+    # Check if first line is a list item
+    is_bullet = heuristics.starts_with_bullet(first_line)
+    is_number = heuristics.starts_with_number(first_line)
+    if not (is_bullet or is_number):
+        return False
+
+    # Count consecutive list items from the start
+    list_item_count = 0
+    for ln in lines:
+        stripped = ln.strip()
+        if heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(stripped):
+            list_item_count += 1
+        elif list_item_count > 0:
+            # Non-list line after list items - stop counting
+            break
+
+    return list_item_count >= min_items
+
+
+# ---------------------------------------------------------------------------
 # Orphan bullet detection
 # ---------------------------------------------------------------------------
 
