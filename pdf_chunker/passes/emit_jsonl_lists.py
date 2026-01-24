@@ -478,10 +478,9 @@ def starts_with_orphan_bullet(
     # If second line is NOT a bullet, first bullet is orphaned
     # (unless the first line looks complete)
     second_line = lines[1].strip()
-    is_second_list_line = (
-        heuristics.starts_with_bullet(second_line)
-        or heuristics.starts_with_number(second_line)
-    )
+    is_second_list_line = heuristics.starts_with_bullet(
+        second_line
+    ) or heuristics.starts_with_number(second_line)
     if is_second_list_line:
         return False
 

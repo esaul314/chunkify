@@ -8,6 +8,8 @@ from pdf_chunker.passes.emit_jsonl import (
 )
 from pdf_chunker.passes.emit_jsonl_lists import (
     is_list_line as _is_list_line,
+)
+from pdf_chunker.passes.emit_jsonl_lists import (
     prepend_intro as _prepend_intro,
 )
 from pdf_chunker.passes.emit_jsonl_text import (
