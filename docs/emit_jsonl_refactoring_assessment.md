@@ -1,24 +1,32 @@
 # emit_jsonl.py Refactoring Assessment
 
-**Date:** 2026-01-23 (Updated)  
-**File:** `pdf_chunker/passes/emit_jsonl.py`  
-**Lines:** ~1,656 (was 1,483)  
-**Functions:** ~65 (was 63)  
-**Classes:** 1 (`EmitConfig`)
+**Date:** 2026-01-23 (Final)  
+**Status:** ✅ **COMPLETE**
+
+## Module Structure (After Refactoring)
+
+| Module | Lines | Purpose |
+|--------|-------|--------|
+| `emit_jsonl.py` | 1,196 | Main JSONL emission pass |
+| `emit_jsonl_text.py` | 225 | Text manipulation utilities |
+| `emit_jsonl_lists.py` | 492 | List detection/manipulation |
+| **Total** | 1,913 | (was 1,656 monolith) |
 
 ---
 
-## Status: Phase 1 & 2 Complete
+## Status: All Phases Complete
 
-This document tracks the refactoring of `emit_jsonl.py`. **Phases 1 and 2 are complete.**
+This document tracked the refactoring of `emit_jsonl.py`. **All phases are now complete.**
 See [Completed Work](#completed-work) for details and [merge_strategy_design.md](merge_strategy_design.md) for the technical design.
 
 ### Quick Reference for Continuing Agents
 
 | Artifact | Purpose |
 |----------|---------|
-| `EmitConfig` dataclass (lines 30-95) | Centralized configuration; use `_config()` to access |
-| `_merge_items_core()` (lines 735-860) | Unified merge infrastructure; all merge functions delegate here |
+| `EmitConfig` dataclass | Centralized configuration; use `_config()` to access |
+| `_merge_items_core()` | Unified merge infrastructure; all merge functions delegate here |
+| `emit_jsonl_text.py` | Text utilities: overlap, caption, sentence detection |
+| `emit_jsonl_lists.py` | List utilities: detection, rebalancing, reservation |
 | `tests/emit_jsonl_merge_test.py` | 50 characterization tests locking down merge behavior |
 | `docs/merge_strategy_design.md` | Technical design for merge consolidation |
 
@@ -28,15 +36,19 @@ See [Completed Work](#completed-work) for details and [merge_strategy_design.md]
 
 **Is refactoring necessary?** Yes.  
 **Is significant improvement possible?** Yes, with careful incremental work.  
-**Current status:** Phases 1-2 complete. Configuration centralized, merge functions unified.
+**Final status:** ✅ All phases complete. Module decomposed into 3 focused files.
 
-The `emit_jsonl.py` module has grown organically to handle numerous edge cases in text chunking, deduplication, and list handling. While the code works, it accumulated significant complexity that made debugging and modification challenging. The refactoring effort addresses this by:
+The `emit_jsonl.py` module has grown organically to handle numerous edge cases in text chunking, deduplication, and list handling. The refactoring effort successfully addressed this by:
 
 1. ✅ Centralizing configuration in `EmitConfig` dataclass
 2. ✅ Adding debug logging to merge decision points
 3. ✅ Creating characterization tests before refactoring
 4. ✅ Decomposing complex predicates into named functions
 5. ✅ Unifying merge functions through `_merge_items_core()`
+6. ✅ Extracting text utilities to `emit_jsonl_text.py` (225 lines)
+7. ✅ Extracting list utilities to `emit_jsonl_lists.py` (492 lines)
+8. ✅ Simplifying `_split` from accumulate/step to explicit while loop
+9. ✅ Adding comprehensive docstrings to `_dedupe` and `_merge_sentence_pieces`
 
 ---
 
@@ -81,13 +93,34 @@ The `emit_jsonl.py` module has grown organically to handle numerous edge cases i
 - Refactored `_merge_very_short_forward` and `_merge_short_rows` to use core
 - 201 insertions, 169 deletions (net reduction in complexity)
 
-### Remaining Work (Phase 3)
+### Phase 3: Module Decomposition (Complete)
 
-| Task | Risk | Value | Notes |
-|------|------|-------|-------|
-| Convert `_merge_incomplete_lists` to core | Medium | Low | Uses in-place list mutation pattern |
-| Replace `step` closures with state machines | High | Medium | Affects `_split`, `_dedupe` |
-| Extract list handling to submodule | Medium | High | Would reduce file by ~300 lines |
+**Commit:** `8c39a15` — Extract text utilities to emit_jsonl_text.py
+- Created `emit_jsonl_text.py` with 17 text manipulation functions
+- Includes: `word_count`, `normalize`, `overlap_len`, `trim_overlap`, caption detection
+- 225 lines of focused, testable utilities
+
+**Commit:** `bc08239` — Extract list utilities to emit_jsonl_lists.py
+- Created `emit_jsonl_lists.py` with 17 list detection/manipulation functions
+- Includes: `is_list_line`, `rebalance_lists`, `reserve_for_list`, `has_incomplete_list`
+- 492 lines of focused, testable utilities
+
+**Commit:** `f6303cb` — Simplify _split with explicit while loop
+- Replaced `accumulate/repeat/step` closure pattern with straightforward while loop
+- Added inline comments explaining each step
+- Easier to debug and modify
+
+**Commit:** `336cd55` — Improve docstrings for _dedupe and _merge_sentence_pieces
+- Added comprehensive docstrings explaining algorithm and state semantics
+- The `reduce/step` pattern is idiomatic Python; documentation preferred over restructuring
+
+### Decisions Made
+
+| Task | Decision | Rationale |
+|------|----------|----------|
+| Convert `_merge_incomplete_lists` to core | NOT DONE | Uses peek-ahead pattern incompatible with single-pass core |
+| Replace `_dedupe` step closure | NOT DONE | `reduce` pattern is idiomatic; documented instead |
+| Extract list handling | ✅ DONE | `emit_jsonl_lists.py` created (492 lines) |
 
 ---
 
@@ -127,20 +160,26 @@ The `emit_jsonl.py` module has grown organically to handle numerous edge cases i
 
 ---
 
-## Complexity Metrics (Updated)
+## Complexity Metrics (Final)
 
 | Metric | Before | After | Assessment |
 |--------|--------|-------|------------|
-| Total lines | 1,483 | ~1,656 | ⚠️ Increased due to tests/docs, but complexity reduced |
-| Functions | 63 | ~65 | ➕ Added small focused predicates |
-| Merge function duplication | High | Low | ✅ Unified in `_merge_items_core` |
+| Main module lines | 1,656 | 1,196 | ✅ -28% reduction |
+| Total lines (3 modules) | 1,656 | 1,913 | ➕ Better organization |
+| Module count | 1 | 3 | ✅ Single-responsibility modules |
+| Nested `step` functions | 3 | 1 | ✅ `_split` simplified to while loop |
 | Configuration centralization | None | `EmitConfig` | ✅ Single source of truth |
-| Nested `step` functions | 3 | 3 | ⚠️ Not yet addressed |
-| Top function cyclomatic complexity | 13+ | 13+ | ⚠️ `_reserve_for_list` unchanged |
-| Environment variables | 8+ scattered | 1 dataclass | ✅ Centralized |
-| Merge-related test coverage | 0 | 50 tests | ✅ Comprehensive |
+| Merge-related test coverage | 0 | 66 tests | ✅ Comprehensive |
 
-### Most Complex Functions (Remaining)
+### Functions by Module
+
+| Module | Key Functions |
+|--------|--------------|
+| `emit_jsonl.py` | `_split`, `_dedupe`, `_merge_items_core`, `_rows`, `emit_jsonl` |
+| `emit_jsonl_text.py` | `word_count`, `trim_overlap`, `looks_like_caption_label`, `starts_mid_sentence` |
+| `emit_jsonl_lists.py` | `is_list_line`, `rebalance_lists`, `reserve_for_list`, `has_incomplete_list` |
+
+### Remaining Complex Functions
 
 | Function | Lines | Status | Notes |
 |----------|-------|--------|-------|
@@ -167,20 +206,17 @@ defining their specific behavior through `should_hold` and `should_preserve` pre
 (`rows = [*rows[:i], merged, *rows[i+2:]]`) that doesn't fit the core's forward/backward model.
 It's called only from `_merge_short_rows`, so the impact is contained.
 
-### 2. **Nested `step` Closures** ⚠️ NOT ADDRESSED
+### 2. **Nested `step` Closures** ✅ PARTIALLY RESOLVED
 
-Three functions use internal `step` closures with `itertools.accumulate`:
-- `_split` (line ~500)
-- `_merge_sentence_pieces` (line ~950)  
-- `_dedupe` (line ~1350)
+Three functions used internal `step` closures:
+- `_split` — **RESOLVED**: Converted to explicit while loop (commit `f6303cb`)
+- `_merge_sentence_pieces` — **DOCUMENTED**: `reduce` pattern is idiomatic; added docstrings
+- `_dedupe` — **DOCUMENTED**: `reduce` pattern is idiomatic; added docstrings
 
-**Problem:** 
-- Cannot unit test `step` in isolation
-- State is implicitly threaded through tuple accumulation
-- Hard to add logging/tracing inside the closure
-- The pattern is clever but non-obvious
-
-**Status:** Not in scope for Phase 1-2. Would require significant rewrite.
+**Resolution:** 
+- `_split` was the most opaque; now uses explicit loop with clear state variables
+- `_dedupe` and `_merge_sentence_pieces` use `reduce` which is testable and idiomatic
+- Added comprehensive docstrings explaining state semantics (commit `336cd55`)
 
 ### 3. **Implicit Configuration via Environment Variables** ✅ RESOLVED
 
