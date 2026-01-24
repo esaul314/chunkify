@@ -1015,7 +1015,11 @@ def _emit_segment_records(
     if overflow_active or len(segment) == 1:
         return _emit_individual_records(segment, start_index, strategy=strategy)
     if exceeds_soft or exceeds_hard:
-        if _segment_allows_list_overflow(segment, strategy=strategy):
+        # Allow overflow for numbered list continuations or colon-introduced lists
+        allows_overflow = _segment_allows_list_overflow(
+            segment, strategy=strategy
+        ) or _segment_is_colon_list(segment, strategy=strategy)
+        if allows_overflow:
             merged = _merged_segment_record(
                 segment,
                 start_index=start_index,
@@ -1061,6 +1065,33 @@ def _segment_allows_list_overflow(
             continue
         if last_num is None and last_in_text is not None:
             last_num = last_in_text
+    return False
+
+
+def _segment_is_colon_list(
+    segment: tuple[tuple[int, Block, str], ...],
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    """Return True if segment is a colon-introduced list that should stay together.
+
+    This detects patterns like:
+    - Record 1: "...text ending with colon:"
+    - Record 2: "• First item\\n• Second item..."
+
+    Such patterns should be kept together for semantic cohesion even when
+    the combined size exceeds normal limits.
+    """
+    if len(segment) < 2:
+        return False
+    # Check if any record ends with colon and is followed by a list-like record
+    for i in range(len(segment) - 1):
+        _, _, prev_text = segment[i]
+        _, next_block, next_text = segment[i + 1]
+        if prev_text.rstrip().endswith(":") and _starts_list_like(
+            next_block, next_text, strategy=strategy
+        ):
+            return True
     return False
 
 
@@ -1161,9 +1192,7 @@ def _page_or_footer_boundary(
     prev_page, _, _ = buffer[-1]
     page, _, _ = record
     if prev_page != page:
-        if _allow_cross_page_list(buffer[-1], record, strategy=strategy):
-            return False
-        return True
+        return not _allow_cross_page_list(buffer[-1], record, strategy=strategy)
     prev_is_footer = _record_is_footer_candidate(buffer[-1], strategy=strategy)
     current_is_footer = _record_is_footer_candidate(record, strategy=strategy)
     return (current_is_footer != prev_is_footer) and (current_is_footer or prev_is_footer)
@@ -1274,6 +1303,33 @@ def _allow_list_overflow(
     return projected_len <= SOFT_LIMIT
 
 
+def _allow_colon_list_overflow(
+    buffer: tuple[Record, ...],
+    record: Record,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> bool:
+    """Allow overflow when buffer ends with colon introducing a list.
+
+    This preserves semantic cohesion between list introductions (ending with
+    colon) and their following list items, even when the combined size exceeds
+    the soft limit.
+    """
+    if not buffer:
+        return False
+    _, prev_block, prev_text = buffer[-1]
+    _, block, text = record
+    # Check if previous text ends with a colon (list introduction pattern)
+    if not prev_text.rstrip().endswith(":"):
+        return False
+    # Check if current record starts with a list marker
+    if not _starts_list_like(block, text, strategy=strategy):
+        return False
+    # Allow overflow up to the soft limit to keep colon-intro with its list
+    projected_len = sum(len(t) for _, _, t in buffer) + len(text)
+    return projected_len <= SOFT_LIMIT
+
+
 def _text_has_number_two(text: str) -> bool:
     return bool(_NUMBERED_TWO_RE.search(text))
 
@@ -1338,7 +1394,11 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
     if state.buffer:
         overflow_action = _projected_overflow(state, block, text, counts)
         if overflow_action is not None:
-            if not _allow_list_overflow(state.buffer, record, strategy=state.strategy):
+            # Allow overflow for numbered list continuations or colon-introduced lists
+            allow_overflow = _allow_list_overflow(
+                state.buffer, record, strategy=state.strategy
+            ) or _allow_colon_list_overflow(state.buffer, record, strategy=state.strategy)
+            if not allow_overflow:
                 state = state.flush(overflow=overflow_action == "overflow")
     return state.append(idx, record, counts)
 
