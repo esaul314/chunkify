@@ -490,6 +490,169 @@ During refactoring:
 
 ---
 
+## Overlap and Deduplication Interaction (Design Note)
+
+The emit_jsonl module has multiple subsystems that remove or modify content to prevent
+duplication. These interact in non-obvious ways that can cause silent data loss if
+the input has certain characteristics.
+
+### Subsystem Overview
+
+```
+Input: items[] from split_semantic
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  _rows_from_item (per-item processing)  │
+│         │                               │
+│         ▼                               │
+│    _split(text, limit)                  │
+│         │                               │
+│         ├─ _reserve_for_list()          │◄── Can return unexpected splits
+│         │                               │    if text matches list patterns
+│         ├─ _truncate_with_remainder()   │
+│         │                               │
+│         └─ _trim_overlap(prev, curr)    │◄── OVERLAP REMOVAL (chunk-level)
+│               │                         │    Returns "" if curr ⊂ prev
+│               ▼                         │
+│    _merge_sentence_pieces(pieces)       │◄── Re-merges mid-sentence splits
+│                                         │
+└─────────────────────────────────────────┘
+         │
+         ▼ (all items processed)
+┌─────────────────────────────────────────┐
+│  _dedupe(items)                         │◄── DEDUPLICATION (item-level)
+│         │                               │
+│         ├─ _contains(acc, item)         │    Skips if item ⊂ accumulated
+│         │                               │
+│         ├─ _overlap_len() /             │    Trims overlapping prefix
+│         │  _prefix_contained_len()      │
+│         │                               │
+│         └─ _merge_if_fragment()         │    Merges mid-sentence fragments
+│                                         │
+└─────────────────────────────────────────┘
+         │
+         ▼
+Output: deduplicated rows[]
+```
+
+### Key Interactions
+
+#### 1. `_trim_overlap` in `_split` (Chunk-Level)
+
+Location: `emit_jsonl_text.py:trim_overlap()`, called from `emit_jsonl.py:_split()`
+
+**Behavior:**
+```python
+if contains(prev_lower, curr_lower):
+    return ""  # Entire chunk dropped silently
+```
+
+**Trigger condition:** Chunk N+1 is a substring of chunk N.
+
+**When this happens:**
+- Repetitive content (same sentence repeated)
+- Very short chunks from long uniform text
+- Text with no natural variation (e.g., "aaa...aaa")
+
+**Safeguards:**
+- Caption labels are preserved (`looks_like_caption_label`)
+- Overlap must be <90% of chunk to trigger trim (otherwise returns full chunk)
+- Alphanumeric boundary check prevents mid-word breaks
+
+#### 2. `_dedupe` (Item-Level)
+
+Location: `emit_jsonl.py:_dedupe()`
+
+**Behavior:**
+```python
+if _contains(acc_norm, text_norm):
+    if log is not None:
+        log.append(text)  # Only logged if dedup_debug enabled
+    return state  # Item skipped entirely
+```
+
+**Trigger condition:** Item text is substring of accumulated text from all previous items.
+
+**When this happens:**
+- Upstream pass emits duplicate chunks
+- Cross-page content gets duplicated during extraction
+- Overlap trimming missed a case
+
+**Safeguards:**
+- `PDF_CHUNKER_DEDUP_DEBUG=1` logs dropped content
+- Caption labels checked before prefix trim
+
+#### 3. `_merge_sentence_pieces` (Re-Merge)
+
+Location: `emit_jsonl.py:_merge_sentence_pieces()`
+
+**Behavior:** Recombines pieces that `_split` separated if the second piece starts
+with a lowercase letter (mid-sentence indicator).
+
+**Interaction risk:** Can merge pieces back together that were intentionally split,
+potentially creating chunks that exceed size limits.
+
+#### 4. `_reserve_for_list` (Split-Point Selection)
+
+Location: `emit_jsonl_lists.py:reserve_for_list()`
+
+**Behavior:** Detects list patterns and adjusts split points to keep lists together.
+
+**Interaction risk:** Text matching list patterns (e.g., "Sentence 0. Sentence 1.")
+gets split at unexpected boundaries. The "intro" portion may be very short,
+leaving most content as "remainder" that gets processed differently.
+
+### Interaction Matrix
+
+| Scenario | trim_overlap | _dedupe | _merge_sentence_pieces | Result |
+|----------|--------------|---------|------------------------|--------|
+| Repetitive identical text | Drops chunks | Drops items | N/A | Silent content loss |
+| Text matching list pattern | Normal | Normal | Normal | Unexpected split points |
+| Short chunks from uniform text | May drop | May drop | May re-merge | Unpredictable |
+| Cross-page duplicate | Partial trim | Full drop | N/A | Correct (intended) |
+| Caption after overlap | Preserved | Preserved | N/A | Correct (special-cased) |
+| Mid-sentence + duplicate | Trim | Drop | N/A | May lose sentence fragment |
+
+### Debugging Recommendations
+
+1. **Enable dedup debug logging:**
+   ```bash
+   PDF_CHUNKER_DEDUP_DEBUG=1 pdf_chunker convert input.pdf --out out.jsonl
+   ```
+   This logs dropped duplicates and flags potential duplicates that survived.
+
+2. **Use trace mode for specific phrases:**
+   ```bash
+   pdf_chunker convert input.pdf --trace "expected phrase" --out out.jsonl
+   ```
+   Generates snapshots at each pass to identify where content is lost.
+
+3. **Test with unique content:**
+   When writing tests, ensure text has unique content in each section to avoid
+   triggering dedup/overlap logic unintentionally. Avoid:
+   - Numbered patterns like "Item 1. Item 2." (triggers list detection)
+   - Repetitive sentences (triggers containment checks)
+   - Single repeated character (triggers substring containment)
+
+### Design Rationale
+
+The overlap and dedup systems evolved to handle real-world PDF extraction issues:
+
+1. **PyMuPDF often extracts the same text twice** at page boundaries
+2. **Headers/footers repeat** across pages and need removal
+3. **Semantic chunking may create overlapping windows** that need de-duplication
+
+The aggressive containment checks (`curr ⊂ prev`) are intentional—they prevent
+the same sentence from appearing multiple times in the output, which would
+degrade RAG retrieval quality.
+
+**Trade-off:** The system errs on the side of removing potential duplicates,
+which can cause silent data loss with pathological input (e.g., test fixtures
+with repetitive content).
+
+---
+
 ## Risks of Not Continuing
 
 With Phases 1-2 complete, the immediate pain points are addressed:

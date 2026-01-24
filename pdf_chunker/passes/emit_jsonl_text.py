@@ -199,8 +199,31 @@ def caption_overlap(prev: str, curr: str, prefix: str) -> bool:
 
 
 def trim_overlap(prev: str, curr: str) -> str:
-    """Remove duplicated prefix from curr that already exists in prev."""
+    """Remove duplicated prefix from curr that already exists in prev.
+
+    This function is part of the overlap/dedup pipeline and runs at chunk-level
+    during _split(). It removes content from curr that already appears in prev.
+
+    IMPORTANT: If curr is entirely contained in prev, returns empty string.
+    This can cause silent data loss with repetitive/uniform content.
+    See docs/emit_jsonl_refactoring_assessment.md "Overlap and Deduplication"
+    for the full interaction model.
+
+    Safeguards that preserve content:
+    - Caption labels (Figure 1, Table 2) are never trimmed
+    - Overlap must be <90% of curr length to trigger trimming
+    - Alphanumeric boundaries prevent mid-word breaks
+
+    Args:
+        prev: Previous chunk text
+        curr: Current chunk text to potentially trim
+
+    Returns:
+        curr with overlapping prefix removed, or "" if curr ⊂ prev
+    """
     prev_lower, curr_lower = prev.lower(), curr.lower()
+    # WARNING: Returns "" if entire chunk is substring of previous chunk.
+    # This is intentional for dedup but can cause data loss with uniform text.
     if contains(prev_lower, curr_lower):
         return ""
     overlap = overlap_len(prev_lower, curr_lower)

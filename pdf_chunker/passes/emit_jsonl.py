@@ -876,8 +876,16 @@ def _dedupe(
 ) -> list[dict[str, Any]]:
     """Remove duplicate or overlapping text from sequential items.
 
-    Processes items one at a time, maintaining accumulated text for comparison.
-    For each item:
+    This function is part of the overlap/dedup pipeline and runs at item-level
+    after all items have been processed by _rows_from_item. It removes content
+    that appears in previous items.
+
+    IMPORTANT: This interacts with trim_overlap() which runs earlier at chunk-level.
+    Both systems can cause silent data loss with repetitive content.
+    See docs/emit_jsonl_refactoring_assessment.md "Overlap and Deduplication"
+    for the full interaction model.
+
+    Processing for each item:
     1. Skip entirely if text is contained in accumulated text
     2. Trim overlapping prefix if item starts with text already seen
     3. Merge fragments that start mid-sentence with previous item
@@ -885,6 +893,7 @@ def _dedupe(
     Args:
         items: Items with "text" keys to deduplicate
         log: Optional list to append dropped duplicates for debugging
+             (enabled via PDF_CHUNKER_DEDUP_DEBUG=1)
         strategy: Bullet detection strategy for fragment merging
 
     Returns:
