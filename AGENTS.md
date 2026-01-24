@@ -261,6 +261,9 @@ pdf_chunker/
 │   ├── text_processing.py         # Shared text manipulation utilities
 │   ├── passes/                    # Registered pipeline passes
 │   │   ├── __init__.py
+│   │   ├── emit_jsonl.py          # JSONL emission with dedup and merging
+│   │   ├── emit_jsonl_lists.py    # List detection and rebalancing utilities
+│   │   ├── emit_jsonl_text.py     # Text manipulation utilities for emission
 │   │   ├── extraction_fallback.py
 │   │   ├── heading_detect.py
 │   │   ├── list_detect.py

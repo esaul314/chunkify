@@ -1,5 +1,4 @@
 import json
-from itertools import count
 
 import pytest
 
@@ -30,19 +29,40 @@ def default_split_limits() -> tuple[int, int]:
 
 
 def test_emit_jsonl_splits_and_clamps_rows(jsonl_max_chars: int) -> None:
-    texts = (f"A{'a' * n}." for n in count(jsonl_max_chars))
-    candidates = (
-        (text, emit_jsonl(Artifact(payload={"type": "chunks", "items": [{"text": text}]})).payload)
-        for text in texts
-    )
-    long_text, rows = next(
-        (text, result)
-        for text, result in candidates
-        if len(result) > 1
-        and len(json.dumps({"text": text}, ensure_ascii=False)) > jsonl_max_chars
-    )
-    assert len(long_text) > jsonl_max_chars
-    assert len(rows) > 1
+    """Test that emit_jsonl splits long text into multiple rows.
+
+    Uses unique content to prevent deduplication/overlap trimming
+    from discarding chunks. Avoids numbered patterns that would
+    trigger list detection (e.g., "Sentence 0." looks like a list).
+    """
+
+    def make_unique_text(length: int) -> str:
+        """Generate text with unique words to prevent dedup and list detection."""
+        # Use unique words that won't trigger numbered list detection
+        # Pattern: "Alpha beta gamma delta. Epsilon zeta eta theta." etc.
+        words = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
+        sentences = []
+        i = 0
+        while len(" ".join(sentences)) < length:
+            # Include unique counter in middle to avoid dedup, but not as list marker
+            w = words[i % len(words)]
+            sentences.append(f"The {w} value is {i} units.")
+            i += 1
+        return " ".join(sentences)
+
+    # Generate text longer than max_chars
+    text = make_unique_text(jsonl_max_chars * 2)
+    json_len = len(json.dumps({"text": text}, ensure_ascii=False))
+
+    # Verify preconditions
+    assert json_len > jsonl_max_chars, f"Text JSON should exceed limit: {json_len} vs {jsonl_max_chars}"
+
+    # Run emit_jsonl
+    rows = emit_jsonl(Artifact(payload={"type": "chunks", "items": [{"text": text}]})).payload
+
+    # Should split into multiple rows
+    assert len(rows) > 1, f"Expected multiple rows, got {len(rows)}"
+    # Each row should be within the limit
     assert all(len(json.dumps(r, ensure_ascii=False)) <= jsonl_max_chars for r in rows)
 
 
