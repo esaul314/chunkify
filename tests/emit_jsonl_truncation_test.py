@@ -3,7 +3,8 @@ import json
 import pytest
 
 from pdf_chunker.framework import Artifact
-from pdf_chunker.passes.emit_jsonl import emit_jsonl, _max_chars as _jsonl_max_chars
+from pdf_chunker.passes.emit_jsonl import _max_chars as _jsonl_max_chars
+from pdf_chunker.passes.emit_jsonl import emit_jsonl
 from pdf_chunker.passes.split_semantic import make_splitter, split_semantic
 
 
@@ -55,7 +56,9 @@ def test_emit_jsonl_splits_and_clamps_rows(jsonl_max_chars: int) -> None:
     json_len = len(json.dumps({"text": text}, ensure_ascii=False))
 
     # Verify preconditions
-    assert json_len > jsonl_max_chars, f"Text JSON should exceed limit: {json_len} vs {jsonl_max_chars}"
+    assert json_len > jsonl_max_chars, (
+        f"Text JSON should exceed limit: {json_len} vs {jsonl_max_chars}"
+    )
 
     # Run emit_jsonl
     rows = emit_jsonl(Artifact(payload={"type": "chunks", "items": [{"text": text}]})).payload
@@ -66,9 +69,7 @@ def test_emit_jsonl_splits_and_clamps_rows(jsonl_max_chars: int) -> None:
     assert all(len(json.dumps(r, ensure_ascii=False)) <= jsonl_max_chars for r in rows)
 
 
-def test_split_semantic_produces_bounded_chunks(
-    default_split_limits: tuple[int, int]
-) -> None:
+def test_split_semantic_produces_bounded_chunks(default_split_limits: tuple[int, int]) -> None:
     chunk_size, overlap = default_split_limits
     word_count = chunk_size * 3 + overlap * 2 + 7
     long_text = " ".join(f"w{i}" for i in range(word_count))
