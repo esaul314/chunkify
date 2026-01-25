@@ -131,6 +131,24 @@ def _page_numbers(path: str) -> range:
         return range(1, doc.page_count + 1)
 
 
+def _block_pages(block: dict[str, Any]) -> set[int]:
+    """Return all pages covered by a block's source metadata."""
+
+    source = block.get("source", {}) if isinstance(block, dict) else {}
+    page_range = source.get("page_range")
+    if (
+        isinstance(page_range, (list, tuple))
+        and len(page_range) == 2
+        and all(isinstance(num, int) for num in page_range)
+    ):
+        start, end = page_range
+        if start <= end:
+            return set(range(start, end + 1))
+        return set(range(end, start + 1))
+    page = source.get("page")
+    return {page} if isinstance(page, int) else set()
+
+
 def _all_blocks(
     path: str,
     excluded: set[int],
@@ -150,7 +168,9 @@ def _all_blocks(
         footer_margin=footer_margin,
         header_margin=header_margin,
     )
-    existing = {b.get("source", {}).get("page") for b in primary}
+    existing: set[int] = set()
+    for block in primary:
+        existing.update(_block_pages(block))
     missing = [p for p in _page_numbers(path) if p not in excluded and p not in existing]
     if not missing:
         return primary

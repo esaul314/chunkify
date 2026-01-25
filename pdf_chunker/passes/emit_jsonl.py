@@ -515,10 +515,29 @@ def _merge_items_core(
     return result
 
 
-# Threshold for "short intro before list" - number of words below which we merge
-# with following list block. This is more conservative than min_row_words to
-# avoid merging substantial paragraphs.
-_SHORT_INTRO_THRESHOLD = 40
+# Threshold for "short intro before list" - number of words in the FINAL SENTENCE
+# below which we merge with following list block. This looks at the last sentence
+# rather than the entire chunk, so longer chunks can still merge if they end with
+# a sentence that introduces a list.
+_SHORT_INTRO_SENTENCE_THRESHOLD = 25
+
+
+def _get_last_sentence_word_count(text: str) -> int:
+    """Return the word count of the final sentence in text.
+
+    Sentences are detected by ending punctuation (.!?) followed by whitespace.
+    If no sentence breaks exist, returns the total word count.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return 0
+    # Split on sentence-ending punctuation followed by whitespace
+    sentences = re.split(r"(?<=[.!?])\s+", stripped)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        return _word_count(stripped)
+    last_sentence = sentences[-1]
+    return _word_count(last_sentence)
 
 
 def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
@@ -557,13 +576,18 @@ def _merge_incomplete_lists(rows: list[Row]) -> list[Row]:
         # OR if it has an incomplete list that needs continuation
         needs_merge = words < min_words or _has_incomplete_list(text)
 
-        # Also consider merging if this is a short intro before a list block
+        # Also consider merging if this chunk ends with a short sentence
+        # before a list block (the last sentence introduces the list)
         is_short_intro_before_list = False
-        if i + 1 < len(rows) and words < _SHORT_INTRO_THRESHOLD:
+        if i + 1 < len(rows):
             next_text = rows[i + 1].get("text", "")
             if _starts_with_list_block(next_text):
-                is_short_intro_before_list = True
-                needs_merge = True
+                # Check if the LAST SENTENCE of current chunk is short enough
+                # to be considered an intro to the list
+                last_sentence_words = _get_last_sentence_word_count(text)
+                if last_sentence_words < _SHORT_INTRO_SENTENCE_THRESHOLD:
+                    is_short_intro_before_list = True
+                    needs_merge = True
 
         if needs_merge and i + 1 < len(rows):
             next_row = rows[i + 1]

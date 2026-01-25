@@ -6,6 +6,7 @@ from pdf_chunker.pdf_blocks import Block
 
 pytest.importorskip("fitz")
 
+import pdf_chunker.adapters.io_pdf as io_pdf  # noqa: E402
 from pdf_chunker.adapters.io_pdf import read  # noqa: E402
 
 
@@ -58,3 +59,29 @@ def test_footer_margin_filters_footer_blocks(monkeypatch):
     read("test_data/sample_test.pdf", footer_margin=40.0)
 
     assert captured["footer_margin"] == 40.0
+
+
+def test_fallback_skipped_when_primary_covers_page_range(monkeypatch):
+    primary_blocks = [
+        {
+            "text": "primary",
+            "source": {"page": 1, "page_range": (1, 2)},
+        }
+    ]
+
+    def fake_primary(*args, **kwargs):
+        return primary_blocks
+
+    def fake_fallback(*args, **kwargs):
+        raise AssertionError("fallback should not be called")
+
+    def fake_pages(*args, **kwargs):
+        return range(1, 3)
+
+    monkeypatch.setattr(io_pdf, "_primary_blocks", fake_primary)
+    monkeypatch.setattr(io_pdf, "_fallback_blocks", fake_fallback)
+    monkeypatch.setattr(io_pdf, "_page_numbers", fake_pages)
+
+    result = io_pdf._all_blocks("/tmp/ignored.pdf", set(), False)
+
+    assert result == primary_blocks

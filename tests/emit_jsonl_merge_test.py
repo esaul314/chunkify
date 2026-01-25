@@ -161,25 +161,49 @@ class TestMergeIncompleteLists:
         assert "Introduction paragraph" in result[0]["text"]
         assert "First item" in result[0]["text"]
 
-    def test_long_intro_not_merged_with_list_block(self):
-        """Long coherent intro paragraph stays separate from following list block."""
-        # Make the intro long enough to exceed _SHORT_INTRO_THRESHOLD (40 words)
-        long_intro = " ".join(
-            [
-                "This is a long introduction paragraph that discusses",
-                "many topics in detail including the history of the subject,",
-                "its current state, various perspectives on the matter,",
-                "and how it relates to broader themes in the field.",
-                "It provides substantial context that stands on its own.",
-            ]
+    def test_long_last_sentence_not_merged_with_list_block(self):
+        """Intro ending with long last sentence stays separate from following list block.
+
+        The merge heuristic looks at the LAST SENTENCE, not the whole paragraph.
+        If the last sentence is long (>25 words), we don't merge because it's
+        likely a complete thought, not an intro to the list.
+        """
+        # Construct text where the last sentence is long (>25 words)
+        long_intro = (
+            "This is some background context. "
+            "The following sentence is very long and provides detailed information "
+            "about a complex topic that spans multiple clauses and includes various "
+            "qualifying phrases to ensure it exceeds the twenty-five word threshold "
+            "for the last sentence check."
         )
         rows = [
             {"text": long_intro},
             {"text": "• First item\n• Second item\n• Third item."},
         ]
         result = _merge_incomplete_lists(rows)
-        # Long intro (>40 words) should NOT merge with following list
+        # Long last sentence (>25 words) should NOT merge with following list
         assert len(result) == 2
+
+    def test_short_last_sentence_merges_with_list_block(self):
+        """Intro ending with short last sentence merges with following list block.
+
+        Even if the total paragraph is long, if the last sentence is short,
+        it's likely an intro to the following list.
+        """
+        # Long paragraph but ending with a short sentence
+        intro = (
+            "This is a long introduction paragraph that discusses many topics "
+            "in detail including the history of the subject, its current state, "
+            "various perspectives on the matter, and how it relates to broader "
+            "themes in the field. It introduces a list."
+        )
+        rows = [
+            {"text": intro},
+            {"text": "• First item\n• Second item\n• Third item."},
+        ]
+        result = _merge_incomplete_lists(rows)
+        # Short last sentence (< 25 words) should merge with following list
+        assert len(result) == 1
 
     def test_professional_development_plan_intro_merges_with_list(self):
         """Regression test: short intro about professional development plan merges with list.
