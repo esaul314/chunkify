@@ -69,8 +69,6 @@ These priorities are applied **continuously**, including micro-decisions (naming
 
 **Phase 4 (Interactive Mode Unification): COMPLETE**
 
-See [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) for implementation details.
-
 Completed deliverables:
 1. Unified `InteractiveDecisionCallback` protocol in `pdf_chunker/interactive.py`
    - `DecisionKind` enum: FOOTER, LIST_CONTINUATION, PATTERN_MERGE, HEADING_BOUNDARY
@@ -93,6 +91,27 @@ Completed deliverables:
    - `evaluate_merge_with_confidence()`: combined confidence scoring
 
 5. 189 new/updated tests passing
+
+**Phase 5 (Documentation as Code): COMPLETE**
+
+Completed deliverables:
+1. Auto-generated `docs/MERGE_DECISIONS.md` from pattern registry
+   - Includes all 12 patterns with precedence, behavior, and regex
+   - Quick reference table with emoji indicators
+   - Detailed precedence explanation
+
+2. `scripts/generate_merge_docs.py` for regeneration
+   - `--check` mode for CI validation
+   - Compares output ignoring timestamp
+
+3. Enhanced docstrings with explicit precedence order
+   - `stitch_block_continuations()` documents evaluation order
+   - Cross-references to `docs/MERGE_DECISIONS.md`
+
+4. 12 new tests for documentation-as-code validation
+
+See [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) for full implementation details.
+
 ---
 
 ## Stable Dependencies

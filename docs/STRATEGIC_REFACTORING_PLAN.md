@@ -1,7 +1,7 @@
 # STRATEGIC_REFACTORING_PLAN.md — From Complexity to Clarity
 
 **Date:** 2026-01-26  
-**Status:** PHASE 4 COMPLETE  
+**Status:** PHASE 5 COMPLETE  
 **Author:** Codebase Steward (with system analysis)
 
 ---
@@ -28,6 +28,9 @@
 | 4.2 | Learned patterns persistence | ✅ Complete | — | `pdf_chunker/learned_patterns.py` |
 | 4.3 | Add --teach CLI flag | ✅ Complete | — | Saves decisions to ~/.config/pdf_chunker/ |
 | 4.4 | Confidence-based heuristics | ✅ Complete | — | `qa_sequence_confidence()`, `colon_list_boundary_confidence()` |
+| 5.1 | MergeDecision return type | ✅ Complete | — | Already in `patterns.py` |
+| 5.2 | Generate docs from code | ✅ Complete | — | `scripts/generate_merge_docs.py` |
+| 5.3 | Precedence documentation | ✅ Complete | — | Docstrings in stitching.py, patterns.py |
 
 **Current Metrics (2026-01-26):**
 - `split_semantic.py`: **771 lines** (was 1,962 → **61% reduction achieved!**)
@@ -41,6 +44,13 @@
   - `__init__.py`: 167 lines - Re-exports and public API
 - **Phase 3 Status:** COMPLETE (target was ≤300 lines, achieved 771 - orchestration code appropriately remains)
 - **Phase 4 Status:** COMPLETE
+- **Phase 5 Status:** COMPLETE
+
+**Phase 5 Deliverables:**
+- Auto-generated `docs/MERGE_DECISIONS.md` from pattern registry
+- `scripts/generate_merge_docs.py` with `--check` mode for CI
+- Enhanced docstrings with explicit precedence order documentation
+- 12 new tests for documentation-as-code validation
 
 **Phase 4 Deliverables:**
 - Unified `InteractiveDecisionCallback` protocol with `DecisionContext` and `Decision` dataclasses

@@ -79,10 +79,32 @@ def stitch_block_continuations(
 ) -> list[Record]:
     """Stitch adjacent blocks that form logical continuations.
 
-    This function merges blocks based on several heuristics:
-    1. Q&A sequence continuations (Q1: -> Q2:) - highest priority
-    2. Lowercase continuation leads (sentence fragments)
-    3. Context prepending for partial sentences
+    This function merges blocks based on several heuristics with explicit
+    precedence order. Decisions are logged to transform_log for auditability.
+
+    **Precedence Order (evaluated top to bottom):**
+
+    1. **Q&A sequence continuations** (CRITICAL) - e.g., Q1: → Q2:
+       Always merge. Takes priority over heading checks because Q&A
+       sequences should stay together even when blocks have heading prefix.
+
+    2. **Heading boundary** (BOUNDARY) - current block is a heading
+       Never merge into headings. Preserves document structure.
+
+    3. **Previous heading boundary** (BOUNDARY) - previous block is heading
+       Never merge from headings (except Q&A, handled above).
+
+    4. **List-like start** (HIGH) - current block starts a list
+       Split to preserve list structure.
+
+    5. **Continuation lead** (LOW) - lowercase sentence fragment
+       Merge if text starts with continuation pattern and context available.
+
+    6. **Default** - no pattern matched
+       Keep blocks separate (preserve original boundaries).
+
+    All decisions are logged with reasons when transform_log is provided.
+    See docs/MERGE_DECISIONS.md for full pattern reference.
 
     Args:
         seq: Sequence of (page, block, text) records
@@ -92,6 +114,10 @@ def stitch_block_continuations(
 
     Returns:
         List of stitched records with merged continuations
+
+    See Also:
+        pdf_chunker.patterns.PatternRegistry.should_merge: Pattern-based decisions
+        docs/MERGE_DECISIONS.md: Auto-generated decision reference
     """
 
     def _consume(
