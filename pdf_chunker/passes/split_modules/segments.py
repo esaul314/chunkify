@@ -13,11 +13,12 @@ and improve maintainability.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from functools import reduce
 from itertools import accumulate
 from math import ceil
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 
 from pdf_chunker.passes.split_semantic_lists import BulletHeuristicStrategy
 
@@ -25,7 +26,11 @@ from .footers import record_is_footer_candidate as _record_is_footer_candidate
 from .footers import strip_footer_suffixes as _strip_footer_suffixes
 from .lists import (
     first_list_number as _first_list_number,
+)
+from .lists import (
     last_list_number as _last_list_number,
+)
+from .lists import (
     starts_list_like as _starts_list_like,
 )
 from .stitching import merge_record_block as _merge_record_block
@@ -115,7 +120,7 @@ def _resolve_bullet_strategy(
 # ---------------------------------------------------------------------------
 
 
-def _resolved_limit(options: "SplitOptions | None", limit: int | None) -> int | None:
+def _resolved_limit(options: SplitOptions | None, limit: int | None) -> int | None:
     """Compute the effective soft limit from options or explicit limit."""
     candidate: int | None
     if limit is not None:
@@ -129,14 +134,14 @@ def _resolved_limit(options: "SplitOptions | None", limit: int | None) -> int | 
     return candidate
 
 
-def _hard_limit(options: "SplitOptions | None", resolved_limit: int | None) -> int | None:
+def _hard_limit(options: SplitOptions | None, resolved_limit: int | None) -> int | None:
     """Compute the hard limit (chunk_size) from options."""
     if options is not None and options.chunk_size > 0:
         return options.chunk_size
     return resolved_limit
 
 
-def _overlap_value(options: "SplitOptions | None") -> int:
+def _overlap_value(options: SplitOptions | None) -> int:
     """Extract overlap value from options."""
     return options.overlap if options is not None else 0
 
@@ -506,8 +511,8 @@ def _page_or_footer_boundary(
 
 
 def _projected_overflow(
-    state: "_CollapseEmitter",
-    block: "Block",
+    state: _CollapseEmitter,
+    block: Block,
     text: str,
     counts: tuple[int, int, int],
 ) -> str | None:
@@ -555,7 +560,7 @@ class _CollapseEmitter:
         idx: int,
         record: Record,
         counts: tuple[int, int, int],
-    ) -> "_CollapseEmitter":
+    ) -> _CollapseEmitter:
         """Append record to buffer, updating running totals."""
         start_index = self.start_index if self.buffer else idx
         words = self.running_words + counts[0] if self.buffer else counts[0]
@@ -568,7 +573,7 @@ class _CollapseEmitter:
             start_index=start_index,
         )
 
-    def flush(self, *, overflow: bool = False) -> "_CollapseEmitter":
+    def flush(self, *, overflow: bool = False) -> _CollapseEmitter:
         """Flush buffer to outputs."""
         if not self.buffer:
             return self
@@ -591,7 +596,7 @@ class _CollapseEmitter:
             outputs=self.outputs + produced,
         )
 
-    def emit_single(self, idx: int, record: Record) -> "_CollapseEmitter":
+    def emit_single(self, idx: int, record: Record) -> _CollapseEmitter:
         """Emit a single record directly to outputs."""
         page, block, text = record
         entry: Record = (page, _with_chunk_index(block, idx), text)
@@ -605,7 +610,7 @@ class _CollapseEmitter:
 
 def _should_emit_list_boundary(
     previous: Record,
-    block: "Block",
+    block: Block,
     text: str,
     *,
     strategy: BulletHeuristicStrategy | None = None,
@@ -669,8 +674,8 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
 
 
 def _maybe_merge_dense_page(
-    records: "Iterable[Record]",
-    options: "SplitOptions | None",
+    records: Iterable[Record],
+    options: SplitOptions | None,
     limit: int | None,
     *,
     strategy: BulletHeuristicStrategy | None = None,
@@ -699,8 +704,8 @@ def _maybe_merge_dense_page(
 
 
 def collapse_records(
-    records: "Iterable[Record]",
-    options: "SplitOptions | None" = None,
+    records: Iterable[Record],
+    options: SplitOptions | None = None,
     limit: int | None = None,
     *,
     strategy: BulletHeuristicStrategy | None = None,

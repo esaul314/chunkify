@@ -53,7 +53,6 @@ from pdf_chunker.passes.split_modules.overlap import (
     trim_tokens,
 )
 from pdf_chunker.passes.split_modules.segments import (
-    _CollapseEmitter,
     _allow_colon_list_overflow,
     _allow_cross_page_list,
     _allow_list_overflow,
@@ -61,6 +60,7 @@ from pdf_chunker.passes.split_modules.segments import (
     _buffer_last_list_number,
     _collapse_records,
     _collapse_step,
+    _CollapseEmitter,
     _effective_counts,
     _emit_buffer_segments,
     _emit_individual_records,
