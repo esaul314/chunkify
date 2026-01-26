@@ -53,6 +53,7 @@ These priorities are applied **continuously**, including micro-decisions (naming
 | [CODESTYLE.md](CODESTYLE.md) | Code style, patterns, and formatting standards |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution workflow, quality gates, PR expectations |
 | [docs/inline_style_schema.md](docs/inline_style_schema.md) | Inline style metadata schema |
+| [docs/REFACTORING_ROADMAP.md](docs/REFACTORING_ROADMAP.md) | Structural improvements and pattern registry proposal |
 | [scripts/AGENTS.md](scripts/AGENTS.md) | Guidance for maintenance scripts |
 | [tests/AGENTS.md](tests/AGENTS.md) | Guidance for test modules |
 
@@ -552,12 +553,19 @@ For each task, follow this loop:
 
 ---
 
-## Legacy-Aware Migration Rules
+## Module Organization Reference (Historical)
 
-When wrapping existing functions in passes/adapters:
+> **Note:** This section documents the **completed migration** from domain modules to the
+> pass/adapter architecture. The term "legacy" here is historical—these functions are now
+> thin shims delegating to the pass implementations. There is no significant legacy code
+> to remove; these shims exist for backward compatibility with external consumers.
+>
+> See [REFACTORING_ROADMAP.md](docs/REFACTORING_ROADMAP.md) for structural improvement plans.
 
-| Legacy Function | Target Pass | Notes |
-|-----------------|-------------|-------|
+The following table maps domain module functions to their corresponding passes:
+
+| Domain Function | Pass | Notes |
+|-----------------|------|-------|
 | `pdf_parsing.extract_text_blocks_from_pdf` | `pdf_parse` | Yields iterator of `Block` dataclasses |
 | `epub_parsing.extract_text_blocks_from_epub` | `epub_parse` | |
 | `text_cleaning.clean_paragraph` / `clean_text` | `text_clean` | |
