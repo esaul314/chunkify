@@ -1,8 +1,25 @@
 # REFACTORING_ROADMAP.md — Structural Improvements for Maintainability
 
 **Date:** 2026-01-26  
-**Status:** PROPOSAL  
+**Status:** PHASES 0-4 IMPLEMENTED (see STRATEGIC_REFACTORING_PLAN.md for details)  
 **Author:** System (following Q&A sequence merging debug session)
+
+> **Note:** This document was the original proposal. For current implementation status,
+> see [STRATEGIC_REFACTORING_PLAN.md](STRATEGIC_REFACTORING_PLAN.md).
+
+---
+
+## Implementation Status
+
+| Section | Status | Implementation |
+|---------|--------|----------------|
+| §1 Legacy Code Clarification | ✅ Done | AGENTS.md updated |
+| §2 Transformation State Tracking | ✅ Done | `transform_log.py`, `--trace` mode |
+| §3 Pattern Registry | ✅ Done | `patterns.py` with 12 patterns |
+| §4 Module Decomposition | ✅ Done | `split_modules/` (7 modules, 61% reduction) |
+| Interactive Callback Unification | ✅ Done | `interactive.py` (Phase 4) |
+| Learned Patterns | ✅ Done | `learned_patterns.py` (Phase 4) |
+| Confidence-Based Heuristics | ✅ Done | `patterns.py` (Phase 4) |
 
 ---
 
@@ -12,11 +29,11 @@ This document outlines structural refactoring opportunities identified during th
 
 ### Key Problems Identified
 
-1. **1,886-line `split_semantic.py`** — Far exceeds the 300-500 line guideline in ARCHITECTURE.md
-2. **Implicit transformation state** — No way to know what merges/splits a text fragment has undergone
-3. **Order-sensitive logic** — Q&A fix required moving code BEFORE heading checks; such dependencies are invisible
-4. **Pattern detection scattered** — Similar patterns (Q&A sequences, numbered lists, bullets) handled in multiple places
-5. **"Legacy" terminology confusion** — Documentation mentions "legacy" but refers to pre-pass module organization, not deprecated code
+1. **~~1,886-line~~ `split_semantic.py`** — ✅ Reduced to 771 lines (61% reduction)
+2. **~~Implicit transformation state~~** — ✅ `TransformationLog` and `--trace` mode implemented
+3. **~~Order-sensitive logic~~** — ✅ Pattern registry with explicit precedence
+4. **~~Pattern detection scattered~~** — ✅ Centralized in `patterns.py`
+5. **"Legacy" terminology confusion** — ✅ AGENTS.md clarified
 
 ---
 

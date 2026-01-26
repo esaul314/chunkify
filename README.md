@@ -54,6 +54,7 @@ pdf_chunker convert "book.pdf" --out tts.jsonl --max-chars 1000 --no-metadata
 | `text_clean.footer_patterns` | `--footer-pattern` | Regex patterns to strip as footers | – |
 | `text_clean.interactive_footers` | `--interactive-footers` | Prompt for footer confirmation | `false` |
 | – | `--interactive` | Enable all interactive prompts (footers + lists) | `false` |
+| – | `--teach` | Learn from interactive decisions and persist for future runs | `false` |
 
 > Supply a custom spec via `--spec pipeline.yaml` to override defaults.
 
@@ -178,6 +179,38 @@ Your decisions are cached by title, so similar footers on subsequent pages are h
 pdf_chunker convert book.pdf --out out.jsonl --interactive --footer-pattern "Chapter.*"
 ```
 
+### Learning Mode (--teach)
+
+When processing multiple similar documents, you can use `--teach` mode to persist your interactive decisions. Once learned, patterns are automatically applied in future runs:
+
+```bash
+# First run: interactively teach the pipeline about your document's patterns
+pdf_chunker convert book1.pdf --out out1.jsonl --interactive --teach
+
+# Subsequent runs: learned patterns are applied automatically
+pdf_chunker convert book2.pdf --out out2.jsonl
+```
+
+**How it works:**
+- When you confirm or reject a footer/list continuation in `--teach` mode, the pattern is saved
+- Patterns are stored in `~/.config/pdf_chunker/learned_patterns.yaml`
+- On subsequent runs, matching patterns trigger the learned decision automatically
+- Confidence thresholds determine when to apply learned patterns vs. prompt again
+
+**Managing learned patterns:**
+```bash
+# View learned patterns
+cat ~/.config/pdf_chunker/learned_patterns.yaml
+
+# Reset learned patterns
+rm ~/.config/pdf_chunker/learned_patterns.yaml
+```
+
+**Use cases:**
+- Processing a book series with consistent footer formatting
+- Batch converting documents from the same publisher
+- Building organization-specific pattern libraries
+
 ### YAML Configuration
 
 For repeated use, add footer patterns to your pipeline spec:
@@ -240,6 +273,15 @@ The CLI will display the list item and candidate continuation:
   Heuristic: item_looks_incomplete+continuation_word
 Merge into list item? [Y/n]
 ```
+
+**Confidence-based decisions:**
+- **High confidence (≥85%)**: Decision is applied automatically
+- **Medium confidence (30-85%)**: Interactive prompt shown
+- **Low confidence (<30%)**: Default behavior applied
+
+Special pattern detection includes:
+- **Q&A sequences**: Automatically detects "Q:" / "A:" patterns and applies appropriate merging
+- **Colon-prefixed lists**: Recognizes items like "Key points:" followed by bullet lists
 
 ### YAML Configuration
 

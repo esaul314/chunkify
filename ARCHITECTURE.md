@@ -27,6 +27,9 @@ pdf_chunker/
 │   ├── cli.py               # Typer CLI: convert / inspect commands
 │   ├── config.py            # Pydantic Settings + YAML pipeline spec loader
 │   ├── framework.py         # Artifact/Pass registry + pipeline runner
+│   ├── interactive.py       # Unified interactive callback protocol
+│   ├── learned_patterns.py  # Persistent learned patterns (~/.config/pdf_chunker/)
+│   ├── patterns.py          # Pattern registry and confidence-based evaluation
 │   ├── adapters/            # I/O boundaries (PDF/EPUB read, JSONL write, LLM calls)
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
@@ -39,6 +42,7 @@ pdf_chunker/
 │   │   ├── heading_detect.py
 │   │   ├── list_detect.py
 │   │   ├── split_semantic.py
+│   │   ├── split_modules/   # Decomposed modules (footers, lists, stitching, etc.)
 │   │   ├── ai_enrich.py
 │   │   └── emit_jsonl.py
 │   ├── # Domain modules (shared pure logic)
@@ -141,6 +145,31 @@ Use patterns to reduce confusion, not to signal sophistication.
 - **Adapter**: isolate third-party APIs and unstable boundaries (LLM calls, file I/O)
 - **Factory**: controlled object construction via `pipeline.yaml` configuration
 - **Pipeline**: data transformations as registered passes (our core pattern)
+- **Protocol**: unified callback interfaces for interactive decisions (`InteractiveDecisionCallback`)
+
+## 6.1) Interactive Callback System
+
+The pipeline supports interactive decision-making for ambiguous cases (footers, list continuations, heading boundaries). This is implemented via a **unified callback protocol**:
+
+```python
+class InteractiveDecisionCallback(Protocol):
+    def __call__(self, context: DecisionContext) -> Decision: ...
+```
+
+**Key components:**
+- `DecisionKind`: Enum of decision types (FOOTER, LIST_CONTINUATION, PATTERN_MERGE, HEADING_BOUNDARY)
+- `DecisionContext`: Frozen dataclass with kind, text, page, confidence, pattern_name, extra context
+- `Decision`: Action (merge/split/skip) + remember mode (once/always/never) + reason
+
+**Confidence-based evaluation:**
+- High confidence (≥0.85): Automatic decision, no prompt needed
+- Medium confidence (0.3-0.85): Interactive prompt shown
+- Low confidence (<0.3): Default behavior applied
+
+**Learned patterns:**
+- `--teach` mode persists user decisions to `~/.config/pdf_chunker/learned_patterns.yaml`
+- Patterns are matched on subsequent runs for consistent behavior
+- Adapter functions maintain backward compatibility with legacy callbacks
 
 ## 7) SOLID, with taste
 
