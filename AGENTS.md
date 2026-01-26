@@ -67,20 +67,32 @@ These priorities are applied **continuously**, including micro-decisions (naming
 - 7 modules extracted to `pdf_chunker/passes/split_modules/`
 - All 642 tests passing
 
-**Phase 4 (Interactive Mode Unification): READY FOR IMPLEMENTATION**
+**Phase 4 (Interactive Mode Unification): COMPLETE**
 
-See [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) for detailed implementation steps.
+See [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) for implementation details.
 
-Key tasks:
-1. Unify interactive callbacks into single `InteractiveDecisionCallback` protocol
-2. Add `--teach` mode for persistent pattern learning
-3. Convert hard-coded heuristics to confidence-based interactive decisions
+Completed deliverables:
+1. Unified `InteractiveDecisionCallback` protocol in `pdf_chunker/interactive.py`
+   - `DecisionKind` enum: FOOTER, LIST_CONTINUATION, PATTERN_MERGE, HEADING_BOUNDARY
+   - `DecisionContext` dataclass with kind, text, page, confidence, pattern_name
+   - `Decision` dataclass with action (merge/split/skip), remember mode, reason
+   - Adapter functions for legacy callbacks: `adapt_footer_callback()`, `adapt_list_continuation_callback()`
 
-Files to start with:
-- `pdf_chunker/interactive.py` - Add unified protocol
-- `pdf_chunker/learned_patterns.py` - NEW: Persistence layer
-- `pdf_chunker/cli.py` - Add `--teach` flag
+2. `LearnedPatterns` persistence layer in `pdf_chunker/learned_patterns.py`
+   - YAML primary format with JSON fallback
+   - Stores at `~/.config/pdf_chunker/learned_patterns.yaml`
+   - Pattern matching for consistent decision reuse
 
+3. `--teach` CLI flag for persistent pattern learning
+   - Saves user decisions automatically
+   - Applies learned patterns in subsequent runs
+
+4. Confidence-based heuristic functions in `pdf_chunker/patterns.py`
+   - `qa_sequence_confidence()`: detects Q&A patterns
+   - `colon_list_boundary_confidence()`: detects colon-prefixed items
+   - `evaluate_merge_with_confidence()`: combined confidence scoring
+
+5. 189 new/updated tests passing
 ---
 
 ## Stable Dependencies
@@ -272,12 +284,15 @@ pdf_chunker/
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── fallbacks.py              # Quality assessment and extraction fallbacks
 │   ├── geometry.py                # Geometric zone detection for header/footer removal
+│   ├── interactive.py             # Unified interactive callback protocol (Phase 4)
 │   ├── language.py               # Default language utilities
+│   ├── learned_patterns.py        # Persistent learned patterns (Phase 4)
 │   ├── heading_detection.py       # Heading detection heuristics and fallbacks
 │   ├── list_detection.py          # Bullet and numbered list detection helpers
 │   ├── page_artifacts.py          # Header/footer detection helpers
 │   ├── page_utils.py              # Page range parsing and validation
 │   ├── parsing.py                 # Structural Pass: visual/font-based extraction
+│   ├── patterns.py                # Pattern registry and confidence-based evaluation
 │   ├── pdf_parsing.py             # Core PDF extraction logic
 │   ├── pymupdf4llm_integration.py # Optional PyMuPDF4LLM enhancement
 │   ├── source_matchers.py         # Source citation heuristics
@@ -331,6 +346,7 @@ pdf_chunker/
     ├── artifact_block_test.py
     ├── bullet_list_test.py
     ├── chunk_pdf_integration_test.py
+    ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── cross_page_sentence_test.py
     ├── env_utils_test.py
@@ -340,6 +356,8 @@ pdf_chunker/
     ├── heading_detection_test.py
     ├── hyphenation_test.py
     ├── indented_block_test.py
+    ├── interactive_unified_test.py     # Phase 4: unified callback protocol tests
+    ├── learned_patterns_test.py        # Phase 4: learned patterns persistence tests
     ├── list_detection_edge_case_test.py
     ├── multiline_bullet_test.py
     ├── multiline_numbered_test.py

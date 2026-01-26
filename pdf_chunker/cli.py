@@ -73,9 +73,22 @@ def _run_convert(
     footer_margin: float | None = None,
     header_margin: float | None = None,
     auto_detect_zones: bool = False,
+    teach: bool = False,
 ) -> None:
     # Resolve interactive flags: --interactive enables all
     effective_interactive_footers = interactive or interactive_footers
+
+    # --teach implies --interactive
+    if teach:
+        interactive = True
+        effective_interactive_footers = True
+
+    # Load learned patterns if they exist
+    learned_patterns = None
+    if teach or interactive:
+        from pdf_chunker.learned_patterns import LearnedPatterns
+
+        learned_patterns = LearnedPatterns.load()
 
     if max_chars:
         os.environ["PDF_CHUNKER_JSONL_MAX_CHARS"] = str(max_chars)
@@ -155,6 +168,14 @@ def _run_convert(
     _, timings = run_convert(_input_artifact(str(input_path), s), s, trace=trace)
     if verbose:
         print(_format_timings(timings))
+
+    # Save learned patterns if --teach mode was enabled
+    if teach and learned_patterns is not None:
+        learned_patterns.save()
+        count = len(learned_patterns.patterns)
+        if count > 0:
+            print(f"teach: saved {count} learned pattern(s)")
+
     print("convert: OK")
 
 
@@ -339,6 +360,11 @@ if typer:
             "--auto-detect-zones",
             help="Auto-detect header/footer zones using geometry",
         ),
+        teach: bool = typer.Option(
+            False,
+            "--teach",
+            help="Save interactive decisions for future runs (implies --interactive)",
+        ),
     ) -> None:
         _safe(
             lambda: _run_convert(
@@ -360,6 +386,7 @@ if typer:
                 footer_margin=footer_margin,
                 header_margin=header_margin,
                 auto_detect_zones=auto_detect_zones,
+                teach=teach,
             )
         )
 
@@ -422,6 +449,11 @@ else:
             action="store_true",
             help="Auto-detect header/footer zones using geometry",
         )
+        conv.add_argument(
+            "--teach",
+            action="store_true",
+            help="Save interactive decisions for future runs (implies --interactive)",
+        )
         conv.set_defaults(
             enrich=False,
             footer_patterns=None,
@@ -431,6 +463,7 @@ else:
             footer_margin=None,
             header_margin=None,
             auto_detect_zones=False,
+            teach=False,
             func=lambda ns: _safe(
                 lambda: _run_convert(
                     ns.input_path,
@@ -451,6 +484,7 @@ else:
                     footer_margin=ns.footer_margin,
                     header_margin=ns.header_margin,
                     auto_detect_zones=ns.auto_detect_zones,
+                    teach=ns.teach,
                 )
             ),
         )

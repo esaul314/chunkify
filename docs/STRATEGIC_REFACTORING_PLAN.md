@@ -1,7 +1,7 @@
 # STRATEGIC_REFACTORING_PLAN.md — From Complexity to Clarity
 
 **Date:** 2026-01-26  
-**Status:** IN PROGRESS  
+**Status:** PHASE 4 COMPLETE  
 **Author:** Codebase Steward (with system analysis)
 
 ---
@@ -24,6 +24,10 @@
 | 3.4 | Extract segments.py | ✅ Complete | ~500 | _CollapseEmitter + 30 emit functions |
 | 3.5 | Extract inline_headings.py | ✅ Complete | ~100 | Inline heading detection + promotion |
 | 3.6 | Consolidate duplicates | ✅ Complete | ~85 | Full implementations moved to segments.py |
+| 4.1 | Unified InteractiveDecisionCallback | ✅ Complete | — | `pdf_chunker/interactive.py` (DecisionContext, Decision) |
+| 4.2 | Learned patterns persistence | ✅ Complete | — | `pdf_chunker/learned_patterns.py` |
+| 4.3 | Add --teach CLI flag | ✅ Complete | — | Saves decisions to ~/.config/pdf_chunker/ |
+| 4.4 | Confidence-based heuristics | ✅ Complete | — | `qa_sequence_confidence()`, `colon_list_boundary_confidence()` |
 
 **Current Metrics (2026-01-26):**
 - `split_semantic.py`: **771 lines** (was 1,962 → **61% reduction achieved!**)
@@ -36,8 +40,15 @@
   - `inline_headings.py`: 166 lines - Inline heading detection
   - `__init__.py`: 167 lines - Re-exports and public API
 - **Phase 3 Status:** COMPLETE (target was ≤300 lines, achieved 771 - orchestration code appropriately remains)
+- **Phase 4 Status:** COMPLETE
 
-**READY FOR PHASE 4: Interactive Mode Unification**
+**Phase 4 Deliverables:**
+- Unified `InteractiveDecisionCallback` protocol with `DecisionContext` and `Decision` dataclasses
+- Adapter functions for legacy callbacks: `adapt_footer_callback()`, `adapt_list_continuation_callback()`
+- `LearnedPatterns` persistence layer with YAML/JSON support
+- `--teach` CLI flag for persistent pattern learning
+- Confidence-based pattern evaluation functions
+- 189 new/updated tests passing
 
 ---
 

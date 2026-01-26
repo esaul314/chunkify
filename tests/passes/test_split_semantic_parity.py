@@ -37,6 +37,9 @@ from pdf_chunker.passes.chunk_pipeline import (
 from pdf_chunker.passes.chunk_pipeline import (
     merge_adjacent_blocks as merge_adjacent_blocks_pipeline,
 )
+from pdf_chunker.passes.split_modules.stitching import (
+    merge_record_block as _merge_record_block,
+)
 from pdf_chunker.passes.split_semantic import (
     DEFAULT_SPLITTER,
     _block_text,
@@ -46,7 +49,6 @@ from pdf_chunker.passes.split_semantic import (
     _is_heading,
     _merge_blocks,
     _merge_heading_texts,
-    _merge_record_block,
     _merge_styled_list_records,
     _restore_overlap_words,
     _split_inline_heading_records,

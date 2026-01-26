@@ -35,10 +35,210 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     pass
+
+
+# ---------------------------------------------------------------------------
+# Unified Decision Protocol (Phase 4 Refactoring)
+# ---------------------------------------------------------------------------
+
+
+class DecisionKind(Enum):
+    """Types of interactive decisions the pipeline can request."""
+
+    FOOTER = "footer"  # Is this text a footer?
+    LIST_CONTINUATION = "list_continuation"  # Does this continue a list item?
+    PATTERN_MERGE = "pattern_merge"  # Should these texts be merged (pattern-based)?
+    HEADING_BOUNDARY = "heading_boundary"  # Is this a heading boundary?
+
+
+@dataclass(frozen=True)
+class DecisionContext:
+    """Context for an interactive decision request.
+
+    This unified context provides all information needed for any decision type,
+    allowing a single callback protocol to handle all interactive decisions.
+
+    Attributes:
+        kind: Type of decision being requested
+        curr_text: The text being evaluated
+        prev_text: Previous text (for merge decisions)
+        page: Page number for context
+        confidence: Heuristic confidence (0.0-1.0)
+        pattern_name: Name of pattern that triggered the decision (if any)
+        extra: Additional context-specific data
+    """
+
+    kind: DecisionKind
+    curr_text: str
+    prev_text: str | None = None
+    page: int = 0
+    confidence: float = 0.5
+    pattern_name: str | None = None
+    extra: dict[str, Any] | None = None
+
+
+@dataclass
+class Decision:
+    """Result of an interactive decision.
+
+    Attributes:
+        action: The decided action ("merge", "split", or "skip")
+        remember: Whether to remember this decision
+            - "once": Just this instance
+            - "always": Remember and apply to similar cases
+            - "never": Remember and do the opposite for similar cases
+        reason: Optional explanation of the decision
+    """
+
+    action: Literal["merge", "split", "skip"]
+    remember: Literal["once", "always", "never"] = "once"
+    reason: str | None = None
+
+
+class InteractiveDecisionCallback(Protocol):
+    """Unified protocol for all interactive pipeline decisions.
+
+    This is the primary callback interface for Phase 4 refactoring.
+    It handles all types of interactive decisions through a single
+    entry point with typed context.
+
+    Usage:
+        def my_callback(ctx: DecisionContext) -> Decision:
+            if ctx.kind == DecisionKind.FOOTER:
+                is_footer = ask_user(f"Is this a footer? {ctx.curr_text[:60]}...")
+                return Decision(action="split" if is_footer else "merge")
+            return Decision(action="skip")  # Let heuristics decide
+    """
+
+    def __call__(self, context: DecisionContext) -> Decision:
+        """Process a decision request and return the user's choice."""
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Adapter functions for legacy callbacks
+# ---------------------------------------------------------------------------
+
+
+def adapt_footer_callback(
+    callback: FooterCallback,
+) -> InteractiveDecisionCallback:
+    """Wrap a legacy FooterCallback in the unified protocol.
+
+    The footer callback returns True (is footer) -> action="split" (remove it)
+    Returns False (not footer) -> action="merge" (keep it as content)
+    """
+
+    def unified(ctx: DecisionContext) -> Decision:
+        if ctx.kind != DecisionKind.FOOTER:
+            return Decision(action="skip")
+        extra = ctx.extra or {}
+        result = callback(ctx.curr_text, ctx.page, extra)
+        # Footer=True means remove it (split/separate from content)
+        return Decision(action="split" if result else "merge")
+
+    return unified
+
+
+def adapt_list_continuation_callback(
+    callback: ListContinuationCallback,
+) -> InteractiveDecisionCallback:
+    """Wrap a legacy ListContinuationCallback in the unified protocol.
+
+    The list callback returns True (continue) -> action="merge"
+    Returns False (not continuation) -> action="split"
+    """
+
+    def unified(ctx: DecisionContext) -> Decision:
+        if ctx.kind != DecisionKind.LIST_CONTINUATION:
+            return Decision(action="skip")
+        extra = ctx.extra or {}
+        result = callback(ctx.prev_text or "", ctx.curr_text, ctx.page, extra)
+        return Decision(action="merge" if result else "split")
+
+    return unified
+
+
+def make_unified_cli_prompt(
+    *,
+    max_preview: int = 80,
+) -> InteractiveDecisionCallback:
+    """Create a CLI-friendly unified prompt callback.
+
+    This callback handles all decision types with appropriate prompts.
+    """
+
+    def _prompt(ctx: DecisionContext) -> Decision:
+        kind = ctx.kind.value.replace("_", " ").title()
+        confidence_str = f"{ctx.confidence:.0%}"
+
+        print(f"\n--- {kind} Decision (page {ctx.page}, confidence {confidence_str}) ---")
+
+        if ctx.kind == DecisionKind.FOOTER:
+            preview = ctx.curr_text[:max_preview].replace("\n", "\\n")
+            ellipsis = "..." if len(ctx.curr_text) > max_preview else ""
+            print(f"  Text: {preview}{ellipsis}")
+            response = input("Treat as footer (remove)? [y/N/always/never] ").strip().lower()
+            is_footer = response in ("y", "yes")
+            remember = (
+                "always" if response == "always" else "never" if response == "never" else "once"
+            )
+            return Decision(action="split" if is_footer else "merge", remember=remember)
+
+        elif ctx.kind == DecisionKind.LIST_CONTINUATION:
+            item_preview = (ctx.prev_text or "")[:max_preview].replace("\n", "\\n")
+            cand_preview = ctx.curr_text[:max_preview].replace("\n", "\\n")
+            item_ellipsis = "..." if len(ctx.prev_text or "") > max_preview else ""
+            cand_ellipsis = "..." if len(ctx.curr_text) > max_preview else ""
+            print(f"  List item: {item_preview}{item_ellipsis}")
+            print(f"  Candidate: {cand_preview}{cand_ellipsis}")
+            response = input("Merge into list item? [Y/n/always/never] ").strip().lower()
+            should_merge = response in ("", "y", "yes", "always")
+            remember = (
+                "always" if response == "always" else "never" if response == "never" else "once"
+            )
+            return Decision(action="merge" if should_merge else "split", remember=remember)
+
+        elif ctx.kind == DecisionKind.PATTERN_MERGE:
+            prev_preview = (ctx.prev_text or "")[-max_preview:].replace("\n", "\\n")
+            curr_preview = ctx.curr_text[:max_preview].replace("\n", "\\n")
+            pattern = ctx.pattern_name or "unknown"
+            print(f"  Pattern: {pattern}")
+            print(f"  Previous ends: ...{prev_preview}")
+            print(f"  Current starts: {curr_preview}...")
+            response = input("Keep together (merge)? [Y/n/always/never] ").strip().lower()
+            should_merge = response in ("", "y", "yes", "always")
+            remember = (
+                "always" if response == "always" else "never" if response == "never" else "once"
+            )
+            return Decision(action="merge" if should_merge else "split", remember=remember)
+
+        elif ctx.kind == DecisionKind.HEADING_BOUNDARY:
+            preview = ctx.curr_text[:max_preview].replace("\n", "\\n")
+            print(f"  Text: {preview}{'...' if len(ctx.curr_text) > max_preview else ''}")
+            response = (
+                input("Treat as heading boundary (split here)? [y/N/always/never] ").strip().lower()
+            )
+            is_boundary = response in ("y", "yes")
+            remember = (
+                "always" if response == "always" else "never" if response == "never" else "once"
+            )
+            return Decision(action="split" if is_boundary else "merge", remember=remember)
+
+        # Default: skip (let heuristics decide)
+        return Decision(action="skip")
+
+    return _prompt
+
+
+# ---------------------------------------------------------------------------
+# Legacy Protocols (kept for backward compatibility)
+# ---------------------------------------------------------------------------
 
 
 class FooterCallback(Protocol):

@@ -432,3 +432,202 @@ def is_continuation_lead(text: str) -> bool:
     if cont_pattern is None:
         return False
     return cont_pattern.matches(text.lstrip())
+
+
+# ---------------------------------------------------------------------------
+# Confidence-based pattern evaluation (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ConfidenceDecision:
+    """Result of confidence-based pattern evaluation.
+
+    This extends MergeDecision with confidence scoring for interactive mode.
+    When confidence is low enough, the system can prompt for user confirmation.
+    """
+
+    should_merge: bool
+    confidence: float  # 0.0 to 1.0
+    reason: str
+    pattern: Pattern | None = None
+    needs_confirmation: bool = False  # True when confidence is in "ask" range
+
+    @property
+    def is_certain(self) -> bool:
+        """Return True if confidence is high enough to not need confirmation."""
+        return self.confidence >= 0.85 or self.confidence <= 0.15
+
+
+def qa_sequence_confidence(prev_text: str, curr_text: str) -> ConfidenceDecision:
+    """Evaluate Q&A sequence continuation with confidence scoring.
+
+    Returns a ConfidenceDecision that can be used for interactive prompts
+    when confidence is in the uncertain range (0.3-0.7).
+
+    High confidence (>=0.85): Definite Q&A sequence (Q1: followed by Q2:)
+    Medium confidence (0.5-0.84): Possible Q&A sequence (partial pattern match)
+    Low confidence (<0.3): Unlikely to be Q&A sequence
+    """
+    curr_stripped = curr_text.lstrip()
+
+    # Check for explicit Q&A pattern match
+    qa_pattern = re.compile(r"^[QA]\d+:", re.IGNORECASE)
+    prev_has_qa = bool(re.search(r"[QA]\d+:", prev_text, re.IGNORECASE))
+    curr_starts_qa = bool(qa_pattern.match(curr_stripped))
+
+    if prev_has_qa and curr_starts_qa:
+        # Both have Q&A patterns - high confidence
+        return ConfidenceDecision(
+            should_merge=True,
+            confidence=0.95,
+            reason="qa_sequence:both_have_qa_pattern",
+            needs_confirmation=False,
+        )
+
+    if curr_starts_qa and not prev_has_qa:
+        # Current starts Q&A but previous doesn't - might be new sequence
+        return ConfidenceDecision(
+            should_merge=False,
+            confidence=0.7,
+            reason="qa_sequence:new_qa_sequence_start",
+            needs_confirmation=True,
+        )
+
+    if prev_has_qa and not curr_starts_qa:
+        # Previous has Q&A but current doesn't - might be answer continuation
+        # Check if current looks like answer text
+        if curr_stripped and curr_stripped[0].isupper() and len(curr_stripped) > 20:
+            return ConfidenceDecision(
+                should_merge=True,
+                confidence=0.6,
+                reason="qa_sequence:possible_answer_continuation",
+                needs_confirmation=True,
+            )
+        return ConfidenceDecision(
+            should_merge=False,
+            confidence=0.4,
+            reason="qa_sequence:no_continuation_signal",
+            needs_confirmation=True,
+        )
+
+    # No Q&A patterns
+    return ConfidenceDecision(
+        should_merge=False,
+        confidence=0.1,
+        reason="qa_sequence:no_qa_patterns",
+        needs_confirmation=False,
+    )
+
+
+def colon_list_boundary_confidence(
+    prev_text: str,
+    curr_text: str,
+) -> ConfidenceDecision:
+    """Evaluate colon-list boundary with confidence scoring.
+
+    Detects patterns like "Here are the items:" followed by "• First item"
+
+    High confidence: Clear colon followed by clear bullet
+    Medium confidence: Colon but ambiguous list start
+    Low confidence: No colon-list pattern
+    """
+    prev_stripped = prev_text.rstrip()
+    curr_stripped = curr_text.lstrip()
+
+    # Check for colon at end of previous text
+    if not prev_stripped.endswith(":"):
+        return ConfidenceDecision(
+            should_merge=False,
+            confidence=0.1,
+            reason="colon_list:no_colon_ending",
+            needs_confirmation=False,
+        )
+
+    # Check for bullet at start of current text
+    bullet_chars = frozenset("•●○◦▪▫‣⁃-–—")
+    numbered_pattern = re.compile(r"^\d+[.)]\s")
+
+    if curr_stripped and curr_stripped[0] in bullet_chars:
+        return ConfidenceDecision(
+            should_merge=True,
+            confidence=0.95,
+            reason="colon_list:clear_bullet_after_colon",
+            needs_confirmation=False,
+        )
+
+    if numbered_pattern.match(curr_stripped):
+        return ConfidenceDecision(
+            should_merge=True,
+            confidence=0.9,
+            reason="colon_list:numbered_after_colon",
+            needs_confirmation=False,
+        )
+
+    # Colon but no clear list start - might be subtitle or other structure
+    if curr_stripped and curr_stripped[0].isupper():
+        return ConfidenceDecision(
+            should_merge=False,
+            confidence=0.5,
+            reason="colon_list:colon_with_capitalized_text",
+            needs_confirmation=True,
+        )
+
+    return ConfidenceDecision(
+        should_merge=True,
+        confidence=0.6,
+        reason="colon_list:colon_with_lowercase_continuation",
+        needs_confirmation=True,
+    )
+
+
+def evaluate_merge_with_confidence(
+    prev_text: str,
+    curr_text: str,
+    *,
+    interactive_callback: InteractiveCallback | None = None,
+    context: Mapping[str, Any] | None = None,
+) -> MergeDecision:
+    """Evaluate merge decision using confidence-based approach.
+
+    This function combines pattern matching with confidence scoring,
+    falling back to interactive prompts when confidence is uncertain.
+
+    Args:
+        prev_text: Text from previous block
+        curr_text: Text from current block
+        interactive_callback: Optional callback for uncertain cases
+        context: Additional context for the callback
+
+    Returns:
+        MergeDecision with should_merge, reason, and confidence
+    """
+    # First check Q&A sequences - only return early if Q&A pattern was found
+    qa_decision = qa_sequence_confidence(prev_text, curr_text)
+    if qa_decision.confidence >= 0.5 and qa_decision.is_certain:
+        return MergeDecision(
+            should_merge=qa_decision.should_merge,
+            reason=qa_decision.reason,
+            confidence=qa_decision.confidence,
+        )
+    # If Q&A pattern detected but uncertain, continue to check other patterns
+
+    # Check colon-list boundaries
+    colon_decision = colon_list_boundary_confidence(prev_text, curr_text)
+    if colon_decision.is_certain:
+        return MergeDecision(
+            should_merge=colon_decision.should_merge,
+            reason=colon_decision.reason,
+            confidence=colon_decision.confidence,
+        )
+
+    # Use standard pattern registry for other patterns
+    registry = get_registry()
+    pattern_decision = registry.should_merge(
+        prev_text,
+        curr_text,
+        interactive_callback=interactive_callback,
+        context=context,
+    )
+
+    return pattern_decision
