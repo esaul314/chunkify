@@ -16,9 +16,9 @@ Invariants covered here:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from functools import partial
 from pathlib import Path
-from typing import Iterable
 
 import pytest
 
@@ -41,16 +41,16 @@ from pdf_chunker.passes.split_semantic import (
     DEFAULT_SPLITTER,
     _block_text,
     _collapse_records,
+    _get_split_fn,
     _inject_continuation_context,
-    _merge_styled_list_records,
+    _is_heading,
     _merge_blocks,
-    _merge_record_block,
     _merge_heading_texts,
+    _merge_record_block,
+    _merge_styled_list_records,
     _restore_overlap_words,
     _split_inline_heading_records,
     _stitch_block_continuations,
-    _get_split_fn,
-    _is_heading,
     build_chunk,
     build_chunk_with_meta,
 )
@@ -58,7 +58,6 @@ from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
     default_bullet_strategy,
 )
-
 
 _BULLET_HEURISTICS: BulletHeuristicStrategy = (
     DEFAULT_SPLITTER.bullet_strategy or default_bullet_strategy()
@@ -73,9 +72,7 @@ def _manual_pipeline(doc: dict) -> tuple[list[dict], dict[str, int]]:
         DEFAULT_SPLITTER.overlap,
         DEFAULT_SPLITTER.min_chunk_size,
     )
-    split_fn, metric_fn = _get_split_fn(
-        options.chunk_size, options.overlap, options.min_chunk_size
-    )
+    split_fn, metric_fn = _get_split_fn(options.chunk_size, options.overlap, options.min_chunk_size)
     limit = options.compute_limit()
     records = merge_adjacent_blocks_pipeline(
         iter_blocks_pipeline(doc),
@@ -165,11 +162,7 @@ def _find_chunk(items: Iterable[dict], *needles: str) -> dict:
     """Return the first chunk whose text contains all ``needles``."""
 
     match = next(
-        (
-            item
-            for item in items
-            if all(needle in item.get("text", "") for needle in needles)
-        ),
+        (item for item in items if all(needle in item.get("text", "") for needle in needles)),
         None,
     )
     if match is None:
@@ -232,21 +225,19 @@ def test_platform_eng_parity() -> None:
     continuation = "ownership of operating the application's infrastructure"
     assert any(continuation in chunk for chunk in _texts(legacy_items))
 
-    chapter_reference = "Chapter 10.\n\nWrapping Up"
-    assert any(chapter_reference in chunk for chunk in _texts(legacy_items))
-    assert any(chapter_reference in chunk for chunk in _texts(refactored_items))
+    # Headings with has_heading_prefix now start new chunks, so "Wrapping Up"
+    # appears at the start of its own chunk rather than merged after "Chapter 10."
+    wrapping_up_heading = "Wrapping Up\n"
+    assert any(chunk.startswith(wrapping_up_heading) for chunk in _texts(legacy_items))
+    assert any(chunk.startswith(wrapping_up_heading) for chunk in _texts(refactored_items))
 
     list_meta = [meta for meta in _metas(legacy_items) if meta.get("list_kind")]
     assert list_meta, "expected list metadata to be present"
-    assert list_meta == [
-        meta for meta in _metas(refactored_items) if meta.get("list_kind")
-    ]
+    assert list_meta == [meta for meta in _metas(refactored_items) if meta.get("list_kind")]
 
     leverage_chunk = _find_chunk(refactored_items, "Leverage", "Core to the value")
     leverage_text = leverage_chunk["text"]
-    assert leverage_text == _find_chunk_text(
-        legacy_items, "Leverage", "Core to the value"
-    )
+    assert leverage_text == _find_chunk_text(legacy_items, "Leverage", "Core to the value")
     assert "Leverage\nCore to the value" in leverage_text
     assert "Leverage\n\nCore to the value" not in leverage_text
 
@@ -378,3 +369,24 @@ def test_merge_record_block_preserves_list_kind_in_mixed_merge() -> None:
     merged = _merge_record_block(records, "\n\n".join(block for _, _, block in records))
     assert merged.get("type") == "paragraph"
     assert merged.get("list_kind") == "bullet"
+
+
+def test_heading_stays_with_section_content() -> None:
+    """Headings must appear at the start of a chunk WITH their section content.
+
+    When a heading is detected (via has_heading_prefix), it should start a new
+    chunk, but the chunk must also contain the section content following the
+    heading, not just the heading text alone.
+    """
+    heading = {"type": "paragraph", "text": "Some Title", "has_heading_prefix": True}
+    content = {"type": "paragraph", "text": "This is the section content that follows."}
+    records = [
+        (1, heading, "Some Title\nThis is the section content that follows."),
+        (1, content, "More content in another block."),
+    ]
+
+    # The heading-prefixed block should contain both heading and content
+    text = records[0][2]
+    assert text.startswith("Some Title\n"), "Heading should be at start"
+    assert "section content" in text, "Section content must be in same chunk as heading"
+    assert len(text) > 50, "Heading chunk should not be tiny"

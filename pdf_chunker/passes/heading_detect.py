@@ -24,7 +24,7 @@ import re
 Block = Dict[str, Any]
 
 
-_HEADING_STYLE_TAGS = frozenset({"bold", "caps", "small_caps"})
+_HEADING_STYLE_TAGS = frozenset({"bold", "caps", "small_caps", "large"})
 _CAPS_STYLE_TAGS = frozenset({"caps", "small_caps"})
 
 

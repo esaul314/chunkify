@@ -8,7 +8,9 @@ from typing import Any
 
 from pdf_chunker.inline_styles import InlineStyleSpan
 
-_HEADING_STYLE_FLAVORS = frozenset({"bold", "italic", "small_caps", "caps", "uppercase"})
+_HEADING_STYLE_FLAVORS = frozenset(
+    {"bold", "italic", "small_caps", "caps", "uppercase", "large"}
+)
 
 
 def _span_attr(span: Any, name: str, default: Any = None) -> Any:

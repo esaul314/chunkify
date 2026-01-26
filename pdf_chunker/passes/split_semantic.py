@@ -396,7 +396,7 @@ def _promote_inline_heading(block: Block, text: str) -> Block:
 
     def _is_heading_style(style: Any) -> bool:
         flavor = _span_style(style).lower()
-        return flavor in {"bold", "italic", "small_caps", "caps", "uppercase"}
+        return flavor in {"bold", "italic", "small_caps", "caps", "uppercase", "large"}
 
     word_limit = len(tuple(token for token in text.split() if token))
     if word_limit > 12:
@@ -420,6 +420,12 @@ def _stitch_block_continuations(
     ) -> list[tuple[int, Block, str]]:
         page, block, text = cur
         if not acc:
+            return [*acc, cur]
+        # Don't merge heading blocks with other content
+        if _is_heading(block):
+            return [*acc, cur]
+        # Don't merge into heading blocks
+        if _is_heading(acc[-1][1]):
             return [*acc, cur]
         if _starts_list_like(block, text, strategy=strategy):
             return [*acc, cur]
@@ -1189,8 +1195,12 @@ def _page_or_footer_boundary(
 ) -> bool:
     if not buffer:
         return False
-    prev_page, _, _ = buffer[-1]
-    page, _, _ = record
+    prev_page, prev_block, _ = buffer[-1]
+    page, block, _ = record
+    # Check for heading boundaries - start a new chunk when we encounter
+    # a block that had a heading merged into it (has_heading_prefix)
+    if block.get("has_heading_prefix", False):
+        return True
     if prev_page != page:
         return not _allow_cross_page_list(buffer[-1], record, strategy=strategy)
     prev_is_footer = _record_is_footer_candidate(buffer[-1], strategy=strategy)
@@ -1666,9 +1676,12 @@ def _block_texts(
 
 
 def _is_heading(block: Block) -> bool:
-    """Return ``True`` when ``block`` represents a heading."""
+    """Return ``True`` when ``block`` represents a heading.
 
-    return block.get("type") == "heading"
+    This includes blocks with type="heading" as well as blocks that
+    have had a heading merged into them (marked with has_heading_prefix).
+    """
+    return block.get("type") == "heading" or block.get("has_heading_prefix", False)
 
 
 def _chunk_items(
@@ -1779,9 +1792,7 @@ class _SplitSemanticPass:
     list_continuation_callback: ListContinuationCallback | None = None
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = derive_min_chunk_size(
-            self.chunk_size, self.min_chunk_size
-        )  # noqa: E501
+        self.min_chunk_size = derive_min_chunk_size(self.chunk_size, self.min_chunk_size)  # noqa: E501
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload

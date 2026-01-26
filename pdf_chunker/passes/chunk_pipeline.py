@@ -13,8 +13,7 @@ Record = tuple[int, Block, str]
 def _page_from_source(value: Any) -> int | None:
     return (
         candidate
-        if isinstance(value, Mapping)
-        and isinstance((candidate := value.get("page")), int)
+        if isinstance(value, Mapping) and isinstance((candidate := value.get("page")), int)
         else None
     )
 
@@ -57,12 +56,7 @@ def merge_adjacent_blocks(
         ((page, block, text_of(block)) for page, block in blocks),
         cast(list[Record], []),
     )
-    return (
-        (page, block, text)
-        for page, block, raw in merged
-        for text in split_fn(raw)
-        if text
-    )
+    return ((page, block, text) for page, block, raw in merged for text in split_fn(raw) if text)
 
 
 def attach_headings(
@@ -82,7 +76,10 @@ def attach_headings(
             yield page, block, text
             continue
         heading_text = merge_block_text(pending_texts, text)
-        yield (pending_page or page), dict(block), heading_text
+        # Mark block as containing a heading at its start
+        merged_block = dict(block)
+        merged_block["has_heading_prefix"] = True
+        yield (pending_page or page), merged_block, heading_text
         pending_page, pending_texts = None, []
 
 
@@ -104,4 +101,3 @@ def chunk_records(
         }
         for index, (page, block, text) in enumerate(records)
     )
-

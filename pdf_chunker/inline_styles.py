@@ -219,6 +219,47 @@ def build_index_map(source: str, target: str) -> list[int | None]:
     return mapping
 
 
+def merge_inline_styles(
+    first_styles: Sequence[InlineStyleSpan] | None,
+    second_styles: Sequence[InlineStyleSpan] | None,
+    first_text_len: int,
+    separator_len: int,
+) -> list[InlineStyleSpan] | None:
+    """Merge inline styles from two concatenated text blocks.
+
+    When text A is concatenated with text B via a separator, this function
+    adjusts spans from block B to account for the offset and combines them
+    with spans from block A.
+
+    Args:
+        first_styles: Inline styles from the first block (or None)
+        second_styles: Inline styles from the second block (or None)
+        first_text_len: Length of the first block's text
+        separator_len: Length of the separator (e.g., 1 for " ", 1 for "\\n")
+
+    Returns:
+        Combined list of inline styles, or None if both inputs are None
+    """
+    if not first_styles and not second_styles:
+        return None
+
+    result: list[InlineStyleSpan] = []
+
+    # Add first block's styles unchanged
+    if first_styles:
+        result.extend(first_styles)
+
+    # Add second block's styles with offset adjustment
+    if second_styles:
+        offset = first_text_len + separator_len
+        for span in second_styles:
+            result.append(
+                replace(span, start=span.start + offset, end=span.end + offset)
+            )
+
+    return result if result else None
+
+
 __all__ = [
     "InlineStyleSpan",
     "BoundsTransform",
@@ -226,6 +267,7 @@ __all__ = [
     "build_index_remapper",
     "clamp_spans",
     "merge_adjacent_spans",
+    "merge_inline_styles",
     "normalize_spans",
     "remap_spans",
     "sort_and_deduplicate",

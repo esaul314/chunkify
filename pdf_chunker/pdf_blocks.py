@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from itertools import chain
@@ -14,6 +15,7 @@ from .inline_styles import (
     InlineStyleSpan,
     build_index_map,
     build_index_remapper,
+    merge_inline_styles,
     normalize_spans,
 )
 from .language import default_language
@@ -87,7 +89,9 @@ def _spans_indicate_heading(spans: list[dict], text: str) -> bool:
     )
 
 
-def _structured_block(page, block_tuple, page_num, filename) -> Block | None:
+def _structured_block(
+    page, block_tuple, page_num, filename, page_font_size: float | None = None
+) -> Block | None:
     raw_text = block_tuple[4]
     cleaned = clean_text(raw_text)
     if not cleaned:
@@ -102,7 +106,9 @@ def _structured_block(page, block_tuple, page_num, filename) -> Block | None:
         except (KeyError, IndexError, TypeError):
             is_heading = _detect_heading_fallback(cleaned)
 
-    inline_styles = _extract_block_inline_styles(page, block_tuple, cleaned)
+    inline_styles = _extract_block_inline_styles(
+        page, block_tuple, cleaned, page_font_size
+    )
 
     return Block(
         type="heading" if is_heading else "paragraph",
@@ -115,7 +121,7 @@ def _structured_block(page, block_tuple, page_num, filename) -> Block | None:
 
 
 def _extract_block_inline_styles(
-    page, block_tuple, cleaned_text: str
+    page, block_tuple, cleaned_text: str, page_font_size: float | None = None
 ) -> list[InlineStyleSpan] | None:
     if not cleaned_text:
         return None
@@ -134,7 +140,10 @@ def _extract_block_inline_styles(
         return None
 
     offsets = tuple(_span_offsets(raw_spans))
-    styles_per_span = tuple(tuple(_collect_styles(span, baseline)) for span, baseline in raw_spans)
+    styles_per_span = tuple(
+        tuple(_collect_styles(span, baseline, page_font_size))
+        for span, baseline in raw_spans
+    )
     spans = tuple(
         InlineStyleSpan(
             start=start,
@@ -195,7 +204,9 @@ def _span_offsets(
 
 
 def _collect_styles(
-    span: Mapping[str, object], line_baseline: float | None
+    span: Mapping[str, object],
+    line_baseline: float | None,
+    page_font_size: float | None = None,
 ) -> Iterable[tuple[str, Mapping[str, str] | None]]:
     flags = int(span.get("flags", 0))
     font = str(span.get("font", "")).lower()
@@ -208,6 +219,15 @@ def _collect_styles(
         yield ("underline", None)
     if _is_monospace(font):
         yield ("monospace", None)
+
+    # Detect large font (heading by size)
+    span_size = span.get("size") if hasattr(span, "get") else None
+    if (
+        page_font_size
+        and isinstance(span_size, (int, float))
+        and span_size > page_font_size * 1.3
+    ):
+        yield ("large", None)
 
     baseline_style = _baseline_style(span, line_baseline)
     if baseline_style:
@@ -309,6 +329,34 @@ def _filter_by_zone_margins(
     return filtered
 
 
+def _compute_page_font_size(page) -> float | None:
+    """Compute the most common (baseline) font size for a page.
+
+    Used to detect headings that are distinguished by larger font size
+    rather than bold/italic styling.
+    """
+    try:
+        page_dict = page.get_text("dict")
+        sizes: list[float] = []
+        for block in page_dict.get("blocks", []):
+            if block.get("type", 0) != 0:
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    size = span.get("size")
+                    text = span.get("text", "")
+                    # Only count spans with actual text content
+                    if isinstance(size, (int, float)) and size > 0 and text.strip():
+                        sizes.append(round(size, 1))
+        if not sizes:
+            return None
+        # Return the most common font size (mode)
+        size_counts = Counter(sizes)
+        return size_counts.most_common(1)[0][0]
+    except Exception:
+        return None
+
+
 def _extract_page_blocks(
     page,
     page_num: int,
@@ -318,6 +366,8 @@ def _extract_page_blocks(
 ) -> list[Block]:
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")
+    # Calculate baseline font size for heading detection
+    page_font_size = _compute_page_font_size(page)
     # First apply zone margin filtering (geometric)
     zone_filtered = _filter_by_zone_margins(raw_blocks, page_height, footer_margin, header_margin)
     # Then apply existing heuristic filtering
@@ -325,7 +375,8 @@ def _extract_page_blocks(
     return [
         b
         for block in filtered
-        if (b := _structured_block(page, block, page_num, filename)) is not None
+        if (b := _structured_block(page, block, page_num, filename, page_font_size))
+        is not None
     ]
 
 
@@ -872,6 +923,10 @@ def _should_merge_blocks(
     if not curr_text or not next_text:
         return False, "empty_text"
 
+    # Don't merge if the next block is a standalone styled heading
+    if _is_standalone_styled_heading(nxt):
+        return False, "next_is_styled_heading"
+
     # Don't merge if CURRENT block is in the footer zone (don't append content to footer)
     if _is_in_footer_zone(curr, page_heights, footer_margin):
         return False, "curr_in_footer_zone"
@@ -956,6 +1011,42 @@ def _should_merge_blocks(
     return False, "no_merge"
 
 
+_HEADING_STYLE_TAGS = frozenset(
+    {"bold", "italic", "small_caps", "caps", "uppercase", "large"}
+)
+
+
+def _is_standalone_styled_heading(block: Block) -> bool:
+    """Return True if block is a standalone heading based on inline styles.
+
+    Detects short text (≤12 words) that is fully covered by a heading-style
+    span (bold, italic, large, etc.) - such blocks should not be merged into
+    adjacent paragraphs.
+    """
+    styles = block.inline_styles
+    if not styles:
+        return False
+
+    text = block.text.strip()
+    if not text:
+        return False
+
+    words = text.split()
+    if len(words) > 12:
+        return False
+
+    length = len(text)
+
+    for span in styles:
+        if span.start <= 0 and span.end >= length:
+            # Span covers entire text
+            style = span.style.lower() if span.style else ""
+            if style in _HEADING_STYLE_TAGS:
+                return True
+
+    return False
+
+
 def within_page_span(pages: Iterable[int | None], limit: int = 1) -> bool:
     """Return True if pages stay within ``limit`` span."""
     nums = [p for p in pages if p is not None]
@@ -988,15 +1079,24 @@ def merge_continuation_blocks(
         current = items[i]
         if _is_footnote_block(current):
             if merged:
-                merged[-1] = replace(
-                    merged[-1],
-                    text=f"{merged[-1].text.rstrip()}\n{current.text.strip()}",
+                # Merge footnote inline_styles too
+                prev = merged[-1]
+                prev_text = prev.text.rstrip()
+                fn_text = current.text.strip()
+                new_text = f"{prev_text}\n{fn_text}"
+                new_styles = merge_inline_styles(
+                    prev.inline_styles,
+                    current.inline_styles,
+                    len(prev_text),
+                    1,  # newline separator
                 )
+                merged[-1] = replace(prev, text=new_text, inline_styles=new_styles)
             else:
                 merged.append(current)
             i += 1
             continue
         current_text = current.text.strip()
+        current_styles = current.inline_styles
         pages = [current.source.get("page")]
         j = i + 1
         deferred_footnotes: list[Block] = []
@@ -1023,14 +1123,19 @@ def merge_continuation_blocks(
                 footer_margin=footer_margin,
             )
             if should_merge:
+                # Determine separator length based on merge reason
+                separator_len = 0
                 if reason == "hyphenated_continuation":
                     normalized_tail = _normalize_hyphenated_tail(current_text, next_text)
                     merged_text = (
                         re.sub(rf"[{HYPHEN_CHARS_ESC}]$", "", current_text) + normalized_tail
                     )
+                    # No separator for hyphenated continuation
+                    separator_len = 0
                 elif reason == "sentence_continuation":
                     normalized_sentence = _normalize_sentence_tail(current_text, next_text)
                     merged_text = current_text + " " + normalized_sentence
+                    separator_len = 1  # space
                 elif reason.startswith("bullet_"):
                     with bullet_trace_scope(
                         current.source,
@@ -1047,8 +1152,19 @@ def merge_continuation_blocks(
                             next_text,
                             strategy=heuristics,
                         )
-                    current = replace(current, text=merged_text)
+                    # For bullet merges, separator varies
+                    separator_len = len(merged_text) - len(current_text) - len(next_text)
+                    if separator_len < 0:
+                        separator_len = 0
+                    new_styles = merge_inline_styles(
+                        current_styles,
+                        nxt.inline_styles,
+                        len(current_text),
+                        separator_len,
+                    )
+                    current = replace(current, text=merged_text, inline_styles=new_styles)
                     current_text = merged_text
+                    current_styles = new_styles
                     if remainder:
                         items[j] = replace(nxt, text=remainder.lstrip())
                         pages.append(next_page)
@@ -1058,11 +1174,14 @@ def merge_continuation_blocks(
                     continue
                 elif reason == "numbered_list":
                     merged_text = current_text + "\n" + next_text
+                    separator_len = 1  # newline
                 elif reason == "numbered_continuation":
                     merged_text = current_text + " " + next_text
+                    separator_len = 1  # space
                 elif reason == "numbered_standalone":
                     processed = insert_numbered_list_newlines(next_text)
                     merged_text = current_text + " " + processed
+                    separator_len = 1  # space
                 elif reason == "numbered_suffix":
                     marker_match = re.search(r"\n(\d+[.)])\s*$", current_text)
                     base = re.sub(r"\n\d+[.)]\s*$", "", current_text)
@@ -1070,15 +1189,30 @@ def merge_continuation_blocks(
                     marker = marker_match.group(1) if marker_match else ""
                     prefix = f"{marker} " if marker else ""
                     merged_text = f"{base}\n{prefix}{processed}".strip()
+                    # Complex case - separator calculation approximate
+                    separator_len = len(merged_text) - len(current_text) - len(next_text)
+                    if separator_len < 0:
+                        separator_len = 0
                 elif reason == "indented_continuation":
                     merged_text = current_text + "\n" + next_text
+                    separator_len = 1  # newline
                 elif reason == "author_attribution":
                     merged_text = current_text + " " + next_text
+                    separator_len = 1  # space
                 else:
                     merged_text = current_text + " " + next_text
+                    separator_len = 1  # space
 
-                current = replace(current, text=merged_text)
+                # Merge inline styles from both blocks
+                new_styles = merge_inline_styles(
+                    current_styles,
+                    nxt.inline_styles,
+                    len(current_text),
+                    separator_len,
+                )
+                current = replace(current, text=merged_text, inline_styles=new_styles)
                 current_text = merged_text
+                current_styles = new_styles
                 j += 1
                 pages.append(next_page)
             else:
@@ -1096,8 +1230,23 @@ def merge_continuation_blocks(
         if deferred_footnotes:
             footnote_texts = [fn.text.strip() for fn in deferred_footnotes if fn.text.strip()]
             if footnote_texts:
-                merged_text = current.text.rstrip() + "\n" + "\n".join(footnote_texts)
-                current = replace(current, text=merged_text)
+                fn_combined = "\n".join(footnote_texts)
+                prev_text = current.text.rstrip()
+                merged_text = prev_text + "\n" + fn_combined
+                # Merge footnote styles (collect all)
+                fn_styles: list[InlineStyleSpan] = []
+                offset = len(prev_text) + 1  # +1 for the first newline
+                for fn in deferred_footnotes:
+                    if fn.inline_styles:
+                        for span in fn.inline_styles:
+                            fn_styles.append(
+                                replace(span, start=span.start + offset, end=span.end + offset)
+                            )
+                    offset += len(fn.text.strip()) + 1  # +1 for newline between
+                combined_styles: list[InlineStyleSpan] | None = None
+                if current_styles or fn_styles:
+                    combined_styles = list(current_styles or []) + fn_styles
+                current = replace(current, text=merged_text, inline_styles=combined_styles)
         merged.append(current)
         i = j
     return merged

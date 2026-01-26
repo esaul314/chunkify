@@ -243,11 +243,24 @@ def list_intro_start(text: str) -> int:
 
 
 def peel_list_intro(text: str) -> tuple[str, str]:
-    """Split text into non-intro content and the trailing list preamble."""
+    """Split text into non-intro content and the trailing list preamble.
+
+    Only peels if the text ending with colon is a genuine list introduction,
+    not a label (like "Q5:") followed by substantial content.
+    """
     stripped = text.rstrip()
     colon_idx = max(stripped.rfind(":"), stripped.rfind("："))
     if colon_idx == -1:
         return text, ""
+
+    # Check if there's substantial content after the colon.
+    # If so, this colon is not introducing a list - it's part of a label
+    # like "Q5:" followed by a question or other content.
+    content_after_colon = stripped[colon_idx + 1 :].strip()
+    if len(content_after_colon) > 50:
+        # Significant content after colon - not a list intro
+        return text, ""
+
     prefix = stripped[: colon_idx + 1]
     start = list_intro_start(prefix)
     if start <= 0:
@@ -414,8 +427,17 @@ def reserve_for_list(
     if not intro_lines and len(keep_lines) > 1 and any(predicate(ln) for ln in block_lines):
         candidate_intro = keep_lines[-1]
         if candidate_intro.strip() and not predicate(candidate_intro):
-            keep_lines = keep_lines[:-1]
-            intro_lines = [candidate_intro, *intro_lines]
+            # Check if moving the candidate would leave only a short heading.
+            # A single short line (< 100 chars) is likely a heading that should
+            # stay with its content, not be split off alone.
+            remaining_keep = keep_lines[:-1]
+            remaining_text = "\n".join(remaining_keep)
+            if len(remaining_text) < 100 and len(remaining_keep) == 1:
+                # Don't split - heading would be isolated
+                pass
+            else:
+                keep_lines = remaining_keep
+                intro_lines = [candidate_intro, *intro_lines]
     if not keep_lines:
         return collapsed, "", None
 
