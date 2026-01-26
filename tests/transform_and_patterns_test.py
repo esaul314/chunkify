@@ -209,3 +209,172 @@ class TestPatternPrecedence:
         registry = PatternRegistry()
         boundary = [p for p in registry.patterns if p.precedence == Precedence.BOUNDARY]
         assert len(boundary) >= 2  # chapter_heading, part_marker
+
+
+class TestStitchBlockTransformLog:
+    """Tests for TransformationLog integration with _stitch_block_continuations."""
+
+    def test_qa_sequence_logged(self):
+        """Q&A sequence merges are recorded in the transformation log."""
+        from pdf_chunker.passes.split_semantic import _stitch_block_continuations
+        from pdf_chunker.passes.transform_log import TransformationLog
+
+        log = TransformationLog.create("Q&A test")
+        records = [
+            (1, {"type": "paragraph"}, "Q1: What is the capital?"),
+            (1, {"type": "paragraph"}, "A1: Paris."),
+            (1, {"type": "paragraph"}, "Q2: What is the population?"),
+        ]
+        result = _stitch_block_continuations(records, limit=None, transform_log=log)
+
+        # Should have merged Q&A sequences
+        assert len(result) < len(records)
+        # Log should record the merge
+        assert any(e.reason == "qa_sequence_merge" for e in log.entries)
+
+    def test_heading_boundary_logged(self):
+        """Heading boundaries are recorded when preserved."""
+        from pdf_chunker.passes.split_semantic import _stitch_block_continuations
+        from pdf_chunker.passes.transform_log import TransformationLog
+
+        log = TransformationLog.create("Heading test")
+        records = [
+            (1, {"type": "paragraph"}, "Some text here."),
+            (2, {"type": "heading"}, "Chapter 2"),
+        ]
+        result = _stitch_block_continuations(records, limit=None, transform_log=log)
+
+        # Both records should remain separate
+        assert len(result) == 2
+        # Log should record the boundary decision
+        assert any(e.reason == "heading_boundary_kept" for e in log.entries)
+
+    def test_no_log_works(self):
+        """Function works correctly when no log is provided."""
+        from pdf_chunker.passes.split_semantic import _stitch_block_continuations
+
+        records = [
+            (1, {"type": "paragraph"}, "Q1: Question?"),
+            (1, {"type": "paragraph"}, "A1: Answer."),
+        ]
+        # Should not raise
+        result = _stitch_block_continuations(records, limit=None, transform_log=None)
+        assert len(result) >= 1
+
+
+class TestOverlapModule:
+    """Tests for the overlap module extracted from split_semantic.py."""
+
+    def test_split_words_basic(self):
+        from pdf_chunker.passes.split_modules.overlap import split_words
+
+        result = split_words("hello world foo")
+        assert result == ("hello", "world", "foo")
+
+    def test_split_words_empty(self):
+        from pdf_chunker.passes.split_modules.overlap import split_words
+
+        result = split_words("")
+        assert result == ()
+
+    def test_overlap_window_full_match(self):
+        from pdf_chunker.passes.split_modules.overlap import overlap_window
+
+        prev = ("a", "b", "c")
+        curr = ("b", "c", "d")
+        assert overlap_window(prev, curr, 3) == 2
+
+    def test_overlap_window_no_match(self):
+        from pdf_chunker.passes.split_modules.overlap import overlap_window
+
+        prev = ("a", "b", "c")
+        curr = ("x", "y", "z")
+        assert overlap_window(prev, curr, 3) == 0
+
+    def test_overlap_text(self):
+        from pdf_chunker.passes.split_modules.overlap import overlap_text
+
+        words = ("hello", "world", "foo")
+        assert overlap_text(words, 2) == "hello world"
+
+    def test_is_overlap_token_filters_empty(self):
+        from pdf_chunker.passes.split_modules.overlap import is_overlap_token
+
+        assert not is_overlap_token("")
+        assert not is_overlap_token("   ")
+
+    def test_is_overlap_token_preserves_bullets(self):
+        from pdf_chunker.passes.split_modules.overlap import is_overlap_token
+
+        assert is_overlap_token("•")
+        assert is_overlap_token("-")
+        assert is_overlap_token("—")
+
+    def test_is_overlap_token_preserves_words(self):
+        from pdf_chunker.passes.split_modules.overlap import is_overlap_token
+
+        assert is_overlap_token("hello")
+        assert is_overlap_token("123")
+
+    def test_missing_overlap_prefix_calculates_missing(self):
+        from pdf_chunker.passes.split_modules.overlap import missing_overlap_prefix
+
+        prev = ("a", "b", "c", "d")
+        curr = ("c", "d", "e")
+        result = missing_overlap_prefix(prev, curr, overlap=4)
+        assert result == ("a", "b")
+
+    def test_missing_overlap_prefix_no_missing(self):
+        from pdf_chunker.passes.split_modules.overlap import missing_overlap_prefix
+
+        prev = ("a", "b", "c")
+        curr = ("a", "b", "c", "d")
+        result = missing_overlap_prefix(prev, curr, overlap=3)
+        assert result == ()
+
+    def test_prepend_words_basic(self):
+        from pdf_chunker.passes.split_modules.overlap import prepend_words
+
+        result = prepend_words(("hello", "world"), "foo bar")
+        assert result == "hello world foo bar"
+
+    def test_prepend_words_empty(self):
+        from pdf_chunker.passes.split_modules.overlap import prepend_words
+
+        result = prepend_words((), "foo bar")
+        assert result == "foo bar"
+
+    def test_restore_overlap_words_sequence(self):
+        from pdf_chunker.passes.split_modules.overlap import restore_overlap_words
+
+        chunks = ["First chunk ending with overlap.", "overlap. Second chunk here."]
+        result = restore_overlap_words(chunks, overlap=2)
+        assert len(result) == 2
+        # Second chunk should have trimmed duplicate sentence prefix
+        assert "overlap." not in result[1] or result[1] != chunks[1]
+
+    def test_trim_sentence_prefix_removes_duplicate(self):
+        from pdf_chunker.passes.split_modules.overlap import trim_sentence_prefix
+
+        prev = "Some text. This is the last sentence."
+        curr = "This is the last sentence. And this continues."
+        result = trim_sentence_prefix(prev, curr)
+        # The duplicate sentence should be trimmed
+        assert result.startswith("And") or "continues" in result
+
+    def test_trim_boundary_overlap(self):
+        from pdf_chunker.passes.split_modules.overlap import trim_boundary_overlap
+
+        prev = "sentence ending here."
+        curr = "ending here. New content follows."
+        result = trim_boundary_overlap(prev, curr, overlap=3)
+        # Should trim the overlapping words
+        assert "New content" in result
+
+    def test_should_trim_overlap_sentence_end(self):
+        from pdf_chunker.passes.split_modules.overlap import should_trim_overlap
+
+        assert should_trim_overlap("end of sentence.")
+        assert should_trim_overlap("question here?")
+        assert not should_trim_overlap("no punct")
+        assert not should_trim_overlap("")

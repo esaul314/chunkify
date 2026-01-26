@@ -87,6 +87,7 @@ from pdf_chunker.passes.split_semantic_metadata import (
     build_chunk,
     build_chunk_with_meta,
 )
+from pdf_chunker.passes.transform_log import TransformationLog, maybe_record
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
     default_bullet_strategy,
@@ -414,6 +415,7 @@ def _stitch_block_continuations(
     limit: int | None,
     *,
     strategy: BulletHeuristicStrategy | None = None,
+    transform_log: TransformationLog | None = None,
 ) -> list[tuple[int, Block, str]]:
     def _consume(
         acc: list[tuple[int, Block, str]],
@@ -431,15 +433,51 @@ def _stitch_block_continuations(
         if _is_qa_sequence_continuation(prev_text, text):
             # Merge Q&A sequences together
             merged = f"{prev_text}\n{text}".strip()
+            maybe_record(
+                transform_log,
+                "merged",
+                "split_semantic._stitch",
+                "qa_sequence_merge",
+                prev_text[:100],
+                merged[:100],
+                details={"page": acc[-1][0], "next_page": page},
+            )
             return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
 
         # Don't merge heading blocks with other content
         if _is_heading(block):
+            maybe_record(
+                transform_log,
+                "boundary",
+                "split_semantic._stitch",
+                "heading_boundary_kept",
+                prev_text[:100],
+                prev_text[:100],
+                details={"page": page, "reason": "current_block_is_heading"},
+            )
             return [*acc, cur]
         # Don't merge into heading blocks (unless it's a Q&A sequence, handled above)
         if _is_heading(acc[-1][1]):
+            maybe_record(
+                transform_log,
+                "boundary",
+                "split_semantic._stitch",
+                "heading_boundary_kept",
+                prev_text[:100],
+                prev_text[:100],
+                details={"page": acc[-1][0], "reason": "previous_block_is_heading"},
+            )
             return [*acc, cur]
         if _starts_list_like(block, text, strategy=strategy):
+            maybe_record(
+                transform_log,
+                "boundary",
+                "split_semantic._stitch",
+                "list_boundary_kept",
+                prev_text[:100],
+                prev_text[:100],
+                details={"page": page},
+            )
             return [*acc, cur]
         lead = text.lstrip()
 
@@ -456,8 +494,26 @@ def _stitch_block_continuations(
                 page=acc[-1][0],
             )
             merged = f"{prev_text} {text}".strip()
+            maybe_record(
+                transform_log,
+                "merged",
+                "split_semantic._stitch",
+                "continuation_merge_limit_skip",
+                prev_text[:100],
+                merged[:100],
+                details={"page": acc[-1][0], "context_words": len(context_words)},
+            )
             return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
         enriched = f"{context} {text}".strip()
+        maybe_record(
+            transform_log,
+            "merged",
+            "split_semantic._stitch",
+            "continuation_context_prepend",
+            text[:100],
+            enriched[:100],
+            details={"page": page, "context_len": len(context)},
+        )
         return [*acc, (page, block, enriched)]
 
     return reduce(_consume, seq, [])
@@ -1706,6 +1762,7 @@ def _chunk_items(
     strategy: BulletHeuristicStrategy | None = None,
     list_continuation_config: ListContinuationConfig | None = None,
     list_continuation_cache: ListContinuationCache | None = None,
+    transform_log: TransformationLog | None = None,
 ) -> Iterator[Chunk]:
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
@@ -1719,7 +1776,12 @@ def _chunk_items(
             merge_block_text=partial(_merge_heading_texts, strategy=heuristics),
         ),
         _merge_styled_list_records,
-        partial(_stitch_block_continuations, limit=limit, strategy=heuristics),
+        partial(
+            _stitch_block_continuations,
+            limit=limit,
+            strategy=heuristics,
+            transform_log=transform_log,
+        ),
     )
     records: Iterable[Record] = _block_texts(
         doc,
@@ -1805,9 +1867,7 @@ class _SplitSemanticPass:
     list_continuation_callback: ListContinuationCallback | None = None
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = derive_min_chunk_size(
-            self.chunk_size, self.min_chunk_size
-        )  # noqa: E501
+        self.min_chunk_size = derive_min_chunk_size(self.chunk_size, self.min_chunk_size)  # noqa: E501
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload

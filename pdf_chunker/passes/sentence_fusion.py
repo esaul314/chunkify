@@ -8,7 +8,18 @@ from dataclasses import dataclass
 from functools import reduce
 from math import ceil
 from numbers import Real
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+# Import from centralized pattern registry (Phase 1 refactoring)
+from pdf_chunker.patterns import (
+    is_continuation_lead as _registry_is_continuation_lead,
+)
+from pdf_chunker.patterns import (
+    is_qa_sequence_continuation as _registry_is_qa_continuation,
+)
+
+if TYPE_CHECKING:
+    pass
 
 SOFT_LIMIT = 8_000
 
@@ -17,6 +28,8 @@ _AVERAGE_CHARS_PER_TOKEN = 5.0
 _WORD_START = re.compile(r"[\w']+")
 _SENTENCE_BOUNDARY = re.compile(r"[.?!][\"')\]]*\s+")
 _ENDS_SENTENCE = re.compile(r"[.?!][\"')\]]*\s*$")
+
+# Legacy: kept for backward compatibility but delegates to pattern registry
 _LEADING_CONTINUATIONS = frozenset(
     token.lower()
     for token in (
@@ -47,13 +60,18 @@ def _leading_token(text: str) -> str:
 
 
 def _is_continuation_lead(text: str) -> bool:
-    return _leading_token(text) in _LEADING_CONTINUATIONS
+    """Check if text starts with a continuation word.
+
+    Note: This now delegates to the centralized PatternRegistry.
+    The local _LEADING_CONTINUATIONS is kept for backward compatibility
+    with any code that imports it directly.
+    """
+    return _registry_is_continuation_lead(text)
 
 
 # Pattern for Q&A sequences like Q1:, Q2:, A1:, A2:, etc.
-# Anchored version for checking text start
+# Legacy: kept for backward compatibility, actual logic in PatternRegistry
 _QA_PATTERN_START = re.compile(r"^[QA]\d+:", re.IGNORECASE)
-# Unanchored version for finding patterns within text
 _QA_PATTERN_ANY = re.compile(r"[QA]\d+:", re.IGNORECASE)
 
 
@@ -61,6 +79,9 @@ def _extract_qa_number(text: str) -> int | None:
     """Extract the number from a Q&A pattern like 'Q2:' or 'A3:'.
 
     Returns the number or None if text doesn't match the pattern.
+
+    Note: This is kept for backward compatibility. New code should use
+    PatternRegistry.should_merge() which handles Q&A sequences automatically.
     """
     match = _QA_PATTERN_START.match(text.lstrip())
     if not match:
@@ -78,38 +99,11 @@ def _is_qa_sequence_continuation(prev_text: str, curr_text: str) -> bool:
 
     Returns True if prev_text contains QN: and curr_text starts with Q(N+1):
     or similar patterns (e.g., Q1: -> Q2:, A1: -> A2:, or Q1: -> A1:).
+
+    Note: This now delegates to the centralized PatternRegistry for consistency.
+    The detailed logic is preserved in the registry's qa_sequence pattern.
     """
-    # Find the last Q/A pattern in the previous text
-    prev_stripped = prev_text.strip()
-    curr_stripped = curr_text.lstrip()
-
-    # Check if current text starts with a Q&A pattern
-    curr_num = _extract_qa_number(curr_stripped)
-    if curr_num is None:
-        return False
-
-    # Find all Q&A patterns in previous text (using unanchored pattern)
-    prev_matches = list(_QA_PATTERN_ANY.finditer(prev_stripped))
-    if not prev_matches:
-        return False
-
-    # Get the last Q&A number from previous text
-    last_match = prev_matches[-1]
-    last_text = last_match.group(0)
-    prev_num = None
-    for char in last_text:
-        if char.isdigit():
-            prev_num = int(char)
-            break
-
-    if prev_num is None:
-        return False
-
-    # Check if current continues the sequence (same number or next number)
-    # Q1: -> Q2: (next question)
-    # Q1: -> A1: (answer to question)
-    # A1: -> Q2: (next question after answer)
-    return curr_num == prev_num or curr_num == prev_num + 1
+    return _registry_is_qa_continuation(prev_text, curr_text)
 
 
 def _compute_limit(chunk_size: int | None, overlap: int, min_chunk_size: int | None) -> int | None:
