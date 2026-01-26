@@ -33,6 +33,7 @@ dependencies = [
   "textstat>=0.7.7",
   "PyMuPDF>=1.26.3",
   "python-dotenv>=1.1.1",
+  "pipe>=2.0",  # Infix composition for declarative pipelines
 ]
 
 [project.optional-dependencies]

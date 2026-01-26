@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Mapping as MappingABC, Sequence as SequenceABC
+from collections.abc import Mapping, Sequence
+from collections.abc import Mapping as MappingABC
+from collections.abc import Sequence as SequenceABC
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from pdf_chunker.passes.transform_log import TransformationLog
 
 _RUN_ID = uuid4().hex
 _CALLS: list[str] = []
+_TRANSFORM_LOGS: dict[str, list[TransformationLog]] = {}
 
 
 def _path(step: str) -> Path:
@@ -19,9 +25,7 @@ def _path(step: str) -> Path:
 
 def write_snapshot(step: str, data: Any) -> None:
     """Persist ``data`` for ``step`` under a unique run directory."""
-    _path(step).write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _path(step).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_inline_styles(step, data)
 
 
@@ -97,9 +101,7 @@ def _block_inline_styles(block: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     spans = block.get("inline_styles") or []
     text = block.get("text", "")
     return [
-        summary
-        for summary in (_span_summary(span, text) for span in spans)
-        if summary is not None
+        summary for summary in (_span_summary(span, text) for span in spans) if summary is not None
     ]
 
 
@@ -160,6 +162,52 @@ def _write_inline_styles(step: str, payload: Any) -> None:
 def record_call(step: str) -> None:
     _CALLS.append(step)
     data = {"calls": list(_CALLS), "counts": {s: _CALLS.count(s) for s in set(_CALLS)}}
-    _path("calls").write_text(
+    _path("calls").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Transformation log collection (Phase 0 of refactoring plan)
+# ---------------------------------------------------------------------------
+
+
+def record_transform_log(step: str, log: TransformationLog) -> None:
+    """Record a transformation log for a step.
+
+    Call this from passes that support transformation tracking to build
+    an audit trail of all text transformations.
+    """
+    if step not in _TRANSFORM_LOGS:
+        _TRANSFORM_LOGS[step] = []
+    _TRANSFORM_LOGS[step].append(log)
+
+
+def write_transform_logs(step: str) -> None:
+    """Write all collected transformation logs for a step."""
+    logs = _TRANSFORM_LOGS.get(step, [])
+    if not logs:
+        return
+
+    data = {
+        "step": step,
+        "fragment_count": len(logs),
+        "fragments": [log.to_dict() for log in logs],
+    }
+    _path(f"{step}_transforms").write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+def get_transform_logs(step: str | None = None) -> dict[str, list[TransformationLog]]:
+    """Return collected transformation logs.
+
+    If step is provided, return only logs for that step.
+    Otherwise return all logs.
+    """
+    if step is not None:
+        return {step: _TRANSFORM_LOGS.get(step, [])}
+    return dict(_TRANSFORM_LOGS)
+
+
+def clear_transform_logs() -> None:
+    """Clear all collected transformation logs (for testing)."""
+    _TRANSFORM_LOGS.clear()
