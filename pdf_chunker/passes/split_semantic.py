@@ -50,20 +50,14 @@ from pdf_chunker.passes.sentence_fusion import (
     _last_sentence,
     _merge_sentence_fragments,
 )
-from pdf_chunker.passes.split_modules.footers import (
-    record_is_footer_candidate as _record_is_footer_candidate,
+from pdf_chunker.passes.split_modules.inline_headings import (
+    promote_inline_heading as _promote_inline_heading,
 )
-from pdf_chunker.passes.split_modules.footers import (
-    strip_footer_suffixes as _strip_footer_suffixes,
+from pdf_chunker.passes.split_modules.inline_headings import (
+    split_inline_heading_records as _split_inline_heading_records,
 )
 from pdf_chunker.passes.split_modules.lists import (
     colon_bullet_boundary as _colon_bullet_boundary,
-)
-from pdf_chunker.passes.split_modules.lists import (
-    first_list_number as _first_list_number,
-)
-from pdf_chunker.passes.split_modules.lists import (
-    last_list_number as _last_list_number,
 )
 from pdf_chunker.passes.split_modules.lists import (
     record_is_list_like as _record_is_list_like,
@@ -75,34 +69,18 @@ from pdf_chunker.passes.split_modules.overlap import (
     restore_overlap_words as _restore_overlap_words,
 )
 from pdf_chunker.passes.split_modules.overlap import (
-    split_words as _split_words,
-)
-from pdf_chunker.passes.split_modules.overlap import (
     trim_boundary_overlap as _trim_boundary_overlap,
+)
+from pdf_chunker.passes.split_modules.segments import (
+    _collapse_records,
 )
 from pdf_chunker.passes.split_modules.stitching import (
     is_heading as _is_heading,
 )
 from pdf_chunker.passes.split_modules.stitching import (
-    merge_record_block as _merge_record_block,
-)
-from pdf_chunker.passes.split_modules.stitching import (
     stitch_block_continuations as _stitch_block_continuations,
 )
-from pdf_chunker.passes.split_modules.stitching import (
-    with_chunk_index as _with_chunk_index,
-)
-from pdf_chunker.passes.split_semantic_inline import (
-    _body_styles,
-    _heading_styles,
-    _leading_heading_candidate,
-    _next_non_whitespace,
-    _span_bounds,
-    _span_style,
-    _trimmed_segment,
-)
 from pdf_chunker.passes.split_semantic_lists import (
-    _STYLED_LIST_KIND,
     _append_caption,
     _apply_envelope,
     _BlockEnvelope,
@@ -151,73 +129,11 @@ def _warn_stitching_issue(message: str, *, page: int | None = None) -> None:
     logger.warning("split_semantic: %s", detail)
 
 
-def _split_inline_heading(block: Block, text: str) -> tuple[Block, Block] | None:
-    if not text or block.get("type") not in {None, "paragraph"}:
-        return None
-    styles = tuple(block.get("inline_styles") or ())
-    if not styles:
-        return None
-    candidate = _leading_heading_candidate(text, styles)
-    if candidate is None:
-        return None
-    _, end = candidate
-    prefix = text[:end]
-    suffix = text[end:]
-    heading_text, heading_lead_trim = _trimmed_segment(prefix)
-    body_text = suffix.lstrip()
-    if not heading_text or not body_text:
-        return None
-    if len(heading_text.split()) > 6:
-        return None
-    if len(body_text.split()) < 5:
-        return None
-    trailer = _next_non_whitespace(text, end)
-    if trailer is None or trailer in ",;:-–—" or trailer.islower():
-        return None
-    body_lead_trim = len(suffix) - len(body_text)
-    text_length = len(text)
-    heading_limit = len(heading_text)
-    body_offset = end + body_lead_trim
-    body_limit = len(body_text)
-    heading_styles = _heading_styles(
-        styles,
-        text_length,
-        end,
-        heading_lead_trim,
-        heading_limit,
-    )
-    body_styles = _body_styles(styles, text_length, body_offset, body_limit)
-    base = {key: value for key, value in dict(block).items() if key != "text"}
-    base.pop("inline_styles", None)
-    heading_block = {
-        **{k: v for k, v in base.items() if k != "list_kind"},
-        "type": "heading",
-        "text": heading_text,
-    }
-    if heading_styles:
-        heading_block["inline_styles"] = heading_styles
-    body_block = {
-        **base,
-        "type": "list_item",
-        "list_kind": base.get("list_kind") or _STYLED_LIST_KIND,
-        "text": body_text,
-    }
-    if body_styles:
-        body_block["inline_styles"] = body_styles
-    return heading_block, body_block
-
-
-def _split_inline_heading_records(
-    records: Iterable[tuple[int, Block, str]],
-) -> Iterator[tuple[int, Block, str]]:
-    for page, block, text in records:
-        split = _split_inline_heading(block, text)
-        if not split:
-            yield page, block, text
-            continue
-        heading_block, body_block = split
-        yield page, heading_block, heading_block.get("text", "")
-        yield page, body_block, body_block.get("text", "")
+# ---------------------------------------------------------------------------
+# Inline heading functions delegated to split_modules.inline_headings
+# ---------------------------------------------------------------------------
+# The following functions are now imported from pdf_chunker.passes.split_modules.inline_headings:
+#   _split_inline_heading, _split_inline_heading_records, _promote_inline_heading
 
 
 def _segment_char_limit(chunk_size: int | None) -> int:
@@ -283,56 +199,11 @@ def _soft_segments(
 #   _trim_boundary_overlap
 
 
-def _promote_inline_heading(block: Block, text: str) -> Block:
-    """Return ``block`` promoted to a heading when inline styles indicate one."""
-
-    if block.get("type") == "heading":
-        return block
-
-    styles = tuple(block.get("inline_styles") or ())
-    if not styles:
-        return block
-
-    length = len(text)
-
-    def _covers_entire(style: Any) -> bool:
-        bounds = _span_bounds(style, length)
-        if bounds is None:
-            return False
-        start, end = bounds
-        return start == 0 and end >= length
-
-    def _is_heading_style(style: Any) -> bool:
-        flavor = _span_style(style).lower()
-        return flavor in {"bold", "italic", "small_caps", "caps", "uppercase", "large"}
-
-    word_limit = len(tuple(token for token in text.split() if token))
-    if word_limit > 12:
-        return block
-
-    if any(_covers_entire(style) and _is_heading_style(style) for style in styles):
-        return {**block, "type": "heading"}
-
-    return block
-
-
 # ---------------------------------------------------------------------------
 # Stitching functions delegated to split_modules.stitching
 # ---------------------------------------------------------------------------
 # The following functions are now imported from pdf_chunker.passes.split_modules.stitching:
 #   _stitch_block_continuations, _merge_record_block, _with_chunk_index, _is_heading
-
-
-def _effective_counts(text: str) -> tuple[int, int, int]:
-    """Return word, dense token, and effective totals for ``text``."""
-    words = _split_words(text)
-    word_count = len(words)
-    char_total = sum(len(token) for token in words)
-    dense_total = int(ceil(char_total / _AVERAGE_CHARS_PER_TOKEN)) if char_total else 0
-    if word_count <= 1 and text:
-        dense_total = max(dense_total, len(text))
-    effective_total = max(word_count, dense_total)
-    return word_count, dense_total, effective_total
 
 
 # ---------------------------------------------------------------------------
@@ -351,23 +222,18 @@ def _effective_counts(text: str) -> tuple[int, int, int]:
 #   _strip_footer_suffix, _strip_footer_suffixes
 
 
-def _should_emit_list_boundary(
-    previous: tuple[int, Block, str],
-    block: Block,
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    _, prev_block, prev_text = previous
-    if prev_text.rstrip().endswith(":"):
-        return False
-    if _starts_list_like(prev_block, prev_text, strategy=strategy):
-        return False
-    prev_num = _last_list_number(prev_text, strategy=strategy)
-    next_num = _first_list_number(text, strategy=strategy)
-    if prev_num is not None and next_num is not None and next_num == prev_num + 1:
-        return False
-    return not _record_is_footer_candidate(previous, strategy=strategy)
+# ---------------------------------------------------------------------------
+# Segment emission functions delegated to split_modules.segments
+# ---------------------------------------------------------------------------
+# The following functions are now imported from pdf_chunker.passes.split_modules.segments:
+#   _effective_counts, _should_emit_list_boundary, _segment_totals, _resolved_limit,
+#   _hard_limit, _overlap_value, _emit_buffer_segments, _merged_segment_record,
+#   _emit_individual_records, _emit_segment_records, _segment_allows_list_overflow,
+#   _segment_is_colon_list, _maybe_merge_dense_page, _CollapseEmitter,
+#   _page_or_footer_boundary, _allow_cross_page_list, _buffer_last_list_number,
+#   _record_starts_numbered_item, _allow_list_overflow, _allow_colon_list_overflow,
+#   _text_has_number_two, _buffer_has_number_two, _projected_overflow,
+#   _collapse_step, _collapse_records
 
 
 def _list_tail_split_index(
@@ -552,305 +418,19 @@ def _apply_overlap_within_segment(
     return reduce(_merge, segment[1:], (segment[0],))
 
 
-def _segment_totals(segment: tuple[tuple[int, Block, str], ...]) -> tuple[int, int, int]:
-    totals = tuple(_effective_counts(text) for _, _, text in segment)
-    words = sum(count for count, _, _ in totals)
-    dense = sum(count for _, count, _ in totals)
-    return words, dense, max(words, dense)
-
-
-def _resolved_limit(options: SplitOptions | None, limit: int | None) -> int | None:
-    candidate: int | None
-    if limit is not None:
-        candidate = limit
-    elif options is not None:
-        candidate = options.compute_limit()
-    else:
-        candidate = None
-    if candidate is None or candidate <= 0:
-        return None
-    return candidate
-
-
-def _hard_limit(options: SplitOptions | None, resolved_limit: int | None) -> int | None:
-    if options is not None and options.chunk_size > 0:
-        return options.chunk_size
-    return resolved_limit
-
-
-def _overlap_value(options: SplitOptions | None) -> int:
-    return options.overlap if options is not None else 0
-
-
-def _emit_buffer_segments(
-    buffer: tuple[tuple[int, Block, str], ...],
-    *,
-    start_index: int,
-    overlap: int,
-    resolved_limit: int | None,
-    hard_limit: int | None,
-    overflow: bool,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[tuple[int, Block, str], ...]:
-    if not buffer:
-        return tuple()
-    segments = _split_colon_bullet_segments(buffer, strategy=strategy) or (buffer,)
-    enumerated = _enumerate_segments(segments)
-    return tuple(
-        emission
-        for offset, segment in enumerated
-        for emission in _emit_segment_records(
-            segment,
-            start_index=start_index + offset,
-            overlap=overlap,
-            resolved_limit=resolved_limit,
-            hard_limit=hard_limit,
-            overflow=overflow,
-            strategy=strategy,
-        )
-    )
-
-
-def _merged_segment_record(
-    segment: tuple[tuple[int, Block, str], ...],
-    *,
-    start_index: int,
-    overlap: int,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[int, Block, str] | None:
-    trimmed = _apply_overlap_within_segment(segment, overlap)
-    if not trimmed:
-        return None
-    joined = _join_record_texts(trimmed, strategy=strategy)
-    if not joined or len(joined) > SOFT_LIMIT:
-        return None
-    merged = _merge_record_block(list(trimmed), joined)
-    first_page = trimmed[0][0]
-    return first_page, _with_chunk_index(merged, start_index), joined
-
-
-def _emit_individual_records(
-    segment: tuple[tuple[int, Block, str], ...],
-    start_index: int,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[tuple[int, Block, str], ...]:
-    return tuple(
-        (
-            page,
-            _with_chunk_index(block, start_index + offset),
-            _normalize_numbered_list_text(text, strategy=strategy),
-        )
-        for offset, (page, block, text) in enumerate(segment)
-    )
-
-
-def _emit_segment_records(
-    segment: tuple[tuple[int, Block, str], ...],
-    *,
-    start_index: int,
-    overlap: int,
-    resolved_limit: int | None,
-    hard_limit: int | None,
-    overflow: bool,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[tuple[int, Block, str], ...]:
-    """Emit ``segment`` as merged or individual records respecting limits."""
-    if not segment:
-        return tuple()
-    segment = _expand_segment_records(segment, strategy=strategy)
-    words, dense, effective = _segment_totals(segment)
-    exceeds_soft = resolved_limit is not None and effective > resolved_limit
-    exceeds_hard = hard_limit is not None and effective > hard_limit
-    overflow_active = overflow and (exceeds_soft or exceeds_hard)
-    if overflow_active or len(segment) == 1:
-        return _emit_individual_records(segment, start_index, strategy=strategy)
-    if exceeds_soft or exceeds_hard:
-        # Allow overflow for numbered list continuations or colon-introduced lists
-        allows_overflow = _segment_allows_list_overflow(
-            segment, strategy=strategy
-        ) or _segment_is_colon_list(segment, strategy=strategy)
-        if allows_overflow:
-            merged = _merged_segment_record(
-                segment,
-                start_index=start_index,
-                overlap=overlap,
-                strategy=strategy,
-            )
-            if merged is not None:
-                return (merged,)
-        return _emit_individual_records(segment, start_index, strategy=strategy)
-    merged = _merged_segment_record(
-        segment,
-        start_index=start_index,
-        overlap=overlap,
-        strategy=strategy,
-    )
-    if merged is None:
-        return _emit_individual_records(segment, start_index, strategy=strategy)
-    return (merged,)
-
-
-def _segment_allows_list_overflow(
-    segment: tuple[tuple[int, Block, str], ...],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    heuristics = _resolve_bullet_strategy(strategy)
-    if not any(_text_has_number_two(text) for _, _, text in segment):
-        return False
-    last_num: int | None = None
-    for _, _, text in segment:
-        first_num = _first_list_number(text, strategy=heuristics)
-        last_in_text = _last_list_number(text, strategy=heuristics)
-        if first_num is not None:
-            if last_num is not None and first_num == last_num + 1:
-                return True
-            last_num = last_in_text or first_num
-            continue
-        if last_in_text is not None and last_num is not None:
-            if last_in_text == last_num + 1:
-                return True
-            if last_in_text >= last_num:
-                last_num = last_in_text
-            continue
-        if last_num is None and last_in_text is not None:
-            last_num = last_in_text
-    return False
-
-
-def _segment_is_colon_list(
-    segment: tuple[tuple[int, Block, str], ...],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    """Return True if segment is a colon-introduced list that should stay together.
-
-    This detects patterns like:
-    - Record 1: "...text ending with colon:"
-    - Record 2: "• First item\\n• Second item..."
-
-    Such patterns should be kept together for semantic cohesion even when
-    the combined size exceeds normal limits.
-    """
-    if len(segment) < 2:
-        return False
-    # Check if any record ends with colon and is followed by a list-like record
-    for i in range(len(segment) - 1):
-        _, _, prev_text = segment[i]
-        _, next_block, next_text = segment[i + 1]
-        if prev_text.rstrip().endswith(":") and _starts_list_like(
-            next_block, next_text, strategy=strategy
-        ):
-            return True
-    return False
-
-
-def _maybe_merge_dense_page(
-    records: Iterable[tuple[int, Block, str]],
-    options: SplitOptions | None,
-    limit: int | None,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[tuple[int, Block, str], ...]:
-    sequence = tuple(records)
-    if len(sequence) <= 1:
-        return sequence
-    if options is None or options.chunk_size <= 0:
-        return sequence
-    if {page for page, _, _ in sequence} != {sequence[0][0]}:
-        return sequence
-    dense_total = sum(_effective_counts(text)[1] for _, _, text in sequence)
-    if dense_total > options.chunk_size:
-        return sequence
-    word_total = sum(_effective_counts(text)[0] for _, _, text in sequence)
-    if word_total > options.chunk_size > 0:
-        return sequence
-    if limit is not None and word_total <= limit:
-        return sequence
-    merged_text = _join_record_texts(sequence, strategy=strategy)
-    if not merged_text:
-        return sequence
-    merged_block = _merge_record_block(list(sequence), merged_text)
-    return ((sequence[0][0], merged_block, merged_text),)
-
-
-@dataclass(frozen=True)
-class _CollapseEmitter:
-    resolved_limit: int | None
-    hard_limit: int | None
-    overlap: int
-    buffer: tuple[Record, ...] = tuple()
-    running_words: int = 0
-    running_dense: int = 0
-    start_index: int | None = None
-    outputs: tuple[Record, ...] = tuple()
-    strategy: BulletHeuristicStrategy | None = None
-
-    def append(
-        self,
-        idx: int,
-        record: Record,
-        counts: tuple[int, int, int],
-    ) -> _CollapseEmitter:
-        start_index = self.start_index if self.buffer else idx
-        words = self.running_words + counts[0] if self.buffer else counts[0]
-        dense = self.running_dense + counts[1] if self.buffer else counts[1]
-        return replace(
-            self,
-            buffer=self.buffer + (record,),
-            running_words=words,
-            running_dense=dense,
-            start_index=start_index,
-        )
-
-    def flush(self, *, overflow: bool = False) -> _CollapseEmitter:
-        if not self.buffer:
-            return self
-        first_index = self.start_index if self.start_index is not None else 0
-        produced = _emit_buffer_segments(
-            self.buffer,
-            start_index=first_index,
-            overlap=self.overlap,
-            resolved_limit=self.resolved_limit,
-            hard_limit=self.hard_limit,
-            overflow=overflow,
-            strategy=self.strategy,
-        )
-        return replace(
-            self,
-            buffer=tuple(),
-            running_words=0,
-            running_dense=0,
-            start_index=None,
-            outputs=self.outputs + produced,
-        )
-
-    def emit_single(self, idx: int, record: Record) -> _CollapseEmitter:
-        page, block, text = record
-        entry: Record = (page, _with_chunk_index(block, idx), text)
-        return replace(self, outputs=self.outputs + (entry,))
-
-
-def _page_or_footer_boundary(
-    buffer: tuple[Record, ...],
-    record: Record,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    if not buffer:
-        return False
-    prev_page, prev_block, _ = buffer[-1]
-    page, block, _ = record
-    # Check for heading boundaries - start a new chunk when we encounter
-    # a block that had a heading merged into it (has_heading_prefix)
-    if block.get("has_heading_prefix", False):
-        return True
-    if prev_page != page:
-        return not _allow_cross_page_list(buffer[-1], record, strategy=strategy)
-    prev_is_footer = _record_is_footer_candidate(buffer[-1], strategy=strategy)
-    current_is_footer = _record_is_footer_candidate(record, strategy=strategy)
-    return (current_is_footer != prev_is_footer) and (current_is_footer or prev_is_footer)
+# _segment_totals imported from split_modules.segments
+# _resolved_limit imported from split_modules.segments
+# _hard_limit imported from split_modules.segments
+# _overlap_value imported from split_modules.segments
+# _emit_buffer_segments imported from split_modules.segments
+# _merged_segment_record imported from split_modules.segments
+# _emit_individual_records imported from split_modules.segments
+# _emit_segment_records imported from split_modules.segments
+# _segment_allows_list_overflow imported from split_modules.segments
+# _segment_is_colon_list imported from split_modules.segments
+# _maybe_merge_dense_page imported from split_modules.segments
+# _CollapseEmitter imported from split_modules.segments
+# _page_or_footer_boundary imported from split_modules.segments
 
 
 _NUMBERED_ANYWHERE_RE = re.compile(r"(?:^|\n|\s)(\d+)[.)]\s+")
@@ -858,218 +438,16 @@ _NUMBERED_TWO_RE = re.compile(r"(?:^|\n|\s)2[.)]\s+")
 
 
 # Note: _first_list_number and _last_list_number are now imported from split_modules.lists
-
-
-def _allow_cross_page_list(
-    previous: Record,
-    current: Record,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    prev_page, prev_block, prev_text = previous
-    page, block, text = current
-    if (
-        prev_page is None
-        or page is None
-        or not isinstance(prev_page, int)
-        or not isinstance(page, int)
-        or page != prev_page + 1
-    ):
-        return False
-    heuristics = _resolve_bullet_strategy(strategy)
-    lead = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-    if not lead or not heuristics.starts_with_number(lead):
-        return False
-    prev_num = _last_list_number(prev_text, strategy=heuristics)
-    next_num = _first_list_number(text, strategy=heuristics)
-    if prev_num is None or next_num is None:
-        return False
-    return next_num == prev_num + 1
-
-
-def _buffer_last_list_number(
-    buffer: tuple[Record, ...],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> int | None:
-    heuristics = _resolve_bullet_strategy(strategy)
-    for _, _, text in reversed(buffer):
-        found = _last_list_number(text, strategy=heuristics)
-        if found is not None:
-            return found
-    return None
-
-
-def _record_starts_numbered_item(
-    record: Record,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    _, _, text = record
-    heuristics = _resolve_bullet_strategy(strategy)
-    lead = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-    return bool(lead and heuristics.starts_with_number(lead))
-
-
-def _allow_list_overflow(
-    buffer: tuple[Record, ...],
-    record: Record,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    if not buffer:
-        return False
-    heuristics = _resolve_bullet_strategy(strategy)
-    if not _record_starts_numbered_item(record, strategy=heuristics):
-        return False
-    if not (_buffer_has_number_two(buffer) or _text_has_number_two(record[2])):
-        return False
-    prev_num = _buffer_last_list_number(buffer, strategy=heuristics)
-    next_num = _first_list_number(record[2], strategy=heuristics)
-    if prev_num is None or next_num is None or next_num != prev_num + 1:
-        return False
-    projected_len = sum(len(text) for _, _, text in buffer) + len(record[2])
-    return projected_len <= SOFT_LIMIT
-
-
-def _allow_colon_list_overflow(
-    buffer: tuple[Record, ...],
-    record: Record,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    """Allow overflow when buffer ends with colon introducing a list.
-
-    This preserves semantic cohesion between list introductions (ending with
-    colon) and their following list items, even when the combined size exceeds
-    the soft limit.
-    """
-    if not buffer:
-        return False
-    _, prev_block, prev_text = buffer[-1]
-    _, block, text = record
-    # Check if previous text ends with a colon (list introduction pattern)
-    if not prev_text.rstrip().endswith(":"):
-        return False
-    # Check if current record starts with a list marker
-    if not _starts_list_like(block, text, strategy=strategy):
-        return False
-    # Allow overflow up to the soft limit to keep colon-intro with its list
-    projected_len = sum(len(t) for _, _, t in buffer) + len(text)
-    return projected_len <= SOFT_LIMIT
-
-
-def _text_has_number_two(text: str) -> bool:
-    return bool(_NUMBERED_TWO_RE.search(text))
-
-
-def _buffer_has_number_two(buffer: tuple[Record, ...]) -> bool:
-    return any(_text_has_number_two(text) for _, _, text in buffer)
-
-
-def _projected_overflow(
-    state: _CollapseEmitter,
-    block: Block,
-    text: str,
-    counts: tuple[int, int, int],
-) -> str | None:
-    words = state.running_words + counts[0]
-    dense = state.running_dense + counts[1]
-    effective = max(words, dense)
-    exceeds_soft = state.resolved_limit is not None and effective > state.resolved_limit
-    exceeds_hard = state.hard_limit is not None and effective > state.hard_limit
-    if exceeds_hard:
-        last_text = state.buffer[-1][2].rstrip()
-        if _ENDS_SENTENCE.search(last_text) and not _starts_list_like(
-            block,
-            text,
-            strategy=state.strategy,
-        ):
-            return "flush"
-        return "overflow"
-    if exceeds_soft:
-        return "overflow"
-    return None
-
-
-def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _CollapseEmitter:
-    idx, record = item
-    _, block, text = record
-    counts = _effective_counts(text)
-    _, _, effective = counts
-    if _page_or_footer_boundary(
-        state.buffer,
-        record,
-        strategy=state.strategy,
-    ):
-        state = state.flush()
-    if (state.resolved_limit is not None and effective > state.resolved_limit) or (
-        state.hard_limit is not None and effective > state.hard_limit
-    ):
-        if state.buffer and _allow_list_overflow(state.buffer, record, strategy=state.strategy):
-            return state.append(idx, record, counts)
-        return state.flush().emit_single(idx, record)
-    if (
-        state.buffer
-        and _starts_list_like(block, text, strategy=state.strategy)
-        and _should_emit_list_boundary(
-            state.buffer[-1],
-            block,
-            text,
-            strategy=state.strategy,
-        )
-    ):
-        state = state.flush()
-    if state.buffer:
-        overflow_action = _projected_overflow(state, block, text, counts)
-        if overflow_action is not None:
-            # Allow overflow for numbered list continuations or colon-introduced lists
-            allow_overflow = _allow_list_overflow(
-                state.buffer, record, strategy=state.strategy
-            ) or _allow_colon_list_overflow(state.buffer, record, strategy=state.strategy)
-            if not allow_overflow:
-                state = state.flush(overflow=overflow_action == "overflow")
-    return state.append(idx, record, counts)
-
-
-def _collapse_records(
-    records: Iterable[tuple[int, Block, str]],
-    options: SplitOptions | None = None,
-    limit: int | None = None,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> Iterator[tuple[int, Block, str]]:
-    heuristics = _resolve_bullet_strategy(strategy)
-    seq = tuple(_strip_footer_suffixes(tuple(records), strategy=heuristics))
-    if not seq:
-        return
-    resolved_limit = _resolved_limit(options, limit)
-    if resolved_limit is None:
-        yield from (
-            (page, _with_chunk_index(block, idx), text)
-            for idx, (page, block, text) in enumerate(seq)
-        )
-        return
-
-    hard_limit = _hard_limit(options, resolved_limit)
-    overlap = _overlap_value(options)
-    initial = _CollapseEmitter(
-        resolved_limit=resolved_limit,
-        hard_limit=hard_limit,
-        overlap=overlap,
-        strategy=heuristics,
-    )
-    final_state = reduce(_collapse_step, enumerate(seq), initial).flush()
-    merged_outputs = _maybe_merge_dense_page(
-        final_state.outputs,
-        options,
-        limit,
-        strategy=heuristics,
-    )
-    yield from (
-        (page, _with_chunk_index(block, idx), text)
-        for idx, (page, block, text) in enumerate(merged_outputs)
-    )
+# _allow_cross_page_list imported from split_modules.segments
+# _buffer_last_list_number imported from split_modules.segments
+# _record_starts_numbered_item imported from split_modules.segments
+# _allow_list_overflow imported from split_modules.segments
+# _allow_colon_list_overflow imported from split_modules.segments
+# _text_has_number_two imported from split_modules.segments
+# _buffer_has_number_two imported from split_modules.segments
+# _projected_overflow imported from split_modules.segments
+# _collapse_step imported from split_modules.segments
+# _collapse_records imported from split_modules.segments
 
 
 class _OverrideOpts(TypedDict, total=False):
@@ -1396,7 +774,9 @@ class _SplitSemanticPass:
     list_continuation_callback: ListContinuationCallback | None = None
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = derive_min_chunk_size(self.chunk_size, self.min_chunk_size)  # noqa: E501
+        self.min_chunk_size = derive_min_chunk_size(
+            self.chunk_size, self.min_chunk_size
+        )  # noqa: E501
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload

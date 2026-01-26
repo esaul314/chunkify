@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pdf_chunker.framework import Artifact
-from pdf_chunker.passes.split_semantic import (
+from pdf_chunker.passes.split_modules.segments import (
     _allow_colon_list_overflow,
     _collapse_step,
     _CollapseEmitter,
     _effective_counts,
     _segment_is_colon_list,
+)
+from pdf_chunker.passes.split_semantic import (
     _SplitSemanticPass,
 )
 from pdf_chunker.strategies.bullets import default_bullet_strategy

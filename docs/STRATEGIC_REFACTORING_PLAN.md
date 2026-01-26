@@ -16,16 +16,25 @@
 | 1.1 | PatternRegistry | ✅ Complete | — | `pdf_chunker/patterns.py` (12 patterns) |
 | 1.2 | Refactor to registry lookup | ✅ Complete | — | `sentence_fusion.py` delegates |
 | 2.1 | Add pipe>=2.0 dependency | ✅ Complete | — | `pyproject.toml` |
-| 3.1 | Create split_modules/ subpackage | ✅ Complete | — | 4 modules: footers, lists, overlap, __init__ |
-| 3.2 | Extract overlap.py | ✅ Complete | ~129 | Boundary overlap management |
-| 3.2 | Wire overlap imports | ✅ Complete | — | 12 functions delegated |
-| 3.2 | Extract lists.py functions | ✅ Complete | ~45 | 5 functions delegated |
-| 3.2 | Wire footer imports | ✅ Complete | ~175 | 5 functions delegated |
+| 3.1 | Create split_modules/ subpackage | ✅ Complete | — | 5 modules: footers, lists, overlap, stitching, segments |
+| 3.2 | Extract footers.py | ✅ Complete | ~175 | 5 functions delegated |
+| 3.2 | Extract lists.py | ✅ Complete | ~45 | 5 functions delegated |
+| 3.2 | Extract overlap.py | ✅ Complete | ~129 | 12 functions delegated |
+| 3.3 | Extract stitching.py | ✅ Complete | ~150 | Block stitching, text merging |
+| 3.4 | Extract segments.py | ✅ Complete | ~500 | _CollapseEmitter + 25 emit functions |
+| 3.5 | Extract inline_headings.py | ✅ Complete | ~100 | Inline heading detection + promotion |
 
 **Metrics:**
-- `split_semantic.py`: **1,609 lines** (was 1,962 → **353 lines removed**)
-- `split_modules/`: 896 lines total (well-organized, single-responsibility modules)
-- **Target:** ≤ 300 lines (in progress)
+- `split_semantic.py`: **856 lines** (was 1,962 → **56% reduction achieved!**)
+- `split_modules/`: 2,215 lines total (well-organized, single-responsibility modules)
+  - `footers.py`: 371 lines
+  - `lists.py`: 198 lines
+  - `overlap.py`: 248 lines
+  - `stitching.py`: 274 lines
+  - `segments.py`: 793 lines
+  - `inline_headings.py`: 166 lines
+  - `__init__.py`: 165 lines
+- **Target:** ≤ 300 lines (remaining extraction required)
 
 ---
 
