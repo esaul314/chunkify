@@ -6,8 +6,8 @@ into focused modules:
 - footers.py: Footer detection and stripping
 - lists.py: List boundary detection and splitting
 - overlap.py: Boundary overlap management
+- stitching.py: Block stitching and merging
 - emission.py: Segment emission (planned)
-- stitching.py: Block stitching and merging (planned)
 
 The main split_semantic.py remains the entry point but can delegate to these
 modules for specific functionality.
@@ -46,6 +46,12 @@ from pdf_chunker.passes.split_modules.overlap import (
     trim_sentence_prefix,
     trim_tokens,
 )
+from pdf_chunker.passes.split_modules.stitching import (
+    is_heading,
+    merge_record_block,
+    stitch_block_continuations,
+    with_chunk_index,
+)
 
 __all__ = [
     # Footer detection
@@ -76,4 +82,9 @@ __all__ = [
     "should_trim_overlap",
     "trim_tokens",
     "trim_boundary_overlap",
+    # Block stitching
+    "stitch_block_continuations",
+    "merge_record_block",
+    "with_chunk_index",
+    "is_heading",
 ]

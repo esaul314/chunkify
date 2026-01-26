@@ -47,7 +47,6 @@ from pdf_chunker.passes.sentence_fusion import (
     _ENDS_SENTENCE,
     SOFT_LIMIT,
     _is_continuation_lead,
-    _is_qa_sequence_continuation,
     _last_sentence,
     _merge_sentence_fragments,
 )
@@ -81,6 +80,18 @@ from pdf_chunker.passes.split_modules.overlap import (
 from pdf_chunker.passes.split_modules.overlap import (
     trim_boundary_overlap as _trim_boundary_overlap,
 )
+from pdf_chunker.passes.split_modules.stitching import (
+    is_heading as _is_heading,
+)
+from pdf_chunker.passes.split_modules.stitching import (
+    merge_record_block as _merge_record_block,
+)
+from pdf_chunker.passes.split_modules.stitching import (
+    stitch_block_continuations as _stitch_block_continuations,
+)
+from pdf_chunker.passes.split_modules.stitching import (
+    with_chunk_index as _with_chunk_index,
+)
 from pdf_chunker.passes.split_semantic_inline import (
     _body_styles,
     _heading_styles,
@@ -110,7 +121,7 @@ from pdf_chunker.passes.split_semantic_metadata import (
     build_chunk,
     build_chunk_with_meta,
 )
-from pdf_chunker.passes.transform_log import TransformationLog, maybe_record
+from pdf_chunker.passes.transform_log import TransformationLog
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
     default_bullet_strategy,
@@ -305,147 +316,11 @@ def _promote_inline_heading(block: Block, text: str) -> Block:
     return block
 
 
-def _stitch_block_continuations(
-    seq: Iterable[tuple[int, Block, str]],
-    limit: int | None,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-    transform_log: TransformationLog | None = None,
-) -> list[tuple[int, Block, str]]:
-    def _consume(
-        acc: list[tuple[int, Block, str]],
-        cur: tuple[int, Block, str],
-    ) -> list[tuple[int, Block, str]]:
-        page, block, text = cur
-        if not acc:
-            return [*acc, cur]
-
-        prev_text = acc[-1][2]
-
-        # Check for Q&A sequence continuation FIRST (e.g., Q1: -> Q2:)
-        # This takes priority over heading checks because Q&A sequences
-        # should stay together even when the previous block has a heading prefix
-        if _is_qa_sequence_continuation(prev_text, text):
-            # Merge Q&A sequences together
-            merged = f"{prev_text}\n{text}".strip()
-            maybe_record(
-                transform_log,
-                "merged",
-                "split_semantic._stitch",
-                "qa_sequence_merge",
-                prev_text[:100],
-                merged[:100],
-                details={"page": acc[-1][0], "next_page": page},
-            )
-            return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
-
-        # Don't merge heading blocks with other content
-        if _is_heading(block):
-            maybe_record(
-                transform_log,
-                "boundary",
-                "split_semantic._stitch",
-                "heading_boundary_kept",
-                prev_text[:100],
-                prev_text[:100],
-                details={"page": page, "reason": "current_block_is_heading"},
-            )
-            return [*acc, cur]
-        # Don't merge into heading blocks (unless it's a Q&A sequence, handled above)
-        if _is_heading(acc[-1][1]):
-            maybe_record(
-                transform_log,
-                "boundary",
-                "split_semantic._stitch",
-                "heading_boundary_kept",
-                prev_text[:100],
-                prev_text[:100],
-                details={"page": acc[-1][0], "reason": "previous_block_is_heading"},
-            )
-            return [*acc, cur]
-        if _starts_list_like(block, text, strategy=strategy):
-            maybe_record(
-                transform_log,
-                "boundary",
-                "split_semantic._stitch",
-                "list_boundary_kept",
-                prev_text[:100],
-                prev_text[:100],
-                details={"page": page},
-            )
-            return [*acc, cur]
-        lead = text.lstrip()
-
-        if not lead or not _is_continuation_lead(lead):
-            return [*acc, cur]
-        context = _last_sentence(prev_text)
-        if not context or text.lstrip().startswith(context):
-            return [*acc, cur]
-        context_words = tuple(context.split())
-        text_words = tuple(text.split())
-        if limit is not None and len(text_words) + len(context_words) > limit:
-            _warn_stitching_issue(
-                "continuation context skipped due to chunk limit",
-                page=acc[-1][0],
-            )
-            merged = f"{prev_text} {text}".strip()
-            maybe_record(
-                transform_log,
-                "merged",
-                "split_semantic._stitch",
-                "continuation_merge_limit_skip",
-                prev_text[:100],
-                merged[:100],
-                details={"page": acc[-1][0], "context_words": len(context_words)},
-            )
-            return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
-        enriched = f"{context} {text}".strip()
-        maybe_record(
-            transform_log,
-            "merged",
-            "split_semantic._stitch",
-            "continuation_context_prepend",
-            text[:100],
-            enriched[:100],
-            details={"page": page, "context_len": len(context)},
-        )
-        return [*acc, (page, block, enriched)]
-
-    return reduce(_consume, seq, [])
-
-
-def _merge_record_block(records: list[tuple[int, Block, str]], text: str) -> Block:
-    blocks = tuple(block for _, block, _ in records)
-    envelope = _resolve_envelope(blocks)
-    first = blocks[0] if blocks else {}
-    merged = _apply_envelope(first, text, envelope)
-    if not blocks:
-        return merged
-
-    def _snapshot(candidate: Block) -> Block:
-        if not isinstance(candidate, Mapping):
-            return {}
-        base = {**candidate}
-        base.pop("source_blocks", None)
-        return base
-
-    existing_sources = (
-        tuple(
-            _snapshot(source)
-            for source in first.get("source_blocks", ())
-            if isinstance(first, Mapping) and isinstance(source, Mapping)
-        )
-        if isinstance(first, Mapping)
-        else tuple()
-    )
-    snapshots = existing_sources + tuple(
-        _snapshot(block) for block in blocks if isinstance(block, Mapping)
-    )
-    return {**merged, "source_blocks": snapshots} if snapshots else merged
-
-
-def _with_chunk_index(block: Block, index: int) -> Block:
-    return {**block, "_chunk_start_index": index}
+# ---------------------------------------------------------------------------
+# Stitching functions delegated to split_modules.stitching
+# ---------------------------------------------------------------------------
+# The following functions are now imported from pdf_chunker.passes.split_modules.stitching:
+#   _stitch_block_continuations, _merge_record_block, _with_chunk_index, _is_heading
 
 
 def _effective_counts(text: str) -> tuple[int, int, int]:
@@ -1404,13 +1279,7 @@ def _block_texts(
     return _split_inline_heading_records(merged)
 
 
-def _is_heading(block: Block) -> bool:
-    """Return ``True`` when ``block`` represents a heading.
-
-    This includes blocks with type="heading" as well as blocks that
-    have had a heading merged into them (marked with has_heading_prefix).
-    """
-    return block.get("type") == "heading" or block.get("has_heading_prefix", False)
+# _is_heading is imported from pdf_chunker.passes.split_modules.stitching
 
 
 def _chunk_items(
