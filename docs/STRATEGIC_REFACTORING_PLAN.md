@@ -1,8 +1,31 @@
 # STRATEGIC_REFACTORING_PLAN.md — From Complexity to Clarity
 
 **Date:** 2026-01-26  
-**Status:** APPROVED FOR IMPLEMENTATION  
+**Status:** IN PROGRESS  
 **Author:** Codebase Steward (with system analysis)
+
+---
+
+## Implementation Progress
+
+| Phase | Task | Status | Lines Saved | Notes |
+|-------|------|--------|-------------|-------|
+| 0.1 | TransformationLog dataclass | ✅ Complete | — | `pdf_chunker/passes/transform_log.py` |
+| 0.2 | Wire to --trace mode | ✅ Complete | — | `pdf_chunker/adapters/emit_trace.py` |
+| 0.3 | Add logging to merge points | ✅ Complete | — | `_stitch_block_continuations` |
+| 1.1 | PatternRegistry | ✅ Complete | — | `pdf_chunker/patterns.py` (12 patterns) |
+| 1.2 | Refactor to registry lookup | ✅ Complete | — | `sentence_fusion.py` delegates |
+| 2.1 | Add pipe>=2.0 dependency | ✅ Complete | — | `pyproject.toml` |
+| 3.1 | Create split_modules/ subpackage | ✅ Complete | — | 4 modules: footers, lists, overlap, __init__ |
+| 3.2 | Extract overlap.py | ✅ Complete | ~129 | Boundary overlap management |
+| 3.2 | Wire overlap imports | ✅ Complete | — | 12 functions delegated |
+| 3.2 | Extract lists.py functions | ✅ Complete | ~45 | 5 functions delegated |
+| 3.2 | Wire footer imports | ✅ Complete | ~175 | 5 functions delegated |
+
+**Metrics:**
+- `split_semantic.py`: **1,609 lines** (was 1,962 → **353 lines removed**)
+- `split_modules/`: 896 lines total (well-organized, single-responsibility modules)
+- **Target:** ≤ 300 lines (in progress)
 
 ---
 

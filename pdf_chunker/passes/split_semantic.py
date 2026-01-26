@@ -25,12 +25,6 @@ from pdf_chunker.interactive import (
     _candidate_continues_list_item,
     _looks_like_list_item,
 )
-from pdf_chunker.page_artifacts import (
-    _bullet_body,
-    _drop_trailing_bullet_footers,
-    _footer_bullet_signals,
-    _header_invites_footer,
-)
 from pdf_chunker.passes.chunk_options import (
     SplitMetrics,
     SplitOptions,
@@ -57,6 +51,36 @@ from pdf_chunker.passes.sentence_fusion import (
     _last_sentence,
     _merge_sentence_fragments,
 )
+from pdf_chunker.passes.split_modules.footers import (
+    record_is_footer_candidate as _record_is_footer_candidate,
+)
+from pdf_chunker.passes.split_modules.footers import (
+    strip_footer_suffixes as _strip_footer_suffixes,
+)
+from pdf_chunker.passes.split_modules.lists import (
+    colon_bullet_boundary as _colon_bullet_boundary,
+)
+from pdf_chunker.passes.split_modules.lists import (
+    first_list_number as _first_list_number,
+)
+from pdf_chunker.passes.split_modules.lists import (
+    last_list_number as _last_list_number,
+)
+from pdf_chunker.passes.split_modules.lists import (
+    record_is_list_like as _record_is_list_like,
+)
+from pdf_chunker.passes.split_modules.lists import (
+    starts_list_like as _starts_list_like,
+)
+from pdf_chunker.passes.split_modules.overlap import (
+    restore_overlap_words as _restore_overlap_words,
+)
+from pdf_chunker.passes.split_modules.overlap import (
+    split_words as _split_words,
+)
+from pdf_chunker.passes.split_modules.overlap import (
+    trim_boundary_overlap as _trim_boundary_overlap,
+)
 from pdf_chunker.passes.split_semantic_inline import (
     _body_styles,
     _heading_styles,
@@ -70,7 +94,6 @@ from pdf_chunker.passes.split_semantic_lists import (
     _STYLED_LIST_KIND,
     _append_caption,
     _apply_envelope,
-    _block_list_kind,
     _BlockEnvelope,
     _contains_caption_line,
     _has_caption,
@@ -239,142 +262,14 @@ def _soft_segments(
     return list(_split(text))
 
 
-def _restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
-    if overlap <= 0:
-        return chunks
-
-    restored = accumulate(
-        chunks,
-        lambda previous, current: _restore_chunk_overlap(previous, current, overlap),
-        initial="",
-    )
-    next(restored, None)
-    return list(restored)
-
-
-def _restore_chunk_overlap(previous: str, current: str, overlap: int) -> str:
-    if not previous or not current:
-        return current
-
-    previous_words = _split_words(previous)
-    current_words = _split_words(current)
-    missing = _missing_overlap_prefix(previous_words, current_words, overlap)
-    if missing:
-        return _prepend_words(missing, current)
-    return _trim_sentence_prefix(previous, current)
-
-
-def _missing_overlap_prefix(
-    previous_words: tuple[str, ...], current_words: tuple[str, ...], overlap: int
-) -> tuple[str, ...]:
-    if overlap <= 0 or not previous_words or not current_words:
-        return tuple()
-
-    window = min(overlap, len(previous_words))
-    matched = _overlap_window(previous_words, current_words, window)
-    if matched >= window:
-        return tuple()
-
-    overlap_words = previous_words[-window:]
-    missing = overlap_words[: window - matched]
-    filtered = tuple(token for token in missing if _is_overlap_token(token))
-    return filtered
-
-
-def _prepend_words(words: tuple[str, ...], text: str) -> str:
-    if not words:
-        return text
-    prefix = " ".join(words)
-    if not prefix:
-        return text
-    glue = "" if not text or text[0].isspace() else " "
-    return f"{prefix}{glue}{text}"
-
-
-def _is_overlap_token(token: str) -> bool:
-    stripped = token.strip()
-    if not stripped:
-        return False
-    if any(char.isalnum() for char in stripped):
-        return True
-    return stripped in {"•", "-", "–", "—"}
-
-
-def _trim_sentence_prefix(previous_text: str, text: str) -> str:
-    if not previous_text or not text:
-        return text
-    sentence = _last_sentence(previous_text)
-    if not sentence:
-        return text
-    candidate = sentence.strip()
-    if not candidate or candidate[-1] not in {".", "?", "!"}:
-        return text
-    if re.search(r"Chapter\s+\d+", candidate):
-        return text
-    if not text.startswith(candidate):
-        return text
-    remainder = text[len(candidate) :]
-    if not remainder or not remainder.strip():
-        return text
-    match = re.search(
-        r"((?:Chapter|Section|Part)\s+[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)?)\.?$", candidate
-    )  # noqa: E501
-    preserved = match.group(0) if match else ""
-    leading_space = remainder.startswith(" ")
-    gap = remainder[1:] if leading_space else remainder
-    if preserved:
-        if gap.startswith("\n"):
-            return f"{preserved}{gap}"
-        spacer = "" if not gap or gap[0].isspace() else " "
-        return f"{preserved}{spacer}{gap}"
-    return gap
-
-
-def _split_words(text: str) -> tuple[str, ...]:
-    return tuple(text.split())
-
-
-def _overlap_window(prev_words: tuple[str, ...], current_words: tuple[str, ...], limit: int) -> int:
-    match_limit = min(limit, len(prev_words), len(current_words))
-    return next(
-        (size for size in range(match_limit, 0, -1) if prev_words[-size:] == current_words[:size]),
-        0,
-    )
-
-
-def _overlap_text(words: tuple[str, ...], size: int) -> str:
-    return " ".join(words[:size]).strip()
-
-
-def _should_trim_overlap(segment: str) -> bool:
-    return bool(segment) and segment[-1] in {".", "?", "!"}
-
-
-def _trim_tokens(text: str, count: int) -> str:
-    matches = list(_TOKEN_PATTERN.finditer(text))
-    if len(matches) >= count:
-        cut = matches[count - 1].end()
-        return text[cut:].lstrip(" ")
-    return ""
-
-
-def _trim_boundary_overlap(prev_text: str, text: str, overlap: int) -> str:
-    if overlap <= 0 or not prev_text or not text:
-        return text
-    previous_words = _split_words(prev_text)
-    current_words = _split_words(text)
-    window = min(overlap, len(previous_words))
-    if not window:
-        return text
-    matched = _overlap_window(previous_words, current_words, window)
-    if not matched or len(current_words) <= matched:
-        return text
-    if _looks_like_caption(text):
-        return text
-    overlap_segment = _overlap_text(current_words, matched)
-    if not _should_trim_overlap(overlap_segment):
-        return text
-    return _trim_tokens(text, matched)
+# ---------------------------------------------------------------------------
+# Overlap functions delegated to split_modules.overlap
+# ---------------------------------------------------------------------------
+# The following functions are now imported from pdf_chunker.passes.split_modules.overlap:
+#   _restore_overlap_words, _restore_chunk_overlap, _missing_overlap_prefix,
+#   _prepend_words, _is_overlap_token, _trim_sentence_prefix, _split_words,
+#   _overlap_window, _overlap_text, _should_trim_overlap, _trim_tokens,
+#   _trim_boundary_overlap
 
 
 def _promote_inline_heading(block: Block, text: str) -> Block:
@@ -565,214 +460,20 @@ def _effective_counts(text: str) -> tuple[int, int, int]:
     return word_count, dense_total, effective_total
 
 
-def _colon_bullet_boundary(
-    prev_text: str,
-    block: Block,
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    return prev_text.rstrip().endswith(":") and _starts_list_like(
-        block,
-        text,
-        strategy=strategy,
-    )
+# ---------------------------------------------------------------------------
+# List functions delegated to split_modules.lists
+# ---------------------------------------------------------------------------
+# The following functions are now imported from pdf_chunker.passes.split_modules.lists:
+#   _starts_list_like, _record_is_list_like, _colon_bullet_boundary,
+#   _first_list_number, _last_list_number
 
 
-def _record_is_list_like(
-    record: tuple[int, Block, str],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    _, block, text = record
-    return _starts_list_like(block, text, strategy=strategy)
-
-
-def _previous_non_empty_line(lines: tuple[str, ...]) -> str:
-    return next((line for line in reversed(lines) if line.strip()), "")
-
-
-def _footer_context_allows(previous_line: str, trailing_count: int) -> bool:
-    return any(
-        (
-            _footer_bullet_signals("", previous_line),
-            _header_invites_footer(previous_line, trailing_count),
-        )
-    )
-
-
-def _footer_line_is_artifact(line: str, previous_line: str) -> bool:
-    body = _bullet_body(line)
-    return not body or _footer_bullet_signals(body, previous_line)
-
-
-def _resolve_footer_suffix(lines: tuple[str, ...]) -> tuple[str, ...]:
-    pruned = tuple(_drop_trailing_bullet_footers(list(lines)))
-    if len(pruned) == len(lines):
-        return tuple()
-    suffix = lines[len(pruned) :]
-    if not suffix:
-        return tuple()
-    previous_line = _previous_non_empty_line(pruned)
-    if not _footer_context_allows(previous_line, len(suffix)):
-        return tuple()
-    if not all(_footer_line_is_artifact(line, previous_line) for line in suffix):
-        return tuple()
-    return suffix
-
-
-def _record_trailing_footer_lines(
-    record: tuple[int, Block, str],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[str, ...]:
-    heuristics = _resolve_bullet_strategy(strategy)
-    """Return trailing bullet lines that heuristically resemble footers."""
-
-    _, block, text = record
-    if not _starts_list_like(block, text):
-        return tuple()
-    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-    if not lines:
-        return tuple()
-    suffix = _resolve_footer_suffix(lines)
-    bullet_like = tuple(
-        line
-        for line in suffix
-        if heuristics.starts_with_bullet(line) or heuristics.starts_with_number(line)
-    )
-    return bullet_like if bullet_like == suffix else tuple()
-
-
-def _record_is_footer_candidate(
-    record: tuple[int, Block, str],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    return bool(_record_trailing_footer_lines(record, strategy=strategy))
-
-
-def _trim_footer_suffix(text: str, suffix: tuple[str, ...]) -> str:
-    """Return ``text`` with trailing ``suffix`` bullet lines removed."""
-
-    if not suffix:
-        return text
-    lines = text.splitlines()
-    if not lines:
-        return text
-    trimmed = list(lines)
-    suffix_lines = tuple(line.strip() for line in suffix if line.strip())
-    if not suffix_lines:
-        return text
-    index = len(trimmed) - 1
-    for candidate in reversed(suffix_lines):
-        while index >= 0 and not trimmed[index].strip():
-            trimmed.pop()
-            index -= 1
-        if index < 0:
-            return text
-        if trimmed[index].strip() != candidate:
-            return text
-        trimmed.pop()
-        index -= 1
-    while trimmed and not trimmed[-1].strip():
-        trimmed.pop()
-    return "\n".join(trimmed)
-
-
-def _strip_footer_suffix(
-    record: tuple[int, Block, str],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[int, Block, str] | None:
-    """Return ``record`` without footer bullets or ``None`` if empty."""
-
-    heuristics = _resolve_bullet_strategy(strategy)
-    page, block, text = record
-    suffix = _record_trailing_footer_lines(record, strategy=heuristics)
-    if not suffix:
-        return record
-    trimmed = _trim_footer_suffix(text, suffix)
-    if trimmed == text:
-        return record
-    if not trimmed.strip():
-        return None
-    updated_block: Block = block
-    if isinstance(block, Mapping):
-        original = {key: value for key, value in dict(block).items() if key != "source_blocks"}
-        original["text"] = text
-        existing_sources = tuple(
-            {key: value for key, value in dict(source).items() if key != "source_blocks"}
-            for source in block.get("source_blocks", ())
-            if isinstance(source, Mapping)
-        )
-        updated = dict(block)
-        updated["text"] = trimmed
-        if existing_sources or original.get("text"):
-            updated["source_blocks"] = existing_sources + (original,)
-        updated_block = cast(Block, updated)
-    return page, updated_block, trimmed
-
-
-def _is_footer_artifact_record(
-    previous: tuple[int, Block, str],
-    current: tuple[int, Block, str],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    """Return ``True`` when ``current`` resembles a stray footer list."""
-
-    heuristics = _resolve_bullet_strategy(strategy)
-    prev_page, prev_block, prev_text = previous
-    page, block, text = current
-    if page != prev_page:
-        return False
-    stripped_lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-    if not stripped_lines or len(stripped_lines) > 2:
-        return False
-    if not all(
-        heuristics.starts_with_bullet(line) or heuristics.starts_with_number(line)
-        for line in stripped_lines
-    ):
-        return False
-    word_total = sum(len(line.split()) for line in stripped_lines)
-    if word_total > 20:
-        return False
-    previous_line = _previous_non_empty_line(tuple(prev_text.splitlines()))
-    if not _footer_context_allows(previous_line, len(stripped_lines)):
-        return False
-    if not all(_footer_line_is_artifact(line, previous_line) for line in stripped_lines):
-        return False
-    width = None
-    if isinstance(block, Mapping):
-        bbox = block.get("bbox")
-        if isinstance(bbox, tuple) and len(bbox) == 4:
-            try:
-                width = float(bbox[2]) - float(bbox[0])
-            except (TypeError, ValueError):
-                width = None
-    if width is not None and width > 260:
-        return False
-    return not _starts_list_like(prev_block, prev_text)
-
-
-def _strip_footer_suffixes(
-    records: Iterable[tuple[int, Block, str]],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> tuple[tuple[int, Block, str], ...]:
-    """Remove footer suffix bullets from ``records``."""
-
-    heuristics = _resolve_bullet_strategy(strategy)
-    cleaned: list[tuple[int, Block, str]] = []
-    for record in records:
-        trimmed = _strip_footer_suffix(record, strategy=heuristics)
-        if trimmed is None:
-            continue
-        if cleaned and _is_footer_artifact_record(cleaned[-1], trimmed, strategy=heuristics):
-            continue
-        cleaned.append(trimmed)
-    return tuple(cleaned)
+# ---------------------------------------------------------------------------
+# Footer functions delegated to split_modules.footers
+# ---------------------------------------------------------------------------
+# The following functions are now imported from pdf_chunker.passes.split_modules.footers:
+#   _resolve_footer_suffix, _record_trailing_footer_lines, _record_is_footer_candidate,
+#   _strip_footer_suffix, _strip_footer_suffixes
 
 
 def _should_emit_list_boundary(
@@ -1281,33 +982,7 @@ _NUMBERED_ANYWHERE_RE = re.compile(r"(?:^|\n|\s)(\d+)[.)]\s+")
 _NUMBERED_TWO_RE = re.compile(r"(?:^|\n|\s)2[.)]\s+")
 
 
-def _first_list_number(
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> int | None:
-    heuristics = _resolve_bullet_strategy(strategy)
-    line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-    if not line or not heuristics.starts_with_number(line):
-        match = _NUMBERED_ANYWHERE_RE.search(text)
-        return int(match.group(1)) if match else None
-    match = re.match(r"^(\d+)[.)]\s+", line)
-    return int(match.group(1)) if match else None
-
-
-def _last_list_number(
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> int | None:
-    heuristics = _resolve_bullet_strategy(strategy)
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    for line in reversed(lines):
-        if heuristics.starts_with_number(line):
-            match = re.match(r"^(\d+)[.)]\s+", line)
-            return int(match.group(1)) if match else None
-    matches = _NUMBERED_ANYWHERE_RE.findall(text)
-    return int(matches[-1]) if matches else None
+# Note: _first_list_number and _last_list_number are now imported from split_modules.lists
 
 
 def _allow_cross_page_list(
@@ -1604,22 +1279,7 @@ def _block_text(block: Block) -> str:
     return block.get("text", "")
 
 
-def _starts_list_like(
-    block: Block,
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> bool:
-    kind = _block_list_kind(block)
-    if kind:
-        return True
-    if block.get("type") == "list_item":
-        return True
-    stripped = text.lstrip()
-    if not stripped:
-        return False
-    heuristics = _resolve_bullet_strategy(strategy)
-    return heuristics.starts_with_bullet(stripped) or heuristics.starts_with_number(stripped)
+# Note: _starts_list_like is now imported from split_modules.lists
 
 
 def _should_break_after_colon(
