@@ -53,6 +53,7 @@ from pdf_chunker.passes.sentence_fusion import (
     _ENDS_SENTENCE,
     SOFT_LIMIT,
     _is_continuation_lead,
+    _is_qa_sequence_continuation,
     _last_sentence,
     _merge_sentence_fragments,
 )
@@ -421,18 +422,30 @@ def _stitch_block_continuations(
         page, block, text = cur
         if not acc:
             return [*acc, cur]
+
+        prev_text = acc[-1][2]
+
+        # Check for Q&A sequence continuation FIRST (e.g., Q1: -> Q2:)
+        # This takes priority over heading checks because Q&A sequences
+        # should stay together even when the previous block has a heading prefix
+        if _is_qa_sequence_continuation(prev_text, text):
+            # Merge Q&A sequences together
+            merged = f"{prev_text}\n{text}".strip()
+            return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
+
         # Don't merge heading blocks with other content
         if _is_heading(block):
             return [*acc, cur]
-        # Don't merge into heading blocks
+        # Don't merge into heading blocks (unless it's a Q&A sequence, handled above)
         if _is_heading(acc[-1][1]):
             return [*acc, cur]
         if _starts_list_like(block, text, strategy=strategy):
             return [*acc, cur]
         lead = text.lstrip()
+
         if not lead or not _is_continuation_lead(lead):
             return [*acc, cur]
-        context = _last_sentence(acc[-1][2])
+        context = _last_sentence(prev_text)
         if not context or text.lstrip().startswith(context):
             return [*acc, cur]
         context_words = tuple(context.split())
@@ -442,7 +455,7 @@ def _stitch_block_continuations(
                 "continuation context skipped due to chunk limit",
                 page=acc[-1][0],
             )
-            merged = f"{acc[-1][2]} {text}".strip()
+            merged = f"{prev_text} {text}".strip()
             return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
         enriched = f"{context} {text}".strip()
         return [*acc, (page, block, enriched)]

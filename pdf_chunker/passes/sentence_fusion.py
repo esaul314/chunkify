@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from math import ceil
 from functools import reduce
+from math import ceil
 from numbers import Real
 from typing import NamedTuple
 
@@ -48,6 +48,68 @@ def _leading_token(text: str) -> str:
 
 def _is_continuation_lead(text: str) -> bool:
     return _leading_token(text) in _LEADING_CONTINUATIONS
+
+
+# Pattern for Q&A sequences like Q1:, Q2:, A1:, A2:, etc.
+# Anchored version for checking text start
+_QA_PATTERN_START = re.compile(r"^[QA]\d+:", re.IGNORECASE)
+# Unanchored version for finding patterns within text
+_QA_PATTERN_ANY = re.compile(r"[QA]\d+:", re.IGNORECASE)
+
+
+def _extract_qa_number(text: str) -> int | None:
+    """Extract the number from a Q&A pattern like 'Q2:' or 'A3:'.
+
+    Returns the number or None if text doesn't match the pattern.
+    """
+    match = _QA_PATTERN_START.match(text.lstrip())
+    if not match:
+        return None
+    # Extract the digit(s) from the match
+    matched = match.group(0)
+    for char in matched:
+        if char.isdigit():
+            return int(char)
+    return None
+
+
+def _is_qa_sequence_continuation(prev_text: str, curr_text: str) -> bool:
+    """Check if curr_text continues a Q&A sequence from prev_text.
+
+    Returns True if prev_text contains QN: and curr_text starts with Q(N+1):
+    or similar patterns (e.g., Q1: -> Q2:, A1: -> A2:, or Q1: -> A1:).
+    """
+    # Find the last Q/A pattern in the previous text
+    prev_stripped = prev_text.strip()
+    curr_stripped = curr_text.lstrip()
+
+    # Check if current text starts with a Q&A pattern
+    curr_num = _extract_qa_number(curr_stripped)
+    if curr_num is None:
+        return False
+
+    # Find all Q&A patterns in previous text (using unanchored pattern)
+    prev_matches = list(_QA_PATTERN_ANY.finditer(prev_stripped))
+    if not prev_matches:
+        return False
+
+    # Get the last Q&A number from previous text
+    last_match = prev_matches[-1]
+    last_text = last_match.group(0)
+    prev_num = None
+    for char in last_text:
+        if char.isdigit():
+            prev_num = int(char)
+            break
+
+    if prev_num is None:
+        return False
+
+    # Check if current continues the sequence (same number or next number)
+    # Q1: -> Q2: (next question)
+    # Q1: -> A1: (answer to question)
+    # A1: -> Q2: (next question after answer)
+    return curr_num == prev_num or curr_num == prev_num + 1
 
 
 def _compute_limit(chunk_size: int | None, overlap: int, min_chunk_size: int | None) -> int | None:
@@ -96,9 +158,7 @@ class _BudgetView:
     def dense_overflow_safe(self) -> bool:
         hard = self.budget.hard_limit
         return (
-            self.sentence_completion_pending
-            and hard is not None
-            and self.budget.word_total <= hard
+            self.sentence_completion_pending and hard is not None and self.budget.word_total <= hard
         )
 
     @property
@@ -199,9 +259,7 @@ def _merge_sentence_fragments(
     def _target_limit_from(budget: _MergeBudget) -> int | None:
         return budget.limit if budget.limit is not None else budget.hard_limit
 
-    def _is_dense_fragment(
-        prev_words: tuple[str, ...], current_words: tuple[str, ...]
-    ) -> bool:
+    def _is_dense_fragment(prev_words: tuple[str, ...], current_words: tuple[str, ...]) -> bool:
         return len(prev_words) <= 1 or len(current_words) <= 1
 
     def _violates_budget(
@@ -246,16 +304,12 @@ def _merge_sentence_fragments(
             return _MergeDecision(False, False, False)
         dense_fragments = _is_dense_fragment(prev_words, current_words)
         previous_ends_sentence = bool(_ENDS_SENTENCE.search(previous.rstrip()))
-        current_completes_sentence = bool(
-            _ENDS_SENTENCE.search(current.rstrip())
-        )
+        current_completes_sentence = bool(_ENDS_SENTENCE.search(current.rstrip()))
         view = _BudgetView(
             budget=budget,
             target_limit=target_limit,
             dense_fragments=dense_fragments,
-            sentence_completion_pending=(
-                current_completes_sentence and not previous_ends_sentence
-            ),
+            sentence_completion_pending=(current_completes_sentence and not previous_ends_sentence),
         )
         allow_overflow = view.allow_overflow()
         budget_violation = view.violates()
@@ -330,9 +384,7 @@ def _merge_sentence_fragments(
             trimmed_words,
             budget,
         )
-        pending_sentence = bool(
-            prev_text and not _ENDS_SENTENCE.search(prev_text.rstrip())
-        )
+        pending_sentence = bool(prev_text and not _ENDS_SENTENCE.search(prev_text.rstrip()))
         if not decision.allowed:
             if trimmed_words != words:
                 return _append(acc, trimmed_text, trimmed_words)
@@ -343,9 +395,7 @@ def _merge_sentence_fragments(
         if exceeds_limit and not decision.allow_overflow and pending_sentence:
             decision = _MergeDecision(decision.allowed, True, dense_fragments)
             dense_fragments = decision.dense_fragments
-            exceeds_limit = _violates_budget(
-                budget, dense_fragments=dense_fragments
-            )
+            exceeds_limit = _violates_budget(budget, dense_fragments=dense_fragments)
         if exceeds_limit and not decision.allow_overflow:
             adjusted = (
                 _rebalance_overflow(prev_text, prev_words, trimmed_text, _target_limit_from(budget))
@@ -365,9 +415,7 @@ def _merge_sentence_fragments(
                         min_chunk_size=min_chunk_size,
                     )
                     dense_fragments = _is_dense_fragment(prev_words, trimmed_words)
-                    exceeds_limit = _violates_budget(
-                        budget, dense_fragments=dense_fragments
-                    )
+                    exceeds_limit = _violates_budget(budget, dense_fragments=dense_fragments)
             if not trimmed_words:
                 return acc
             if exceeds_limit:
@@ -398,15 +446,15 @@ def _coalesce_sentence_runs(chunks: Iterable[str]) -> list[str]:
             return acc
         if len(buffer) == 1:
             return [*acc, buffer[0]]
-        has_sentence_end = any(
-            _ENDS_SENTENCE.search(part.rstrip()) for part in buffer if part
-        )
+        has_sentence_end = any(_ENDS_SENTENCE.search(part.rstrip()) for part in buffer if part)
         if not has_sentence_end:
             return [*acc, *buffer]
         combined = _combine(buffer)
         return [*acc, combined] if combined else acc
 
-    def _consume(state: tuple[list[str], tuple[str, ...]], chunk: str) -> tuple[list[str], tuple[str, ...]]:
+    def _consume(
+        state: tuple[list[str], tuple[str, ...]], chunk: str
+    ) -> tuple[list[str], tuple[str, ...]]:
         acc, buffer = state
         updated_buffer = (*buffer, chunk)
         if _ENDS_SENTENCE.search(chunk.rstrip()):
@@ -424,9 +472,7 @@ def _coalesce_sentence_runs(chunks: Iterable[str]) -> list[str]:
 def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str]:
     def _split_sentence_tail(text: str) -> tuple[str, str] | None:
         boundaries = tuple(
-            match.end()
-            for match in _SENTENCE_BOUNDARY.finditer(text)
-            if match.end() < len(text)
+            match.end() for match in _SENTENCE_BOUNDARY.finditer(text) if match.end() < len(text)
         )
         if not boundaries:
             return None
@@ -447,9 +493,7 @@ def _stitch_continuation_heads(chunks: list[str], limit: int | None) -> list[str
         overlap = next(
             (
                 size
-                for size in range(
-                    min(len(tail_words), len(chunk_words)), 0, -1
-                )
+                for size in range(min(len(tail_words), len(chunk_words)), 0, -1)
                 if tail_words[-size:] == chunk_words[:size]
             ),
             0,
