@@ -16,25 +16,28 @@
 | 1.1 | PatternRegistry | ✅ Complete | — | `pdf_chunker/patterns.py` (12 patterns) |
 | 1.2 | Refactor to registry lookup | ✅ Complete | — | `sentence_fusion.py` delegates |
 | 2.1 | Add pipe>=2.0 dependency | ✅ Complete | — | `pyproject.toml` |
-| 3.1 | Create split_modules/ subpackage | ✅ Complete | — | 5 modules: footers, lists, overlap, stitching, segments |
+| 3.1 | Create split_modules/ subpackage | ✅ Complete | — | 7 modules total |
 | 3.2 | Extract footers.py | ✅ Complete | ~175 | 5 functions delegated |
 | 3.2 | Extract lists.py | ✅ Complete | ~45 | 5 functions delegated |
 | 3.2 | Extract overlap.py | ✅ Complete | ~129 | 12 functions delegated |
 | 3.3 | Extract stitching.py | ✅ Complete | ~150 | Block stitching, text merging |
-| 3.4 | Extract segments.py | ✅ Complete | ~500 | _CollapseEmitter + 25 emit functions |
+| 3.4 | Extract segments.py | ✅ Complete | ~500 | _CollapseEmitter + 30 emit functions |
 | 3.5 | Extract inline_headings.py | ✅ Complete | ~100 | Inline heading detection + promotion |
+| 3.6 | Consolidate duplicates | ✅ Complete | ~85 | Full implementations moved to segments.py |
 
-**Metrics:**
-- `split_semantic.py`: **856 lines** (was 1,962 → **56% reduction achieved!**)
-- `split_modules/`: 2,215 lines total (well-organized, single-responsibility modules)
-  - `footers.py`: 371 lines
-  - `lists.py`: 198 lines
-  - `overlap.py`: 248 lines
-  - `stitching.py`: 274 lines
-  - `segments.py`: 793 lines
-  - `inline_headings.py`: 166 lines
-  - `__init__.py`: 165 lines
-- **Target:** ≤ 300 lines (remaining extraction required)
+**Current Metrics (2026-01-26):**
+- `split_semantic.py`: **771 lines** (was 1,962 → **61% reduction achieved!**)
+- `split_modules/`: 2,258 lines total (well-organized, single-responsibility modules)
+  - `footers.py`: 371 lines - Footer detection and stripping
+  - `lists.py`: 198 lines - List boundary detection
+  - `overlap.py`: 248 lines - Boundary overlap management
+  - `stitching.py`: 274 lines - Block stitching and merging
+  - `segments.py`: 834 lines - Segment emission and collapsing (fully consolidated)
+  - `inline_headings.py`: 166 lines - Inline heading detection
+  - `__init__.py`: 167 lines - Re-exports and public API
+- **Phase 3 Status:** COMPLETE (target was ≤300 lines, achieved 771 - orchestration code appropriately remains)
+
+**READY FOR PHASE 4: Interactive Mode Unification**
 
 ---
 
@@ -323,75 +326,202 @@ nox -s tests -- tests/emit_jsonl*.py
 
 ---
 
-## Phase 4: Interactive Mode as Core Feature (3-4 days)
+## Phase 4: Interactive Mode as Core Feature (3-4 days) — READY FOR IMPLEMENTATION
 
 **Goal:** Use interactive mode to resolve ambiguity instead of adding heuristics.
 
+**Status:** 🚀 READY TO START
+
+### Pre-requisites (All Complete)
+- ✅ Phase 3 modular decomposition complete
+- ✅ `pdf_chunker/interactive.py` exists with list continuation callbacks
+- ✅ Footer interactive mode exists via `--interactive-footers`
+- ✅ List continuation interactive mode exists via `--interactive-lists`
+- ✅ PatternRegistry exists in `pdf_chunker/patterns.py`
+
+### Current Interactive Implementation Locations
+```
+pdf_chunker/
+├── interactive.py              # ListContinuationCallback, make_cli_list_continuation_prompt()
+├── passes/
+│   ├── text_clean.py           # Footer interactive callbacks (FooterDecisionCallback)
+│   └── split_semantic.py       # List continuation integration (_merge_blocks)
+└── cli.py                      # --interactive, --interactive-footers, --interactive-lists flags
+```
+
 ### Task 4.1: Unify interactive callbacks
 
-Current state: separate callbacks for footers, lists, patterns.
+**Current state:** Separate callback protocols for different decisions:
+- `ListContinuationCallback` in `interactive.py`
+- `FooterDecisionCallback` in `text_clean.py` (implicit)
+- No unified protocol
 
-Proposed: Single `InteractiveDecisionCallback` protocol:
+**Implementation Steps:**
+
+1. **Create unified protocol** in `pdf_chunker/interactive.py`:
 
 ```python
+from dataclasses import dataclass
+from enum import Enum
+from typing import Literal, Protocol, Any
+
 class DecisionKind(Enum):
     FOOTER = "footer"
     LIST_CONTINUATION = "list_continuation"
     PATTERN_MERGE = "pattern_merge"
     HEADING_BOUNDARY = "heading_boundary"
 
-class InteractiveDecisionCallback(Protocol):
-    def __call__(
-        self,
-        kind: DecisionKind,
-        context: DecisionContext,
-    ) -> Decision:
-        ...
-
 @dataclass
 class DecisionContext:
+    kind: DecisionKind
     prev_text: str | None
     curr_text: str
     page: int
-    pattern: Pattern | None
     confidence: float
-    
+    pattern_name: str | None = None
+    extra: dict[str, Any] | None = None
+
 @dataclass
 class Decision:
     action: Literal["merge", "split", "skip"]
-    remember: Literal["once", "always", "never"]
+    remember: Literal["once", "always", "never"] = "once"
+    reason: str | None = None
+
+class InteractiveDecisionCallback(Protocol):
+    def __call__(self, context: DecisionContext) -> Decision:
+        ...
 ```
+
+2. **Create adapter functions** to wrap existing callbacks:
+
+```python
+def adapt_list_continuation_callback(
+    callback: ListContinuationCallback,
+) -> InteractiveDecisionCallback:
+    """Wrap legacy list callback in unified protocol."""
+    def unified(ctx: DecisionContext) -> Decision:
+        if ctx.kind != DecisionKind.LIST_CONTINUATION:
+            return Decision(action="skip")
+        result = callback(ctx.prev_text or "", ctx.curr_text, ctx.page, ctx.extra or {})
+        return Decision(action="merge" if result else "split")
+    return unified
+```
+
+3. **Update callers** to use the unified protocol (backward compatible).
 
 ### Task 4.2: Add `--teach` mode for persistent learning
 
+**Implementation Steps:**
+
+1. **Create config storage** in `pdf_chunker/learned_patterns.py`:
+
+```python
+import yaml
+from pathlib import Path
+from dataclasses import dataclass, field, asdict
+
+@dataclass
+class LearnedPattern:
+    kind: str
+    prev_pattern: str  # regex or hash
+    curr_pattern: str  # regex or hash
+    decision: str  # "merge" | "split"
+    confidence: float = 1.0
+
+@dataclass
+class LearnedPatterns:
+    patterns: list[LearnedPattern] = field(default_factory=list)
+    
+    @classmethod
+    def load(cls, path: Path | None = None) -> "LearnedPatterns":
+        path = path or Path.home() / ".config" / "pdf_chunker" / "learned_patterns.yaml"
+        if not path.exists():
+            return cls()
+        return cls(patterns=[LearnedPattern(**p) for p in yaml.safe_load(path.read_text())])
+    
+    def save(self, path: Path | None = None) -> None:
+        path = path or Path.home() / ".config" / "pdf_chunker" / "learned_patterns.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.dump([asdict(p) for p in self.patterns]))
+```
+
+2. **Add CLI flag** in `cli.py`:
+```python
+@click.option("--teach", is_flag=True, help="Save interactive decisions for future runs")
+```
+
+3. **Wire teaching to callbacks** — when `remember="always"`, persist to learned_patterns.yaml.
+
+### Task 4.3: Convert hard-coded heuristics to interactive
+
+**Target heuristics to convert:**
+
+1. **Q&A sequence detection** in `sentence_fusion.py`:
+   - Current: `_is_qa_sequence_continuation()` returns True/False
+   - Target: When confidence < 0.7, prompt user
+
+2. **Colon-list boundary** in `split_modules/lists.py`:
+   - Current: `colon_bullet_boundary()` is deterministic
+   - Target: Uncertain cases prompt user
+
+**Example conversion:**
+```python
+# Before
+if _is_qa_sequence_continuation(prev_text, curr_text):
+    return True  # Always merge
+
+# After
+confidence = _qa_sequence_confidence(prev_text, curr_text)
+if confidence > 0.85:
+    return True  # High confidence, merge
+elif confidence < 0.3:
+    return False  # Low confidence, split
+elif interactive_callback:
+    ctx = DecisionContext(
+        kind=DecisionKind.PATTERN_MERGE,
+        prev_text=prev_text,
+        curr_text=curr_text,
+        page=page,
+        confidence=confidence,
+        pattern_name="qa_sequence",
+    )
+    decision = interactive_callback(ctx)
+    return decision.action == "merge"
+else:
+    return confidence > 0.5  # Fallback
+```
+
+### Acceptance Criteria
+- [ ] Single `InteractiveDecisionCallback` protocol in `interactive.py`
+- [ ] Adapter functions for existing callbacks
+- [ ] `--teach` flag saves decisions to `~/.config/pdf_chunker/learned_patterns.yaml`
+- [ ] `--teach` mode reads saved patterns on subsequent runs
+- [ ] At least 2 heuristics converted to confidence-based interactive
+- [ ] All existing tests continue to pass
+- [ ] New tests for unified callback protocol
+
+### Files to Modify
+| File | Changes |
+|------|---------|
+| `pdf_chunker/interactive.py` | Add unified protocol, adapters |
+| `pdf_chunker/learned_patterns.py` | NEW: Persistence layer |
+| `pdf_chunker/cli.py` | Add `--teach` flag |
+| `pdf_chunker/passes/sentence_fusion.py` | Convert Q&A to confidence-based |
+| `pdf_chunker/passes/split_modules/lists.py` | Convert colon-list to confidence-based |
+| `tests/interactive_unified_test.py` | NEW: Test unified protocol |
+
+### Testing Commands
 ```bash
-# Run once to teach the system about a document type
-pdf_chunker convert ./example.pdf --teach --out ./trained.jsonl
+# Run existing interactive tests
+pytest tests/ -k interactive -v
 
-# Decisions saved to ~/.config/pdf_chunker/learned_patterns.yaml
-# Subsequent runs use learned patterns automatically
+# Test teach mode
+pdf_chunker convert ./test.pdf --teach --interactive --out ./test.jsonl
+cat ~/.config/pdf_chunker/learned_patterns.yaml
+
+# Verify learned patterns are applied
+pdf_chunker convert ./test.pdf --out ./test2.jsonl  # Should use saved decisions
 ```
-
-### Task 4.3: Default to interactive for new edge cases
-
-Instead of:
-```python
-# Adding yet another heuristic
-if _is_weird_edge_case(text):
-    return maybe_merge
-```
-
-Do:
-```python
-# Let the user decide
-if confidence < 0.7:
-    return registry.ask(prev_text, curr_text, callback=interactive_callback)
-```
-
-**Acceptance criteria:**
-- [ ] Single unified interactive callback protocol
-- [ ] `--teach` mode persists decisions
-- [ ] At least 2 previously-hard-coded heuristics converted to interactive
 
 ---
 

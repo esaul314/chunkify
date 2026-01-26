@@ -13,7 +13,7 @@ and improve maintainability.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from functools import reduce
 from itertools import accumulate
@@ -33,12 +33,11 @@ from .lists import (
 from .lists import (
     starts_list_like as _starts_list_like,
 )
+from .overlap import trim_boundary_overlap as _trim_boundary_overlap
 from .stitching import merge_record_block as _merge_record_block
 from .stitching import with_chunk_index as _with_chunk_index
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from pdf_chunker.passes.split_semantic import Block, SplitOptions
 
 # ---------------------------------------------------------------------------
@@ -151,37 +150,74 @@ def _overlap_value(options: SplitOptions | None) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _collapse_numbered_list_spacing(
+    text: str,
+    *,
+    strategy: BulletHeuristicStrategy | None = None,
+) -> str:
+    """Collapse blank lines between numbered items while preserving others."""
+    if "\n\n" not in text:
+        return text
+    lines = tuple(text.splitlines())
+    if len(lines) <= 2:
+        return text
+
+    heuristics = _resolve_bullet_strategy(strategy)
+
+    def _is_numbered(line: str) -> bool:
+        stripped = line.lstrip()
+        return bool(stripped) and heuristics.starts_with_number(stripped)
+
+    def _keep(index_line: tuple[int, str]) -> bool:
+        index, line = index_line
+        if line.strip():
+            return True
+        if index == 0 or index == len(lines) - 1:
+            return True
+        prev_line, next_line = lines[index - 1], lines[index + 1]
+        return not (_is_numbered(prev_line) and _is_numbered(next_line))
+
+    filtered = tuple(line for index, line in enumerate(lines) if _keep((index, line)))
+    return "\n".join(filtered)
+
+
 def _normalize_numbered_list_text(
     text: str,
     *,
     strategy: BulletHeuristicStrategy | None = None,
 ) -> str:
-    """Normalize text that contains numbered list items."""
-    # This is a pass-through for now; specific normalization can be added
-    return text
+    """Normalize numbered list spacing without altering other content."""
+    return _collapse_numbered_list_spacing(text, strategy=strategy) if text else text
 
 
 def _join_record_texts(
-    records: tuple[Record, ...],
+    records: Iterable[Record],
     *,
     strategy: BulletHeuristicStrategy | None = None,
 ) -> str:
-    """Join the text portions of multiple records."""
-    if not records:
-        return ""
-    texts = tuple(text for _, _, text in records)
-    return "\n".join(texts)
+    """Join the text portions of multiple records with paragraph breaks."""
+    joined = "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
+    return _normalize_numbered_list_text(joined, strategy=strategy) if joined else joined
 
 
 def _apply_overlap_within_segment(
     segment: tuple[Record, ...],
     overlap: int,
 ) -> tuple[Record, ...]:
-    """Apply overlap trimming within a segment."""
+    """Apply boundary trimming within ``segment`` before joining blocks."""
     if overlap <= 0 or len(segment) <= 1:
         return segment
-    # Overlap is applied between segments, not within a single merged segment
-    return segment
+
+    def _merge(
+        acc: tuple[Record, ...],
+        record: Record,
+    ) -> tuple[Record, ...]:
+        prev_text = acc[-1][2]
+        trimmed = _trim_boundary_overlap(prev_text, record[2], overlap)
+        updated = (record[0], record[1], trimmed)
+        return acc + (updated,)
+
+    return reduce(_merge, segment[1:], (segment[0],))
 
 
 # ---------------------------------------------------------------------------

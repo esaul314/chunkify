@@ -334,100 +334,15 @@ def _expand_segment_records(
     return expanded if expanded else segment
 
 
-def _segment_offsets(segments: tuple[tuple[tuple[int, Block, str], ...], ...]) -> tuple[int, ...]:
-    if not segments:
-        return tuple()
-    counts = accumulate(len(segment) for segment in segments[:-1])
-    return tuple(chain((0,), counts))
-
-
-def _enumerate_segments(
-    segments: tuple[tuple[tuple[int, Block, str], ...], ...],
-) -> tuple[tuple[int, tuple[tuple[int, Block, str], ...]], ...]:
-    offsets = _segment_offsets(segments)
-    return tuple(zip(offsets, segments, strict=False))
-
-
-def _collapse_numbered_list_spacing(
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> str:
-    """Collapse blank lines between numbered items while preserving others."""
-
-    if "\n\n" not in text:
-        return text
-    lines = tuple(text.splitlines())
-    if len(lines) <= 2:
-        return text
-
-    heuristics = _resolve_bullet_strategy(strategy)
-
-    def _is_numbered(line: str) -> bool:
-        stripped = line.lstrip()
-        return bool(stripped) and heuristics.starts_with_number(stripped)
-
-    def _keep(index_line: tuple[int, str]) -> bool:
-        index, line = index_line
-        if line.strip():
-            return True
-        if index == 0 or index == len(lines) - 1:
-            return True
-        prev_line, next_line = lines[index - 1], lines[index + 1]
-        return not (_is_numbered(prev_line) and _is_numbered(next_line))
-
-    filtered = tuple(line for index, line in enumerate(lines) if _keep((index, line)))
-    return "\n".join(filtered)
-
-
-def _normalize_numbered_list_text(
-    text: str,
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> str:
-    """Normalize numbered list spacing without altering other content."""
-
-    return _collapse_numbered_list_spacing(text, strategy=strategy) if text else text
-
-
-def _join_record_texts(
-    records: Iterable[tuple[int, Block, str]],
-    *,
-    strategy: BulletHeuristicStrategy | None = None,
-) -> str:
-    joined = "\n\n".join(part.strip() for _, _, part in records if part.strip()).strip()
-    return _normalize_numbered_list_text(joined, strategy=strategy) if joined else joined
-
-
-def _apply_overlap_within_segment(
-    segment: tuple[tuple[int, Block, str], ...], overlap: int
-) -> tuple[tuple[int, Block, str], ...]:
-    """Apply boundary trimming within ``segment`` before joining blocks."""
-    if overlap <= 0 or len(segment) <= 1:
-        return segment
-
-    def _merge(
-        acc: tuple[tuple[int, Block, str], ...],
-        record: tuple[int, Block, str],
-    ) -> tuple[tuple[int, Block, str], ...]:
-        prev_text = acc[-1][2]
-        trimmed = _trim_boundary_overlap(prev_text, record[2], overlap)
-        updated = (record[0], record[1], trimmed)
-        return acc + (updated,)
-
-    return reduce(_merge, segment[1:], (segment[0],))
-
-
-# _segment_totals imported from split_modules.segments
-# _resolved_limit imported from split_modules.segments
-# _hard_limit imported from split_modules.segments
-# _overlap_value imported from split_modules.segments
-# _emit_buffer_segments imported from split_modules.segments
-# _merged_segment_record imported from split_modules.segments
-# _emit_individual_records imported from split_modules.segments
-# _emit_segment_records imported from split_modules.segments
-# _segment_allows_list_overflow imported from split_modules.segments
-# _segment_is_colon_list imported from split_modules.segments
+# ---------------------------------------------------------------------------
+# Segment utilities now consolidated in split_modules.segments
+# ---------------------------------------------------------------------------
+# The following functions are now imported from pdf_chunker.passes.split_modules.segments:
+#   _segment_offsets, _enumerate_segments, _collapse_numbered_list_spacing,
+#   _normalize_numbered_list_text, _join_record_texts, _apply_overlap_within_segment,
+#   _segment_totals, _resolved_limit, _hard_limit, _overlap_value,
+#   _emit_buffer_segments, _merged_segment_record, _emit_individual_records,
+#   _emit_segment_records, _segment_allows_list_overflow, _segment_is_colon_list
 # _maybe_merge_dense_page imported from split_modules.segments
 # _CollapseEmitter imported from split_modules.segments
 # _page_or_footer_boundary imported from split_modules.segments
@@ -774,7 +689,9 @@ class _SplitSemanticPass:
     list_continuation_callback: ListContinuationCallback | None = None
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = derive_min_chunk_size(self.chunk_size, self.min_chunk_size)  # noqa: E501
+        self.min_chunk_size = derive_min_chunk_size(
+            self.chunk_size, self.min_chunk_size
+        )  # noqa: E501
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload

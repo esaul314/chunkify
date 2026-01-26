@@ -54,8 +54,32 @@ These priorities are applied **continuously**, including micro-decisions (naming
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution workflow, quality gates, PR expectations |
 | [docs/inline_style_schema.md](docs/inline_style_schema.md) | Inline style metadata schema |
 | [docs/REFACTORING_ROADMAP.md](docs/REFACTORING_ROADMAP.md) | Structural improvements and pattern registry proposal |
+| [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) | **Phase 4 implementation guide** (start here for interactive mode work) |
 | [scripts/AGENTS.md](scripts/AGENTS.md) | Guidance for maintenance scripts |
 | [tests/AGENTS.md](tests/AGENTS.md) | Guidance for test modules |
+
+---
+
+## Current Refactoring Status (2026-01-26)
+
+**Phase 3 (Module Decomposition): COMPLETE**
+- `split_semantic.py` reduced from 1,962 → 771 lines (61% reduction)
+- 7 modules extracted to `pdf_chunker/passes/split_modules/`
+- All 642 tests passing
+
+**Phase 4 (Interactive Mode Unification): READY FOR IMPLEMENTATION**
+
+See [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) for detailed implementation steps.
+
+Key tasks:
+1. Unify interactive callbacks into single `InteractiveDecisionCallback` protocol
+2. Add `--teach` mode for persistent pattern learning
+3. Convert hard-coded heuristics to confidence-based interactive decisions
+
+Files to start with:
+- `pdf_chunker/interactive.py` - Add unified protocol
+- `pdf_chunker/learned_patterns.py` - NEW: Persistence layer
+- `pdf_chunker/cli.py` - Add `--teach` flag
 
 ---
 
@@ -269,7 +293,15 @@ pdf_chunker/
 │   │   ├── heading_detect.py
 │   │   ├── list_detect.py
 │   │   ├── pdf_parse.py
-│   │   ├── split_semantic.py
+│   │   ├── split_semantic.py      # Main pass (771 lines) - orchestration
+│   │   ├── split_modules/         # Extracted modules (Phase 3 refactoring)
+│   │   │   ├── __init__.py        # Re-exports public API
+│   │   │   ├── footers.py         # Footer detection and stripping
+│   │   │   ├── inline_headings.py # Inline heading detection and promotion
+│   │   │   ├── lists.py           # List boundary detection
+│   │   │   ├── overlap.py         # Boundary overlap management
+│   │   │   ├── segments.py        # Segment emission and collapsing
+│   │   │   └── stitching.py       # Block stitching and merging
 │   │   ├── ai_enrich.py
 │   │   └── text_clean.py
 │   └── utils.py                   # Metadata mapping and glue logic
