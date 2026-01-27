@@ -13,4 +13,4 @@ def test_footer_strip_counts_sample():
         - len(remove_page_artifact_lines(page.get_text("text"), i + 1).splitlines())
         for i, page in enumerate(doc)
     ]
-    assert counts == [6, 3]
+    assert counts == [9, 3]

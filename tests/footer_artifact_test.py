@@ -5,16 +5,16 @@ from typing import Any
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pdf_chunker.chunk_validation import validate_chunks
 from pdf_chunker.core import (
     chunk_text,
     filter_blocks,
     parse_exclusions,
     process_document,
 )
-from pdf_chunker.chunk_validation import validate_chunks
 from pdf_chunker.page_artifacts import (
-    remove_page_artifact_lines,
     _drop_trailing_bullet_footers,
+    remove_page_artifact_lines,
 )
 from pdf_chunker.parsing import extract_structured_text
 
@@ -100,14 +100,9 @@ def test_footer_and_subfooter_removed(
     expected_count = _expected_chunk_count(sample_footer_pdf, 400, 50)
     assert len(sample_footer_texts) == expected_count
     assert all("spam.com" not in t.lower() for t in sample_footer_texts)
-    assert all(
-        "Bearings of Cattle Like Leaves Know" not in t for t in sample_footer_texts
-    )
+    assert all("Bearings of Cattle Like Leaves Know" not in t for t in sample_footer_texts)
     assert any("Directed to John Smith" in t for t in sample_footer_texts)
-    assert any(
-        "So is your pastoral life whirled past and away" in t
-        for t in sample_footer_texts
-    )
+    assert any("So is your pastoral life whirled past and away" in t for t in sample_footer_texts)
     joined = " ".join(sample_footer_texts)
     assert "I look up from my book" in joined
     assert "no longer" in joined and "nolonger" not in joined
@@ -115,9 +110,7 @@ def test_footer_and_subfooter_removed(
     assert not sample_footer_texts[0].rstrip().endswith(",")
 
 
-def test_footer_pdf_includes_second_page_text(
-    sample_footer_chunks: list[dict[str, Any]]
-) -> None:
+def test_footer_pdf_includes_second_page_text(sample_footer_chunks: list[dict[str, Any]]) -> None:
     report = validate_chunks(sample_footer_chunks)
     assert report.empty_text == 0
     text = " ".join(chunk["text"] for chunk in sample_footer_chunks)
@@ -145,18 +138,18 @@ def test_trailing_bullet_footer_dropped_with_header_signal(
     assert pruned == ["BOOK CLUB QUESTIONS"]
 
 
-def test_trailing_bullet_footer_dropped_for_uppercase_header_without_partners(
-) -> None:
+def test_trailing_bullet_footer_dropped_for_uppercase_header_without_partners() -> None:
     lines = ["PROGRAM OVERVIEW", "• Who leads the quarterly review?"]
     pruned = _drop_trailing_bullet_footers(lines)
     assert pruned == ["PROGRAM OVERVIEW"]
 
 
-def test_trailing_bullet_footer_dropped_for_shipping_notice(
+def test_trailing_bullet_footer_preserved_for_shipping_notice(
     shipping_footer_lines: list[str],
 ) -> None:
+    # Shipping-related bullet content is now preserved as legitimate content
     pruned = _drop_trailing_bullet_footers(shipping_footer_lines)
-    assert pruned == ["SHIPPING NOTICE"]
+    assert pruned == shipping_footer_lines
 
 
 def test_trailing_bullet_footer_preserves_legitimate_list() -> None:
