@@ -61,6 +61,7 @@ def _run_convert(
     overlap: int | None,
     enrich: bool,
     exclude_pages: str | None,
+    exclude_spine: str | None,
     no_metadata: bool,
     spec: str,
     verbose: bool,
@@ -104,9 +105,12 @@ def _run_convert(
 
         excluded_page_set = parse_page_ranges(exclude_pages)
 
-    # Auto-detect footer/header zones if requested
+    # Auto-detect footer/header zones if requested (PDF only - EPUBs don't have zones)
     zones_config: dict[str, float] = {}
-    if auto_detect_zones or (effective_interactive_footers and footer_margin is None):
+    is_epub = str(input_path).lower().endswith(".epub")
+    if not is_epub and (
+        auto_detect_zones or (effective_interactive_footers and footer_margin is None)
+    ):
         try:
             import fitz
 
@@ -156,6 +160,7 @@ def _run_convert(
             overlap,
             enrich,
             exclude_pages,
+            exclude_spine,
             no_metadata,
             footer_patterns=footer_patterns,
             interactive=interactive,
@@ -182,6 +187,25 @@ def _run_convert(
 def _run_inspect() -> None:
     _, _, run_inspect = _core_helpers(False)
     print(json.dumps(run_inspect(), indent=2))
+
+
+def _run_list_spines(input_path: Path) -> None:
+    """List EPUB spine items with indices."""
+    if not str(input_path).lower().endswith(".epub"):
+        print("Error: list-spines only works with EPUB files", file=sys.stderr)
+        sys.exit(1)
+
+    from pdf_chunker.epub_parsing import list_epub_spines
+
+    spines = list_epub_spines(str(input_path))
+    print(f"\nSpine items in {input_path.name}:\n")
+    for item in spines:
+        idx = item["index"]
+        filename = item["filename"]
+        preview = item["content_preview"]
+        print(f"  {idx:3d}. {filename}")
+        print(f"       {preview}\n")
+    print("Use --exclude-spine to skip items, e.g.: --exclude-spine '1,2'")
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True) if typer else None
@@ -230,6 +254,7 @@ def _cli_overrides(
     overlap: int | None,
     enrich: bool,
     exclude_pages: str | None,
+    exclude_spine: str | None,
     no_metadata: bool,
     *,
     footer_patterns: tuple[str, ...] | None = None,
@@ -262,7 +287,12 @@ def _cli_overrides(
     }
     enrich_opts: dict[str, Any] = {"enabled": True} if enrich else {}
     parse_opts: dict[str, Any] = {
-        k: v for k, v in {"exclude_pages": exclude_pages}.items() if v is not None
+        k: v
+        for k, v in {
+            "exclude_pages": exclude_pages,
+            "exclude_spine": exclude_spine,
+        }.items()
+        if v is not None
     }
     # Add zone exclusion margins to pdf_parse options
     if zones_config:
@@ -320,6 +350,11 @@ if typer:
         overlap: int | None = typer.Option(None, "--overlap"),
         enrich: bool = typer.Option(False, "--enrich/--no-enrich"),
         exclude_pages: str | None = typer.Option(None, "--exclude-pages"),
+        exclude_spine: str | None = typer.Option(
+            None,
+            "--exclude-spine",
+            help="EPUB spine items to exclude (e.g., '1,2' for ToC). Use list-spines to discover.",
+        ),
         no_metadata: bool = typer.Option(False, "--no-metadata"),
         spec: str = typer.Option("pipeline.yaml", "--spec"),
         verbose: bool = typer.Option(False, "--verbose"),
@@ -374,6 +409,7 @@ if typer:
                 overlap,
                 enrich,
                 exclude_pages,
+                exclude_spine,
                 no_metadata,
                 spec,
                 verbose,
@@ -389,6 +425,32 @@ if typer:
                 teach=teach,
             )
         )
+
+    @app.command(name="list-spines")
+    def list_spines(
+        input_path: Path = typer.Argument(
+            ...,
+            exists=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ) -> None:
+        """List EPUB spine items with indices for use with --exclude-spine."""
+        if not str(input_path).lower().endswith(".epub"):
+            print("Error: list-spines only works with EPUB files", file=sys.stderr)
+            raise typer.Exit(1)
+
+        from pdf_chunker.epub_parsing import list_epub_spines
+
+        spines = list_epub_spines(str(input_path))
+        print(f"\nSpine items in {input_path.name}:\n")
+        for item in spines:
+            idx = item["index"]
+            filename = item["filename"]
+            preview = item["content_preview"]
+            print(f"  {idx:3d}. {filename}")
+            print(f"       {preview}\n")
+        print("Use --exclude-spine to skip items, e.g.: --exclude-spine '1,2'")
 
     @app.command()
     def inspect() -> None:  # pragma: no cover - exercised in tests
@@ -408,6 +470,10 @@ else:
         conv.add_argument("--enrich", dest="enrich", action="store_true")
         conv.add_argument("--no-enrich", dest="enrich", action="store_false")
         conv.add_argument("--exclude-pages")
+        conv.add_argument(
+            "--exclude-spine",
+            help="EPUB spine items to exclude (e.g., '1,2' for ToC)",
+        )
         conv.add_argument("--no-metadata", action="store_true")
         conv.add_argument("--spec", default="pipeline.yaml")
         conv.add_argument("--verbose", action="store_true")
@@ -456,6 +522,7 @@ else:
         )
         conv.set_defaults(
             enrich=False,
+            exclude_spine=None,
             footer_patterns=None,
             interactive=False,
             interactive_footers=False,
@@ -472,6 +539,7 @@ else:
                     ns.overlap,
                     ns.enrich,
                     ns.exclude_pages,
+                    ns.exclude_spine,
                     ns.no_metadata,
                     ns.spec,
                     ns.verbose,
@@ -487,6 +555,13 @@ else:
                     teach=ns.teach,
                 )
             ),
+        )
+
+        # list-spines command for EPUB
+        list_sp = sub.add_parser("list-spines", help="List EPUB spine items")
+        list_sp.add_argument("input_path", type=Path)
+        list_sp.set_defaults(
+            func=lambda ns: _run_list_spines(ns.input_path),
         )
 
         insp = sub.add_parser("inspect")

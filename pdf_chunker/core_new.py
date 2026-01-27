@@ -187,6 +187,8 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
     text_clean_opts = spec_opts.get("text_clean", {})
 
     exclude = pdf_opts.get("exclude_pages")
+    # EPUB-specific spine exclusion (takes precedence over exclude_pages for EPUB)
+    exclude_spine = pdf_opts.get("exclude_spine")
     # Propagate interactive mode to PDF extraction so aggressive footer
     # detection is skipped, allowing downstream interactive confirmation
     interactive = text_clean_opts.get("interactive_footers", False)
@@ -195,15 +197,20 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
     header_margin = pdf_opts.get("header_margin")
 
     abs_path = str(Path(path).resolve())
+    is_epub = Path(path).suffix.lower() == ".epub"
     adapter = _adapter_for(path)
+
+    # For EPUB, use exclude_spine if provided, otherwise fall back to exclude_pages
+    epub_exclude = exclude_spine or exclude if is_epub else None
+
     # Pass interactive flag and zone margins if the adapter supports them
     try:
         payload = (
             {"type": "page_blocks", "source_path": abs_path, "pages": []}
-            if _excluded_all(abs_path, exclude)
+            if not is_epub and _excluded_all(abs_path, exclude)
             else adapter.read(
                 path,
-                exclude_pages=exclude,
+                exclude_pages=epub_exclude if is_epub else exclude,
                 interactive=interactive,
                 footer_margin=footer_margin,
                 header_margin=header_margin,
@@ -213,8 +220,8 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
         # Adapter doesn't support interactive/zone parameters (e.g., EPUB)
         payload = (
             {"type": "page_blocks", "source_path": abs_path, "pages": []}
-            if _excluded_all(abs_path, exclude)
-            else adapter.read(path, exclude_pages=exclude)
+            if not is_epub and _excluded_all(abs_path, exclude)
+            else adapter.read(path, exclude_pages=epub_exclude if is_epub else exclude)
         )
     return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
 

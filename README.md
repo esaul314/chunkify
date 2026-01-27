@@ -269,15 +269,22 @@ Use spine exclusions to skip Table of Contents, cover pages, or other front matt
 pdf_chunker list-spines book.epub
 
 # Output:
-# 1. cover.xhtml - "Book Title"
-# 2. toc.xhtml - "Table of Contents Chapter 1..."  
-# 3. chapter1.xhtml - "Chapter 1: Introduction..."
+#   1. cover.xhtml
+#      Book Title
+#
+#   2. toc.xhtml
+#      Table of Contents Chapter 1...
+#
+#   3. chapter1.xhtml
+#      Chapter 1: Introduction...
+#
+# Use --exclude-spine to skip items, e.g.: --exclude-spine '1,2'
 
 # Skip first two spine items (cover and TOC)
-pdf_chunker convert book.epub --out out.jsonl --exclude-pages 1,2
+pdf_chunker convert book.epub --out out.jsonl --exclude-spine '1,2'
 
 # Skip a range of spine items
-pdf_chunker convert book.epub --out out.jsonl --exclude-pages 1-3,15-20
+pdf_chunker convert book.epub --out out.jsonl --exclude-spine '1-3,15-20'
 ```
 
 ### Interactive Mode for EPUB
@@ -289,18 +296,32 @@ For EPUB files, interactive mode focuses on:
 Footer prompts are skipped because EPUB doesn't have positional footers:
 
 ```bash
-# Interactive mode for EPUB (no footer prompts)
+# Interactive mode for EPUB (no footer prompts, list boundaries only)
 pdf_chunker convert book.epub --out out.jsonl --interactive
 ```
 
-### CSS Parsing Warnings
+### List Boundary Detection
 
-You may see MuPDF CSS parsing errors like:
+EPUB files use HTML `<ul>` and `<ol>` tags, so list boundaries are **structurally clear**. The parser extracts `<li>` elements with proper `block_type: "list_item"` and `list_kind: "numbered"` or `"bullet"` metadata.
+
+Interactive list continuation prompts should be rare for well-formed EPUB files. If you see many prompts, the EPUB may have malformed HTML where list items aren't properly wrapped in `<li>` tags.
+
+### Zone Detection Not Applicable
+
+Zone-based footer/header detection (`--auto-detect-zones`, `--footer-margin`) is **automatically skipped** for EPUB files. This is because:
+
+1. EPUBs are HTML-based with no fixed page layout
+2. There are no geometric "zones" to detect
+3. The MuPDF library (used for zone detection) produces CSS parsing warnings on EPUB files
+
+### CSS Parsing Warnings (Legacy)
+
+In older versions, you might have seen MuPDF CSS parsing errors like:
 ```
 MuPDF error: syntax error: css syntax error: unexpected token (OEBPS/epub.css:74)
 ```
 
-These warnings are **harmless**—they indicate the EPUB uses modern CSS features that MuPDF's CSS parser doesn't support. The text content is still extracted correctly.
+These are now avoided because zone detection is skipped for EPUB files. If you still see them, ensure you're using the latest version.
 
 ## List Continuation Detection
 

@@ -2,15 +2,17 @@
 
 import os
 import sys
+from collections.abc import Iterable
 from functools import reduce
-from typing import Dict, Iterable, List, Tuple, TypedDict, cast
+from typing import TypedDict, cast
 
 import ebooklib
 from bs4 import BeautifulSoup, Tag
 from ebooklib import epub
-from .text_cleaning import clean_paragraph
+
 from .heading_detection import _detect_heading_fallback
 from .language import default_language
+from .text_cleaning import clean_paragraph
 
 
 class TextBlock(TypedDict):
@@ -19,7 +21,7 @@ class TextBlock(TypedDict):
     type: str
     text: str
     language: str
-    source: Dict[str, str | int]
+    source: dict[str, str | int]
 
 
 def get_element_text_content(element) -> str:
@@ -43,25 +45,28 @@ def _prefixed_list_text(element, text: str) -> str:
     return text
 
 
-def _element_to_block(
-    element, filename: str, item_name: str, spine_index: int
-) -> TextBlock | None:
+def _element_to_block(element, filename: str, item_name: str, spine_index: int) -> TextBlock | None:
     """Convert a BeautifulSoup element into a TextBlock."""
     raw_text = get_element_text_content(element)
     block_text = clean_paragraph(raw_text)
     if not block_text:
         return None
 
+    # Determine block type and list metadata
     if element.name == "li":
         block_text = _prefixed_list_text(element, block_text)
+        block_type = "list_item"
+        # Detect list kind from parent element
+        parent = element.find_parent(["ol", "ul"])
+        list_kind = "numbered" if parent and parent.name == "ol" else "bullet"
+    elif element.name.startswith("h") or _detect_heading_fallback(block_text):
+        block_type = "heading"
+        list_kind = None
+    else:
+        block_type = "paragraph"
+        list_kind = None
 
-    block_type = (
-        "heading"
-        if element.name.startswith("h") or _detect_heading_fallback(block_text)
-        else "paragraph"
-    )
-
-    return {
+    result: TextBlock = {
         "type": block_type,
         "text": block_text,
         "language": default_language(),
@@ -71,11 +76,12 @@ def _element_to_block(
             "page": spine_index,
         },
     }
+    if list_kind:
+        result["list_kind"] = list_kind
+    return result
 
 
-def process_epub_item(
-    item: epub.EpubHtml, filename: str, spine_index: int
-) -> List[TextBlock]:
+def process_epub_item(item: epub.EpubHtml, filename: str, spine_index: int) -> list[TextBlock]:
     """Convert a spine item into structured text blocks."""
     soup = BeautifulSoup(item.get_content(), "html.parser")
     body = soup.find("body")
@@ -98,10 +104,7 @@ def process_epub_item(
         ]
     )
 
-    blocks = (
-        _element_to_block(element, filename, item_name, spine_index)
-        for element in elements
-    )
+    blocks = (_element_to_block(element, filename, item_name, spine_index) for element in elements)
     filtered = [
         block
         for block in blocks
@@ -117,7 +120,7 @@ def process_epub_item(
 
 def extract_text_blocks_from_epub(
     filepath: str, exclude_spines: str | None = None
-) -> List[TextBlock]:
+) -> list[TextBlock]:
     """
     Extracts structured text blocks from an EPUB file.
 
@@ -153,7 +156,7 @@ def extract_text_blocks_from_epub(
             excluded_spines = set()
 
     # Process spine items with exclusion filtering
-    all_blocks: List[TextBlock] = []
+    all_blocks: list[TextBlock] = []
     for spine_index, item in enumerate(spine_items, 1):
         if spine_index in excluded_spines:
             print(
@@ -235,6 +238,8 @@ def list_epub_spines(filepath: str) -> list[dict]:
         }
         for index, item in enumerate(spine_items, 1)
     ]
+
+
 EPUB_GROUP_CHAR_LIMIT = 650
 EPUB_GROUP_MIN_TARGET = 450
 EPUB_DOCUMENT_CHAR_LIMIT = 1100
@@ -276,17 +281,17 @@ def _should_merge_blocks(
         return True
 
     previous_length = len(previous["text"])
-    return previous_length < min_anchor and merged_length <= (
-        max_chars + min_anchor
-    )
+    return previous_length < min_anchor and merged_length <= (max_chars + min_anchor)
 
 
-def _attach_heading_prefixes(blocks: Iterable[TextBlock]) -> Tuple[List[TextBlock], List[TextBlock]]:
+def _attach_heading_prefixes(
+    blocks: Iterable[TextBlock],
+) -> tuple[list[TextBlock], list[TextBlock]]:
     """Attach collected heading text to the following paragraph or list block."""
 
     def step(
-        state: Tuple[List[TextBlock], List[TextBlock]], block: TextBlock
-    ) -> Tuple[List[TextBlock], List[TextBlock]]:
+        state: tuple[list[TextBlock], list[TextBlock]], block: TextBlock
+    ) -> tuple[list[TextBlock], list[TextBlock]]:
         pending, acc = state
         if _is_heading(block):
             return [*pending, block], acc
@@ -294,9 +299,9 @@ def _attach_heading_prefixes(blocks: Iterable[TextBlock]) -> Tuple[List[TextBloc
         if pending:
             heading_text = _DOUBLE_NEWLINE.join(h["text"] for h in pending)
             merged_source = dict(block.get("source", {}))
-            page_candidates = [
-                merged_source.get("page")
-            ] + [h.get("source", {}).get("page") for h in pending]
+            page_candidates = [merged_source.get("page")] + [
+                h.get("source", {}).get("page") for h in pending
+            ]
             pages = [p for p in page_candidates if isinstance(p, int)]
             if pages:
                 merged_source["page"] = min(pages)
@@ -317,19 +322,17 @@ def _coalesce_body_blocks(
     *,
     max_chars: int = EPUB_GROUP_CHAR_LIMIT,
     min_anchor: int = EPUB_GROUP_MIN_TARGET,
-) -> List[TextBlock]:
+) -> list[TextBlock]:
     """Group adjacent paragraph/list blocks while keeping headings separate."""
 
     pending_headings, prepared = _attach_heading_prefixes(blocks)
 
-    def step(acc: List[TextBlock], block: TextBlock) -> List[TextBlock]:
+    def step(acc: list[TextBlock], block: TextBlock) -> list[TextBlock]:
         if not acc:
             return [block]
 
         previous = acc[-1]
-        if not _should_merge_blocks(
-            previous, block, max_chars=max_chars, min_anchor=min_anchor
-        ):
+        if not _should_merge_blocks(previous, block, max_chars=max_chars, min_anchor=min_anchor):
             return [*acc, block]
 
         merged_block = {**previous, "text": _join_block_text(previous["text"], block["text"])}
@@ -337,4 +340,3 @@ def _coalesce_body_blocks(
 
     merged_blocks = reduce(step, prepared, [])
     return [*merged_blocks, *pending_headings]
-
