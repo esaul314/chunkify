@@ -304,7 +304,11 @@ pdf_chunker convert book.epub --out out.jsonl --interactive
 
 EPUB files use HTML `<ul>` and `<ol>` tags, so list boundaries are **structurally clear**. The parser extracts `<li>` elements with proper `block_type: "list_item"` and `list_kind: "numbered"` or `"bullet"` metadata.
 
-Interactive list continuation prompts should be rare for well-formed EPUB files. If you see many prompts, the EPUB may have malformed HTML where list items aren't properly wrapped in `<li>` tags.
+**Key behavior**: When a list item (`<li>`) is followed by a paragraph (`<p>`), the boundary is recognized from HTML structure. You will **not** be prompted to merge the next sentence after a bulleted list—that's a clear structural boundary.
+
+Interactive list continuation prompts should only appear when:
+- The HTML is malformed (list items not in `<li>` tags)
+- Text-based heuristics are uncertain about continuation within a list item
 
 ### Zone Detection Not Applicable
 

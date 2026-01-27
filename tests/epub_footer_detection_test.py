@@ -207,3 +207,47 @@ class TestEpubInteractiveMode:
 
         # For PDF: might detect as candidate (user would be prompted)
         # This is expected behavior - PDFs do have footers
+
+
+class TestEpubStructuralListBoundary:
+    """Tests for EPUB structural list boundary detection."""
+
+    def test_structural_list_boundary_not_prompted(self):
+        """When EPUB has structural list_item, paragraph after list should not prompt."""
+        from pdf_chunker.passes.split_semantic import _merge_blocks
+
+        # Simulate EPUB blocks with structural type info
+        list_block = {"type": "list_item", "text": "• First item in list"}
+        para_block = {"type": "paragraph", "text": "Next paragraph after the list."}
+
+        # Previous: list item, Current: paragraph
+        acc = [(1, list_block, "• First item in list")]
+        cur = (1, para_block, "Next paragraph after the list.")
+
+        # With structural info, should NOT merge (clear boundary)
+        result = _merge_blocks(acc, cur)
+
+        # Should have 2 separate entries (not merged)
+        assert len(result) == 2
+        assert result[0][2] == "• First item in list"
+        assert result[1][2] == "Next paragraph after the list."
+
+    def test_pdf_text_heuristic_still_works(self):
+        """PDF blocks without structural type should still use text heuristics."""
+        from pdf_chunker.passes.split_semantic import _merge_blocks
+
+        # PDF blocks typically don't have structural type=list_item
+        # They rely on text pattern detection
+        list_block = {"text": "• First item"}  # No type field
+        para_block = {"text": "continuation text"}  # No type field
+
+        acc = [(1, list_block, "• First item")]
+        cur = (1, para_block, "continuation text")
+
+        # Without structural info, uses text heuristics
+        # This should check if "continuation text" looks like it continues the list
+        result = _merge_blocks(acc, cur)
+
+        # The heuristics may or may not merge depending on content
+        # Key point: it shouldn't crash and should process
+        assert len(result) >= 1

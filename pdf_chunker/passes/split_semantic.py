@@ -508,6 +508,17 @@ def _merge_blocks(
         return acc + [cur]
 
     # Check for list continuation - previous is a list item, current might continue it
+    # For EPUB/HTML with structural list info, check block type first
+    prev_is_structural_list = prev_block.get("type") == "list_item"
+    cur_is_structural_list = block.get("type") == "list_item"
+
+    # If we have structural info and current block is NOT a list item,
+    # the boundary is clear - no need for interactive prompt
+    if prev_is_structural_list and not cur_is_structural_list:
+        # Clear boundary from HTML structure - don't merge paragraph after list
+        return acc + [cur]
+
+    # Fall back to text heuristics for PDF or when structural info is missing
     if _looks_like_list_item(prev_text) and not _looks_like_list_item(text):
         should_merge, confidence, reason = _candidate_continues_list_item(
             prev_text,
@@ -689,9 +700,7 @@ class _SplitSemanticPass:
     list_continuation_callback: ListContinuationCallback | None = None
 
     def __post_init__(self) -> None:
-        self.min_chunk_size = derive_min_chunk_size(
-            self.chunk_size, self.min_chunk_size
-        )  # noqa: E501
+        self.min_chunk_size = derive_min_chunk_size(self.chunk_size, self.min_chunk_size)  # noqa: E501
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload
