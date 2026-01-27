@@ -235,6 +235,73 @@ The pipeline handles two footer scenarios:
 
 The inline pattern structure is: `\n\n{title_pattern}\s+{page_number}`
 
+## EPUB Processing
+
+EPUB files are processed differently from PDFs because they have different structural characteristics:
+
+### Key Differences from PDF
+
+- **No positional footers**: EPUBs don't have running headers/footers like PDFs—content flows continuously through HTML chapters
+- **Spine-based structure**: Content is organized as ordered "spine items" (chapters), not fixed pages
+- **Table of Contents**: EPUBs often have a dedicated navigation document (nav.xhtml) with TOC entries
+
+### Footer Detection for EPUB
+
+**Important**: The heuristic footer detection (patterns like "Title 123") is **automatically disabled** for EPUB files. This is because:
+
+1. EPUBs don't have page-based footers
+2. The "Title followed by number" pattern often matches TOC entries in EPUBs, not footers
+3. You won't see footer prompts for TOC entries like "Chapter One 5" or "Interview Process 6"
+
+If you need to strip specific patterns from EPUB content, use explicit `--footer-pattern` flags:
+
+```bash
+# Explicit patterns still work for EPUB
+pdf_chunker convert book.epub --out out.jsonl --footer-pattern "Copyright.*"
+```
+
+### Skipping TOC and Front Matter
+
+Use spine exclusions to skip Table of Contents, cover pages, or other front matter:
+
+```bash
+# List spine items to see what's in the EPUB
+pdf_chunker list-spines book.epub
+
+# Output:
+# 1. cover.xhtml - "Book Title"
+# 2. toc.xhtml - "Table of Contents Chapter 1..."  
+# 3. chapter1.xhtml - "Chapter 1: Introduction..."
+
+# Skip first two spine items (cover and TOC)
+pdf_chunker convert book.epub --out out.jsonl --exclude-pages 1,2
+
+# Skip a range of spine items
+pdf_chunker convert book.epub --out out.jsonl --exclude-pages 1-3,15-20
+```
+
+### Interactive Mode for EPUB
+
+For EPUB files, interactive mode focuses on:
+- **List continuations**: Confirming multi-line list item merging
+- **Heading boundaries**: Confirming where chunk splits should occur
+
+Footer prompts are skipped because EPUB doesn't have positional footers:
+
+```bash
+# Interactive mode for EPUB (no footer prompts)
+pdf_chunker convert book.epub --out out.jsonl --interactive
+```
+
+### CSS Parsing Warnings
+
+You may see MuPDF CSS parsing errors like:
+```
+MuPDF error: syntax error: css syntax error: unexpected token (OEBPS/epub.css:74)
+```
+
+These warnings are **harmless**—they indicate the EPUB uses modern CSS features that MuPDF's CSS parser doesn't support. The text content is still extracted correctly.
+
 ## List Continuation Detection
 
 PDF extraction often splits multi-line list items into separate text blocks. For example, a bullet point that wraps across lines may be extracted as:

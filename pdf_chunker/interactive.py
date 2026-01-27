@@ -493,28 +493,158 @@ _STANDALONE_FOOTER_HEURISTIC = re.compile(
 )
 
 
-def is_standalone_footer_candidate(text: str) -> tuple[str, str] | None:
-    """Check if text is a standalone footer block (entire block is footer-like).
+# ---------------------------------------------------------------------------
+# Table of Contents (TOC) Detection
+# ---------------------------------------------------------------------------
+# TOC entries look similar to footers but are actually content. They appear as:
+#   "Chapter Title\n\n9"       - title followed by page number
+#   "Finding External Executive Roles\n\n5"
+#   "Understanding the Technology\n\n4"
+#
+# Key differences from PDF footers:
+# - In EPUBs, these are the actual TOC entries (book content)
+# - In PDFs, similar patterns are footers appearing at page breaks
+#
+# This is the core source of confusion: the same pattern means different
+# things in different document formats.
+
+# TOC entry pattern: title followed by newline(s) and page number
+_TOC_ENTRY_PATTERN = re.compile(
+    r"^([A-Z][A-Za-z]*(?:\s+[A-Za-z]+){1,8})\s*\n+\s*(\d{1,3})$",
+    re.UNICODE | re.MULTILINE,
+)
+
+# TOC title + number on same line (like "Chapter 1 5")
+_TOC_SAME_LINE_PATTERN = re.compile(
+    r"^([A-Z][A-Za-z]*(?:\s+[A-Za-z]+){1,8})\s+(\d{1,3})$",
+    re.UNICODE,
+)
+
+
+def is_toc_entry(text: str) -> bool:
+    """Check if text appears to be a Table of Contents entry.
+
+    TOC entries have the pattern:
+        "Chapter Title" followed by a page number
+
+    This helps distinguish TOC content from PDF footers that have
+    similar patterns.
+
+    Args:
+        text: The text to check
 
     Returns:
-        Tuple of (title, page_number) if it matches, None otherwise.
+        True if text looks like a TOC entry
     """
     text = text.strip()
+    if not text:
+        return False
+
+    # Check for TOC entry pattern (title + newline + number)
+    if _TOC_ENTRY_PATTERN.match(text):
+        return True
+
+    # Check for same-line pattern (title + number)
+    if _TOC_SAME_LINE_PATTERN.match(text):
+        # Additional heuristic: TOC entries are usually short (under 80 chars)
+        # and don't contain sentence-like structures
+        if len(text) < 80 and "." not in text[:-5]:  # exclude trailing page number
+            return True
+
+    return False
+
+
+def is_epub_source(source_path: str | None) -> bool:
+    """Check if the source path indicates an EPUB document."""
+    if not source_path:
+        return False
+    return source_path.lower().endswith(".epub")
+
+
+def should_skip_footer_heuristics(
+    source_path: str | None,
+    *,
+    force_heuristics: bool = False,
+) -> bool:
+    """Determine if footer heuristics should be skipped for this document.
+
+    Footer heuristics (detecting "Title 123" patterns as footers) are designed
+    for PDF documents where footers appear at consistent positions on each page.
+
+    For EPUB documents:
+    - There are no positional footers (no page geometry)
+    - The "Title 123" pattern is often TOC entries, not footers
+    - Footer detection should only use explicit patterns, not heuristics
+
+    Args:
+        source_path: Path to the source document
+        force_heuristics: Override to enable heuristics regardless of format
+
+    Returns:
+        True if footer heuristics should be skipped
+    """
+    if force_heuristics:
+        return False
+
+    # Skip heuristics for EPUB files
+    return is_epub_source(source_path)
+
+
+def is_standalone_footer_candidate(
+    text: str,
+    *,
+    source_path: str | None = None,
+) -> tuple[str, str] | None:
+    """Check if text is a standalone footer block (entire block is footer-like).
+
+    For EPUB documents, this returns None because EPUB doesn't have positional
+    footers. The "Title 123" pattern in EPUB is usually TOC content.
+
+    Args:
+        text: The text to check
+        source_path: Optional path to source document (for format detection)
+
+    Returns:
+        Tuple of (title, page_number) if it matches footer pattern, None otherwise.
+    """
+    text = text.strip()
+
+    # Skip heuristic footer detection for EPUB documents
+    if is_epub_source(source_path):
+        return None
+
+    # For PDF, we detect "Title 123" patterns as potential footers
+    # (user can confirm interactively if needed)
     match = _STANDALONE_FOOTER_HEURISTIC.match(text)
     if match:
         return match.group(1), match.group(2)
     return None
 
 
-def detect_inline_footer_candidates(text: str) -> list[tuple[str, int, int]]:
+def detect_inline_footer_candidates(
+    text: str,
+    *,
+    source_path: str | None = None,
+) -> list[tuple[str, int, int]]:
     """Detect potential inline footers heuristically (without user-provided patterns).
 
     Looks for the pattern: \\n\\n{TitleCase Text} {PageNumber} {Continuation}
     Also detects mid-text footers without \\n\\n prefix.
 
+    For EPUB documents, returns an empty list because EPUB doesn't have
+    the same footer patterns as PDFs.
+
+    Args:
+        text: The text to scan for inline footers
+        source_path: Optional path to source document (for format detection)
+
     Returns:
         List of (footer_text, start_pos, end_pos) tuples for each candidate.
     """
+    # Skip heuristic footer detection for EPUB documents
+    if is_epub_source(source_path):
+        return []
+
     candidates = []
     seen_ranges: set[tuple[int, int]] = set()
 
@@ -545,25 +675,34 @@ def strip_inline_footers_interactive(
     callback: FooterCallback,
     cache: FooterDecisionCache | None = None,
     page: int = 0,
+    source_path: str | None = None,
 ) -> tuple[str, list[str]]:
     """Remove inline footers detected heuristically, confirming each with callback.
 
     This is the true interactive mode: it detects footer candidates without
     user-provided patterns and asks for confirmation on each.
 
+    For EPUB documents, this function returns the text unchanged because
+    EPUB doesn't have positional footers.
+
     Args:
         text: The text to clean
         callback: Callback for interactive confirmation (required)
         cache: Optional cache for remembering decisions
         page: Page number for context
+        source_path: Optional path to source document (for format detection)
 
     Returns:
         Tuple of (cleaned text, list of stripped footer strings)
     """
     stripped: list[str] = []
 
+    # Skip heuristic footer detection for EPUB documents
+    if is_epub_source(source_path):
+        return text, stripped
+
     # Collect all candidates with their positions
-    candidates = detect_inline_footer_candidates(text)
+    candidates = detect_inline_footer_candidates(text, source_path=source_path)
     if not candidates:
         return text, stripped
 

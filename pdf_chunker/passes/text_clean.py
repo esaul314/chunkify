@@ -159,6 +159,7 @@ def _clean_block(
     footer_cache: Any = None,
     *,
     interactive_heuristic: bool = False,
+    source_path: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Return a new block with normalized text and list of stripped footers."""
     from pdf_chunker import text_cleaning
@@ -188,37 +189,42 @@ def _clean_block(
 
     # 2. If interactive mode enabled, also run heuristic detection to catch
     #    any additional footers not matched by explicit patterns
+    #    For EPUB files, heuristic detection is skipped automatically
     if interactive_heuristic and footer_callback is not None:
         from pdf_chunker.interactive import (
+            is_epub_source,
             is_standalone_footer_candidate,
             strip_inline_footers_interactive,
         )
 
-        # Check for additional inline footers (within the text) using heuristics
-        text, additional_stripped = strip_inline_footers_interactive(
-            text,
-            callback=footer_callback,
-            cache=footer_cache,
-            page=page,
-        )
-        stripped_footers.extend(additional_stripped)
+        # Skip heuristic footer detection for EPUB (no positional footers)
+        if not is_epub_source(source_path):
+            # Check for additional inline footers (within the text) using heuristics
+            text, additional_stripped = strip_inline_footers_interactive(
+                text,
+                callback=footer_callback,
+                cache=footer_cache,
+                page=page,
+                source_path=source_path,
+            )
+            stripped_footers.extend(additional_stripped)
 
-        # Also check if the entire block is a standalone footer
-        standalone = is_standalone_footer_candidate(text)
-        if standalone:
-            title, page_num = standalone
-            ctx = {
-                "inline": False,
-                "standalone": True,
-                "page": page,
-                "detected_page_num": page_num,
-                "heuristic_confidence": 0.8,
-                "heuristic": True,
-            }
-            is_footer = footer_callback(text, page, ctx)
-            if is_footer:
-                stripped_footers.append(text)
-                text = ""  # Remove entire block
+            # Also check if the entire block is a standalone footer
+            standalone = is_standalone_footer_candidate(text, source_path=source_path)
+            if standalone:
+                title, page_num = standalone
+                ctx = {
+                    "inline": False,
+                    "standalone": True,
+                    "page": page,
+                    "detected_page_num": page_num,
+                    "heuristic_confidence": 0.8,
+                    "heuristic": True,
+                }
+                is_footer = footer_callback(text, page, ctx)
+                if is_footer:
+                    stripped_footers.append(text)
+                    text = ""  # Remove entire block
 
     # 2. Check if entire block matches a known footer pattern (block-level)
     #    This is for blocks that are entirely footers (no body content).
@@ -254,6 +260,7 @@ def _clean_page(
     footer_cache: Any = None,
     *,
     interactive_heuristic: bool = False,
+    source_path: str | None = None,
 ) -> tuple[dict[str, Any], int, list[str]]:
     """Clean all blocks in ``page`` and return the block count and stripped footers."""
     page_num = page.get("page", 0)
@@ -270,6 +277,7 @@ def _clean_page(
             footer_callback,
             footer_cache,
             interactive_heuristic=interactive_heuristic,
+            source_path=source_path,
         )
         all_stripped.extend(stripped)
         cleaned_blocks.append(cleaned_block)
@@ -287,6 +295,7 @@ def _clean_doc(
     footer_cache: Any = None,
     *,
     interactive_heuristic: bool = False,
+    source_path: str | None = None,
 ) -> tuple[dict[str, Any], int, dict[str, Any], list[str]]:
     """Clean document pages and aggregate block metrics."""
     all_stripped: list[str] = []
@@ -300,6 +309,7 @@ def _clean_doc(
             footer_callback,
             footer_cache,
             interactive_heuristic=interactive_heuristic,
+            source_path=source_path,
         )
         pages_with_counts.append((cleaned_page, count))
         all_stripped.extend(stripped)
@@ -384,6 +394,12 @@ class _TextCleanPass:
             footer_callback = make_cli_footer_prompt(default_is_footer=True)
             footer_cache = FooterDecisionCache()
 
+        # Extract source_path for format-aware footer detection
+        # (EPUB files don't have positional footers like PDFs)
+        source_path: str | None = None
+        if isinstance(payload, dict):
+            source_path = payload.get("source_path")
+
         if isinstance(payload, str):
             from pdf_chunker.text_cleaning import _clean_text_impl
 
@@ -397,6 +413,7 @@ class _TextCleanPass:
                 footer_callback,
                 footer_cache,
                 interactive_heuristic=interactive_heuristic,
+                source_path=source_path,
             )
         else:
             return a
