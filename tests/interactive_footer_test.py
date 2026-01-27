@@ -269,6 +269,41 @@ class TestInlineFooterStripping:
         assert not pattern.search("Scale Communication without page")
         assert not pattern.search("not matching\nSingle newline 1")
 
+    def test_greedy_pattern_does_not_consume_content(self):
+        """Test that greedy .* in user patterns doesn't consume all content.
+
+        Regression test for bug where 'Collective Wisdom.*' would match from
+        the beginning of a block all the way to the last page number, consuming
+        the entire content between two footer markers.
+        """
+        from pdf_chunker.interactive import compile_footer_patterns, strip_inline_footers
+
+        # User pattern with greedy .* (should be converted to .*? internally)
+        patterns = compile_footer_patterns(
+            ("Collective Wisdom.*", "Ground Rules in Meetings"),
+            inline=True,
+            midtext=True,
+        )
+
+        # This text has footer at start and end, with valuable content between
+        text = (
+            "Collective Wisdom from the Experts 105 "
+            "Apply ground rules today to help achieve your meeting goals. "
+            'As Medina says, "minimizes the need for mind reading." '
+            "Ground Rules in Meetings 106"
+        )
+
+        cleaned, stripped = strip_inline_footers(text, patterns)
+
+        # Should strip both footers
+        assert "Collective Wisdom from the Experts 105" not in cleaned
+        assert "Ground Rules in Meetings 106" not in cleaned
+
+        # But should PRESERVE the valuable content between them
+        assert "Apply ground rules" in cleaned
+        assert "mind reading" in cleaned
+        assert len(stripped) == 2
+
     def test_compile_footer_patterns_inline_mode(self):
         from pdf_chunker.interactive import compile_footer_patterns
 

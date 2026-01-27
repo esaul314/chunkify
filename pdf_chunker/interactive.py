@@ -702,6 +702,25 @@ def strip_inline_footers(
     return result, stripped
 
 
+def _make_pattern_non_greedy(pattern: str) -> str:
+    """Convert greedy quantifiers to non-greedy to prevent over-matching.
+
+    User-provided patterns like 'Collective Wisdom.*' with greedy '.*' can
+    match far more text than intended when wrapped with page number suffix.
+    For example, 'Collective Wisdom.*\\s+(\\d{1,3})' would match from
+    'Collective Wisdom' at the start of a block all the way to '106' at the
+    end, consuming the entire content as a 'footer'.
+
+    This function converts:
+      - .* -> .*?  (non-greedy)
+      - .+ -> .+?  (non-greedy)
+    """
+    # Only convert if not already non-greedy
+    result = re.sub(r"(\.\*)(?!\?)", r"\1?", pattern)
+    result = re.sub(r"(\.\+)(?!\?)", r"\1?", result)
+    return result
+
+
 def compile_footer_patterns(
     patterns: tuple[str, ...],
     *,
@@ -717,6 +736,12 @@ def compile_footer_patterns(
 
     Returns:
         Tuple of compiled regex patterns
+
+    Note:
+        Greedy quantifiers (.* and .+) in user patterns are converted to
+        non-greedy (.*? and .+?) to prevent over-matching. Without this,
+        a pattern like 'Collective Wisdom.*' would consume all text between
+        the first occurrence and the last page number in the block.
     """
     if not inline:
         return tuple(re.compile(p, re.IGNORECASE) for p in patterns if isinstance(p, str))
@@ -729,18 +754,19 @@ def compile_footer_patterns(
         if r"\n\n" in p or p.startswith("^"):
             compiled.append(re.compile(p, re.IGNORECASE))
         else:
+            # Make pattern non-greedy to prevent over-matching
+            safe_p = _make_pattern_non_greedy(p)
+
             # Wrap pattern to match inline footer with \n\n prefix
             # Pattern: \n\n + user_pattern + whitespace + page_number + word_boundary
-            inline_pat = rf"\n\n({p})\s+(\d{{1,3}})(?=\s|$)"
+            inline_pat = rf"\n\n({safe_p})\s+(\d{{1,3}})(?=\s|$)"
             compiled.append(re.compile(inline_pat, re.IGNORECASE))
 
             # Also create mid-text pattern (without \n\n requirement)
             if midtext:
                 # Match after sentence boundary, space, or start of text
                 # This catches footers that appear mid-paragraph
-                midtext_pat = (
-                    rf"(?:(?<=\. )|(?<=\.\n)|(?<= )|(?<=\n)|^)({p})\s+(\d{{1,3}})(?=\s|$|[.!?,])"
-                )
+                midtext_pat = rf"(?:(?<=\. )|(?<=\.\n)|(?<= )|(?<=\n)|^)({safe_p})\s+(\d{{1,3}})(?=\s|$|[.!?,])"
                 compiled.append(re.compile(midtext_pat, re.IGNORECASE))
     return tuple(compiled)
 

@@ -684,7 +684,10 @@ def _collapse_step(state: _CollapseEmitter, item: tuple[int, Record]) -> _Collap
     if (state.resolved_limit is not None and effective > state.resolved_limit) or (
         state.hard_limit is not None and effective > state.hard_limit
     ):
-        if state.buffer and _allow_list_overflow(state.buffer, record, strategy=state.strategy):
+        if state.buffer and (
+            _allow_list_overflow(state.buffer, record, strategy=state.strategy)
+            or _allow_colon_list_overflow(state.buffer, record, strategy=state.strategy)
+        ):
             return state.append(idx, record, counts)
         return state.flush().emit_single(idx, record)
     if (

@@ -10,6 +10,7 @@ from pdf_chunker.passes.split_modules.segments import (
 )
 from pdf_chunker.passes.split_semantic import (
     _SplitSemanticPass,
+    SplitOptions,
 )
 from pdf_chunker.strategies.bullets import default_bullet_strategy
 
@@ -154,3 +155,49 @@ def test_colon_intro_and_bullet_list_stay_together_in_single_chunk() -> None:
     assert "critical issues:" in merged_text
     assert "• First challenge" in merged_text
     assert "• Third challenge" in merged_text
+
+
+def test_colon_intro_and_numbered_list_stay_together_when_list_exceeds_limit() -> None:
+    """Colon-introduced numbered list should merge even when list alone exceeds limit.
+
+    This regression test covers the case where a numbered list block alone exceeds
+    chunk_size, but should still merge with a preceding colon-ending intro because
+    the colon introduces the list.
+    """
+    from pdf_chunker.passes.split_modules.segments import collapse_records
+
+    strategy = default_bullet_strategy()
+
+    # Intro that ends with colon
+    intro_text = (
+        "This is a comprehensive introduction to the key challenges in software "
+        "engineering. After careful analysis, we identified the following critical "
+        "issues that need to be addressed immediately:"
+    )
+    # Numbered list that alone exceeds the chunk_size limit (40 words)
+    numbered_text = (
+        "1. First issue is the growing technical debt that has been accumulating "
+        "over the years.\n"
+        "2. Second issue is the lack of proper documentation for critical systems.\n"
+        "3. Third issue is the insufficient test coverage in production code."
+    )
+
+    records = [
+        (1, {"text": intro_text, "type": "paragraph"}, intro_text),
+        (1, {"text": numbered_text, "type": "paragraph"}, numbered_text),
+    ]
+
+    # Use a limit smaller than the numbered list alone (38 words)
+    opts = SplitOptions(chunk_size=40, overlap=10, min_chunk_size=10)
+    result = list(collapse_records(records, opts, limit=40, strategy=strategy))
+
+    # Should produce single merged output despite exceeding limit
+    assert len(result) == 1, (
+        f"Expected 1 merged output, got {len(result)}. "
+        "Colon-intro and numbered list should stay together even when list exceeds limit."
+    )
+
+    merged_text = result[0][2]
+    assert "issues that need to be addressed immediately:" in merged_text
+    assert "1. First issue" in merged_text
+    assert "3. Third issue" in merged_text
