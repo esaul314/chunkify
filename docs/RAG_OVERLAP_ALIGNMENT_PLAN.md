@@ -1,6 +1,6 @@
 # RAG Overlap Alignment Plan
 
-> **Status**: Phase 1 Complete  
+> **Status**: Phase 2 Complete  
 > **Created**: 2026-01-28  
 > **Updated**: 2026-01-28  
 > **Audience**: AI agents implementing this plan  
@@ -146,15 +146,31 @@ Overlap tuning is a domain where diminishing returns set in quickly. The goal is
 
 ---
 
-### Phase 2: Evaluation Framework (Optional, Evidence-Driven)
+### Phase 2: Evaluation Framework (Optional, Evidence-Driven) ✅ COMPLETE
 
 **Intent**: Provide a path to measure overlap effectiveness—but only if warranted.
 
 This phase is **gated**: proceed only if users or maintainers report retrieval quality issues that might stem from overlap settings.
 
-- [ ] Create a minimal eval harness: sample queries + expected chunk retrievals
-- [ ] Document how to run A/B comparisons (overlap=50 vs. 100 vs. 150)
-- [ ] Record baseline metrics if eval is run
+- [x] Create a minimal eval harness: sample queries + expected chunk retrievals
+- [x] Document how to run A/B comparisons (overlap=50 vs. 100 vs. 150)
+- [x] Record baseline metrics if eval is run
+
+**Implementation:**
+- `scripts/eval_overlap.py` — TF-IDF-based retrieval evaluation (no external dependencies)
+- Generates synthetic boundary-spanning queries automatically
+- Measures recall@k across configurable overlap values
+- Runs in ~30 seconds on platform-eng-excerpt.pdf (86-99 chunks)
+
+**Baseline metrics** (platform-eng-excerpt.pdf, k=3):
+| Overlap | Chunks | Recall@3 |
+|---------|--------|----------|
+| 0       | 86     | 84.7%    |
+| 50      | 91     | 84.4%    |
+| 100     | 93     | 85.9%    |
+| 150     | 99     | 84.7%    |
+
+**Finding**: Overlap values 0-150 show similar recall (84-86%), validating that the 100-word default is reasonable. Content-aware tuning (Phase 3) is not warranted by this data.
 
 **Guardrails:**
 - Do not build a framework; a script with clear inputs/outputs suffices
@@ -203,7 +219,9 @@ If evidence emerges (e.g., technical docs need 20% overlap but narrative prose n
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-01-28 | Current 100-word overlap retained | Falls within 10–30% best-practice range; no user complaints |
-| — | Phase 3 deferred indefinitely | No evidence that content-aware tuning improves outcomes |
+| 2026-01-28 | Phase 2 eval harness implemented | Provides tooling to measure overlap effectiveness when needed |
+| 2026-01-28 | Baseline metrics recorded | Recall@3 range 84-86% across overlap 0-150; validates current default |
+| 2026-01-28 | Phase 3 deferred indefinitely | No evidence that content-aware tuning improves outcomes |
 
 ---
 

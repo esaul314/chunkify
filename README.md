@@ -55,6 +55,23 @@ The `pipeline_rag.yaml` spec is optimized for Retrieval-Augmented Generation wor
 
 Industry heuristic: 10–30% overlap relative to chunk size balances recall vs. redundancy. See [docs/RAG_OVERLAP_ALIGNMENT_PLAN.md](docs/RAG_OVERLAP_ALIGNMENT_PLAN.md) for detailed design rationale.
 
+### Evaluating Overlap Effectiveness
+
+If you suspect overlap settings are affecting retrieval quality, use the evaluation script to compare different values:
+
+```bash
+# Compare overlap values 0, 50, 100, 150 on your corpus
+python scripts/eval_overlap.py --corpus your_document.pdf --overlaps 0,50,100,150
+
+# Verbose output shows per-query results
+python scripts/eval_overlap.py --corpus your_document.pdf --overlaps 50,100,150 --verbose
+
+# JSON output for integration with other tools
+python scripts/eval_overlap.py --corpus your_document.pdf --overlaps 50,100 --json
+```
+
+The script generates synthetic boundary-spanning queries and measures recall@k across different overlap settings. If recall is similar across values, overlap tuning has diminishing returns for your content.
+
 ## pipeline.yaml options
 
 | YAML key | CLI flag | Description | Default |

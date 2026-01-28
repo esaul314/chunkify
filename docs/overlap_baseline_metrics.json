@@ -1,0 +1,44 @@
+[
+  {
+    "overlap": 0,
+    "recall_at_k": 0.8470588235294118,
+    "num_chunks": 86,
+    "k": 3
+  },
+  {
+    "overlap": 25,
+    "recall_at_k": 0.8372093023255814,
+    "num_chunks": 87,
+    "k": 3
+  },
+  {
+    "overlap": 50,
+    "recall_at_k": 0.8444444444444444,
+    "num_chunks": 91,
+    "k": 3
+  },
+  {
+    "overlap": 75,
+    "recall_at_k": 0.8586956521739131,
+    "num_chunks": 93,
+    "k": 3
+  },
+  {
+    "overlap": 100,
+    "recall_at_k": 0.8586956521739131,
+    "num_chunks": 93,
+    "k": 3
+  },
+  {
+    "overlap": 125,
+    "recall_at_k": 0.8631578947368421,
+    "num_chunks": 96,
+    "k": 3
+  },
+  {
+    "overlap": 150,
+    "recall_at_k": 0.8469387755102041,
+    "num_chunks": 99,
+    "k": 3
+  }
+]
