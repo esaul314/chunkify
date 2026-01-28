@@ -37,6 +37,24 @@ To generate chunks suitable for Text-to-Speech engines (strict character limit, 
 pdf_chunker convert "book.pdf" --out tts.jsonl --max-chars 1000 --no-metadata
 ```
 
+## RAG Configuration
+
+The `pipeline_rag.yaml` spec is optimized for Retrieval-Augmented Generation workflows:
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `chunk_size` | 400 words | Balances embedding model context windows (~512 tokens) against semantic coherence |
+| `overlap` | 100 words | 25% overlap ensures queries spanning chunk boundaries match both chunks |
+
+**Why overlap matters**: RAG systems retrieve chunks based on similarity to a query. If a relevant passage spans two chunks, neither chunk alone may contain enough context to score highly. Overlap duplicates text at boundaries so boundary-spanning queries match both adjacent chunks.
+
+**Tuning guidance**:
+- **Increase overlap** (up to 30%) if retrieval frequently misses relevant chunks near boundaries
+- **Decrease overlap** (down to 10%) if you see too many duplicate retrievals or storage is constrained
+- **Adjust chunk_size** based on your embedding model's token limit and desired granularity
+
+Industry heuristic: 10–30% overlap relative to chunk size balances recall vs. redundancy. See [docs/RAG_OVERLAP_ALIGNMENT_PLAN.md](docs/RAG_OVERLAP_ALIGNMENT_PLAN.md) for detailed design rationale.
+
 ## pipeline.yaml options
 
 | YAML key | CLI flag | Description | Default |

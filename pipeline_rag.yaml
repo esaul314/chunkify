@@ -13,8 +13,18 @@ options:
     normalize_quotes: true
     repair_ligatures: true
   split_semantic:
+    # chunk_size: Target words per chunk. 400 balances embedding model context
+    # windows (~512 tokens) against semantic coherence. Smaller chunks increase
+    # retrieval precision but lose context; larger chunks improve context but
+    # dilute relevance scores.
     chunk_size: 400
+    
+    # overlap: Words duplicated at chunk boundaries. 100 words (~25% of chunk_size)
+    # ensures queries spanning boundaries match both chunks. Industry heuristic:
+    # 10-30% overlap. Higher values improve recall but increase storage/redundancy.
+    # See docs/RAG_OVERLAP_ALIGNMENT_PLAN.md for design rationale.
     overlap: 100
+    
     generate_metadata: true
   ai_enrich:
     enabled: true

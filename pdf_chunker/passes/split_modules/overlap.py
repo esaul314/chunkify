@@ -1,11 +1,32 @@
 """Boundary overlap management for split_semantic pass.
 
 This module handles the overlap between consecutive chunks to provide
-context continuity in RAG applications. Key responsibilities:
+context continuity in RAG (Retrieval-Augmented Generation) applications.
 
+Why Overlap Matters
+-------------------
+RAG systems retrieve chunks based on query similarity. When a relevant passage
+spans two chunks, neither chunk alone may score highly. Overlap duplicates
+text at boundaries so queries hitting the boundary region match both chunks,
+improving retrieval recall.
+
+Key Responsibilities
+--------------------
 1. Restore missing overlap words when chunks were split
 2. Trim duplicate sentence prefixes at chunk boundaries
 3. Manage overlap window calculations
+
+Design Rationale
+----------------
+- Industry heuristic: 10-30% overlap relative to chunk_size
+- Current default: 100 words / 400 word chunks = 25%
+- Overlap words are prepended to each chunk (except the first) from the
+  tail of the previous chunk
+
+See Also
+--------
+- docs/RAG_OVERLAP_ALIGNMENT_PLAN.md — Full design rationale and tuning guidance
+- pipeline_rag.yaml — User-facing overlap configuration
 
 Extracted from split_semantic.py for modularity.
 """
@@ -141,10 +162,29 @@ def restore_chunk_overlap(previous: str, current: str, overlap: int) -> str:
 
 
 def restore_overlap_words(chunks: list[str], overlap: int) -> list[str]:
-    """Restore overlap words across all chunks.
+    """Inject overlap words at chunk boundaries for RAG retrieval.
 
-    Processes chunks in sequence, ensuring each chunk has the appropriate
-    overlap context from the previous chunk.
+    Overlap ensures queries spanning chunk boundaries match both chunks.
+    The overlap words are prepended to each chunk (except the first) from
+    the tail of the previous chunk.
+
+    Parameters
+    ----------
+    chunks : list[str]
+        List of chunk texts to process.
+    overlap : int
+        Number of words to overlap between consecutive chunks.
+
+    Returns
+    -------
+    list[str]
+        Chunks with overlap words prepended where needed.
+
+    Design rationale
+    ----------------
+    See docs/RAG_OVERLAP_ALIGNMENT_PLAN.md for full explanation.
+    Industry heuristic: 10-30% overlap relative to chunk_size.
+    Current default: 100 words / 400 word chunks = 25%.
     """
     if overlap <= 0:
         return chunks

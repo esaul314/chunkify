@@ -1,7 +1,8 @@
 # RAG Overlap Alignment Plan
 
-> **Status**: Proposed  
+> **Status**: Phase 1 Complete  
 > **Created**: 2026-01-28  
+> **Updated**: 2026-01-28  
 > **Audience**: AI agents implementing this plan  
 > **Context**: Ensure overlap configuration in `pipeline_rag.yaml` follows RAG best practices and is well-documented for maintainers and users.
 
@@ -126,13 +127,13 @@ Overlap tuning is a domain where diminishing returns set in quickly. The goal is
 
 ## Strategic Sequence
 
-### Phase 1: Documentation (Low Risk, High Clarity)
+### Phase 1: Documentation (Low Risk, High Clarity) ✅ COMPLETE
 
 **Intent**: Make the existing behavior legible to users and future agents.
 
-- [ ] Add inline comments in `pipeline_rag.yaml` explaining overlap rationale
-- [ ] Add a "RAG Configuration" section to `README.md` or a dedicated `docs/RAG_GUIDE.md`
-- [ ] Cross-reference from `split_semantic.py` docstrings to the user-facing docs
+- [x] Add inline comments in `pipeline_rag.yaml` explaining overlap rationale
+- [x] Add a "RAG Configuration" section to `README.md` or a dedicated `docs/RAG_GUIDE.md`
+- [x] Cross-reference from `split_semantic.py` docstrings to the user-facing docs
 
 **Guardrails:**
 - Comments should answer "why this value?" not "what does this do?"
@@ -318,11 +319,11 @@ def eval_overlap(chunks_file: Path, queries_file: Path, k: int = 3) -> float:
 
 After implementing Phase 1, verify:
 
-- [ ] `pipeline_rag.yaml` has comments explaining `chunk_size` and `overlap`
-- [ ] `README.md` or `docs/RAG_GUIDE.md` has a RAG Configuration section
-- [ ] `split_semantic.py` or `overlap.py` docstrings reference the plan
-- [ ] Running `pdf_chunker convert ... --spec pipeline_rag.yaml` produces expected output
-- [ ] No existing tests break (`nox -s tests`)
+- [x] `pipeline_rag.yaml` has comments explaining `chunk_size` and `overlap`
+- [x] `README.md` or `docs/RAG_GUIDE.md` has a RAG Configuration section
+- [x] `split_semantic.py` or `overlap.py` docstrings reference the plan
+- [x] Running `pdf_chunker convert ... --spec pipeline_rag.yaml` produces expected output
+- [x] No existing tests break (`nox -s tests`)
 
 ---
 
