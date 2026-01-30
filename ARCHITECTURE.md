@@ -81,21 +81,21 @@ If you only remember one rule:
 
 This split makes testing cheap and refactoring safe. Passes can be unit-tested with in-memory fixtures; adapters are tested with integration/golden tests.
 
-## 3) Three-pass pipeline architecture
+## 3) Three-phase pipeline architecture
 
-The pipeline implements a robust **three-pass** transformation:
+The pipeline implements a robust **three-phase** transformation (multiple configurable passes grouped into logical phases):
 
-1. **Structural Pass** (`pdf_parse`, `epub_parse`, `heading_detect`, `list_detect`)
+1. **Structural Phase** (`pdf_parse`, `epub_parse`, `heading_detect`, `list_detect`)
    - Extracts typographic and layout structure from PDF/EPUB
    - Hybrid approach: font-size and style heuristics + PyMuPDF4LLM cleaning
    - Fallback logic with quality scoring: PyMuPDF → pdftotext → pdfminer.six
 
-2. **Semantic Pass** (`text_clean`, `split_semantic`)
+2. **Semantic Phase** (`text_clean`, `split_semantic`)
    - Enforces chunk boundaries: 8k character soft limit, 25k hard truncation
    - Avoids splitting within sentences or headings
    - Generates metadata for each chunk: `chunk_id`, `source_file`, `page_range`, `heading`, `tags`, `text`
 
-3. **Enrichment Pass** (`ai_enrich`, `emit_jsonl`)
+3. **Enrichment Phase** (`ai_enrich`, `emit_jsonl`)
    - Classifies and annotates chunks using external tag vocabularies
    - Supports multiple domains: generic, philosophy, psychology, technical, PM
    - Outputs enriched chunk records in JSONL

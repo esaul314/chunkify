@@ -298,7 +298,7 @@ pdf_chunker/
 │   │   ├── io_pdf.py
 │   │   └── io_epub.py
 │   ├── ai_enrichment.py           # Shim delegating to ai_enrich pass and adapter
-│   ├── core.py                    # Orchestrates the three-pass pipeline
+│   ├── core.py                    # Orchestrates the multi-pass pipeline
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── fallbacks.py              # Quality assessment and extraction fallbacks
@@ -434,28 +434,29 @@ All Python modules, scripts, and tests must be formatted with **Black**, linted 
 
 ## Core Processing Architecture
 
-The project implements a robust **Three-Pass Pipeline**:
+The project implements a robust **three-phase pipeline** architecture with **multiple configurable passes**:
 
-1. **Structural Pass** (`parsing.py`, `heading_detection.py`, `fallbacks.py`)
+1. **Structural Phase** (`pdf_parse`, `epub_parse`, `heading_detect`, `list_detect`)
 
    * Extracts typographic and layout structure from PDF/EPUB
    * Hybrid approach: font-size and style heuristics + PyMuPDF4LLM cleaning
    * Fallback logic with quality scoring: PyMuPDF → pdftotext → pdfminer.six
    * Logs fallback reasons and page-level quality metrics
 
-2. **Semantic Pass** (`splitter.py`)
+2. **Semantic Phase** (`text_clean`, `split_semantic`)
 
+   * Cleans text (ligatures, quotes, control characters)
    * Enforces chunk boundaries: 8k character soft limit, 25k hard truncation
    * Avoids splitting within sentences or headings
-   * Generates metadata for each chunk:
+   * Generates metadata for each chunk: `chunk_id`, `source_file`, `page_range`, `heading`, `tags`, `text`
 
-     * ```chunk_id`, `source_file`, `page_range`, `heading`, `tags`, `text`
-
-3. **AI Enrichment Pass** (`ai_enrichment.py`, YAML configs)
+3. **Enrichment Phase** (`ai_enrich`, `emit_jsonl`)
 
    * Classifies and annotates chunks using external tag vocabularies
    * Supports multiple domains: generic, philosophy, psychology, technical, PM
    * Outputs enriched chunk records in JSONL
+
+The default pipeline (`pipeline.yaml`) runs: `pdf_parse → text_clean → heading_detect → split_semantic → emit_jsonl`
 
 ---
 

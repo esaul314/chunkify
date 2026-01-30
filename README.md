@@ -98,9 +98,9 @@ The script generates synthetic boundary-spanning queries and measures recall@k a
 Many books include chapter titles or book titles as running footers on each page. When PDFs are extracted, these footers often appear merged into the text body, causing mid-sentence interruptions like:
 
 ```
-"There's conflicting scientific literature on the subject.
+"There's interesting scientific evidence on the subject.
 
-Scale Communication Through Writing 202 Aside from that, we can all likely agree..."
+Scale Fish With Bare Hands 202 Aside from that, blah blah blah..."
 ```
 
 ### Geometric Zone Detection (Recommended)
@@ -141,7 +141,7 @@ Found 2 potential footer zone(s):
     Position: 621.0pt from top (45.5pt margin from bottom)
     Confidence: 93% (18/20 pages)
     Sample content:
-      • Scale Communication Through Writing 202
+      • Scale Fish With Bare Hands 202
       • Chapter 5: Advanced Topics 203
 
 [2] Footer Zone Candidate
@@ -170,8 +170,8 @@ options:
 Use `--footer-pattern` to specify regex patterns matching footer text. The pattern should match the footer title portion—the pipeline automatically handles the page number and inline structure.
 
 ```bash
-# Strip footers like "Scale Communication Through Writing 123"
-pdf_chunker convert book.pdf --out out.jsonl --footer-pattern "Scale Communication.*"
+# Strip footers like "Scale Fish With Bare Hands 123"
+pdf_chunker convert book.pdf --out out.jsonl --footer-pattern "Scale Fish.*"
 
 # Strip generic chapter footers like "Chapter 5" or "Part II"
 pdf_chunker convert book.pdf --out out.jsonl --footer-pattern "Chapter \d+" --footer-pattern "Part [IVX]+"
@@ -197,12 +197,12 @@ pdf_chunker convert book.pdf --out out.jsonl --interactive-footers
 pdf_chunker convert book.pdf --out out.jsonl --interactive-lists
 ```
 
-**Footer heuristic detection**: Without `--footer-pattern`, the CLI uses a heuristic to find inline footers matching the pattern `\n\n{TitleCase Words} {PageNumber}` (e.g., "Scale Communication Through Writing 202").
+**Footer heuristic detection**: Without `--footer-pattern`, the CLI uses a heuristic to find inline footers matching the pattern `\n\n{TitleCase Words} {PageNumber}` (e.g., "Scale Fish With Bare Hands 202").
 
 The CLI will display candidate footer text and ask for confirmation:
 ```
 --- Footer candidate (page 202, confidence 70%) ---
-  Scale Communication Through Writing 202
+  Scale Fish With Bare Hands 202
 Treat as footer? [Y/n] 
 ```
 
@@ -255,7 +255,7 @@ For repeated use, add footer patterns to your pipeline spec:
 options:
   text_clean:
     footer_patterns:
-      - "Scale Communication.*"
+      - "Scale Fish.*"
       - "Chapter \\d+"
       - "Part [IVX]+"
 ```
@@ -367,8 +367,8 @@ These are now avoided because zone detection is skipped for EPUB files. If you s
 PDF extraction often splits multi-line list items into separate text blocks. For example, a bullet point that wraps across lines may be extracted as:
 
 ```
-Block 1: "• Reduce wordiness."
-Block 2: "For every word ask: what information is it conveying?"
+Block 1: "• Reduce noise."
+Block 2: "For every noise check: what is the message?"
 ```
 
 When this happens, naïve chunking produces semantically broken output where list item text is separated from its continuation.
@@ -395,8 +395,8 @@ pdf_chunker convert book.pdf --out out.jsonl --interactive
 The CLI will display the list item and candidate continuation:
 ```
 --- List continuation candidate (page 15, confidence 75%) ---
-  List item: • Reduce wordiness.
-  Candidate: For every word ask: what information is it conveying?
+  List item: • Reduce noise.
+  Candidate: For every noise check: what is the message?
   Heuristic: item_looks_incomplete+continuation_word
 Merge into list item? [Y/n]
 ```
