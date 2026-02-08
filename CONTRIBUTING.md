@@ -133,7 +133,7 @@ Keep boundaries crisp; keep side effects out of the core.
 
 If an AI agent is used to author changes, it must follow [AGENTS.md](AGENTS.md), including:
 
-- **Mode B Voice + Ledger** reporting format (Voice ≤ 5 lines; Ledger audit-grade with explicit goals accomplished and evidence)
+- **Output Protocol: Voice + Ledger** reporting format (Voice ≤ 5 lines; Ledger audit-grade with explicit goals accomplished and evidence)
 - **Pass purity constraints**: no I/O inside passes; adapters handle all side effects
 - **Non-destructive change policy**: wrap/adapt existing functions rather than deleting; keep public signatures stable
 - **Small, reversible commits**: one concern per commit; show plan before non-trivial work
