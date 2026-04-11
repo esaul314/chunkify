@@ -134,9 +134,15 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 - `apt-get install -y poppler-utils`  # provides `pdftotext`
 
 ### Quick Usage
+- Supported source formats in this repository are `.pdf` and `.epub` only.
+- For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
+  ```
+- Convert EPUB via library CLI:
+  ```bash
+  pdf_chunker convert ./sample.epub --spec pipeline.yaml --out ./data/sample.jsonl --no-enrich
   ```
 - RAG-optimized pipeline (100-word overlap, metadata on; tags apply when `OPENAI_API_KEY` is set):
   ```bash

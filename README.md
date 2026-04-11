@@ -2,6 +2,13 @@
 
 CLI pipeline to convert PDFs and EPUBs into JSONL chunks for RAG workflows.
 
+Supported input formats for this project are:
+
+- `.pdf`
+- `.epub`
+
+For corpus-ingestion workflows, skip unsupported formats such as `.mobi`, `.azw3`, `.djvu`, and `.chm` unless they have first been converted into a supported format outside this project.
+
 ## Quickstart
 
 ### Installation
@@ -12,6 +19,11 @@ pip install pdf-chunker
 ### Basic usage
 ```bash
 pdf_chunker convert "sample.pdf" --out out.jsonl --chunk-size 400 --overlap 50
+```
+
+EPUB example:
+```bash
+pdf_chunker convert "sample.epub" --out out.jsonl --chunk-size 400 --overlap 50
 ```
 
 ### RAG-optimized spec
