@@ -28,6 +28,8 @@ options:
     generate_metadata: true
   ai_enrich:
     enabled: true
+    model: "qwen3-8b-local"
+    api_base: "http://localhost:8100/v1"
     tags_dir: "config/tags"
   emit_jsonl:
     output_path: "out.jsonl"

@@ -1,5 +1,6 @@
 import sys
 from typing import Any
+from types import SimpleNamespace
 
 # Ensure local package path for pdf_chunker imports
 sys.path.insert(0, ".")
@@ -7,10 +8,11 @@ sys.path.insert(0, ".")
 from pdf_chunker.adapters.ai_enrich import (
     _load_tag_configs,
     _process_chunk_for_file,
+    init_llm,
 )
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, run_pipeline
-from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
+from pdf_chunker.passes.ai_enrich import _resolve_completion, classify_chunk_utterance
 
 
 def _dummy_completion(_: str) -> str:
@@ -56,7 +58,63 @@ def test_classify_chunk_utterance_handles_multiline_tags() -> None:
         "tags": ["technical", "methodology"],
     }
 
+def _category_heading_completion(_: str) -> str:
+    return """Classification: explanation
+Tags:
+- technical_level:
+- deliverables
+- tools
+"""
 
+
+def test_classify_chunk_utterance_ignores_category_headings_and_invalid_tags() -> None:
+    tag_configs = {"generic": ["tool", "analysis"]}
+    result = classify_chunk_utterance(
+        "This section describes a tool.",
+        tag_configs=tag_configs,
+        completion_fn=_category_heading_completion,
+    )
+    assert result == {
+        "classification": "explanation",
+        "tags": ["tool"],
+    }
+
+
+
+
+
+def _invalid_classification_completion(_: str) -> str:
+    return "Classification: book\nTags: [software_design, technical_debt]"
+
+
+def test_classify_chunk_utterance_invalid_classification_falls_back_to_unclassified() -> None:
+    tag_configs = {"generic": ["software_design", "technical_debt"]}
+    result = classify_chunk_utterance(
+        "Front matter for a software design book.",
+        tag_configs=tag_configs,
+        completion_fn=_invalid_classification_completion,
+    )
+    assert result == {
+        "classification": "unclassified",
+        "tags": ["software_design", "technical_debt"],
+    }
+
+
+def _empty_tags_completion(_: str) -> str:
+    return "Classification: explanation\nTags: []"
+
+
+def test_classify_chunk_utterance_uses_lexical_fallback_for_empty_tags() -> None:
+    tag_configs = {"generic": ["software_design", "technical_debt", "tool"]}
+    result = classify_chunk_utterance(
+        "This software design chapter explains how to pay down technical debt.",
+        tag_configs=tag_configs,
+        completion_fn=_empty_tags_completion,
+    )
+    assert result == {
+        "classification": "explanation",
+        "tags": ["software_design", "technical_debt"],
+    }
 class _StubClient:
     def classify_chunk_utterance(
         self, text_chunk: str, *, tag_configs: dict[str, list[str]]
@@ -81,3 +139,63 @@ def test_pipeline_enrichment_with_stub() -> None:
     items = result.payload["items"]
     assert all(c.get("utterance_type") == "question" for c in items)
     assert all(c.get("tags") == ["technical"] for c in items)
+
+
+def test_init_llm_uses_local_luminatus_defaults(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Classification: question\nTags: []"))]
+        )
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("PDF_CHUNKER_AI_ENRICH_MODEL", raising=False)
+    monkeypatch.delenv("PDF_CHUNKER_AI_ENRICH_API_BASE", raising=False)
+    monkeypatch.delenv("PDF_CHUNKER_AI_ENRICH_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE_URL", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "litellm",
+        SimpleNamespace(completion=fake_completion),
+    )
+
+    completion = init_llm()
+    completion("hello")
+
+    assert calls
+    assert calls[0]["model"] == "qwen3-8b-local"
+    assert calls[0]["api_base"] == "http://localhost:8100/v1"
+    assert calls[0]["api_key"] == "sk-local"
+    assert calls[0]["custom_llm_provider"] == "openai"
+    assert calls[0]["max_tokens"] == 256
+    assert calls[0]["messages"][0]["content"].startswith("/no_think\n")
+
+
+def test_resolve_completion_passes_model_and_api_base_options(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_init_llm(*, api_key=None, model=None, api_base=None, max_tokens=None):
+        captured["api_key"] = api_key
+        captured["model"] = model
+        captured["api_base"] = api_base
+        captured["max_tokens"] = max_tokens
+        return lambda _: "Classification: question\nTags: []"
+
+    import pdf_chunker.adapters.ai_enrich as adapter
+
+    monkeypatch.setattr(adapter, "init_llm", fake_init_llm)
+    completion, reason = _resolve_completion(
+        {"api_key": "k", "model": "qwen3-8b-local", "api_base": "http://localhost:8100/v1", "max_tokens": 300}
+    )
+
+    assert callable(completion)
+    assert reason == "init_llm"
+    assert captured == {
+        "api_key": "k",
+        "model": "qwen3-8b-local",
+        "api_base": "http://localhost:8100/v1",
+        "max_tokens": 300,
+    }

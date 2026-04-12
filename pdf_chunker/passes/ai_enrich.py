@@ -154,7 +154,12 @@ def _resolve_completion(
     except Exception:  # pragma: no cover - adapters unavailable
         return None, "missing_adapters"
     try:
-        return init_llm(api_key=options.get("api_key")), "init_llm"
+        return init_llm(
+            api_key=options.get("api_key"),
+            model=options.get("model"),
+            api_base=options.get("api_base") or options.get("base_url"),
+            max_tokens=options.get("max_tokens"),
+        ), "init_llm"
     except Exception as exc:  # pragma: no cover - missing credentials
         return None, f"init_llm_error:{exc.__class__.__name__}"
 
@@ -315,7 +320,9 @@ def _split_tag_line(line: str) -> list[str]:
         return []
     if ":" in cleaned:
         prefix, suffix = cleaned.split(":", 1)
-        cleaned = suffix.strip() or prefix.strip()
+        cleaned = suffix.strip()
+        if not cleaned:
+            return []
     cleaned = cleaned.strip("[]")
     tokens = [
         re.sub(r"\(.*?\)$", "", token).strip().strip("\"'")
@@ -344,8 +351,44 @@ def _dedupe(sequence: TypingIterable[str]) -> list[str]:
 
 def _normalize_tags(candidates: list[str], valid: set[str]) -> list[str]:
     normalized = _dedupe(token.strip().lower() for token in candidates if token and token.strip())
-    filtered = [tag for tag in normalized if not valid or tag in valid]
-    return filtered or normalized
+    if not valid:
+        return normalized
+
+    def normalize_candidate(tag: str) -> str | None:
+        if tag in valid:
+            return tag
+        if tag.endswith("s") and tag[:-1] in valid:
+            return tag[:-1]
+        return None
+
+    filtered = _dedupe(
+        normalized_tag
+        for tag in normalized
+        if (normalized_tag := normalize_candidate(tag)) is not None
+    )
+    return filtered
+
+
+def _lexical_fallback_tags(text_chunk: str, valid: set[str], limit: int = 4) -> list[str]:
+    if not valid:
+        return []
+    lowered = text_chunk.lower()
+    words = set(re.findall(r"[a-z]+", lowered))
+    scored: list[tuple[int, str]] = []
+    for tag in valid:
+        parts = tag.split("_")
+        if len(parts) < 2:
+            continue
+        score = 0
+        phrase = " ".join(parts)
+        if phrase in lowered:
+            score += 3
+        if all(part in words for part in parts):
+            score += len(parts)
+        if score >= 3:
+            scored.append((score, tag))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [tag for _, tag in scored[:limit]]
 
 
 def _parse_completion(
@@ -402,6 +445,8 @@ def classify_chunk_utterance(
     try:
         response_text = completion_fn(prompt).strip()
         classification, tags = _parse_completion(response_text, tag_configs)
+        if not tags and tag_configs:
+            tags = _lexical_fallback_tags(text_chunk, _valid_tags(tag_configs))
         if _debug_enabled() and _debug_next_sample():
             has_tags = "tags:" in response_text.lower()
             logger.warning(

@@ -27,10 +27,15 @@ def _load_tag_configs(config_dir: str = "config/tags") -> dict:
     return impl(config_dir=config_dir)
 
 
-def init_llm(api_key: str | None = None) -> Callable[[str], str]:
+def init_llm(
+    api_key: str | None = None,
+    model: str | None = None,
+    api_base: str | None = None,
+    max_tokens: int | None = None,
+) -> Callable[[str], str]:
     from pdf_chunker.adapters.ai_enrich import init_llm as impl
 
-    return impl(api_key=api_key)
+    return impl(api_key=api_key, model=model, api_base=api_base, max_tokens=max_tokens)
 
 
 def _process_chunk_for_file(

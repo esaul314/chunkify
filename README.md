@@ -42,6 +42,11 @@ PDF_CHUNKER_AI_ENRICH_DEBUG=1 PDF_CHUNKER_AI_ENRICH_DEBUG_SAMPLES=1 pdf_chunker 
 ```
 If AI enrichment is enabled but no completion client can be created (e.g., `litellm` missing),
 the CLI now raises an error instead of silently producing empty tags.
+The default metadata-enrichment path now targets the local the downstream retrieval coordinator router using `qwen3-8b-local` at `http://localhost:8100/v1` with the dummy key `sk-local`.
+Override it when needed with `PDF_CHUNKER_AI_ENRICH_MODEL`, `PDF_CHUNKER_AI_ENRICH_API_BASE`, or `PDF_CHUNKER_AI_ENRICH_API_KEY`:
+```bash
+PDF_CHUNKER_AI_ENRICH_MODEL=qwen3-8b-local PDF_CHUNKER_AI_ENRICH_API_BASE=http://localhost:8100/v1 PDF_CHUNKER_AI_ENRICH_API_KEY=sk-local pdf_chunker convert "sample.pdf" --spec pipeline_rag.yaml --out out.rag.jsonl
+```
 
 ### TTS Preparation (Strict Character Limits)
 To generate chunks suitable for Text-to-Speech engines (strict character limit, no overlap, no metadata):
@@ -89,6 +94,8 @@ The script generates synthetic boundary-spanning queries and measures recall@k a
 | YAML key | CLI flag | Description | Default |
 | --- | --- | --- | --- |
 | `ai_enrich.enabled` | `--enrich/--no-enrich` | Toggle AI enrichment pass | `false` |
+| `ai_enrich.model` | – | Metadata/tagging model passed to `litellm` | `qwen3-8b-local` |
+| `ai_enrich.api_base` | – | OpenAI-compatible base URL for the enrichment model | `http://localhost:8100/v1` |
 | `pdf_parse.exclude_pages` | `--exclude-pages` | Comma-separated pages to skip | – |
 | `pdf_parse.footer_margin` | `--footer-margin` | Points from bottom to exclude as footer zone | – |
 | `pdf_parse.header_margin` | `--header-margin` | Points from top to exclude as header zone | – |

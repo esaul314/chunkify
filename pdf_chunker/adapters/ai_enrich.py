@@ -10,6 +10,10 @@ from typing import Any, cast
 from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
 
 yaml = cast(Any, import_module("yaml"))
+DEFAULT_AI_ENRICH_MODEL = "qwen3-8b-local"
+DEFAULT_AI_ENRICH_API_BASE = "http://localhost:8100/v1"
+DEFAULT_AI_ENRICH_API_KEY = "sk-local"
+DEFAULT_AI_ENRICH_MAX_TOKENS = 256
 
 
 class Client:
@@ -83,27 +87,67 @@ def _load_tag_configs(config_dir: str = "config/tags") -> dict[str, list[str]]:
     }
 
 
-def init_llm(api_key: str | None = None) -> Callable[[str], str]:
+def init_llm(
+    api_key: str | None = None,
+    model: str | None = None,
+    api_base: str | None = None,
+    max_tokens: int | None = None,
+) -> Callable[[str], str]:
     """Return a completion function configured with an API key."""
     from dotenv import load_dotenv  # lazy import
 
     load_dotenv()
-    key = api_key or os.environ.get("OPENAI_API_KEY")
+    resolved_model = (
+        model
+        or os.environ.get("PDF_CHUNKER_AI_ENRICH_MODEL")
+        or os.environ.get("OPENAI_MODEL")
+        or DEFAULT_AI_ENRICH_MODEL
+    )
+    resolved_api_base = (
+        api_base
+        or os.environ.get("PDF_CHUNKER_AI_ENRICH_API_BASE")
+        or os.environ.get("PDF_CHUNKER_AI_ENRICH_BASE_URL")
+        or os.environ.get("OPENAI_API_BASE_URL")
+        or DEFAULT_AI_ENRICH_API_BASE
+    )
+    prefers_local_key = (
+        "localhost:8100" in resolved_api_base
+        or "127.0.0.1:8100" in resolved_api_base
+        or "host.docker.internal:8100" in resolved_api_base
+    )
+    key = (
+        api_key
+        or os.environ.get("PDF_CHUNKER_AI_ENRICH_API_KEY")
+        or (DEFAULT_AI_ENRICH_API_KEY if prefers_local_key else None)
+        or os.environ.get("OPENAI_API_KEY")
+    )
+    resolved_max_tokens = (
+        max_tokens
+        or int(os.environ.get("PDF_CHUNKER_AI_ENRICH_MAX_TOKENS", DEFAULT_AI_ENRICH_MAX_TOKENS))
+    )
     if not key:
-        raise ValueError("OPENAI_API_KEY not found in .env file or environment.")
+        raise ValueError(
+            "No API key found for AI enrichment. Set PDF_CHUNKER_AI_ENRICH_API_KEY or OPENAI_API_KEY."
+        )
     try:
         import litellm
     except Exception as exc:  # pragma: no cover
         raise ImportError("litellm is required for init_llm") from exc
 
     def completion(prompt: str) -> str:
-        response = litellm.completion(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=100,
-            api_key=key,
-        )
+        if resolved_model in {"qwen3-8b-local", "Qwen/Qwen3-8B-AWQ"}:
+            prompt = f"/no_think\n{prompt}"
+        kwargs = {
+            "model": resolved_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+            "max_tokens": resolved_max_tokens,
+            "api_key": key,
+        }
+        if resolved_api_base:
+            kwargs["api_base"] = resolved_api_base
+            kwargs["custom_llm_provider"] = "openai"
+        response = litellm.completion(**kwargs)
         return response.choices[0].message.content
 
     return completion

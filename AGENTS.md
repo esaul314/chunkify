@@ -148,6 +148,11 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
+- The default metadata-enrichment path uses the local the downstream retrieval coordinator router with model alias `qwen3-8b-local`, base URL `http://localhost:8100/v1`, and dummy key `sk-local`.
+- Override it when needed with:
+  ```bash
+  PDF_CHUNKER_AI_ENRICH_MODEL=qwen3-8b-local PDF_CHUNKER_AI_ENRICH_API_BASE=http://localhost:8100/v1 PDF_CHUNKER_AI_ENRICH_API_KEY=sk-local pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
+  ```
 - Strip custom footer patterns using regex (repeatable flag):
   ```bash
   pdf_chunker convert ./book.pdf --spec pipeline.yaml --out ./out.jsonl --footer-pattern "Collective Wisdom.*\d+" --footer-pattern "Book Title \d+"
