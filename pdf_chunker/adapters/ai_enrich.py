@@ -14,6 +14,8 @@ DEFAULT_AI_ENRICH_MODEL = "qwen3-8b-local"
 DEFAULT_AI_ENRICH_API_BASE = "http://localhost:8100/v1"
 DEFAULT_AI_ENRICH_API_KEY = "sk-local"
 DEFAULT_AI_ENRICH_MAX_TOKENS = 256
+DEFAULT_AI_ENRICH_FALLBACK_MODEL = "gpt-4.1-nano"
+DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS = 128
 
 
 class Client:
@@ -24,9 +26,13 @@ class Client:
         *,
         completion_fn: Callable[[str], str],
         tag_configs: dict[str, list[str]] | None = None,
+        fallback_completion_fn: Callable[[str], str] | None = None,
+        fallback_min_chars: int = 200,
     ) -> None:
         self._completion_fn = completion_fn
         self._tag_configs: dict[str, list[str]] = tag_configs or _load_tag_configs()
+        self._fallback_completion_fn = fallback_completion_fn
+        self._fallback_min_chars = fallback_min_chars
 
     def classify_chunk_utterance(
         self, text: str, *, tag_configs: dict[str, list[str]] | None = None
@@ -35,6 +41,8 @@ class Client:
             text,
             tag_configs=tag_configs or self._tag_configs,
             completion_fn=self._completion_fn,
+            fallback_completion_fn=self._fallback_completion_fn,
+            fallback_min_chars=self._fallback_min_chars,
         )
 
 
@@ -143,6 +151,65 @@ def init_llm(
             "temperature": 0.0,
             "max_tokens": resolved_max_tokens,
             "api_key": key,
+        }
+        if resolved_api_base:
+            kwargs["api_base"] = resolved_api_base
+            kwargs["custom_llm_provider"] = "openai"
+        response = litellm.completion(**kwargs)
+        return response.choices[0].message.content
+
+    return completion
+
+
+def init_fallback_llm(
+    api_key: str | None = None,
+    model: str | None = None,
+    api_base: str | None = None,
+    max_tokens: int | None = None,
+) -> Callable[[str], str] | None:
+    """Return a fallback completion function or ``None`` when disabled."""
+    from dotenv import load_dotenv  # lazy import
+
+    load_dotenv()
+    resolved_key = (
+        api_key
+        or os.environ.get("PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+    )
+    if not resolved_key:
+        return None
+
+    resolved_model = (
+        model
+        or os.environ.get("PDF_CHUNKER_AI_ENRICH_FALLBACK_MODEL")
+        or DEFAULT_AI_ENRICH_FALLBACK_MODEL
+    )
+    resolved_api_base = (
+        api_base
+        or os.environ.get("PDF_CHUNKER_AI_ENRICH_FALLBACK_API_BASE")
+        or None
+    )
+    resolved_max_tokens = (
+        max_tokens
+        or int(
+            os.environ.get(
+                "PDF_CHUNKER_AI_ENRICH_FALLBACK_MAX_TOKENS",
+                DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS,
+            )
+        )
+    )
+    try:
+        import litellm
+    except Exception as exc:  # pragma: no cover
+        raise ImportError("litellm is required for init_fallback_llm") from exc
+
+    def completion(prompt: str) -> str:
+        kwargs = {
+            "model": resolved_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+            "max_tokens": resolved_max_tokens,
+            "api_key": resolved_key,
         }
         if resolved_api_base:
             kwargs["api_base"] = resolved_api_base

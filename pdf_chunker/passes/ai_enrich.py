@@ -164,6 +164,27 @@ def _resolve_completion(
         return None, f"init_llm_error:{exc.__class__.__name__}"
 
 
+def _resolve_fallback_completion(
+    options: Mapping[str, Any],
+) -> tuple[Callable[[str], str] | None, str | None]:
+    if options.get("fallback_enabled") is False:
+        return None, "fallback_disabled"
+    try:
+        from pdf_chunker.adapters.ai_enrich import init_fallback_llm
+    except Exception:  # pragma: no cover - adapters unavailable
+        return None, "missing_adapters"
+    try:
+        completion = init_fallback_llm(
+            api_key=options.get("fallback_api_key"),
+            model=options.get("fallback_model"),
+            api_base=options.get("fallback_api_base"),
+            max_tokens=options.get("fallback_max_tokens"),
+        )
+    except Exception as exc:  # pragma: no cover - missing credentials
+        return None, f"init_fallback_llm_error:{exc.__class__.__name__}"
+    return completion, "init_fallback_llm" if completion else "fallback_unconfigured"
+
+
 def _ensure_client(
     options: Mapping[str, Any],
     fallback: "ClassifyClient | None",
@@ -191,8 +212,18 @@ def _ensure_client(
         if _debug_enabled():
             logger.warning("ai_enrich debug: adapters unavailable for Client")
         return None, "missing_adapters"
+    fallback_completion, fallback_reason = _resolve_fallback_completion(options)
     try:
-        return Client(completion_fn=completion, tag_configs=tag_configs or None), "client_ready"
+        return Client(
+            completion_fn=completion,
+            tag_configs=tag_configs or None,
+            fallback_completion_fn=fallback_completion,
+            fallback_min_chars=int(options.get("fallback_min_chars", 200)),
+        ), (
+            "client_ready"
+            if fallback_reason in {None, "fallback_unconfigured", "fallback_disabled"}
+            else f"client_ready+{fallback_reason}"
+        )
     except Exception as exc:  # pragma: no cover - client init failure
         if _debug_enabled():
             logger.warning("ai_enrich debug: Client initialization failed")
@@ -265,6 +296,27 @@ UTTERANCE_TYPES = [
 def _normalized_classification(value: str) -> str:
     candidate = value.strip().lower()
     return candidate if candidate in UTTERANCE_TYPES else "unclassified"
+
+
+_EXCLUDED_TAG_CATEGORIES = {"content_type"}
+_EXCLUDED_TAGS = set(UTTERANCE_TYPES)
+
+
+def _effective_tag_configs(
+    tag_configs: Mapping[str, TypingIterable[str]]
+) -> dict[str, list[str]]:
+    effective: dict[str, list[str]] = {}
+    for category, tags in tag_configs.items():
+        if category in _EXCLUDED_TAG_CATEGORIES:
+            continue
+        filtered = _dedupe(
+            tag
+            for tag in tags
+            if isinstance(tag, str) and tag not in _EXCLUDED_TAGS
+        )
+        if filtered:
+            effective[str(category)] = filtered
+    return effective
 
 
 def _valid_tags(tag_configs: Mapping[str, TypingIterable[str]]) -> set[str]:
@@ -352,9 +404,11 @@ def _dedupe(sequence: TypingIterable[str]) -> list[str]:
 def _normalize_tags(candidates: list[str], valid: set[str]) -> list[str]:
     normalized = _dedupe(token.strip().lower() for token in candidates if token and token.strip())
     if not valid:
-        return normalized
+        return [tag for tag in normalized if tag not in _EXCLUDED_TAGS]
 
     def normalize_candidate(tag: str) -> str | None:
+        if tag in _EXCLUDED_TAGS:
+            return None
         if tag in valid:
             return tag
         if tag.endswith("s") and tag[:-1] in valid:
@@ -369,11 +423,26 @@ def _normalize_tags(candidates: list[str], valid: set[str]) -> list[str]:
     return filtered
 
 
+def _grounded_tags(tags: list[str], text_chunk: str) -> list[str]:
+    lowered = text_chunk.lower()
+    words = set(re.findall(r"[a-z]+", lowered))
+
+    def is_grounded(tag: str) -> bool:
+        parts = tag.split("_")
+        if len(parts) == 1:
+            return len(parts[0]) >= 5 and parts[0] in words
+        phrase = " ".join(parts)
+        return phrase in lowered or all(part in words for part in parts)
+
+    return [tag for tag in tags if is_grounded(tag)]
+
+
 def _lexical_fallback_tags(text_chunk: str, valid: set[str], limit: int = 4) -> list[str]:
     if not valid:
         return []
     lowered = text_chunk.lower()
     words = set(re.findall(r"[a-z]+", lowered))
+    title_window = lowered[:400]
     scored: list[tuple[int, str]] = []
     for tag in valid:
         parts = tag.split("_")
@@ -382,7 +451,9 @@ def _lexical_fallback_tags(text_chunk: str, valid: set[str], limit: int = 4) -> 
         score = 0
         phrase = " ".join(parts)
         if phrase in lowered:
-            score += 3
+            score += 4
+        if phrase in title_window:
+            score += 2
         if all(part in words for part in parts):
             score += len(parts)
         if score >= 3:
@@ -414,27 +485,40 @@ def classify_chunk_utterance(
     *,
     tag_configs: dict[str, list[str]],
     completion_fn: Callable[[str], str],
+    fallback_completion_fn: Callable[[str], str] | None = None,
+    fallback_min_chars: int = 200,
 ) -> dict[str, Any]:
     """Classify ``text_chunk`` and assign relevant tags using ``completion_fn``."""
     if not text_chunk or not text_chunk.strip():
         return {"classification": "unclassified", "tags": []}
 
+    tag_configs = _effective_tag_configs(tag_configs)
     tag_lines = [f"- {cat}: {', '.join(tags)}\n" for cat, tags in tag_configs.items()]
     available_tags = (
         (
-            "\n\nAvailable tags by category:\n"
+            "\n\nAllowed topical tags by category:\n"
             + "".join(tag_lines)
-            + "\nSelect 2-4 most relevant tags from the available categories."
+            + "\nChoose 1-4 tags only from this list."
         )
         if tag_configs
         else ""
     )
 
     prompt = (
-        "Given the following text, classify its primary utterance type and "
-        "assign relevant tags.\n\n"
+        "Given the following text, identify its primary utterance type and assign topical tags.\n\n"
         f"Classification: Choose the best fit from this list: {UTTERANCE_TYPES}.\n\n"
         f"{available_tags}\n\n"
+        "Important rules for tags:\n"
+        "- Tags must describe subject matter, concepts, methods, technologies, or artifacts discussed in the text.\n"
+        "- Prefer tags that are explicitly grounded in the title or body text.\n"
+        "- Do not use utterance-type labels as tags, such as explanation, instruction, example, summary, critique, definition, opinion, or question.\n"
+        "- Do not invent new tags.\n"
+        "- If no allowed topical tag is clearly grounded in the text, return an empty list.\n\n"
+        "Good tag examples:\n"
+        "- For a chunk about Python design patterns: Tags: [python, design_patterns]\n"
+        "- For a chunk about configuration syntax: Tags: [configuration]\n"
+        "Bad tag examples:\n"
+        "- Tags: [explanation, summary]\n\n"
         "Respond in this exact format:\n"
         "Classification: [chosen_type]\n"
         "Tags: [tag1, tag2, tag3]\n\n"
@@ -445,6 +529,23 @@ def classify_chunk_utterance(
     try:
         response_text = completion_fn(prompt).strip()
         classification, tags = _parse_completion(response_text, tag_configs)
+        tags = _grounded_tags(tags, text_chunk)
+        if (
+            not tags
+            and tag_configs
+            and fallback_completion_fn
+            and len(text_chunk.strip()) >= fallback_min_chars
+        ):
+            fallback_response = fallback_completion_fn(prompt).strip()
+            fallback_classification, fallback_tags = _parse_completion(
+                fallback_response,
+                tag_configs,
+            )
+            fallback_tags = _grounded_tags(fallback_tags, text_chunk)
+            if fallback_tags:
+                tags = fallback_tags
+            if classification == "error" and fallback_classification != "unclassified":
+                classification = fallback_classification
         if not tags and tag_configs:
             tags = _lexical_fallback_tags(text_chunk, _valid_tags(tag_configs))
         if _debug_enabled() and _debug_next_sample():

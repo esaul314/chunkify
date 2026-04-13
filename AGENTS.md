@@ -149,9 +149,14 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
 - The default metadata-enrichment path uses the local the downstream retrieval coordinator router with model alias `qwen3-8b-local`, base URL `http://localhost:8100/v1`, and dummy key `sk-local`.
+- When grounded tags come back empty, `pdf_chunker` can optionally retry tagging with a cheap OpenAI fallback model. The default fallback model is `gpt-4.1-nano` and it only runs when `OPENAI_API_KEY` or `PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY` is available.
 - Override it when needed with:
   ```bash
   PDF_CHUNKER_AI_ENRICH_MODEL=qwen3-8b-local PDF_CHUNKER_AI_ENRICH_API_BASE=http://localhost:8100/v1 PDF_CHUNKER_AI_ENRICH_API_KEY=sk-local pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
+  ```
+- Optional empty-tag fallback via OpenAI:
+  ```bash
+  OPENAI_API_KEY=... PDF_CHUNKER_AI_ENRICH_FALLBACK_MODEL=gpt-4.1-nano pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
 - Strip custom footer patterns using regex (repeatable flag):
   ```bash

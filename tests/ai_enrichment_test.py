@@ -8,11 +8,17 @@ sys.path.insert(0, ".")
 from pdf_chunker.adapters.ai_enrich import (
     _load_tag_configs,
     _process_chunk_for_file,
+    init_fallback_llm,
     init_llm,
 )
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.framework import Artifact, run_pipeline
-from pdf_chunker.passes.ai_enrich import _resolve_completion, classify_chunk_utterance
+from pdf_chunker.passes.ai_enrich import (
+    _effective_tag_configs,
+    _resolve_completion,
+    _resolve_fallback_completion,
+    classify_chunk_utterance,
+)
 
 
 def _dummy_completion(_: str) -> str:
@@ -31,13 +37,25 @@ def test_load_tag_configs_deduplicates() -> None:
 def test_classify_chunk_utterance_filters_invalid_tags() -> None:
     tag_configs = {"generic": ["technical"]}
     result = classify_chunk_utterance(
-        "What is AI?", tag_configs=tag_configs, completion_fn=_dummy_completion
+        "This technical overview asks what AI is.",
+        tag_configs=tag_configs,
+        completion_fn=_dummy_completion,
     )
     assert result == {"classification": "question", "tags": ["technical"]}
 
 
+def test_effective_tag_configs_drops_content_type_and_utterance_type_tags() -> None:
+    tag_configs = {
+        "content_type": ["explanation", "summary"],
+        "concepts": ["architecture", "explanation", "testing"],
+    }
+    assert _effective_tag_configs(tag_configs) == {
+        "concepts": ["architecture", "testing"],
+    }
+
+
 def test_process_chunk_for_file_populates_tags() -> None:
-    chunk = {"text": "What is AI?"}
+    chunk = {"text": "This technical overview asks what AI is."}
     tag_configs = {"generic": ["technical"]}
     result = _process_chunk_for_file(
         chunk, tag_configs=tag_configs, completion_fn=_dummy_completion
@@ -49,7 +67,7 @@ def test_process_chunk_for_file_populates_tags() -> None:
 def test_classify_chunk_utterance_handles_multiline_tags() -> None:
     tag_configs = {"generic": ["technical", "methodology"]}
     result = classify_chunk_utterance(
-        "How should we build this?",
+        "This technical methodology explains how we should build this.",
         tag_configs=tag_configs,
         completion_fn=_multiline_completion,
     )
@@ -62,21 +80,20 @@ def _category_heading_completion(_: str) -> str:
     return """Classification: explanation
 Tags:
 - technical_level:
-- deliverables
-- tools
+- analysis
 """
 
 
 def test_classify_chunk_utterance_ignores_category_headings_and_invalid_tags() -> None:
     tag_configs = {"generic": ["tool", "analysis"]}
     result = classify_chunk_utterance(
-        "This section describes a tool.",
+        "This section provides analysis of the system and compares tradeoffs.",
         tag_configs=tag_configs,
         completion_fn=_category_heading_completion,
     )
     assert result == {
         "classification": "explanation",
-        "tags": ["tool"],
+        "tags": ["analysis"],
     }
 
 
@@ -96,7 +113,24 @@ def test_classify_chunk_utterance_invalid_classification_falls_back_to_unclassif
     )
     assert result == {
         "classification": "unclassified",
-        "tags": ["software_design", "technical_debt"],
+        "tags": ["software_design"],
+    }
+
+
+def _ungrounded_tag_completion(_: str) -> str:
+    return "Classification: explanation\nTags: [technical_debt, software_design]"
+
+
+def test_classify_chunk_utterance_drops_ungrounded_model_tags() -> None:
+    tag_configs = {"generic": ["software_design", "technical_debt"]}
+    result = classify_chunk_utterance(
+        "This software design book introduces modular architecture.",
+        tag_configs=tag_configs,
+        completion_fn=_ungrounded_tag_completion,
+    )
+    assert result == {
+        "classification": "explanation",
+        "tags": ["software_design"],
     }
 
 
@@ -115,6 +149,55 @@ def test_classify_chunk_utterance_uses_lexical_fallback_for_empty_tags() -> None
         "classification": "explanation",
         "tags": ["software_design", "technical_debt"],
     }
+
+
+def test_classify_chunk_utterance_does_not_guess_single_word_fallback_tags() -> None:
+    tag_configs = {"concepts": ["algorithms", "testing", "security"]}
+    result = classify_chunk_utterance(
+        "Algorithms are central to this chapter, and the introduction compares algorithm design tradeoffs.",
+        tag_configs=tag_configs,
+        completion_fn=_empty_tags_completion,
+    )
+    assert result == {
+        "classification": "explanation",
+        "tags": [],
+    }
+
+
+def _fallback_only_completion(_: str) -> str:
+    return "Classification: explanation\nTags: [software_design]"
+
+
+def test_classify_chunk_utterance_uses_fallback_for_empty_tags() -> None:
+    tag_configs = {"generic": ["software_design", "technical_debt"]}
+    result = classify_chunk_utterance(
+        "This software design guide focuses on modular architecture.",
+        tag_configs=tag_configs,
+        completion_fn=_empty_tags_completion,
+        fallback_completion_fn=_fallback_only_completion,
+        fallback_min_chars=10,
+    )
+    assert result == {
+        "classification": "explanation",
+        "tags": ["software_design"],
+    }
+
+
+def test_classify_chunk_utterance_skips_fallback_for_short_chunks() -> None:
+    tag_configs = {"generic": ["software_design"]}
+    result = classify_chunk_utterance(
+        "short chunk",
+        tag_configs=tag_configs,
+        completion_fn=_empty_tags_completion,
+        fallback_completion_fn=_fallback_only_completion,
+        fallback_min_chars=50,
+    )
+    assert result == {
+        "classification": "explanation",
+        "tags": [],
+    }
+
+
 class _StubClient:
     def classify_chunk_utterance(
         self, text_chunk: str, *, tag_configs: dict[str, list[str]]
@@ -172,6 +255,68 @@ def test_init_llm_uses_local_luminatus_defaults(monkeypatch) -> None:
     assert calls[0]["custom_llm_provider"] == "openai"
     assert calls[0]["max_tokens"] == 256
     assert calls[0]["messages"][0]["content"].startswith("/no_think\n")
+
+
+def test_init_fallback_llm_uses_openai_defaults(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Classification: question\nTags: []"))]
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test")
+    monkeypatch.delenv("PDF_CHUNKER_AI_ENRICH_FALLBACK_MODEL", raising=False)
+    monkeypatch.delenv("PDF_CHUNKER_AI_ENRICH_FALLBACK_API_BASE", raising=False)
+    monkeypatch.delenv("PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "litellm",
+        SimpleNamespace(completion=fake_completion),
+    )
+
+    completion = init_fallback_llm()
+    assert completion is not None
+    completion("hello")
+
+    assert calls
+    assert calls[0]["model"] == "gpt-4.1-nano"
+    assert calls[0]["api_key"] == "openai-test"
+    assert "api_base" not in calls[0]
+    assert calls[0]["max_tokens"] == 128
+
+
+def test_resolve_fallback_completion_passes_fallback_options(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_init_fallback_llm(*, api_key=None, model=None, api_base=None, max_tokens=None):
+        captured["api_key"] = api_key
+        captured["model"] = model
+        captured["api_base"] = api_base
+        captured["max_tokens"] = max_tokens
+        return lambda _: "Classification: question\nTags: []"
+
+    import pdf_chunker.adapters.ai_enrich as adapter
+
+    monkeypatch.setattr(adapter, "init_fallback_llm", fake_init_fallback_llm)
+    completion, reason = _resolve_fallback_completion(
+        {
+            "fallback_api_key": "k",
+            "fallback_model": "gpt-4.1-nano",
+            "fallback_api_base": None,
+            "fallback_max_tokens": 80,
+        }
+    )
+
+    assert callable(completion)
+    assert reason == "init_fallback_llm"
+    assert captured == {
+        "api_key": "k",
+        "model": "gpt-4.1-nano",
+        "api_base": None,
+        "max_tokens": 80,
+    }
 
 
 def test_resolve_completion_passes_model_and_api_base_options(monkeypatch) -> None:
