@@ -290,7 +290,7 @@ def test_init_llm_can_disable_no_think_for_local_qwen(monkeypatch) -> None:
     assert calls[0]["messages"][0]["content"] == "hello"
 
 
-def test_init_llm_uses_local_luminatus_defaults(monkeypatch) -> None:
+def test_init_llm_uses_local_router_defaults(monkeypatch) -> None:
     calls: list[dict[str, Any]] = []
 
     def fake_completion(**kwargs):

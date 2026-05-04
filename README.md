@@ -42,7 +42,8 @@ PDF_CHUNKER_AI_ENRICH_DEBUG=1 PDF_CHUNKER_AI_ENRICH_DEBUG_SAMPLES=1 pdf_chunker 
 ```
 If AI enrichment is enabled but no completion client can be created (e.g., `litellm` missing),
 the CLI now raises an error instead of silently producing empty tags.
-The default metadata-enrichment path now targets the local the downstream retrieval coordinator router using `qwen3-8b-local` at `http://localhost:8100/v1` with the dummy key `sk-local`.
+The default metadata-enrichment path now targets a local OpenAI-compatible router using
+`qwen3-8b-local` at `http://localhost:8100/v1` with the dummy key `sk-local`.
 If grounded tags come back empty, `pdf_chunker` can optionally retry tagging with a cheap OpenAI fallback model. The default fallback model is `gpt-4.1-nano` and it only runs when `OPENAI_API_KEY` or `PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY` is available.
 Override it when needed with `PDF_CHUNKER_AI_ENRICH_MODEL`, `PDF_CHUNKER_AI_ENRICH_API_BASE`, or `PDF_CHUNKER_AI_ENRICH_API_KEY`:
 ```bash
