@@ -139,6 +139,17 @@ class TestMergeIncompleteLists:
         assert "key points:" in result[0]["text"]
         assert "First point" in result[0]["text"]
 
+    def test_row_with_fullwidth_colon_intro_merges_with_next(self):
+        """Row ending with fullwidth colon merges with following list content."""
+        rows = [
+            {"text": "Here are the key points："},
+            {"text": "• First point\n• Second point"},
+        ]
+        result = _merge_incomplete_lists(rows)
+        assert len(result) == 1
+        assert "key points" in result[0]["text"]
+        assert "First point" in result[0]["text"]
+
     def test_row_with_inline_bullet_merges(self):
         """Row with incomplete inline bullet merges forward."""
         rows = [
@@ -321,6 +332,8 @@ class TestHasIncompleteList:
         """Text ending with ':' alone is an incomplete list intro."""
         assert _has_incomplete_list("Here are the items:")
         assert _has_incomplete_list("The following:")
+        assert _has_incomplete_list("The following：")
+        assert _has_incomplete_list('The following:”')
 
     def test_colon_with_bullet_not_incomplete(self):
         """Text with colon followed by bullet items is complete."""
@@ -412,6 +425,8 @@ class TestEndsWithListIntroColon:
     def test_colon_ending_no_bullets(self):
         lines = ["Here are the items:"]
         assert _ends_with_list_intro_colon(lines)
+        assert _ends_with_list_intro_colon(["Here are the items："])
+        assert _ends_with_list_intro_colon(['Here are the items:”'])
 
     def test_colon_ending_with_bullets(self):
         lines = ["Items:", "• First bullet"]
@@ -431,6 +446,7 @@ class TestHasSingleInlineBullet:
     def test_inline_bullet_single(self):
         lines = ["List: • single item"]
         assert _has_single_inline_bullet(lines)
+        assert _has_single_inline_bullet(["List： • single item"])
 
     def test_inline_bullet_multiple(self):
         lines = ["List: • item one", "• item two"]

@@ -25,6 +25,7 @@ Record = tuple[int, Block, str]
 # ---------------------------------------------------------------------------
 
 _NUMBERED_ANYWHERE_RE = re.compile(r"(?:^|\n|\s)(\d+)[.)]\s+")
+_LIST_INTRO_COLON_RE = re.compile(r"""[:：]\s*(?:["')\]\u2019\u201d]+)?\s*$""")
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +173,7 @@ def should_emit_list_boundary(
     from pdf_chunker.passes.split_modules.footers import record_is_footer_candidate
 
     _, prev_block, prev_text = previous
-    if prev_text.rstrip().endswith(":"):
+    if ends_with_list_intro_colon(prev_text):
         return False
     if starts_list_like(prev_block, prev_text, strategy=strategy):
         return False
@@ -191,8 +192,13 @@ def colon_bullet_boundary(
     strategy: BulletHeuristicStrategy | None = None,
 ) -> bool:
     """Check if a colon-prefixed bullet boundary exists."""
-    return prev_text.rstrip().endswith(":") and starts_list_like(
+    return ends_with_list_intro_colon(prev_text) and starts_list_like(
         block,
         text,
         strategy=strategy,
     )
+
+
+def ends_with_list_intro_colon(text: str) -> bool:
+    """Return True if ``text`` ends with a list-intro colon marker."""
+    return _LIST_INTRO_COLON_RE.search(text.rstrip()) is not None

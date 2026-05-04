@@ -5,12 +5,11 @@ from pdf_chunker.passes.split_modules.segments import (
     _allow_colon_list_overflow,
     _collapse_step,
     _CollapseEmitter,
-    _effective_counts,
     _segment_is_colon_list,
 )
 from pdf_chunker.passes.split_semantic import (
-    _SplitSemanticPass,
     SplitOptions,
+    _SplitSemanticPass,
 )
 from pdf_chunker.strategies.bullets import default_bullet_strategy
 
@@ -74,6 +73,16 @@ def test_segment_is_colon_list_detects_colon_bullet_pattern() -> None:
         (1, {"text": "• Item", "type": "paragraph"}, "• Item"),
     )
     assert _segment_is_colon_list(segment, strategy=strategy) is True
+    segment_fullwidth = (
+        (1, {"text": "Intro：", "type": "paragraph"}, "Intro："),
+        (1, {"text": "• Item", "type": "paragraph"}, "• Item"),
+    )
+    assert _segment_is_colon_list(segment_fullwidth, strategy=strategy) is True
+    segment_quoted = (
+        (1, {"text": 'Intro:”', "type": "paragraph"}, 'Intro:”'),
+        (1, {"text": "• Item", "type": "paragraph"}, "• Item"),
+    )
+    assert _segment_is_colon_list(segment_quoted, strategy=strategy) is True
 
     # No colon - should not match
     segment_no_colon = (
@@ -98,6 +107,10 @@ def test_allow_colon_list_overflow_permits_merge() -> None:
     bullets = (1, {"text": "• First\n• Second", "type": "paragraph"}, "• First\n• Second")
 
     assert _allow_colon_list_overflow((intro,), bullets, strategy=strategy) is True
+    intro_fullwidth = (1, {"text": "Key points：", "type": "paragraph"}, "Key points：")
+    assert _allow_colon_list_overflow((intro_fullwidth,), bullets, strategy=strategy) is True
+    intro_quoted = (1, {"text": 'Key points:”', "type": "paragraph"}, 'Key points:”')
+    assert _allow_colon_list_overflow((intro_quoted,), bullets, strategy=strategy) is True
 
     # Without colon - should not allow overflow
     intro_no_colon = (1, {"text": "Key points", "type": "paragraph"}, "Key points")
@@ -139,7 +152,6 @@ def test_colon_intro_and_bullet_list_stay_together_in_single_chunk() -> None:
 
     state = emitter
     for idx, record in enumerate(records):
-        counts = _effective_counts(record[2])
         state = _collapse_step(state, (idx, record))
 
     state = state.flush()

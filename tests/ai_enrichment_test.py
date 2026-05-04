@@ -6,6 +6,7 @@ from types import SimpleNamespace
 sys.path.insert(0, ".")
 
 from pdf_chunker.adapters.ai_enrich import (
+    DEFAULT_AI_ENRICH_MAX_TOKENS,
     _load_tag_configs,
     _process_chunk_for_file,
     init_fallback_llm,
@@ -198,6 +199,21 @@ def test_classify_chunk_utterance_skips_fallback_for_short_chunks() -> None:
     }
 
 
+def test_classify_chunk_utterance_preserves_local_result_when_fallback_fails() -> None:
+    tag_configs = {"generic": ["javascript", "design_patterns"]}
+    result = classify_chunk_utterance(
+        "This chapter explains JavaScript design patterns for modular frontend architecture.",
+        tag_configs=tag_configs,
+        completion_fn=lambda _: "Classification: explanation\nTags: [javascript, design_patterns]",
+        fallback_completion_fn=lambda _: (_ for _ in ()).throw(RuntimeError("quota")),
+        fallback_min_chars=10,
+    )
+    assert result == {
+        "classification": "explanation",
+        "tags": ["javascript", "design_patterns"],
+    }
+
+
 class _StubClient:
     def classify_chunk_utterance(
         self, text_chunk: str, *, tag_configs: dict[str, list[str]]
@@ -222,6 +238,56 @@ def test_pipeline_enrichment_with_stub() -> None:
     items = result.payload["items"]
     assert all(c.get("utterance_type") == "question" for c in items)
     assert all(c.get("tags") == ["technical"] for c in items)
+
+
+def test_classify_chunk_utterance_repairs_unclassified_when_model_can_reclassify() -> None:
+    calls: list[str] = []
+
+    def completion(prompt: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "Classification: unclassified\nTags: [javascript, design_patterns]"
+        return "Classification: explanation"
+
+    tag_configs = {"generic": ["javascript", "design_patterns"]}
+    result = classify_chunk_utterance(
+        "This chapter explains JavaScript design patterns for modular frontend architecture.",
+        tag_configs=tag_configs,
+        completion_fn=completion,
+    )
+
+    assert result == {"classification": "explanation", "tags": ["javascript", "design_patterns"]}
+    assert len(calls) == 2
+
+
+def test_init_llm_can_disable_no_think_for_local_qwen(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Classification: question\nTags: []"))]
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "local-test")
+    monkeypatch.setitem(
+        sys.modules,
+        "litellm",
+        SimpleNamespace(completion=fake_completion),
+    )
+
+    completion = init_llm(
+        model="Qwen/Qwen3-14B-AWQ",
+        api_base="http://localhost:8000/v1",
+        no_think=False,
+    )
+    completion("hello")
+
+    assert calls
+    assert calls[0]["model"] == "Qwen/Qwen3-14B-AWQ"
+    assert calls[0]["api_base"] == "http://localhost:8000/v1"
+    assert calls[0]["max_tokens"] == DEFAULT_AI_ENRICH_MAX_TOKENS
+    assert calls[0]["messages"][0]["content"] == "hello"
 
 
 def test_init_llm_uses_local_luminatus_defaults(monkeypatch) -> None:
@@ -322,18 +388,25 @@ def test_resolve_fallback_completion_passes_fallback_options(monkeypatch) -> Non
 def test_resolve_completion_passes_model_and_api_base_options(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_init_llm(*, api_key=None, model=None, api_base=None, max_tokens=None):
+    def fake_init_llm(*, api_key=None, model=None, api_base=None, max_tokens=None, no_think=None):
         captured["api_key"] = api_key
         captured["model"] = model
         captured["api_base"] = api_base
         captured["max_tokens"] = max_tokens
+        captured["no_think"] = no_think
         return lambda _: "Classification: question\nTags: []"
 
     import pdf_chunker.adapters.ai_enrich as adapter
 
     monkeypatch.setattr(adapter, "init_llm", fake_init_llm)
     completion, reason = _resolve_completion(
-        {"api_key": "k", "model": "qwen3-8b-local", "api_base": "http://localhost:8100/v1", "max_tokens": 300}
+        {
+            "api_key": "k",
+            "model": "qwen3-8b-local",
+            "api_base": "http://localhost:8100/v1",
+            "max_tokens": 300,
+            "no_think": False,
+        }
     )
 
     assert callable(completion)
@@ -343,4 +416,5 @@ def test_resolve_completion_passes_model_and_api_base_options(monkeypatch) -> No
         "model": "qwen3-8b-local",
         "api_base": "http://localhost:8100/v1",
         "max_tokens": 300,
+        "no_think": False,
     }

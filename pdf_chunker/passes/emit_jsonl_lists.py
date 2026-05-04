@@ -26,8 +26,9 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _LIST_GAP_RE = re.compile(r"\n{2,}(?=\s*(?:[-\*\u2022]|\d+\.))")
-_INLINE_BULLET_RE = re.compile(r":\s*[•\-\*\u2022]\s+\w")
-_INLINE_NUMBER_RE = re.compile(r":\s*\d+[.)]\s+\w")
+_INLINE_BULLET_RE = re.compile(r"[:：]\s*[•\-\*\u2022]\s+\w")
+_INLINE_NUMBER_RE = re.compile(r"[:：]\s*\d+[.)]\s+\w")
+_LIST_INTRO_COLON_RE = re.compile(r"""[:：]\s*(?:["')\]\u2019\u201d]+)?\s*$""")
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ def ends_with_list_intro_colon(
     if not lines:
         return False
     last_line = lines[-1].rstrip()
-    if not last_line.endswith(":"):
+    if _LIST_INTRO_COLON_RE.search(last_line) is None:
         return False
     # Verify no bullets present - this is a pure introduction
     all_text = "\n".join(lines)
@@ -142,7 +143,7 @@ def has_unterminated_bullet_item(
     # Check if there's intro text ending with colon before the bullet
     if first_bullet_idx > 0:
         pre_bullet = "\n".join(lines[:first_bullet_idx])
-        if pre_bullet.rstrip().endswith(":"):
+        if _LIST_INTRO_COLON_RE.search(pre_bullet.rstrip()):
             return True
 
     # Check if single bullet item lacks sentence terminator

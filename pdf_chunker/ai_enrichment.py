@@ -32,10 +32,11 @@ def init_llm(
     model: str | None = None,
     api_base: str | None = None,
     max_tokens: int | None = None,
+    no_think: bool | None = None,
 ) -> Callable[[str], str]:
     from pdf_chunker.adapters.ai_enrich import init_llm as impl
 
-    return impl(api_key=api_key, model=model, api_base=api_base, max_tokens=max_tokens)
+    return impl(api_key=api_key, model=model, api_base=api_base, max_tokens=max_tokens, no_think=no_think)
 
 
 def _process_chunk_for_file(

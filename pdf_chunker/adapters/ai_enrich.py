@@ -100,6 +100,7 @@ def init_llm(
     model: str | None = None,
     api_base: str | None = None,
     max_tokens: int | None = None,
+    no_think: bool | None = None,
 ) -> Callable[[str], str]:
     """Return a completion function configured with an API key."""
     from dotenv import load_dotenv  # lazy import
@@ -133,6 +134,14 @@ def init_llm(
         max_tokens
         or int(os.environ.get("PDF_CHUNKER_AI_ENRICH_MAX_TOKENS", DEFAULT_AI_ENRICH_MAX_TOKENS))
     )
+    if no_think is None:
+        raw_no_think = os.environ.get("PDF_CHUNKER_AI_ENRICH_NO_THINK")
+        if raw_no_think is None:
+            resolved_no_think = True
+        else:
+            resolved_no_think = raw_no_think.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        resolved_no_think = bool(no_think)
     if not key:
         raise ValueError(
             "No API key found for AI enrichment. Set PDF_CHUNKER_AI_ENRICH_API_KEY or OPENAI_API_KEY."
@@ -143,7 +152,12 @@ def init_llm(
         raise ImportError("litellm is required for init_llm") from exc
 
     def completion(prompt: str) -> str:
-        if resolved_model in {"qwen3-8b-local", "Qwen/Qwen3-8B-AWQ"}:
+        if resolved_no_think and resolved_model in {
+            "qwen3-8b-local",
+            "Qwen/Qwen3-8B-AWQ",
+            "qwen3-14b-local",
+            "Qwen/Qwen3-14B-AWQ",
+        }:
             prompt = f"/no_think\n{prompt}"
         kwargs = {
             "model": resolved_model,

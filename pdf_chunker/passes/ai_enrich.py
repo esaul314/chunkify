@@ -159,6 +159,7 @@ def _resolve_completion(
             model=options.get("model"),
             api_base=options.get("api_base") or options.get("base_url"),
             max_tokens=options.get("max_tokens"),
+            no_think=options.get("no_think"),
         ), "init_llm"
     except Exception as exc:  # pragma: no cover - missing credentials
         return None, f"init_llm_error:{exc.__class__.__name__}"
@@ -462,6 +463,32 @@ def _lexical_fallback_tags(text_chunk: str, valid: set[str], limit: int = 4) -> 
     return [tag for _, tag in scored[:limit]]
 
 
+def _classification_repair_prompt(text_chunk: str) -> str:
+    return (
+        "Given the following text, choose the single best utterance type.\n\n"
+        f"Classification: Choose exactly one from this list: {UTTERANCE_TYPES}.\n\n"
+        "Only use unclassified for front matter, bibliographic entries, indexes, tables of contents, or text with no clear communicative act.\n"
+        "Otherwise choose the nearest valid type.\n\n"
+        "Respond in this exact format:\n"
+        "Classification: [chosen_type]\n\n"
+        f'Text: "{text_chunk}"\n\n'
+        "Response:"
+    )
+
+
+def _repair_classification(
+    text_chunk: str,
+    *,
+    completion_fn: Callable[[str], str],
+    classification: str,
+) -> str:
+    if classification != "unclassified":
+        return classification
+    response_text = completion_fn(_classification_repair_prompt(text_chunk)).strip()
+    repaired, _ = _parse_completion(response_text, {})
+    return classification if repaired == "unclassified" else repaired
+
+
 def _parse_completion(
     response_text: str, tag_configs: Mapping[str, TypingIterable[str]]
 ) -> tuple[str, list[str]]:
@@ -530,12 +557,27 @@ def classify_chunk_utterance(
         response_text = completion_fn(prompt).strip()
         classification, tags = _parse_completion(response_text, tag_configs)
         tags = _grounded_tags(tags, text_chunk)
-        if (
-            not tags
-            and tag_configs
-            and fallback_completion_fn
-            and len(text_chunk.strip()) >= fallback_min_chars
-        ):
+        if classification == "unclassified":
+            classification = _repair_classification(
+                text_chunk,
+                completion_fn=completion_fn,
+                classification=classification,
+            )
+    except Exception as exc:
+        if _debug_enabled():
+            logger.warning(
+                "ai_enrich debug: completion failed (%s)",
+                exc.__class__.__name__,
+            )
+        return {"classification": "error", "tags": []}
+
+    if (
+        not tags
+        and tag_configs
+        and fallback_completion_fn
+        and len(text_chunk.strip()) >= fallback_min_chars
+    ):
+        try:
             fallback_response = fallback_completion_fn(prompt).strip()
             fallback_classification, fallback_tags = _parse_completion(
                 fallback_response,
@@ -546,25 +588,25 @@ def classify_chunk_utterance(
                 tags = fallback_tags
             if classification == "error" and fallback_classification != "unclassified":
                 classification = fallback_classification
-        if not tags and tag_configs:
-            tags = _lexical_fallback_tags(text_chunk, _valid_tags(tag_configs))
-        if _debug_enabled() and _debug_next_sample():
-            has_tags = "tags:" in response_text.lower()
-            logger.warning(
-                "ai_enrich debug: response_preview='%s' has_tags=%s classification=%s tags=%s",
-                _debug_preview(response_text),
-                has_tags,
-                classification,
-                tags,
-            )
-        return {"classification": classification, "tags": tags}
-    except Exception as exc:
-        if _debug_enabled():
-            logger.warning(
-                "ai_enrich debug: completion failed (%s)",
-                exc.__class__.__name__,
-            )
-        return {"classification": "error", "tags": []}
+        except Exception as exc:
+            if _debug_enabled():
+                logger.warning(
+                    "ai_enrich debug: fallback completion failed (%s)",
+                    exc.__class__.__name__,
+                )
+
+    if not tags and tag_configs:
+        tags = _lexical_fallback_tags(text_chunk, _valid_tags(tag_configs))
+    if _debug_enabled() and _debug_next_sample():
+        has_tags = "tags:" in response_text.lower()
+        logger.warning(
+            "ai_enrich debug: response_preview='%s' has_tags=%s classification=%s tags=%s",
+            _debug_preview(response_text),
+            has_tags,
+            classification,
+            tags,
+        )
+    return {"classification": classification, "tags": tags}
 
 
 class ClassifyClient(Protocol):

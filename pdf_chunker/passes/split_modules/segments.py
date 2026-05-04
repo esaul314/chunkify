@@ -25,6 +25,9 @@ from pdf_chunker.passes.split_semantic_lists import BulletHeuristicStrategy
 from .footers import record_is_footer_candidate as _record_is_footer_candidate
 from .footers import strip_footer_suffixes as _strip_footer_suffixes
 from .lists import (
+    ends_with_list_intro_colon as _ends_with_list_intro_colon,
+)
+from .lists import (
     first_list_number as _first_list_number,
 )
 from .lists import (
@@ -329,7 +332,7 @@ def _segment_is_colon_list(
     for i in range(len(segment) - 1):
         _, _, prev_text = segment[i]
         _, next_block, next_text = segment[i + 1]
-        if prev_text.rstrip().endswith(":") and _starts_list_like(
+        if _ends_with_list_intro_colon(prev_text) and _starts_list_like(
             next_block, next_text, strategy=strategy
         ):
             return True
@@ -513,7 +516,7 @@ def _allow_colon_list_overflow(
         return False
     _, prev_block, prev_text = buffer[-1]
     _, block, text = record
-    if not prev_text.rstrip().endswith(":"):
+    if not _ends_with_list_intro_colon(prev_text):
         return False
     if not _starts_list_like(block, text, strategy=strategy):
         return False
@@ -653,7 +656,7 @@ def _should_emit_list_boundary(
 ) -> bool:
     """Determine if a list boundary should trigger a segment flush."""
     _, prev_block, prev_text = previous
-    if prev_text.rstrip().endswith(":"):
+    if _ends_with_list_intro_colon(prev_text):
         return False
     if _starts_list_like(prev_block, prev_text, strategy=strategy):
         return False
