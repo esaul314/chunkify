@@ -109,6 +109,21 @@ python scripts/eval_overlap.py --corpus your_document.pdf --overlaps 50,100 --js
 
 The script generates synthetic boundary-spanning queries and measures recall@k across different overlap settings. If recall is similar across values, overlap tuning has diminishing returns for your content.
 
+### Corpus quality reports
+
+Run the representative corpus evaluation before reviewing a pipeline change:
+
+```bash
+python scripts/evaluate_corpus.py \
+  --manifest docs/corpus_manifest.yaml \
+  --output /tmp/pdf-chunker-quality.json
+```
+
+The report separates text preservation and sentinel checks from page coverage,
+extraction engine/fallback use, artifact removals, chunk sizes, overlap,
+duplicate rate, and metadata completeness. It does not change overlap settings;
+use `scripts/eval_overlap.py` only after extraction and chunk integrity are stable.
+
 ## pipeline.yaml options
 
 | YAML key | CLI flag | Description | Default |

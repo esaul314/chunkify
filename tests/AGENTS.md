@@ -26,6 +26,7 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `splitter_transform_test.py`: Chunk splitting of cleaned text artifacts
 - `text_cleaning_transform_test.py`: Ligature, underscore, and hyphenation normalization
 - `rag_pipeline_readiness_test.py`: RAG pipeline overlap, metadata completeness, and LiteLLM preflight
+- `corpus_evaluation_test.py`: Corpus manifest loading and category-based quality metrics
 - Duplicate detection thresholds (via `detect_duplicates.py`).
 - `parity/test_page_count_regression.py`: Page count parity with sentinel phrase check and TOC dot-leader removal
 - `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters

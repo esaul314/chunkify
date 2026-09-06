@@ -7,6 +7,8 @@ CLI entry points and automation scripts.
 Please, keep this file up-to-date with the latest code structure. If you notice that the code structure has changed, please update this file accordingly.
 
 ## Responsibilities
+- `evaluate_corpus.py`: Runs the tracked corpus manifest and writes a category-based
+  quality report; it must not tune overlap or collapse categories into one score.
 - ```chunk_pdf.py`: Deprecated compatibility frontend delegating parsing and execution to
   `pdf_chunker convert`; it must not grow a second conversion implementation.
 - `validate_chunks.sh`: Semantic and size checks.
@@ -58,7 +60,20 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   - `--dir PATH`: directory containing per-pass snapshots.
   - `--spec FILE`: pipeline specification (default `pipeline.yaml`).
 
+## Corpus evaluation
+
+- Evaluate representative PDF, EPUB, and transcript fixtures:
+  ```bash
+  python scripts/evaluate_corpus.py \
+    --manifest docs/corpus_manifest.yaml \
+    --output /tmp/pdf-chunker-quality.json
+  ```
+  The report separates preservation checks, page coverage, extraction engine and
+  fallback use, artifact removals, chunk sizes, overlap, duplicate rate, and
+  metadata completeness. Use retrieval evaluation separately before changing overlap.
+
 ## Known Issues
+
 - Command-line help may be outdated.
 - `_apply.sh` exit codes not consistently handled.
 ```

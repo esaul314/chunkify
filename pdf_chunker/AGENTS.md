@@ -43,6 +43,8 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   owns loading/saving while callback wrappers remain in-memory during a run.
 
 ## AI Agent Guidance
+- `evaluation.py`: Deterministic corpus-quality metrics for preservation, structure,
+  metadata completeness, overlap, duplicates, and artifact-removal reporting.
 - Respect strict separation of passes.
 - Log fallback reasons and quality metrics.
 - Use `text_cleaning.py` transforms before splitting.

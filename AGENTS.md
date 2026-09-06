@@ -134,7 +134,7 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 - `apt-get install -y poppler-utils`  # provides `pdftotext`
 
 ### Quick Usage
-- Supported source formats in this repository are `.pdf` and `.epub` only.
+- Supported source formats in this repository are `.pdf`, `.epub`, and `.txt`.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -147,6 +147,10 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
 - Convert plain-text transcript via library CLI:
   ```bash
   pdf_chunker convert ./episode.txt --spec pipeline.yaml --out ./data/episode.jsonl --metadata-file ./episode.metadata.yaml --no-enrich
+  ```
+- Evaluate the tracked representative corpus and write a reviewable report:
+  ```bash
+  python scripts/evaluate_corpus.py --manifest docs/corpus_manifest.yaml --output /tmp/pdf-chunker-quality.json
   ```
 - RAG-optimized pipeline (100-word overlap, metadata on; tags apply when `OPENAI_API_KEY` is set):
   ```bash
@@ -327,6 +331,7 @@ pdf_chunker/
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── fallbacks.py              # Quality assessment and extraction fallbacks
+│   ├── evaluation.py             # Deterministic corpus-quality metrics
 │   ├── geometry.py                # Geometric zone detection for header/footer removal
 │   ├── interactive.py             # Unified interactive callback protocol (Phase 4)
 │   ├── language.py               # Default language utilities
@@ -382,6 +387,7 @@ pdf_chunker/
 │   ├── llm_correction.py        # Apply LLM-based corrections
 │   ├── test_page_boundaries.py  # Inspect chunk boundaries against pages
 │   ├── validate_chunk_quality.py # Evaluate chunk content quality
+│   ├── evaluate_corpus.py        # Run representative corpus quality evaluation
 │   ├── validate_chunks.sh       # Quality and boundary validation
 │   └── validate_readme_functionality.py # Check README code snippets
 ├── tests/                        # Modular test architecture
@@ -394,6 +400,7 @@ pdf_chunker/
     ├── chunk_pdf_integration_test.py
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
+    ├── corpus_evaluation_test.py
     ├── cross_page_sentence_test.py
     ├── env_utils_test.py
     ├── epub_spine_test.py

@@ -286,6 +286,18 @@ configuration accepts too many invalid states.
 
 ### P2-A — Build a result-quality evaluation layer
 
+**Status: COMPLETE (2026-09-06)**
+
+**Delivered:**
+- docs/corpus_manifest.yaml covers tracked PDF, EPUB, transcript, and text-normalization
+  fixtures; base64 fixtures are materialized only in temporary evaluation storage.
+- scripts/evaluate_corpus.py produces a stable JSON report with separate preservation,
+  structure, metadata, fallback, artifact-removal, chunk-size, overlap, and duplicate
+  categories.
+- Sentinel/order checks and representative-format tests live in
+  tests/corpus_evaluation_test.py. Retrieval overlap tuning remains a separate,
+  evidence-gated activity.
+
 **Why:** Unit tests and small goldens catch regressions, but they do not measure
 quality on representative documents or downstream retrieval behavior.
 
@@ -403,7 +415,7 @@ Use separate coherent commits, in this order:
 6. `refactor: restore pure pass and adapter boundaries`
 7. `refactor: consolidate semantic emission ownership`
 8. `refactor: simplify CLI and configuration validation`
-9. `test: add corpus quality evaluation`
+9. `test: add corpus quality evaluation` — complete
 10. `docs: reconcile roadmap and supported input formats`
 
 If a package is too large for one review, split it by boundary, not by arbitrary

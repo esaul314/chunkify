@@ -56,6 +56,7 @@ pdf_chunker/
 │   ├── list_detection.py    # Bullet and numbered list detection
 │   ├── splitter.py          # Chunk splitting and semantic boundaries
 │   ├── fallbacks.py         # Quality scoring and extraction fallbacks
+│   ├── evaluation.py        # Deterministic corpus-quality metrics
 │   ├── inline_styles.py     # Inline style span normalization
 │   ├── pdf_blocks.py        # Block extraction with inline style metadata
 │   ├── page_artifacts.py    # Header/footer detection helpers
@@ -151,6 +152,16 @@ unmarked legacy chunks retain the compatibility path until parity coverage
 allows that path to be retired.
 
 Legacy block fields (`type`, `text`, `language`, `source`, `bbox`) are preserved when lifting into artifacts.
+
+## 4.1) Corpus-quality evaluation
+
+`docs/corpus_manifest.yaml` defines representative tracked fixtures and the
+sentinels/order fragments that maintainers have reviewed. `scripts/evaluate_corpus.py`
+runs each case through the canonical runner and writes a stable JSON report. The
+report keeps preservation, structure, metadata, extraction fallback, artifact
+removal, chunk-size, overlap, and duplicate metrics separate so a count change
+does not masquerade as a quality judgment. Base64 fixtures are materialized only
+under a temporary directory.
 
 ## 5) Module boundaries and naming
 

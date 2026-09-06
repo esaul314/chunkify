@@ -1,0 +1,15 @@
+WEBVTT
+
+1
+00:00:00.000 --> 00:00:03.000
+HOST: Welcome to the document quality evaluation.
+
+2
+00:00:03.000 --> 00:00:07.000
+GUEST: We preserve speaker labels while normalizing transcript cues.
+
+HOST: The next paragraph checks stable chunk identity and source provenance.
+
+3
+00:00:07.000 --> 00:00:10.000
+HOST: The evaluation report records preservation, structure, metadata, and redundancy metrics.

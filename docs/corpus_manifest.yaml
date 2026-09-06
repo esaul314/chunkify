@@ -1,0 +1,114 @@
+version: 1
+
+# This manifest contains tracked fixtures only. Base64 entries are materialized in
+# a temporary directory so evaluation never writes generated documents into the repo.
+cases:
+  - name: platform_engineering_excerpt
+    path: platform-eng-excerpt.pdf
+    kind: pdf
+    spec: pipeline.yaml
+    expected_page_count: 55
+    reviewed_for:
+      - running_headers_footers
+      - tables
+      - lists
+      - captions
+      - cross_page_sentences
+    sentinels:
+      - The marbled newt is listed as vulnerable by the IUCN due to habitat loss
+    ordered_fragments:
+      - "CHAPTER 1"
+      - "Figure 1-1"
+      - "Table 1-1"
+      - "The marbled newt is listed as vulnerable by the IUCN due to habitat loss"
+
+  - name: structured_layout_pdf
+    path: Sample PDF.pdf
+    kind: pdf
+    spec: pipeline.yaml
+    expected_page_count: 6
+    reviewed_for:
+      - footnotes
+      - tables
+      - lists
+    sentinels:
+      - "Document Conversion Testing"
+      - "Footnotes:"
+    ordered_fragments:
+      - "Section 1.1: General Information"
+      - "The goal of this document"
+      - "This section demonstrates"
+      - "The following table provides"
+      - "Footnotes:"
+
+  - name: sample_pdf
+    path: test_data/sample_test.pdf
+    kind: pdf
+    spec: pipeline.yaml
+    expected_page_count: 3
+    reviewed_for:
+      - lists
+      - cross_page_sentences
+    sentinels:
+      - "Chapter 1: Sample Content"
+      - "Chapter 2: Structured Content"
+    ordered_fragments:
+      - "Chapter 1: Sample Content"
+      - "Chapter 2: Structured Content"
+
+  - name: sample_epub
+    path: tests/golden/samples/sample.epub.b64
+    filename: sample.epub
+    encoding: base64
+    kind: epub
+    spec: pipeline.yaml
+    expected_page_count: 2
+    reviewed_for:
+      - lists
+      - cross_page_sentences
+    sentinels:
+      - "Chapter 1: Introduction"
+      - "Chapter 3: Conclusion"
+    ordered_fragments:
+      - "Chapter 1: Introduction"
+      - "Chapter 3: Conclusion"
+
+  - name: sample_transcript
+    path: tests/evaluation/fixtures/sample_transcript.txt
+    kind: txt
+    spec: pipeline.yaml
+    expected_page_count: 1
+    reviewed_for:
+      - transcript_ingress
+    sentinels:
+      - stable chunk identity
+      - speaker labels
+    ordered_fragments:
+      - Welcome to the document quality evaluation.
+      - The evaluation report records preservation
+
+  - name: ligature_fixture
+    path: test_data/ligature.b64
+    filename: ligature.pdf
+    encoding: base64
+    kind: pdf
+    spec: pipeline.yaml
+    expected_page_count: 1
+    reviewed_for:
+      - poor_text
+      - text_normalization
+    sentinels:
+      - Ligature fi and fl test
+
+  - name: hyphenation_fixture
+    path: test_data/hyphenation.b64
+    filename: hyphenation.pdf
+    encoding: base64
+    kind: pdf
+    spec: pipeline.yaml
+    expected_page_count: 1
+    reviewed_for:
+      - poor_text
+      - text_normalization
+    sentinels:
+      - This is a container with soft hyphen hy-phen
