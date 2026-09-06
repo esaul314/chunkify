@@ -50,3 +50,32 @@ def test_read_epub_adapter(tmp_path: Path) -> None:
     pages = doc["pages"]
     assert len(pages) == 1
     assert pages[0]["blocks"][0]["text"] == "Hello world"
+
+
+def test_navigation_provenance_is_replaced_when_coalesced() -> None:
+    from pdf_chunker.epub_parsing import _coalesce_body_blocks
+
+    blocks = [
+        {
+            "type": "list_item",
+            "text": "1. Chapter 1",
+            "language": "en",
+            "source": {"filename": "book.epub", "location": "nav.xhtml", "page": 1},
+        },
+        {
+            "type": "paragraph",
+            "text": "Chapter body",
+            "language": "en",
+            "source": {"filename": "book.epub", "location": "chapter1.xhtml", "page": 2},
+        },
+    ]
+
+    merged = _coalesce_body_blocks(blocks, max_chars=1000, min_anchor=0)
+
+    assert len(merged) == 1
+    assert merged[0]["text"] == "1. Chapter 1\n\nChapter body"
+    assert merged[0]["source"] == {
+        "filename": "book.epub",
+        "location": "chapter1.xhtml",
+        "page": 1,
+    }

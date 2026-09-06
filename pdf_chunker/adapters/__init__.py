@@ -1,7 +1,7 @@
 from importlib import import_module
 from typing import Any
 
-from . import ai_enrich, emit_jsonl, io_pdf
+from . import ai_enrich, emit_jsonl, io_pdf, io_text
 
 
 def _load_epub() -> Any:
@@ -22,4 +22,12 @@ describe_epub, read_epub = (
     (io_epub.describe_epub, io_epub.read_epub) if io_epub else (_missing, _missing)
 )
 
-__all__ = ["ai_enrich", "emit_jsonl", "io_epub", "io_pdf", "describe_epub", "read_epub"]
+__all__ = [
+    "ai_enrich",
+    "emit_jsonl",
+    "io_epub",
+    "io_pdf",
+    "io_text",
+    "describe_epub",
+    "read_epub",
+]

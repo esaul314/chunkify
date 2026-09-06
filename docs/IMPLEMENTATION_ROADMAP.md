@@ -1,0 +1,442 @@
+# pdf-chunker Implementation Roadmap
+
+**Status:** Ready for implementation
+**Prepared:** 2026-09-03
+**Purpose:** Durable handoff for the next AI agent or maintainer
+
+This document converts the repository audit into an execution plan. It is intentionally
+implementation-oriented: each work package explains why it exists, where to work, what
+to preserve, and how to prove completion.
+
+## 1. Start here
+
+Before changing code, read these documents in order:
+
+1. [`AGENTS.md`](../AGENTS.md) — stewardship rules, architecture constraints, and output protocol.
+2. [`ARCHITECTURE.md`](../ARCHITECTURE.md) — intended pipeline boundaries and contracts.
+3. [`CODESTYLE.md`](../CODESTYLE.md) — functional/declarative coding conventions.
+4. [`CONTRIBUTING.md`](../CONTRIBUTING.md) — quality gates and commit discipline.
+5. This document — current findings, priorities, and acceptance criteria.
+
+Then inspect the worktree:
+
+```bash
+git status --short
+git log -8 --date=short --pretty=format:'%h %ad %s'
+```
+
+The worktree already contains pending user changes for plain-text/transcript ingestion
+and metadata propagation. Preserve those changes. Do not reset, clean, or overwrite
+unrelated files.
+
+## 2. Mission and non-negotiable constraints
+
+The mission is to make the existing PDF/EPUB/text-to-JSONL pipeline trustworthy,
+maintainable, and extensible without replacing its working algorithms wholesale.
+
+Maintain these principles throughout:
+
+- Keep transformation logic pure and move file, subprocess, network, and prompt I/O to adapters or the CLI shell.
+- Prefer small named functions, immutable returned values, standard-library solutions, and explicit data flow.
+- Do not add a framework or plugin layer unless a concrete second implementation requires it.
+- Do not silently change public behavior or delete compatibility shims.
+- Do not refresh golden fixtures until a behavior change has been explained and approved.
+- Treat text preservation, source traceability, and deterministic ordering as correctness properties.
+- Make each change small, reversible, and independently testable.
+
+## 3. Current architecture and target architecture
+
+### Current intended flow
+
+```text
+PDF/EPUB/TXT adapter
+        ↓
+canonical PageBlocks artifact
+        ↓
+text_clean → structure/list/heading passes → split_semantic
+        ↓
+chunks → emit_jsonl pass → JSONL writer
+        ↓
+optional AI enrichment at the integration boundary
+```
+
+### Current implementation reality
+
+- [`core_new.py`](../pdf_chunker/core_new.py) is the newer CLI runner.
+- [`core.py`](../pdf_chunker/core.py) remains a separate public processing path.
+- [`splitter.py`](../pdf_chunker/splitter.py) is still used by `split_semantic` through `_get_split_fn`.
+- `split_modules/`, `sentence_fusion.py`, and `emit_jsonl.py` each contain substantial boundary/merge logic.
+- `framework.py` provides a global pass registry and an untyped `Artifact` carrier.
+- Several passes perform I/O, invoke callbacks, or invoke external clients despite the documented purity rule.
+- The current worktree adds `adapters/io_text.py`, `passes/text_parse.py`, and `--metadata-file`; this is the correct direction for transcript ingestion, but it needs full contract and CLI verification.
+
+### Target architecture
+
+Keep the existing pipeline shape, but establish one execution path and four explicit
+boundaries:
+
+1. `Reader` adapters produce typed-in-practice `PageBlocks` values.
+2. Pure passes transform page blocks into chunks and metadata.
+3. `EnrichmentClient` and `DecisionCallback` are injected collaborators, not pass-owned side effects.
+4. Writers serialize rows only; semantic merging does not occur during final emission.
+
+## 4. Baseline findings to preserve in the handoff
+
+The audit was performed against the current worktree on 2026-09-03.
+
+### Health baseline
+
+- `nox -s lint` passes only because [`noxfile.py`](../noxfile.py) checks a narrow list of files.
+- `nox -s tests` reports `773 passed, 5 failed, 1 skipped, 25 deselected`.
+- Direct `mypy pdf_chunker` reports 64 errors across 27 files.
+- `nox -s typecheck` also encounters a local Python 3.14/NumPy stub incompatibility; use the supported CI Python version when judging project type health.
+- Plain `pytest` collection fails because [`scripts/test_page_boundaries.py`](../scripts/test_page_boundaries.py) is discovered as a test and imports the removed `clean_text_traditional` symbol.
+- The five failing tests cover PDF readability drift, EPUB metadata drift, list metadata parity, missing `litellm`, and readability regression.
+
+### Highest-risk code locations
+
+- Fixture-specific chunk repair: [`core.py`](../pdf_chunker/core.py:202).
+- Trivial extraction quality scoring: [`fallbacks.py`](../pdf_chunker/fallbacks.py:24).
+- Global timeout and repeated document access: [`adapters/io_pdf.py`](../pdf_chunker/adapters/io_pdf.py:249).
+- Broad exception fallback around the semantic splitter: [`passes/split_semantic.py`](../pdf_chunker/passes/split_semantic.py:374).
+- Duplicate merge/dedupe systems: [`passes/emit_jsonl.py`](../pdf_chunker/passes/emit_jsonl.py:1139).
+- CLI module stubbing and duplicated frontend implementations: [`cli.py`](../pdf_chunker/cli.py:217).
+- Global registry and shallowly immutable artifacts: [`framework.py`](../pdf_chunker/framework.py:8).
+- Unwired learned-pattern loading: [`cli.py`](../pdf_chunker/cli.py:88).
+
+## 5. Prioritized implementation plan
+
+Work packages are ordered. Do not start a later package while an earlier package has
+an unresolved correctness decision.
+
+### P0-A — Establish a truthful green baseline
+
+**Why:** The current checks can report partial health while production code remains
+untyped, unformatted, or behaviorally failing. This makes every later refactor risky.
+
+**Where:** `noxfile.py`, `pyproject.toml`, test discovery configuration, CI workflow,
+dependency declarations.
+
+**Do:**
+
+1. Make pytest collection deterministic. Either exclude operational scripts explicitly or rename/move test-like scripts; do not hide the import failure with a blanket ignore.
+2. Expand lint and format checks to all maintained production modules and relevant scripts.
+3. Expand mypy targets to the package incrementally, starting with public boundaries and the pass framework.
+4. Run the checks under the supported Python version used by CI, not only the local Python 3.14 environment.
+5. Make the dependency source of truth explicit. Add enrichment dependencies as an optional extra if enrichment is not required for base conversion; otherwise declare them as runtime dependencies. Reconcile or retire the stale frozen `requirements.txt`.
+6. Keep `ruff check --no-fix` as the default review command. Avoid automatic repository-wide mutation during diagnosis.
+
+**Acceptance criteria:**
+
+- `pytest --collect-only -q` completes without collection errors.
+- `nox -s lint`, `nox -s typecheck`, and `nox -s tests` run the intended scope.
+- CI and local supported-Python results are reproducible from declared dependencies.
+- Any excluded or optional test is explicit, documented, and not hiding a production failure.
+
+### P0-B — Resolve the five current test failures deliberately
+
+**Why:** These failures are the current contract conflicts. Updating goldens before
+understanding them would lock in unknown regressions.
+
+**Do:**
+
+1. Compare PDF golden text, metadata, and readability fields separately. Decide whether readability algorithm drift is intended; if not, fix the algorithm. Refresh fixtures only after the decision.
+2. Investigate EPUB location semantics (`nav.xhtml` versus chapter content). The output must not treat navigation metadata as chapter body provenance.
+3. Trace the first `list_kind` divergence between the legacy and refactored split paths. Preserve the richer correct metadata or document a reviewed exception.
+4. Decide whether `litellm` is a mandatory or optional enrichment dependency. Base conversion must remain usable without AI enrichment; enabled enrichment must fail clearly when its dependency/client is unavailable.
+5. Keep parity exceptions narrow and documented in `tests/parity/EXCEPTIONS.md`.
+
+**Acceptance criteria:**
+
+- Each failure has either a code fix or a written, reviewed compatibility decision.
+- No golden is refreshed solely to make the suite green.
+- Base conversion works without enrichment dependencies.
+- Enrichment failure is explicit and actionable.
+
+### P0-C — Replace fallback scoring with real extraction quality signals
+
+**Why:** The current scorer gives every non-empty text value a score of `1.0`, so
+fallback extraction is not genuinely quality-driven.
+
+**Where:** [`fallbacks.py`](../pdf_chunker/fallbacks.py), PDF adapter, extraction tests,
+run-report metrics.
+
+**Do:**
+
+- Measure page coverage and missing pages.
+- Measure text density, whitespace/word plausibility, replacement-glyph frequency, and suspiciously repeated lines.
+- Preserve per-engine metrics and the fallback reason.
+- Compare candidates using the same normalized quality model.
+- Do not discard a candidate merely because it has fewer blocks; compare meaningful page/content coverage.
+- Keep subprocess and file access in adapters. The quality scorer itself must remain pure.
+
+**Acceptance criteria:**
+
+- A non-empty but obviously degraded primary extraction can trigger fallback.
+- A successful primary extraction does not trigger fallback unnecessarily.
+- Run reports state the selected engine, score, candidate scores, and reason.
+- Tests cover empty, partial, malformed, artifact-heavy, and good extraction cases.
+
+### P0-D — Remove fixture-specific semantic behavior
+
+**Why:** Special cases for literal fixture phrases are not maintainable production
+rules and can distort unrelated documents.
+
+**Where:** [`core.py`](../pdf_chunker/pdf_chunker/core.py:202), semantic split tests,
+parity tests.
+
+**Do:**
+
+- Remove the `cattle-train`/`lambs.` repairs and chunk reordering.
+- Reproduce the intended behavior with general list-continuation, sentence-boundary, or overflow rules.
+- Add an input fixture that expresses the structural condition without relying on a document-specific phrase.
+
+**Acceptance criteria:**
+
+- No production code branches on fixture-specific text.
+- The original regression behavior remains covered by a structural test.
+- Property tests confirm no loss, accidental reorder, or unexplained duplication.
+
+### P1-A — Establish one canonical runner and typed boundary contracts
+
+**Why:** Two orchestration paths and untyped dictionaries make it unclear which
+behavior is authoritative.
+
+**Where:** `core_new.py`, `core.py`, `framework.py`, a small new standard-library-only
+contracts module if needed.
+
+**Do:**
+
+1. Select `core_new.py` as the canonical runner for CLI conversion.
+2. Turn `core.process_document` into a compatibility wrapper or clearly freeze it as a legacy API with tests and deprecation documentation.
+3. Introduce small `TypedDict` or dataclass contracts for `Block`, `PageBlocks`, `Chunk`, metadata, and run metrics. Keep external JSON compatibility.
+4. Make `Artifact` generic or otherwise typed at the boundary, and ensure metadata copying is deep enough to prevent hidden nested mutation.
+5. Make registry registration reject accidental name collisions instead of silently overwriting.
+6. Centralize invariant validation in the runner: parser selection, pass order, payload type, and required output shape.
+
+**Acceptance criteria:**
+
+- CLI and library conversion use the same canonical pipeline.
+- Compatibility entry points have characterization tests.
+- Core public boundaries are type-checkable without `Any` leaks.
+- Invalid pass names, payload shapes, and option combinations fail early with actionable errors.
+
+### P1-B — Restore pass purity and explicit side-effect boundaries
+
+**Why:** The documented functional-core/imperative-shell architecture is valuable,
+but the implementation currently crosses that boundary.
+
+**Do:**
+
+- Move extraction fallback execution into the PDF adapter; pass only receives extracted candidates and metrics.
+- Move LLM calls into an injected `EnrichmentClient` adapter. The enrichment pass should transform a supplied result or use a clearly injected collaborator, with side effects visible at the runner boundary.
+- Move prompt construction/execution and learned-decision persistence into callback adapters.
+- Make run reports consume supplied environment/dependency metadata rather than reading source files from a supposedly pure assembler.
+- Replace broad `except Exception` fallback logic with narrow, logged domain errors. Never silently switch algorithms because of an unrelated programming error.
+
+**Acceptance criteria:**
+
+- Pass tests can run with in-memory artifacts and no filesystem, subprocess, network, or stdin access.
+- Side effects are mockable at adapter boundaries.
+- Unexpected exceptions fail loudly with pass and input context.
+- Interactive and enrichment behavior remains deterministic when collaborators are stubbed.
+
+### P1-C — Consolidate semantic and emission responsibilities
+
+**Why:** Boundary decisions are spread across `splitter.py`, `sentence_fusion.py`,
+`split_modules/`, and `emit_jsonl.py`. Multiple merge/dedupe passes increase the risk
+of silent data loss.
+
+**Do:**
+
+1. Define one semantic pipeline responsible for stitching, heading/list boundaries, sentence splitting, overlap, and chunk metadata.
+2. Keep `emit_jsonl` responsible for row normalization, metadata-key compatibility, serialization preparation, and final size validation.
+3. Remove or deprecate duplicate implementations only after parity/property tests establish the canonical behavior.
+4. Replace opaque nested `reduce`/`accumulate` state machines with named pure transitions where the state is non-obvious.
+5. Maintain a transformation log for decisions that materially change text.
+
+**Acceptance criteria:**
+
+- Each merge or dedupe rule has one owner and one documented precedence position.
+- Chunk text is not silently removed by two independent dedupe systems.
+- Tests cover sentence starts, overlap, repeated text, lists, headings, footnotes, and page transitions.
+- The semantic pass can be tested independently of JSONL writing.
+
+### P1-D — Simplify configuration and CLI wiring
+
+**Why:** The current CLI duplicates implementations and uses dynamic module stubbing;
+configuration accepts too many invalid states.
+
+**Do:**
+
+- Keep one internal conversion function and make Typer/argparse thin frontends over it.
+- Remove the `sys.modules` adapter fabrication once dependency injection is available.
+- Add per-pass option validation for known keys and numeric ranges.
+- Make missing explicit spec files an error; reserve empty defaults for an intentional no-spec path.
+- Restore environment variables after temporary CLI overrides.
+- Make `choose_parser` raise a specific unsupported-format error.
+- Wire `LearnedPatterns` into the callback/pattern registry and test that a saved decision changes the next run.
+
+**Acceptance criteria:**
+
+- Both CLI frontends produce identical parsed options and output.
+- Invalid options fail before processing input.
+- `--teach` has an end-to-end test: prompt decision → persisted pattern → automatic reuse.
+- CLI tests do not depend on import-order tricks.
+
+### P2-A — Build a result-quality evaluation layer
+
+**Why:** Unit tests and small goldens catch regressions, but they do not measure
+quality on representative documents or downstream retrieval behavior.
+
+**Do:**
+
+- Create a corpus manifest with representative PDFs, EPUBs, and transcripts.
+- Record extraction engine, page coverage, artifact removals, chunk counts, chunk sizes, overlap, duplicate rate, metadata completeness, and fallback rate.
+- Add preservation checks for text order and expected sentinel phrases.
+- Add reviewed fixtures for difficult layouts: running headers/footers, footnotes, tables, lists, captions, scanned/poor text, and cross-page sentences.
+- Use retrieval evaluation for overlap tuning only after extraction and chunk integrity are stable.
+
+**Acceptance criteria:**
+
+- A pipeline change produces a reviewable quality report, not only a pass/fail test result.
+- Intentional differences are visible by category: text, structure, metadata, or metrics.
+- Overlap changes are justified by retrieval evidence rather than a generic percentage rule.
+
+### P2-B — Complete transcript/text ingestion as a supported path
+
+**Why:** The current worktree has the right small adapter-based direction, but the
+public documentation and test contract must agree with the implementation.
+
+**Do:**
+
+- Verify `.txt` parser selection, adapter normalization, and reuse of `text_clean → split_semantic → emit_jsonl`.
+- Add tests for UTF-8 BOM/CRLF, WebVTT cues, timestamps, speaker labels, blank paragraphs, lowercase or bracketed speaker labels, and timestamp provenance policy.
+- Ensure episode-level metadata is copied to every chunk without overwriting generated `chunk_id` or source location fields.
+- Update README, AGENTS guidance, and CLI help so supported formats are consistent.
+- Keep transcript-specific logic limited to ingress normalization and metadata; do not create a second chunking engine.
+
+**Acceptance criteria:**
+
+- A documented `.txt` command produces valid JSONL with stable document/chunk identity.
+- Transcript metadata survives chunking and optional enrichment.
+- PDF-only footer and geometric heuristics do not run accidentally on transcripts.
+
+### P2-C — Documentation and dependency cleanup
+
+**Why:** Several documents describe completed phases or old failures while the code
+has moved on. This makes future agents repeat old investigations.
+
+**Do:**
+
+- Make this roadmap the active implementation plan.
+- Mark `REFACTORING_ROADMAP.md`, `STRATEGIC_REFACTORING_PLAN.md`, and `test_stabilization_plan.md` as historical or update them to link here.
+- Reconcile README, AGENTS, ARCHITECTURE, pipeline YAML, and actual registered passes.
+- Replace the oversized environment snapshot with a declared dependency policy and, if needed, a generated lock/constraints workflow.
+- Keep generated artifacts and experimental scripts clearly separated from maintained source.
+
+**Acceptance criteria:**
+
+- A new agent can determine current status from one active roadmap and one architecture document.
+- Supported formats, commands, pass names, and dependency requirements agree across docs.
+- Historical plans are not presented as current work.
+
+## 6. Required correctness invariants
+
+Every implementation package that changes processing behavior should test the relevant
+invariants below:
+
+- Input order is preserved unless an explicit structural rule says otherwise.
+- No text is lost except for an identified artifact-removal rule.
+- No chunk starts in the middle of an unfinished sentence without an explicit hard-limit explanation.
+- Intentional overlap is bounded and does not become cumulative duplication.
+- Source filename, source kind, page/location, and document-level metadata remain traceable.
+- Chunk IDs are stable for the same source/configuration and distinguish separate chunks.
+- Metadata generation is deterministic without AI enrichment.
+- Optional enrichment cannot prevent base conversion from running.
+- Passes do not perform hidden I/O.
+- Invalid configuration fails before partial output is emitted.
+
+## 7. Verification protocol
+
+Run these from the repository root in the supported development environment:
+
+```bash
+source pdf-env/bin/activate
+pytest --collect-only -q
+nox -s lint
+nox -s typecheck
+nox -s tests
+python scripts/generate_merge_docs.py --check
+git diff --check
+```
+
+For semantic changes, also run targeted tests and the canonical smoke conversion:
+
+```bash
+pytest tests/semantic_chunking_test.py \
+  tests/passes/test_split_semantic_parity.py \
+  tests/emit_jsonl_coalesce_test.py -q
+
+pdf_chunker convert platform-eng-excerpt.pdf \
+  --spec pipeline.yaml \
+  --out /tmp/platform-eng.jsonl \
+  --no-enrich
+```
+
+Verify the smoke output retains the sentinel phrase:
+
+> The marbled newt is listed as vulnerable by the IUCN due to habitat loss
+
+For any intentional output change, capture a before/after diff of text, metadata,
+metrics, and warnings. Do not compare only chunk counts.
+
+## 8. Suggested delivery sequence
+
+Use separate coherent commits, in this order:
+
+1. `test: make repository quality gates truthful`
+2. `fix: resolve current golden and parity regressions`
+3. `fix: make extraction fallback quality-driven`
+4. `fix: remove fixture-specific chunk repairs`
+5. `refactor: establish canonical runner and contracts`
+6. `refactor: restore pure pass and adapter boundaries`
+7. `refactor: consolidate semantic emission ownership`
+8. `refactor: simplify CLI and configuration validation`
+9. `test: add corpus quality evaluation`
+10. `docs: reconcile roadmap and supported input formats`
+
+If a package is too large for one review, split it by boundary, not by arbitrary
+file count. Each commit must leave the repository in a testable state.
+
+## 9. Stop conditions and decision points
+
+Stop and request direction rather than guessing when:
+
+- a golden change would alter user-visible text or metadata without a clear intended behavior;
+- legacy compatibility conflicts with a proposed improvement;
+- a public API must be removed or renamed;
+- a new dependency is required but its operational role is unclear;
+- a transcript metadata field would collide with generated metadata semantics;
+- a refactor requires deleting large compatibility paths before replacement tests exist.
+
+Do not:
+
+- refresh all goldens as a first step;
+- delete `core.py`, `splitter.py`, or compatibility shims wholesale;
+- introduce a general plugin framework for a single new adapter;
+- tune overlap before measuring preservation and retrieval effects;
+- silence broad exceptions to preserve an apparently green test run.
+
+## 10. Definition of done
+
+The roadmap is complete when:
+
+- the supported quality gates are green in a declared environment;
+- one documented runner owns conversion behavior;
+- pure passes and side-effect adapters have clear boundaries;
+- extraction fallback decisions are evidence-based and observable;
+- semantic merge/dedupe ownership is consolidated;
+- output metadata and IDs satisfy a stable contract across PDF, EPUB, and text;
+- representative corpus evaluation exists;
+- current documentation describes the actual code rather than historical phase status.

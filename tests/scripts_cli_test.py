@@ -7,6 +7,7 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+from pdf_chunker.cli import ConvertOptions, run_conversion
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 from tests.utils.materialize import materialize_base64
 
@@ -23,9 +24,7 @@ def _run_cli(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess
     )
 
 
-def _run_chunk_pdf(
-    *args: str, cwd: Path | None = None
-) -> subprocess.CompletedProcess[str]:
+def _run_chunk_pdf(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "scripts.chunk_pdf", *args],
         capture_output=True,
@@ -36,11 +35,7 @@ def _run_chunk_pdf(
 
 
 def _jsonl_lines(path: Path) -> list[str]:
-    return [
-        line
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def _rows_from_lines(lines: Iterable[str]) -> list[dict[str, object]]:
@@ -95,6 +90,7 @@ def test_convert_help_lists_expected_flags() -> None:
     assert result.returncode == 0
     out = result.stdout
     flags = (
+        "--metadata-file",
         "--enrich",
         "--no-enrich",
         "--exclude-pages",
@@ -105,6 +101,88 @@ def test_convert_help_lists_expected_flags() -> None:
         "--verbose",
     )
     assert all(f in out for f in flags)
+
+
+def test_convert_cli_chunks_text_transcript_with_metadata(tmp_path: Path) -> None:
+    transcript = tmp_path / "episode.txt"
+    transcript.write_text(
+        "\n".join(
+            (
+                "WEBVTT",
+                "",
+                "1",
+                "00:00:01.000 --> 00:00:03.000",
+                "HOST:",
+                "Welcome back.",
+                "",
+                "00:00:04.000 --> 00:00:06.000",
+                "GUEST:",
+                "Thanks for having me.",
+            )
+        ),
+        encoding="utf-8",
+    )
+    metadata_path = tmp_path / "episode-metadata.yaml"
+    metadata_path.write_text(
+        "\n".join(
+            (
+                "doc_id: episode-001",
+                "source: podcasts/signal/episode-001",
+                "source_file: episode.txt",
+                "source_kind: podcast_episode",
+                "source_system: podcast_addict",
+                "podcast_name: Signal",
+                "episode_name: Episode One",
+                "corpus: podcasts",
+                "publication_date_utc: 2026-07-16T00:00:00Z",
+                "played_at_utc: 2026-07-17T10:30:00Z",
+                "best_link: https://example.com/episode-001",
+                "transcript_url: https://example.com/episode-001/transcript",
+                "transcript_source_url: https://example.com/episode-001/source",
+                "transcript_source_kind: webvtt",
+            )
+        ),
+        encoding="utf-8",
+    )
+    out_file = tmp_path / "out.jsonl"
+
+    result = _run_cli(
+        "convert",
+        str(transcript),
+        "--metadata-file",
+        str(metadata_path),
+        "--chunk-size",
+        "1000",
+        "--overlap",
+        "0",
+        "--out",
+        str(out_file),
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    rows = _rows(out_file)
+    assert rows
+    merged_text = " ".join(row["text"] for row in rows)
+    assert "WEBVTT" not in merged_text
+    assert "HOST: Welcome back." in merged_text
+    assert "GUEST: Thanks for having me." in merged_text
+    for row in rows:
+        metadata = row["metadata"]
+        assert metadata["doc_id"] == "episode-001"
+        assert metadata["source"] == "podcasts/signal/episode-001"
+        assert metadata["source_file"] == "episode.txt"
+        assert metadata["source_kind"] == "podcast_episode"
+        assert metadata["source_system"] == "podcast_addict"
+        assert metadata["podcast_name"] == "Signal"
+        assert metadata["episode_name"] == "Episode One"
+        assert metadata["corpus"] == "podcasts"
+        assert metadata["publication_date_utc"] == "2026-07-16T00:00:00Z"
+        assert metadata["played_at_utc"] == "2026-07-17T10:30:00Z"
+        assert metadata["best_link"] == "https://example.com/episode-001"
+        assert metadata["transcript_url"] == "https://example.com/episode-001/transcript"
+        assert metadata["transcript_source_url"] == "https://example.com/episode-001/source"
+        assert metadata["transcript_source_kind"] == "webvtt"
 
 
 def test_chunk_pdf_accepts_flags(tmp_path: Path) -> None:
@@ -129,6 +207,82 @@ def test_chunk_pdf_accepts_flags(tmp_path: Path) -> None:
     lines = _jsonl_lines(out_file)
     rows = _rows(out_file, lines)
     assert lines and rows and all("metadata" not in row for row in rows)
+
+
+def test_legacy_frontend_matches_modern_frontend(tmp_path: Path) -> None:
+    pdf_path = materialize_base64(
+        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+    )
+    modern_out = tmp_path / "modern.jsonl"
+    legacy_out = tmp_path / "legacy.jsonl"
+
+    modern = _run_cli(
+        "convert",
+        str(pdf_path),
+        "--chunk-size",
+        "1000",
+        "--overlap",
+        "0",
+        "--no-metadata",
+        "--out",
+        str(modern_out),
+        cwd=tmp_path,
+    )
+    legacy = _run_chunk_pdf(
+        str(pdf_path),
+        "--chunk-size",
+        "1000",
+        "--overlap",
+        "0",
+        "--no-metadata",
+        "--out",
+        str(legacy_out),
+        cwd=tmp_path,
+    )
+
+    assert modern.returncode == legacy.returncode == 0
+    assert _rows(modern_out) == _rows(legacy_out)
+
+
+def test_missing_explicit_spec_fails_before_conversion(tmp_path: Path) -> None:
+    pdf_path = materialize_base64(
+        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+    )
+    result = _run_cli(
+        "convert",
+        str(pdf_path),
+        "--spec",
+        str(tmp_path / "missing.yaml"),
+        "--out",
+        str(tmp_path / "out.jsonl"),
+        cwd=tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert "pipeline spec does not exist" in result.stderr
+    assert not (tmp_path / "out.jsonl").exists()
+
+
+def test_max_chars_override_restores_environment(tmp_path: Path, monkeypatch) -> None:
+    pdf_path = materialize_base64(
+        Path("tests/golden/samples/sample.pdf.b64"), tmp_path, "sample.pdf"
+    )
+    output = tmp_path / "out.jsonl"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PDF_CHUNKER_JSONL_MAX_CHARS", "original")
+
+    run_conversion(
+        ConvertOptions(
+            input_path=pdf_path,
+            out=output,
+            chunk_size=1000,
+            overlap=0,
+            max_chars=2000,
+        )
+    )
+
+    assert output.exists()
+    assert os.environ["PDF_CHUNKER_JSONL_MAX_CHARS"] == "original"
 
 
 def test_cli_exclude_pages_flag(tmp_path: Path) -> None:
@@ -194,7 +348,6 @@ def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
     lines = _jsonl_lines(out_file)
     rows = _rows(out_file, lines)
     assert lines and rows
-    tokens = [r["text"].split() for r in rows]
     report = json.loads((tmp_path / "run_report.json").read_text())
     metrics = report["metrics"]
     emit_rows = metrics.get("emit_jsonl", {}).get("rows")
@@ -204,5 +357,3 @@ def test_cli_chunk_size_overlap_flags(tmp_path: Path) -> None:
     assert chunk_count == metrics["chunk_count"]
     assert chunk_count >= 2
     assert len(rows) == chunk_count
-
-

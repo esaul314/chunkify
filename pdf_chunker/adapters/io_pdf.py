@@ -91,6 +91,7 @@ def _primary_blocks(
     interactive: bool = False,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    quality_report: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Extract blocks using the legacy parser with optional enhancement."""
 
@@ -106,6 +107,7 @@ def _primary_blocks(
                 interactive=interactive,
                 footer_margin=footer_margin,
                 header_margin=header_margin,
+                quality_report=quality_report,
             )
         ]
 
@@ -157,6 +159,7 @@ def _all_blocks(
     interactive: bool = False,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    quality_report: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Return primary blocks, falling back to second extractor for gaps."""
 
@@ -167,6 +170,7 @@ def _all_blocks(
         interactive=interactive,
         footer_margin=footer_margin,
         header_margin=header_margin,
+        quality_report=quality_report,
     )
     existing: set[int] = set()
     for block in primary:
@@ -274,6 +278,7 @@ def read(
     abs_path = str(Path(path))
     excluded = _excluded(exclude_pages)
     # Zone margins are now applied at extraction time (before block merging)
+    quality_report: dict[str, Any] = {}
     blocks = _all_blocks(
         abs_path,
         excluded,
@@ -281,12 +286,18 @@ def read(
         interactive=interactive,
         footer_margin=footer_margin,
         header_margin=header_margin,
+        quality_report=quality_report,
     )
 
     filtered = [b for b in blocks if b.get("source", {}).get("page") not in excluded]
     grouped = _group_blocks(filtered)
     pages = _ensure_all_pages(abs_path, grouped, excluded)
-    return {"type": "page_blocks", "source_path": abs_path, "pages": pages}
+    return {
+        "type": "page_blocks",
+        "source_path": abs_path,
+        "pages": pages,
+        "extraction_quality": quality_report,
+    }
 
 
 def run_pdftotext(

@@ -1,12 +1,15 @@
 import string
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, TypeVar
+from typing import TypeVar
 
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
+
 from pdf_chunker import splitter
+from pdf_chunker.core import _stitch_bullet_chunks
 from pdf_chunker.page_artifacts import remove_page_artifact_lines
 from pdf_chunker.text_cleaning import clean_text
-
 
 T = TypeVar("T")
 WINDOWS_1252_QUOTES = "\x91\x92\x93\x94"
@@ -44,7 +47,10 @@ def test_clean_text_normalizes_windows_quote_bytes(sample: str) -> None:
 def test_split_text_preserves_non_whitespace(sample: str) -> None:
     chunks = splitter._split_text_into_chunks(sample, chunk_size=50, overlap=0)
     joined = "".join(chunks)
-    strip_ws = lambda s: "".join(ch for ch in s if not ch.isspace())
+
+    def strip_ws(value: str) -> str:
+        return "".join(ch for ch in value if not ch.isspace())
+
     assert strip_ws(joined) == strip_ws(sample)
 
 
@@ -63,6 +69,28 @@ def test_split_roundtrip_cleaning(sample: str) -> None:
         clean_text,
     )
     assert pipeline(sample) == clean_text(sample)
+
+
+@given(
+    st.lists(
+        st.text(alphabet=string.ascii_letters + " .,;:\n•", min_size=1, max_size=40),
+        min_size=1,
+        max_size=10,
+    )
+)
+def test_bullet_stitching_preserves_non_whitespace_order(chunks: list[str]) -> None:
+    stitched = _stitch_bullet_chunks(chunks)
+    combined = "".join(stitched)
+    cursor = 0
+
+    for chunk in chunks:
+        content = "".join(chunk.split())
+        if not content:
+            continue
+        normalized = "".join(combined.split())
+        position = normalized.find(content, cursor)
+        assert position >= cursor
+        cursor = position + len(content)
 
 
 def test_clean_text_handles_emphasis_hyphen_roundtrip() -> None:

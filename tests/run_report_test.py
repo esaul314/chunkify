@@ -32,6 +32,24 @@ def test_run_report_written_on_success(tmp_path):
     assert isinstance(report["warnings"], list)
 
 
+def test_run_report_contains_extraction_quality_metrics(tmp_path):
+    pdf = Path("sample_book0-1.pdf")
+    spec = PipelineSpec(
+        pipeline=["pdf_parse"],
+        options={"run_report": {"output_path": str(tmp_path / "r.json")}},
+    )
+
+    run_convert(_input_artifact(str(pdf), spec), spec)
+
+    quality = _report(tmp_path / "r.json")["metrics"]["pdf_parse"]["extraction_quality"]
+    assert quality["selected_engine"] == "pymupdf"
+    assert quality["candidate_scores"]["pymupdf"] == quality["score"]
+    assert quality["reason"] in {
+        "primary_quality_acceptable",
+        "no_better_fallback",
+    }
+
+
 def test_run_report_written_on_failure(tmp_path, monkeypatch):
     @dataclass(frozen=True)
     class Boom:

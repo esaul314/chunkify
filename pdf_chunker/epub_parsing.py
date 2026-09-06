@@ -257,6 +257,18 @@ def _join_block_text(first: str, second: str) -> str:
     return f"{first.rstrip()}{_DOUBLE_NEWLINE}{second.lstrip()}"
 
 
+def _merged_source(previous: TextBlock, current: TextBlock) -> dict[str, str | int]:
+    """Keep navigation text from becoming the provenance of chapter content."""
+
+    source = dict(previous.get("source", {}))
+    current_source = current.get("source", {})
+    if source.get("location") == "nav.xhtml":
+        location = current_source.get("location")
+        if isinstance(location, str) and location != "nav.xhtml":
+            source["location"] = location
+    return source
+
+
 def _is_heading(block: TextBlock) -> bool:
     return block.get("type") == "heading"
 
@@ -269,7 +281,6 @@ def _should_merge_blocks(
     if _is_heading(previous) or _is_heading(current):
         return False
 
-    prev_text = previous["text"].rstrip()
     curr_text = current["text"].lstrip()
 
     if curr_text.endswith(":"):
@@ -335,7 +346,11 @@ def _coalesce_body_blocks(
         if not _should_merge_blocks(previous, block, max_chars=max_chars, min_anchor=min_anchor):
             return [*acc, block]
 
-        merged_block = {**previous, "text": _join_block_text(previous["text"], block["text"])}
+        merged_block = {
+            **previous,
+            "text": _join_block_text(previous["text"], block["text"]),
+            "source": _merged_source(previous, block),
+        }
         return [*acc[:-1], merged_block]
 
     merged_blocks = reduce(step, prepared, [])

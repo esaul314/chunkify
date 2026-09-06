@@ -425,6 +425,39 @@ def make_cli_footer_prompt(
     return _prompt
 
 
+def make_learned_footer_callback(
+    callback: FooterCallback,
+    learned: Any,
+    *,
+    teach: bool = False,
+    source_file: str | None = None,
+) -> FooterCallback:
+    """Wrap a footer callback with in-memory learned decisions.
+
+    Loading and saving remain caller-owned side effects.  The wrapper only
+    consults or updates the supplied collection while the pass is running.
+    """
+    from pdf_chunker.learned_patterns import LearnedPattern, extract_pattern_from_text
+
+    def _wrapped(text: str, page: int, context: Mapping[str, Any]) -> bool:
+        match = learned.find_match("footer", text)
+        if match is not None:
+            return match.decision == "split"
+        decision = callback(text, page, context)
+        if teach:
+            learned.add(
+                LearnedPattern(
+                    kind="footer",
+                    pattern=extract_pattern_from_text(text),
+                    decision="split" if decision else "merge",
+                    source_file=source_file,
+                )
+            )
+        return decision
+
+    return _wrapped
+
+
 def make_batch_footer_prompt(decisions: Mapping[str, bool]) -> FooterCallback:
     """Create a callback that looks up decisions from a pre-defined mapping.
 
@@ -586,8 +619,10 @@ def should_skip_footer_heuristics(
     if force_heuristics:
         return False
 
-    # Skip heuristics for EPUB files
-    return is_epub_source(source_path)
+    # Heuristics are only reliable for PDF-like paged sources.
+    if not source_path:
+        return False
+    return not source_path.lower().endswith(".pdf")
 
 
 def is_standalone_footer_candidate(
@@ -609,8 +644,8 @@ def is_standalone_footer_candidate(
     """
     text = text.strip()
 
-    # Skip heuristic footer detection for EPUB documents
-    if is_epub_source(source_path):
+    # Skip heuristic footer detection for non-PDF documents.
+    if should_skip_footer_heuristics(source_path):
         return None
 
     # For PDF, we detect "Title 123" patterns as potential footers
@@ -641,8 +676,8 @@ def detect_inline_footer_candidates(
     Returns:
         List of (footer_text, start_pos, end_pos) tuples for each candidate.
     """
-    # Skip heuristic footer detection for EPUB documents
-    if is_epub_source(source_path):
+    # Skip heuristic footer detection for non-PDF documents.
+    if should_skip_footer_heuristics(source_path):
         return []
 
     candidates = []
@@ -697,8 +732,8 @@ def strip_inline_footers_interactive(
     """
     stripped: list[str] = []
 
-    # Skip heuristic footer detection for EPUB documents
-    if is_epub_source(source_path):
+    # Skip heuristic footer detection for non-PDF documents.
+    if should_skip_footer_heuristics(source_path):
         return text, stripped
 
     # Collect all candidates with their positions
@@ -1215,6 +1250,41 @@ def make_cli_list_continuation_prompt(
         return response in ("y", "yes", "1", "true")
 
     return _prompt
+
+
+def make_learned_list_continuation_callback(
+    callback: ListContinuationCallback,
+    learned: Any,
+    *,
+    teach: bool = False,
+    source_file: str | None = None,
+) -> ListContinuationCallback:
+    """Wrap a list callback with in-memory learned decisions."""
+    from pdf_chunker.learned_patterns import LearnedPattern, text_to_pattern
+
+    def _wrapped(
+        list_item: str,
+        candidate: str,
+        page: int,
+        context: Mapping[str, Any],
+    ) -> bool:
+        text = f"{list_item}\n{candidate}"
+        match = learned.find_match("list_continuation", text)
+        if match is not None:
+            return match.decision == "merge"
+        decision = callback(list_item, candidate, page, context)
+        if teach:
+            learned.add(
+                LearnedPattern(
+                    kind="list_continuation",
+                    pattern=text_to_pattern(text),
+                    decision="merge" if decision else "split",
+                    source_file=source_file,
+                )
+            )
+        return decision
+
+    return _wrapped
 
 
 def make_batch_list_continuation_prompt(

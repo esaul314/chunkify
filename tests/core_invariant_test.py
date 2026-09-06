@@ -35,3 +35,14 @@ def test_parse_step_replaced_for_mismatch(monkeypatch: pytest.MonkeyPatch) -> No
     )
     steps = _enforce_invariants(spec, input_path="dummy.epub")
     assert steps == ["epub_parse", "text_clean"]
+
+
+def test_parse_step_replaced_for_text_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = PipelineSpec(pipeline=["pdf_parse", "text_clean"])
+    monkeypatch.setattr(
+        "pdf_chunker.core_new.registry",
+        lambda: {"text_parse": object(), "text_clean": object()},
+        raising=False,
+    )
+    steps = _enforce_invariants(spec, input_path="dummy.txt")
+    assert steps == ["text_parse", "text_clean"]

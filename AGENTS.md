@@ -144,6 +144,10 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   pdf_chunker convert ./sample.epub --spec pipeline.yaml --out ./data/sample.jsonl --no-enrich
   ```
+- Convert plain-text transcript via library CLI:
+  ```bash
+  pdf_chunker convert ./episode.txt --spec pipeline.yaml --out ./data/episode.jsonl --metadata-file ./episode.metadata.yaml --no-enrich
+  ```
 - RAG-optimized pipeline (100-word overlap, metadata on; tags apply when `OPENAI_API_KEY` is set):
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
@@ -281,6 +285,7 @@ The `text_clean` pass handles both:
 | `merge_footers` | `pdf_chunker.passes.merge_footers` | Merge short trailing footer lines into a single block for stability. |
 | `pdf_parse` | `pdf_chunker.passes.pdf_parse` |  |
 | `split_semantic` | `pdf_chunker.passes.split_semantic` | Split ``page_blocks`` into canonical ``chunks``. |
+| `text_parse` | `pdf_chunker.passes.text_parse` | Normalize plain-text transcript input into canonical ``page_blocks``. |
 | `text_clean` | `pdf_chunker.passes.text_clean` |  |
 <!-- END AUTO-PASSES -->
 
@@ -312,9 +317,13 @@ pdf_chunker/
 │   │   ├── __init__.py
 │   │   ├── ai_enrich.py           # LLM completion & tag config loading
 │   │   ├── io_pdf.py
-│   │   └── io_epub.py
+│   │   ├── io_epub.py
+│   │   └── io_text.py             # Plain-text transcript ingestion
 │   ├── ai_enrichment.py           # Shim delegating to ai_enrich pass and adapter
-│   ├── core.py                    # Orchestrates the multi-pass pipeline
+│   ├── core_new.py                # Canonical CLI/library runner and invariants
+│   ├── core.py                    # Frozen legacy process_document compatibility API
+│   ├── contracts.py               # Typed page/block/chunk/run-report contracts
+│   ├── framework.py               # Generic artifacts and pass registry
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
 │   ├── fallbacks.py              # Quality assessment and extraction fallbacks
@@ -336,14 +345,16 @@ pdf_chunker/
 │   ├── text_processing.py         # Shared text manipulation utilities
 │   ├── passes/                    # Registered pipeline passes
 │   │   ├── __init__.py
-│   │   ├── emit_jsonl.py          # JSONL emission with dedup and merging
+│   │   ├── emit_jsonl.py          # Canonical row normalization and JSONL prep
 │   │   ├── emit_jsonl_lists.py    # List detection and rebalancing utilities
 │   │   ├── emit_jsonl_text.py     # Text manipulation utilities for emission
 │   │   ├── extraction_fallback.py
 │   │   ├── heading_detect.py
 │   │   ├── list_detect.py
 │   │   ├── pdf_parse.py
+│   │   ├── text_parse.py          # Plain-text parser normalization
 │   │   ├── split_semantic.py      # Main pass (771 lines) - orchestration
+│   │   ├── semantic_dedupe.py     # Sentence-bearing duplicate removal
 │   │   ├── split_modules/         # Extracted modules (Phase 3 refactoring)
 │   │   │   ├── __init__.py        # Re-exports public API
 │   │   │   ├── footers.py         # Footer detection and stripping
@@ -518,6 +529,7 @@ usage: chunk_pdf.py [-h] -i INPUT -o OUTPUT [--config CONFIG_DIR]
 * `--max_chunk_size`: override 8000-char soft limit
 * `--min_chunk_size`: override minimum chunk size
 * `--log_level`: set verbosity
+* `--metadata-file`: JSON/YAML metadata propagated to every emitted chunk
 
 ### `validate_chunks.sh`
 
@@ -568,11 +580,12 @@ All CLI scripts follow these conventions:
 
 ## Programming Philosophy
 
-* **Pure functions** and **declarative transforms** preferred
-* Use **functional programming** techniques and libraries where applicable
-* **Single-responsibility modules**, minimal interdependencies
-* **Explicit logging** and **testability**
-* Adhere to **Unix philosophy**: communicate via clear interfaces, CLI tools
+* **Declarative and functional style**: Prefer declarative and functional programming paradigms, techniques, and standard-library modules (`functools`, `itertools`) where applicable over deeply nested imperative logic and mutable state.
+* **Comprehensions and generator expressions**: Prefer list, dict, and set comprehensions for transformations, and generator expressions for lazy/streaming pipelines to keep data flow clear and memory bounded.
+* **Pure functions & pass purity**: Core transformations must remain pure functions operating on immutable `Artifact` structures; side effects and I/O belong strictly in adapters.
+* **Single-responsibility modules**, minimal interdependencies.
+* **Explicit logging** and **testability**.
+* Adhere to **Unix philosophy**: communicate via clear interfaces, CLI tools.
 
 ---
 

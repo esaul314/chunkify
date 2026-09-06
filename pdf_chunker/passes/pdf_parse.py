@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from collections.abc import Iterable, Mapping
 from itertools import groupby
 from typing import Any
@@ -27,10 +28,18 @@ def _to_page_blocks(blocks: Blocks, source_path: str) -> dict:
     }
 
 
-def _meta(meta: dict[str, Any] | None, pages: int) -> dict[str, Any]:
+def _meta(
+    meta: dict[str, Any] | None,
+    pages: int,
+    extraction_quality: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     base = dict(meta or {})
-    metrics = base.setdefault("metrics", {}).setdefault("pdf_parse", {})
-    metrics["pages"] = pages
+    metrics = {**(base.get("metrics") or {})}
+    pdf_metrics = {**(metrics.get("pdf_parse") or {}), "pages": pages}
+    if extraction_quality:
+        pdf_metrics["extraction_quality"] = dict(extraction_quality)
+    metrics["pdf_parse"] = pdf_metrics
+    base["metrics"] = metrics
     return base
 
 
@@ -44,8 +53,12 @@ class _PdfParsePass:
     def __call__(self, a: Artifact) -> Artifact:
         payload = a.payload
         if isinstance(payload, Mapping) and payload.get("type") == "page_blocks":
-            doc = payload
+            extraction_quality = payload.get("extraction_quality")
+            doc = {key: value for key, value in payload.items() if key != "extraction_quality"}
+            if not isinstance(extraction_quality, Mapping):
+                extraction_quality = None
         else:
+            extraction_quality = None
             blocks = (
                 payload
                 if isinstance(payload, Iterable) and not isinstance(payload, (str, bytes, Mapping))
@@ -53,7 +66,7 @@ class _PdfParsePass:
             )
             source = (a.meta or {}).get("input") or "<memory>"
             doc = _to_page_blocks(blocks, str(source))
-        meta = _meta(a.meta, len(doc.get("pages", [])))
+        meta = _meta(a.meta, len(doc.get("pages", [])), extraction_quality)
         return Artifact(payload=doc, meta=meta)
 
 

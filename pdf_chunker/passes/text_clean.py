@@ -192,13 +192,13 @@ def _clean_block(
     #    For EPUB files, heuristic detection is skipped automatically
     if interactive_heuristic and footer_callback is not None:
         from pdf_chunker.interactive import (
-            is_epub_source,
             is_standalone_footer_candidate,
+            should_skip_footer_heuristics,
             strip_inline_footers_interactive,
         )
 
-        # Skip heuristic footer detection for EPUB (no positional footers)
-        if not is_epub_source(source_path):
+        # Skip heuristic footer detection for non-PDF sources.
+        if not should_skip_footer_heuristics(source_path):
             # Check for additional inline footers (within the text) using heuristics
             text, additional_stripped = strip_inline_footers_interactive(
                 text,
@@ -354,9 +354,8 @@ class _TextCleanPass:
 
         # Set up interactive callback if enabled
         if self.interactive_footers:
-            from pdf_chunker.interactive import FooterDecisionCache, make_cli_footer_prompt
+            from pdf_chunker.interactive import FooterDecisionCache
 
-            self._footer_callback = make_cli_footer_prompt(default_is_footer=True)
             self._footer_cache = FooterDecisionCache()
 
     def __call__(self, a: Artifact) -> Artifact:
@@ -374,6 +373,12 @@ class _TextCleanPass:
         inline_patterns = self._inline_patterns
         footer_callback = self._footer_callback
         footer_cache = self._footer_cache
+        if opts.get("footer_callback") is not None:
+            footer_callback = opts["footer_callback"]
+            if footer_cache is None:
+                from pdf_chunker.interactive import FooterDecisionCache
+
+                footer_cache = FooterDecisionCache()
 
         # Interactive mode: always enable heuristic detection when interactive is set
         # Patterns provide precision for known footers, interactive catches the rest
@@ -389,9 +394,8 @@ class _TextCleanPass:
 
         # Set up interactive callback if enabled at runtime
         if runtime_interactive and footer_callback is None:
-            from pdf_chunker.interactive import FooterDecisionCache, make_cli_footer_prompt
+            from pdf_chunker.interactive import FooterDecisionCache
 
-            footer_callback = make_cli_footer_prompt(default_is_footer=True)
             footer_cache = FooterDecisionCache()
 
         # Extract source_path for format-aware footer detection

@@ -478,7 +478,7 @@ def _footer_bullet_signals(*candidates: str) -> bool:
     return any(
         predicate(candidate)
         for candidate in candidates
-        if candidate
+        if candidate and not candidate.strip().isdigit()
         for predicate in (_looks_like_footer_context, _looks_like_contact_detail)
     )
 

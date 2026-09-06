@@ -11,6 +11,9 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import fitz
+
+from pdf_chunker.cli import ConvertOptions, run_conversion
 from pdf_chunker.learned_patterns import (
     LearnedPattern,
     LearnedPatterns,
@@ -333,3 +336,55 @@ class TestExtractPatternFromText:
         """Works with text that has no page number."""
         pattern = extract_pattern_from_text("Just a title")
         assert "title" in pattern.lower() or "Just" in pattern
+
+
+def test_cli_teach_persists_and_reuses_footer_decision(tmp_path, monkeypatch):
+    """A taught footer decision is used on the next conversion without prompting."""
+    transcript = tmp_path / "book.pdf"
+    document = fitz.open()
+    for _ in range(2):
+        page = document.new_page()
+        page.insert_text((72, 72), "Body before.")
+        page.insert_text((72, 760), "Scale Communication Through Writing 1")
+        page.insert_text((72, 790), "Body after.")
+    document.save(transcript)
+    document.close()
+    learned_path = tmp_path / "learned.yaml"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("pdf_chunker.learned_patterns._default_config_path", lambda: learned_path)
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+
+    run_conversion(
+        ConvertOptions(
+            input_path=transcript,
+            out=tmp_path / "first.jsonl",
+            chunk_size=100,
+            overlap=0,
+            interactive_footers=True,
+            footer_margin=1,
+            teach=True,
+        )
+    )
+
+    learned = LearnedPatterns.load(learned_path)
+    assert learned.find_match("footer", "Scale Communication Through Writing 1") is not None
+
+    def fail_if_prompted(_: str) -> str:
+        raise AssertionError("the learned decision should avoid a second prompt")
+
+    monkeypatch.setattr("builtins.input", fail_if_prompted)
+    run_conversion(
+        ConvertOptions(
+            input_path=transcript,
+            out=tmp_path / "second.jsonl",
+            chunk_size=100,
+            overlap=0,
+            interactive_footers=True,
+            footer_margin=1,
+        )
+    )
+
+    first = (tmp_path / "first.jsonl").read_text(encoding="utf-8")
+    second = (tmp_path / "second.jsonl").read_text(encoding="utf-8")
+    assert "Scale Communication" not in first
+    assert "Scale Communication" not in second

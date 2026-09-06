@@ -30,8 +30,8 @@ dependencies = [
   "langchain-text-splitters>=0.3.8",
   "wordfreq>=3.1.1",
   "haystack-ai>=2.15.1",
-  "textstat>=0.7.7",
-  "PyMuPDF>=1.26.3",
+  "textstat==0.7.7",
+  "PyMuPDF==1.26.3",
   "python-dotenv>=1.1.1",
   "pipe>=2.0",  # Infix composition for declarative pipelines
 ]
@@ -41,6 +41,7 @@ dev = [
   "pytest>=8.2",
   "pytest-regressions>=2.6",
   "hypothesis>=6.108",
+  "nltk>=3.9.1",
   "ruff>=0.5.5",
   "black>=24.8.0",
   "mypy>=1.11.2",
@@ -48,6 +49,9 @@ dev = [
   "types-PyYAML>=6.0.12",
   "ebooklib>=0.19",
   "beautifulsoup4>=4.12",
+]
+enrichment = [
+  "litellm>=1.73.6",
 ]
 
 [project.scripts]
@@ -76,10 +80,6 @@ pretty = true
 show_error_codes = true
 allow_untyped_globals = true
 plugins = []
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pdf_chunker"]

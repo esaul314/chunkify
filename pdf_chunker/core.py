@@ -1,4 +1,9 @@
-"""Core orchestration logic for document chunking."""
+"""Legacy orchestration compatibility for document chunking.
+
+The canonical configurable pipeline lives in :mod:`pdf_chunker.core_new` and is
+exposed as ``pdf_chunker.convert``. ``process_document`` remains supported for
+callers that rely on its injectable extractor/chunker/enricher hooks.
+"""
 
 from __future__ import annotations
 
@@ -171,6 +176,26 @@ def _blocks_to_page_doc(blocks: Sequence[Block]) -> dict[str, Any]:
     return {"type": "page_blocks", "pages": pages}
 
 
+def _stitch_bullet_chunks(chunks: Iterable[str]) -> list[str]:
+    """Join bullet fragments with adjacent context without changing order."""
+    merged: list[str] = []
+    for chunk in chunks:
+        lines = [line for line in chunk.splitlines() if line.strip()]
+        bullet_only = bool(lines) and all(line.lstrip().startswith("•") for line in lines)
+        if bullet_only and merged:
+            merged[-1] = f"{merged[-1]}\n{chunk}"
+        elif chunk:
+            merged.append(chunk)
+
+    stitched: list[str] = []
+    for chunk in merged:
+        if stitched and "•" in stitched[-1] and "•" not in chunk and len(stitched[-1]) < 800:
+            stitched[-1] = f"{stitched[-1]}\n{chunk}"
+        else:
+            stitched.append(chunk)
+    return stitched
+
+
 def chunk_text(
     blocks: Iterable[Block],
     chunk_size: int,
@@ -194,39 +219,12 @@ def chunk_text(
     )
     artifact = splitter(Artifact(payload=doc))
     items = artifact.payload.get("items", []) if isinstance(artifact.payload, dict) else []
-    chunks = [item.get("text", "") for item in items if item.get("text", "")]  # type: ignore[arg-type]
+    chunks = [item.get("text", "") for item in items if item.get("text", "")]
     logger.debug(
         "Semantic chunking with conversational text handling produced %d chunks",
         len(chunks),
     )
-    merged: list[str] = []
-    for chunk in chunks:
-        lines = [ln for ln in chunk.splitlines() if ln.strip()]
-        bullet_only = lines and all(ln.lstrip().startswith("•") for ln in lines)
-        if bullet_only and merged:
-            merged[-1] = merged[-1] + "\n" + chunk
-        elif chunk:
-            merged.append(chunk)
-    final: list[str] = []
-    for chunk in merged:
-        if (
-            final
-            and "•" in final[-1]
-            and "•" not in chunk
-            and len(final[-1]) < 800
-        ):
-            final[-1] = final[-1] + "\n" + chunk
-        else:
-            final.append(chunk)
-    stitched: list[str] = []
-    for chunk in final:
-        if stitched and "•" in stitched[-1] and ("cattle-train" in chunk or "lambs." in chunk):
-            stitched[-1] = stitched[-1] + "\n" + chunk
-            continue
-        stitched.append(chunk)
-    if len(stitched) > 2 and "cattle-train" in stitched[2] and "cattle-train" not in stitched[1]:
-        stitched[1], stitched[2] = stitched[2], stitched[1]
-    chunks = stitched
+    chunks = _stitch_bullet_chunks(chunks)
     if chunks:
         log_chunk_stats(chunks)
     return chunks
@@ -311,7 +309,11 @@ def process_document(
     chunker: Chunker = chunk_text,
     enricher: Enricher = utils_format_chunks_with_metadata,
 ) -> list[Block]:
-    """Process a PDF or EPUB document through extraction, chunking and enrichment.
+    """Run the frozen legacy processing API.
+
+    New callers should use ``pdf_chunker.convert`` with a ``PipelineSpec`` so the
+    library and CLI share the canonical runner. This entry point remains available
+    for compatibility and for tests or integrations that inject individual stages.
 
     Parameters allow injection of custom callables for each stage, enabling
     alternate pipelines or simplified testing while defaulting to the standard

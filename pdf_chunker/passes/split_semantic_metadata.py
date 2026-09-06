@@ -11,12 +11,12 @@ from pdf_chunker.passes.split_semantic_inline import (
     _span_style,
 )
 from pdf_chunker.passes.split_semantic_lists import _tag_list
-from pdf_chunker.text_cleaning import STOPWORDS
-from pdf_chunker.utils import _build_metadata
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
     default_bullet_strategy,
 )
+from pdf_chunker.text_cleaning import STOPWORDS
+from pdf_chunker.utils import _build_metadata
 
 Block = dict[str, Any]
 Chunk = dict[str, Any]
@@ -153,10 +153,16 @@ def _strip_nulls(source: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in source.items() if value is not None}
 
 
-def _with_source(block: Block, page: int, filename: str | None) -> Block:
+def _with_source(
+    block: Block,
+    page: int,
+    filename: str | None,
+    document_metadata: Mapping[str, Any] | None = None,
+) -> Block:
     existing = _existing_source(block)
     fallback = _fallback_source(page, filename)
-    merged = _merge_source(existing, fallback)
+    seeded = {**dict(document_metadata or {}), **fallback}
+    merged = _merge_source(existing, seeded)
     return {**block, "source": _strip_nulls(merged)}
 
 
@@ -172,6 +178,7 @@ def build_chunk_with_meta(
     index: int,
     *,
     bullet_strategy: BulletHeuristicStrategy | None = None,
+    document_metadata: Mapping[str, Any] | None = None,
 ) -> Chunk:
     heuristics = _resolve_bullet_strategy(bullet_strategy)
     annotated = _tag_list(block, strategy=heuristics)
@@ -179,7 +186,7 @@ def build_chunk_with_meta(
     chunk_index = start_index if isinstance(start_index, int) else index
     metadata = _build_metadata(
         text,
-        _with_source(annotated, page, filename),
+        _with_source(annotated, page, filename, document_metadata),
         chunk_index,
         {},
         strategy=heuristics,
@@ -191,4 +198,45 @@ def build_chunk_with_meta(
     return {**chunk, "_footnote_spans": spans} if spans else chunk
 
 
-__all__ = ["Block", "Chunk", "build_chunk", "build_chunk_with_meta", "_chunk_meta", "_meta_is_list", "_merge_heading_texts"]
+def finalize_chunk(chunk: Chunk) -> Chunk:
+    """Return a public chunk with semantic text annotations applied.
+
+    Footnote spans are extraction annotations, not emission concerns.  Remove
+    them here while retaining the public ``footnote_anchors`` metadata.
+    """
+    spans = tuple(chunk.get("_footnote_spans") or ())
+    text = chunk.get("text", "")
+    if not spans or not isinstance(text, str):
+        return {key: value for key, value in chunk.items() if key != "_footnote_spans"}
+
+    limit = len(text)
+    normalized = tuple(
+        (max(0, min(limit, start)), max(0, min(limit, end)))
+        for start, end in sorted(spans, key=lambda pair: pair[0])
+        if start < end
+    )
+    if not normalized:
+        return {key: value for key, value in chunk.items() if key != "_footnote_spans"}
+
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in normalized:
+        pieces.append(text[cursor:start])
+        cursor = end
+    pieces.append(text[cursor:])
+    return {
+        **{key: value for key, value in chunk.items() if key != "_footnote_spans"},
+        "text": "".join(pieces),
+    }
+
+
+__all__ = [
+    "Block",
+    "Chunk",
+    "build_chunk",
+    "build_chunk_with_meta",
+    "finalize_chunk",
+    "_chunk_meta",
+    "_meta_is_list",
+    "_merge_heading_texts",
+]

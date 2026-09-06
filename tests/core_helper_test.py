@@ -44,7 +44,9 @@ def test_chunk_text_invokes_splitter(monkeypatch):
 
         def __call__(self, artifact: Artifact) -> Artifact:
             captured.append(artifact.payload)
-            return Artifact(payload={"items": [{"text": "first"}, {"text": ""}, {"text": "second"}]})
+            return Artifact(
+                payload={"items": [{"text": "first"}, {"text": ""}, {"text": "second"}]}
+            )
 
     monkeypatch.setattr(core, "_SplitSemanticPass", DummySplit)
 
@@ -62,6 +64,31 @@ def test_chunk_text_invokes_splitter(monkeypatch):
     assert params["min_chunk_size"] == 12
     assert payload["pages"][0]["page"] == 1
     assert [page["page"] for page in payload["pages"]] == [1, 2]
+
+
+def test_stitch_bullet_chunks_uses_structural_list_continuation():
+    chunks = [
+        "The next steps are:",
+        "• Gather the inputs\n• Review the results",
+        "Then document the decision.",
+    ]
+
+    assert core._stitch_bullet_chunks(chunks) == [
+        (
+            "The next steps are:\n• Gather the inputs\n• Review the results\n"
+            "Then document the decision."
+        ),
+    ]
+
+
+def test_stitch_bullet_chunks_preserves_input_order_for_unrelated_text():
+    chunks = [
+        "Opening context.",
+        "A separate paragraph.",
+        "A cattle-train appears in this paragraph.",
+    ]
+
+    assert core._stitch_bullet_chunks(chunks) == chunks
 
 
 def test_log_chunk_stats_emits_warning_for_tiny_chunks(caplog):

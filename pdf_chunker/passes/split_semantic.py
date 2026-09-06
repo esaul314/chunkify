@@ -42,6 +42,7 @@ from pdf_chunker.passes.chunk_pipeline import (
 from pdf_chunker.passes.chunk_pipeline import (
     merge_adjacent_blocks as pipeline_merge_adjacent_blocks,
 )
+from pdf_chunker.passes.semantic_dedupe import deduplicate_chunks
 from pdf_chunker.passes.sentence_fusion import (
     _AVERAGE_CHARS_PER_TOKEN,
     _ENDS_SENTENCE,
@@ -98,8 +99,9 @@ from pdf_chunker.passes.split_semantic_metadata import (
     _meta_is_list,
     build_chunk,
     build_chunk_with_meta,
+    finalize_chunk,
 )
-from pdf_chunker.passes.transform_log import TransformationLog
+from pdf_chunker.passes.transform_log import TransformationLog, maybe_record
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
     default_bullet_strategy,
@@ -419,7 +421,11 @@ def _get_split_fn(
             soft_hits += sum(len(c) > SOFT_LIMIT for c in final)
             return _restore_overlap_words(final, overlap)
 
-    except Exception:  # pragma: no cover - safety fallback
+    except ImportError as exc:  # pragma: no cover - optional splitter dependency
+        logger.warning(
+            "split_semantic: semantic splitter unavailable; using bounded fallback (%s)",
+            exc,
+        )
 
         def split(text: str) -> list[str]:
             nonlocal soft_hits
@@ -481,6 +487,7 @@ def _merge_blocks(
     strategy: BulletHeuristicStrategy | None = None,
     list_continuation_config: ListContinuationConfig | None = None,
     list_continuation_cache: ListContinuationCache | None = None,
+    transform_log: TransformationLog | None = None,
 ) -> list[tuple[int, Block, str]]:
     heuristics = _resolve_bullet_strategy(strategy)
     page, block, text = cur
@@ -493,12 +500,31 @@ def _merge_blocks(
         return acc + [cur]
     if block is prev_block and _is_heading(block) and _looks_like_caption(prev_text):
         merged = " ".join(part for part in (prev_text, text) if part).strip()
+        maybe_record(
+            transform_log,
+            "merged",
+            "split_semantic.blocks",
+            "heading_caption_merge",
+            prev_text,
+            merged,
+            details={"page": page},
+        )
         acc[-1] = (prev_page, prev_block, merged)
         return acc
     if _looks_like_caption(text):
         if _has_caption(prev_block) or _contains_caption_line(prev_text):
             return acc + [cur]
-        acc[-1] = (prev_page, _mark_caption(prev_block), _append_caption(prev_text, text))
+        merged = _append_caption(prev_text, text)
+        maybe_record(
+            transform_log,
+            "merged",
+            "split_semantic.blocks",
+            "caption_append",
+            prev_text,
+            merged,
+            details={"page": page},
+        )
+        acc[-1] = (prev_page, _mark_caption(prev_block), merged)
         return acc
     if _is_heading(prev_block) or _is_heading(block):
         return acc + [cur]
@@ -544,7 +570,17 @@ def _merge_blocks(
                 if list_continuation_cache is not None:
                     list_continuation_cache.set(prev_text, text, should_merge)
         if should_merge:
-            acc[-1] = (prev_page, prev_block, f"{prev_text} {text}".strip())
+            merged = f"{prev_text} {text}".strip()
+            maybe_record(
+                transform_log,
+                "merged",
+                "split_semantic.blocks",
+                "list_continuation_merge",
+                prev_text,
+                merged,
+                details={"page": page, "confidence": confidence},
+            )
+            acc[-1] = (prev_page, prev_block, merged)
             return acc
 
     lead = text.lstrip()
@@ -554,7 +590,17 @@ def _merge_blocks(
         _is_continuation_lead(lead)
         or (not prev_ends_sentence and (lead[0].islower() or lead[0] in continuation_chars))
     ):
-        acc[-1] = (prev_page, prev_block, f"{prev_text} {text}".strip())
+        merged = f"{prev_text} {text}".strip()
+        maybe_record(
+            transform_log,
+            "merged",
+            "split_semantic.blocks",
+            "sentence_continuation_merge",
+            prev_text,
+            merged,
+            details={"page": page},
+        )
+        acc[-1] = (prev_page, prev_block, merged)
         return acc
     return acc + [cur]
 
@@ -566,6 +612,7 @@ def _block_texts(
     strategy: BulletHeuristicStrategy | None = None,
     list_continuation_config: ListContinuationConfig | None = None,
     list_continuation_cache: ListContinuationCache | None = None,
+    transform_log: TransformationLog | None = None,
 ) -> Iterator[tuple[int, Block, str]]:
     """Yield ``(page, block, text)`` triples after merging sentence fragments."""
 
@@ -577,6 +624,7 @@ def _block_texts(
             strategy=strategy,
             list_continuation_config=list_continuation_config,
             list_continuation_cache=list_continuation_cache,
+            transform_log=transform_log,
         ),
         split_fn=split_fn,
     )
@@ -600,6 +648,7 @@ def _chunk_items(
     """Yield chunk records from ``doc`` using ``split_fn``."""
 
     filename = doc.get("source_path")
+    document_metadata = doc.get("document_metadata")
     limit = options.compute_limit() if options is not None else None
     heuristics = _resolve_bullet_strategy(strategy)
     stages: tuple[Callable[[Iterable[Record]], Iterable[Record]], ...] = (
@@ -622,16 +671,25 @@ def _chunk_items(
         strategy=heuristics,
         list_continuation_config=list_continuation_config,
         list_continuation_cache=list_continuation_cache,
+        transform_log=transform_log,
     )
     for stage in stages:
         records = stage(records)
     collapsed = _collapse_records(records, options, limit, strategy=heuristics)
-    builder = partial(build_chunk_with_meta, filename=filename, bullet_strategy=heuristics)
-    return pipeline_chunk_records(
-        collapsed,
-        generate_metadata=generate_metadata,
-        build_plain=build_chunk,
-        build_with_meta=builder,
+    builder = partial(
+        build_chunk_with_meta,
+        filename=filename,
+        bullet_strategy=heuristics,
+        document_metadata=document_metadata if isinstance(document_metadata, Mapping) else None,
+    )
+    return (
+        finalize_chunk(item)
+        for item in pipeline_chunk_records(
+            collapsed,
+            generate_metadata=generate_metadata,
+            build_plain=build_chunk,
+            build_with_meta=builder,
+        )
     )
 
 
@@ -723,13 +781,17 @@ class _SplitSemanticPass:
         runtime_interactive = a.meta.get("interactive_lists", False) if a.meta else False
         if self.interactive_lists or runtime_interactive or self.list_continuation_callback:
             callback = self.list_continuation_callback
-            if callback is None and (self.interactive_lists or runtime_interactive):
-                # Import here to avoid circular dependency at module level
-                from pdf_chunker.interactive import make_cli_list_continuation_prompt
-
-                callback = make_cli_list_continuation_prompt()
             list_config = ListContinuationConfig(callback=callback)
             list_cache = ListContinuationCache()
+
+        transform_log = None
+        if a.meta and a.meta.get("trace_transformations"):
+            preview = " ".join(
+                str(block.get("text", ""))
+                for page in doc.get("pages", [])
+                for block in page.get("blocks", [])[:3]
+            )
+            transform_log = TransformationLog.create(preview)
 
         chunk_records = _chunk_items(
             doc,
@@ -739,13 +801,22 @@ class _SplitSemanticPass:
             strategy=strategy,
             list_continuation_config=list_config,
             list_continuation_cache=list_cache,
+            transform_log=transform_log,
         )
         items = list(
             _inject_continuation_context(
                 chunk_records, limit, options.overlap if options else self.overlap
             )
         )
+        pre_dedupe_count = len(items)
+        items = deduplicate_chunks(items, transform_log=transform_log)
         meta = SplitMetrics(len(items), metric_fn()).apply(a.meta)
+        deduplicated = pre_dedupe_count - len(items)
+        if deduplicated:
+            meta["metrics"]["split_semantic"]["deduplicated"] = deduplicated
+        meta["semantic_pipeline"] = "canonical-v1"
+        if transform_log is not None:
+            meta["transformation_log"] = transform_log.to_dict()
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
 

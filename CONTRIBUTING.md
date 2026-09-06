@@ -37,6 +37,13 @@ Install in editable mode with dev dependencies:
 pip install -e ".[dev]"
 ```
 
+Install the optional enrichment client when running enrichment-enabled
+conversions locally:
+
+```bash
+pip install -e ".[dev,enrichment]"
+```
+
 If no extras exist yet:
 
 ```bash

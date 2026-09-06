@@ -10,6 +10,7 @@ Command = tuple[str, ...]
 
 ROOT: Final = Path(__file__).parent
 SESSION_DEPENDENCIES: Final = ("-e", ".[dev]")
+TEST_SESSION_DEPENDENCIES: Final = ("-e", ".[dev,enrichment]")
 QUALITY_PATHS: Final = (
     "pdf_chunker/__init__.py",
     "pdf_chunker/passes/emit_jsonl.py",
@@ -29,7 +30,7 @@ def _existing(paths: Iterable[str]) -> tuple[str, ...]:
 def _lint_commands() -> tuple[Command, ...]:
     targets = _existing((*QUALITY_PATHS, *LINT_EXTRA_PATHS))
     return (
-        ("ruff", "check", *targets),
+        ("ruff", "check", "--no-fix", *targets),
         ("black", "--check", *targets),
     )
 
@@ -48,11 +49,12 @@ def _run(
     session: nox.Session,
     commands: tuple[Command, ...],
     *,
+    dependencies: tuple[str, ...] = SESSION_DEPENDENCIES,
     empty_message: str | None = None,
 ) -> None:
     """Install shared dependencies and execute ``commands`` within ``session``."""
 
-    session.install(*SESSION_DEPENDENCIES)
+    session.install(*dependencies)
     if not commands:
         if empty_message is not None:
             session.log(empty_message)
@@ -79,4 +81,4 @@ def typecheck(session: nox.Session) -> None:
 def tests(session: nox.Session) -> None:
     """Execute the pytest suite."""
 
-    _run(session, _test_commands())
+    _run(session, _test_commands(), dependencies=TEST_SESSION_DEPENDENCIES)

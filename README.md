@@ -2,10 +2,16 @@
 
 CLI pipeline to convert PDFs and EPUBs into JSONL chunks for RAG workflows.
 
+The CLI and library share one canonical runner. Library callers can use
+``pdf_chunker.convert(path, PipelineSpec(...))``; the older
+``pdf_chunker.core.process_document`` API remains available for compatibility
+with integrations that inject custom processing stages.
+
 Supported input formats for this project are:
 
 - `.pdf`
 - `.epub`
+- `.txt`
 
 For corpus-ingestion workflows, skip unsupported formats such as `.mobi`, `.azw3`, `.djvu`, and `.chm` unless they have first been converted into a supported format outside this project.
 
@@ -14,6 +20,12 @@ For corpus-ingestion workflows, skip unsupported formats such as `.mobi`, `.azw3
 ### Installation
 ```bash
 pip install pdf-chunker
+```
+
+AI enrichment is optional. Install it only when using an enrichment-enabled
+pipeline:
+```bash
+pip install "pdf-chunker[enrichment]"
 ```
 
 ### Basic usage

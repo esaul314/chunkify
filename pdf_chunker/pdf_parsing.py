@@ -6,6 +6,7 @@ import logging
 import os
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, replace
+from typing import Any
 
 import fitz
 
@@ -75,6 +76,7 @@ def _block_pipeline(
     interactive: bool = False,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    quality_report: dict[str, Any] | None = None,
 ) -> list[Block]:
     """Return merged blocks for ``filepath`` respecting ``excluded`` pages.
 
@@ -88,6 +90,9 @@ def _block_pipeline(
     """
     # Collect page heights for footer zone detection during merge
     page_heights = _get_page_heights(filepath) if footer_margin else None
+
+    with fitz.open(filepath) as doc:
+        expected_pages = set(range(1, len(doc) + 1)) - excluded
 
     merged = merge_continuation_blocks(
         apply_fallbacks(
@@ -107,6 +112,8 @@ def _block_pipeline(
             ),
             filepath,
             excluded,
+            expected_pages=expected_pages,
+            quality_report=quality_report,
         ),
         page_heights=page_heights,
         footer_margin=footer_margin,
@@ -122,6 +129,7 @@ def extract_text_blocks_from_pdf(
     interactive: bool = False,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    quality_report: dict[str, Any] | None = None,
 ) -> Iterable[Block]:
     """Yield ``Block`` objects from ``filepath`` respecting ``exclude_pages``.
 
@@ -146,6 +154,7 @@ def extract_text_blocks_from_pdf(
             interactive=interactive,
             footer_margin=footer_margin,
             header_margin=header_margin,
+            quality_report=quality_report,
         )
     )
 
@@ -157,6 +166,7 @@ def extract_text_blocks_from_pdf_list(
     interactive: bool = False,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    quality_report: dict[str, Any] | None = None,
 ) -> list[dict]:
     """Deprecated shim returning a materialised list of block dictionaries."""
 
@@ -168,6 +178,7 @@ def extract_text_blocks_from_pdf_list(
             interactive=interactive,
             footer_margin=footer_margin,
             header_margin=header_margin,
+            quality_report=quality_report,
         )
     ]
 

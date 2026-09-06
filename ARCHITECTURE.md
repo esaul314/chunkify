@@ -23,7 +23,9 @@ This repository is designed to be **easy to grasp**. Structure exists to reduce 
 pdf_chunker/
 ├── pdf_chunker/
 │   ├── __init__.py
-│   ├── core.py              # Pipeline orchestration and invariant enforcement
+│   ├── core_new.py          # Canonical CLI/library runner and invariant enforcement
+│   ├── core.py              # Frozen process_document compatibility API
+│   ├── contracts.py         # Typed page/block/chunk/run-report contracts
 │   ├── cli.py               # Typer CLI: convert / inspect commands
 │   ├── config.py            # Pydantic Settings + YAML pipeline spec loader
 │   ├── framework.py         # Artifact/Pass registry + pipeline runner
@@ -33,15 +35,18 @@ pdf_chunker/
 │   ├── adapters/            # I/O boundaries (PDF/EPUB read, JSONL write, LLM calls)
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
+│   │   ├── io_text.py
 │   │   ├── emit_jsonl.py
 │   │   └── ai_enrich.py
 │   ├── passes/              # Pure transformation passes (no I/O)
 │   │   ├── pdf_parse.py
 │   │   ├── epub_parse.py
+│   │   ├── text_parse.py
 │   │   ├── text_clean.py
 │   │   ├── heading_detect.py
 │   │   ├── list_detect.py
 │   │   ├── split_semantic.py
+│   │   ├── semantic_dedupe.py
 │   │   ├── split_modules/   # Decomposed modules (footers, lists, stitching, etc.)
 │   │   ├── ai_enrich.py
 │   │   └── emit_jsonl.py
@@ -79,6 +84,12 @@ If you only remember one rule:
   - convert to/from canonical data structures (`PageBlocks`, `Chunks`),
   - handle logging and error presentation.
 
+The runner makes those boundaries explicit: PDF adapters execute extraction
+fallbacks and attach quality metrics; `adapters.ai_enrich` constructs the
+injected enrichment client; and the CLI constructs prompt callbacks (including
+the optional learned-pattern wrapper). Report assembly receives environment
+metadata collected by the runner rather than inspecting files itself.
+
 This split makes testing cheap and refactoring safe. Passes can be unit-tested with in-memory fixtures; adapters are tested with integration/golden tests.
 
 ## 3) Three-phase pipeline architecture
@@ -98,9 +109,17 @@ The pipeline implements a robust **three-phase** transformation (multiple config
 3. **Enrichment Phase** (`ai_enrich`, `emit_jsonl`)
    - Classifies and annotates chunks using external tag vocabularies
    - Supports multiple domains: generic, philosophy, psychology, technical, PM
-   - Outputs enriched chunk records in JSONL
+   - `emit_jsonl` normalizes canonical rows and validates their serialized size
+     before the writer emits JSONL
 
 ## 4) Canonical artifact contracts
+
+The canonical library entry point is ``pdf_chunker.convert(path, spec)``. The CLI
+calls the same runner in ``core_new.py`` through one normalized `ConvertOptions`
+boundary; the deprecated `scripts.chunk_pdf` frontend delegates to that boundary
+instead of maintaining a second parser or conversion path. Specs are validated
+before input ingestion, while `None` is the explicit no-spec value. ``core.process_document``
+is retained as a compatibility API for callers that inject legacy processing stages.
 
 **After parse (PageBlocks):**
 ```python
@@ -122,6 +141,14 @@ The pipeline implements a robust **three-phase** transformation (multiple config
   ]
 }
 ```
+
+The split pass is the semantic owner: it performs stitching, heading/list
+boundaries, sentence splitting, overlap handling, deduplication, footnote-span
+cleanup, and chunk metadata assembly. It marks the artifact with
+`semantic_pipeline: canonical-v1`; the JSONL pass uses that marker to avoid
+performing a second semantic merge or deduplication. Direct callers that pass
+unmarked legacy chunks retain the compatibility path until parity coverage
+allows that path to be retired.
 
 Legacy block fields (`type`, `text`, `language`, `source`, `bbox`) are preserved when lifting into artifacts.
 

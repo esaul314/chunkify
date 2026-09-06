@@ -7,7 +7,8 @@ CLI entry points and automation scripts.
 Please, keep this file up-to-date with the latest code structure. If you notice that the code structure has changed, please update this file accordingly.
 
 ## Responsibilities
-- ```chunk_pdf.py`: Full pipeline runner.
+- ```chunk_pdf.py`: Deprecated compatibility frontend delegating parsing and execution to
+  `pdf_chunker convert`; it must not grow a second conversion implementation.
 - `validate_chunks.sh`: Semantic and size checks.
 - `detect_duplicates.py`: Overlap/duplicate analysis.
 - `bisect_dups.py`: Locate first pass introducing duplicates via snapshot replay (checks `pdf_parse`→`text_clean`→`heading_detect`→`list_detect`→`split_semantic`).
@@ -17,13 +18,18 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 
 ## AI Agent Guidance
 - Delegate core logic to library modules.
-- CLI must use `argparse` or POSIX `getopts`.
+- CLI wrappers must delegate option parsing and execution to the canonical `pdf_chunker.cli`
+  runner so modern and compatibility invocations stay behaviorally identical.
 - Output logs and JSON forming for downstream tools.
 
 ## Usage
 - Convert a PDF via CLI:
   ```bash
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
+  ```
+- The deprecated compatibility frontend accepts the same conversion flags:
+  ```bash
+  python -m scripts.chunk_pdf ./platform-eng-excerpt.pdf --out ./data/platform-eng.jsonl --no-metadata
   ```
 - Equivalent script invocation:
   ```bash
@@ -58,4 +64,3 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 ```
 
 ---
-

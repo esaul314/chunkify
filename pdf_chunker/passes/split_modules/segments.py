@@ -15,7 +15,6 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
-from functools import reduce
 from itertools import accumulate
 from math import ceil
 from typing import TYPE_CHECKING
@@ -220,7 +219,10 @@ def _apply_overlap_within_segment(
         updated = (record[0], record[1], trimmed)
         return acc + (updated,)
 
-    return reduce(_merge, segment[1:], (segment[0],))
+    merged: tuple[Record, ...] = (segment[0],)
+    for record in segment[1:]:
+        merged = _merge(merged, record)
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -776,7 +778,10 @@ def collapse_records(
         overlap=overlap,
         strategy=heuristics,
     )
-    final_state = reduce(_collapse_step, enumerate(seq), initial).flush()
+    state = initial
+    for item in enumerate(seq):
+        state = _collapse_step(state, item)
+    final_state = state.flush()
     merged_outputs = _maybe_merge_dense_page(
         final_state.outputs,
         options,

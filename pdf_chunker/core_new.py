@@ -8,23 +8,35 @@ import sys
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import fields, is_dataclass, replace
+from datetime import date, datetime
 from functools import reduce
 from hashlib import md5
 from importlib import import_module
 from itertools import chain
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import pdf_chunker.adapters.emit_trace as emit_trace
 from pdf_chunker.adapters import emit_jsonl
-from pdf_chunker.config import PipelineSpec
+from pdf_chunker.config import PipelineSpec, validate_options
+from pdf_chunker.contracts import Chunk
 from pdf_chunker.framework import Artifact, Pass, registry
+
+
+class UnsupportedFormatError(ValueError):
+    """Raised when no reader adapter is available for an input suffix."""
+
+
+class PipelineContractError(ValueError):
+    """Raised when a pass receives or returns the wrong canonical payload."""
+
 
 _PARSER_MAP: Final[Mapping[str, str]] = {
     ext: name
     for name, exts in {
         "pdf_parse": (".pdf",),
         "epub_parse": (".epub",),
+        "text_parse": (".txt",),
     }.items()
     for ext in exts
 }
@@ -32,7 +44,14 @@ _PARSER_MAP: Final[Mapping[str, str]] = {
 
 def choose_parser(suffix: str) -> str:
     """Return parser step for ``suffix`` using a lookup table."""
-    return _PARSER_MAP[suffix.lower()]
+    normalized = suffix.lower()
+    try:
+        return _PARSER_MAP[normalized]
+    except KeyError as exc:
+        supported = ", ".join(sorted(_PARSER_MAP))
+        raise UnsupportedFormatError(
+            f"unsupported input format {normalized!r}; supported formats: {supported}"
+        ) from exc
 
 
 def _pass_steps(spec: PipelineSpec) -> list[str]:
@@ -40,7 +59,8 @@ def _pass_steps(spec: PipelineSpec) -> list[str]:
     regs = registry()
     unknown = [s for s in spec.pipeline if s not in regs and s != "emit_jsonl"]
     if unknown:
-        raise KeyError(f"unknown steps: {unknown}")
+        available = ", ".join(sorted(regs)) or "<none>"
+        raise KeyError(f"unknown pipeline steps: {unknown}; available: {available}")
     return [s for s in spec.pipeline if s in regs]
 
 
@@ -60,15 +80,17 @@ def _ensure_clean_precedes_split(steps: Sequence[str]) -> None:
 
 def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> list[str]:
     """Return ``steps`` with parse step aligned to ``ext``; reject mixed media."""
-    prefixes = {s.split("_", 1)[0] for s in steps if s.startswith(("pdf_", "epub_"))}
+    parser_steps = {"pdf_parse", "epub_parse", "text_parse"}
+    prefixes = {s.split("_", 1)[0] for s in steps if s in parser_steps}
     if len(prefixes) > 1:
         raise ValueError(f"pipeline mixes media types: {sorted(prefixes)}")
     parser = choose_parser(ext)
-    return [parser if s in {"pdf_parse", "epub_parse"} else s for s in steps]
+    return [parser if s in parser_steps else s for s in steps]
 
 
 def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     """Return validated steps while enforcing order and media-type invariants."""
+    validate_options(spec.options)
     ext = Path(input_path).suffix.lower()
     steps = _ensure_pdf_epub_separation(list(spec.pipeline), ext)
     _ensure_clean_precedes_split(steps)
@@ -79,6 +101,11 @@ def _prepare_pass(pass_obj: Pass, overrides: Mapping[str, Any]) -> tuple[Pass, M
     """Return a configured pass and sanitized overrides for meta propagation."""
 
     opts = dict(overrides)
+    if pass_obj.name == "ai_enrich" and opts.get("enabled"):
+        from pdf_chunker.adapters.ai_enrich import prepare_options
+
+        opts = prepare_options(opts)
+    _validate_pass_options(pass_obj, opts)
     if not opts:
         return pass_obj, opts
     if not is_dataclass(pass_obj):
@@ -103,6 +130,24 @@ def _prepare_pass(pass_obj: Pass, overrides: Mapping[str, Any]) -> tuple[Pass, M
     return new_pass, opts
 
 
+def _validate_pass_options(pass_obj: Pass, opts: Mapping[str, Any]) -> None:
+    """Reject invalid numeric splitter settings before a pass starts."""
+    if pass_obj.name != "split_semantic":
+        return
+
+    for name in ("chunk_size", "overlap", "min_chunk_size"):
+        value = opts.get(name)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ValueError(f"split_semantic.{name} must be an integer")
+        if isinstance(value, int) and value < (0 if name == "overlap" else 1):
+            raise ValueError(f"split_semantic.{name} must be greater than zero")
+
+    chunk_size = opts.get("chunk_size", getattr(pass_obj, "chunk_size", None))
+    overlap = opts.get("overlap", getattr(pass_obj, "overlap", None))
+    if isinstance(chunk_size, int) and isinstance(overlap, int) and overlap >= chunk_size:
+        raise ValueError("split_semantic.overlap must be smaller than chunk_size")
+
+
 def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
     """Return a new pass with ``opts`` merged without mutating ``pass_obj``."""
 
@@ -110,10 +155,58 @@ def configure_pass(pass_obj: Pass, opts: Mapping[str, Any]) -> Pass:
     return configured
 
 
+_EXPECTED_INPUT_SHAPES: Final[Mapping[str, str]] = {
+    "text_clean": "page_blocks",
+    "list_detect": "page_blocks",
+    "heading_detect": "page_blocks",
+    "merge_footers": "page_blocks",
+    "detect_doc_end": "page_blocks",
+    "detect_page_artifacts": "page_blocks",
+    "split_semantic": "page_blocks",
+    "ai_enrich": "chunks",
+    "emit_jsonl": "chunks",
+}
+_EXPECTED_OUTPUT_SHAPES: Final[Mapping[str, str]] = {
+    "pdf_parse": "page_blocks",
+    "epub_parse": "page_blocks",
+    "text_parse": "page_blocks",
+    "text_clean": "page_blocks",
+    "list_detect": "page_blocks",
+    "heading_detect": "page_blocks",
+    "merge_footers": "page_blocks",
+    "detect_doc_end": "page_blocks",
+    "detect_page_artifacts": "page_blocks",
+    "split_semantic": "chunks",
+    "ai_enrich": "chunks",
+    "emit_jsonl": "rows",
+}
+
+
+def _matches_shape(payload: object, shape: str) -> bool:
+    """Return whether ``payload`` has the required canonical envelope."""
+    if shape == "rows":
+        return isinstance(payload, list)
+    if not isinstance(payload, Mapping) or payload.get("type") != shape:
+        return False
+    field = "pages" if shape == "page_blocks" else "items"
+    return isinstance(payload.get(field), list)
+
+
+def _validate_payload_shape(payload: object, step: str, *, phase: str) -> None:
+    """Validate a known pass boundary with a useful error message."""
+    shapes = _EXPECTED_INPUT_SHAPES if phase == "input" else _EXPECTED_OUTPUT_SHAPES
+    expected = shapes.get(step)
+    if expected is not None and not _matches_shape(payload, expected):
+        actual = payload.get("type") if isinstance(payload, Mapping) else type(payload).__name__
+        raise PipelineContractError(
+            f"{step} {phase} requires {expected!r} payload, received {actual!r}"
+        )
+
+
 def _time_step(
-    acc: tuple[Artifact, dict[str, float]],
+    acc: tuple[Artifact[object], dict[str, float]],
     p: Pass,
-) -> tuple[Artifact, dict[str, float]]:
+) -> tuple[Artifact[object], dict[str, float]]:
     """Apply ``p`` to ``acc`` while recording its execution time."""
     a, timings = acc
     t0 = time.time()
@@ -137,25 +230,31 @@ def _with_pass_options(
     return base
 
 
-def _run_passes(spec: PipelineSpec, a: Artifact) -> tuple[Artifact, dict[str, float]]:
+def _run_passes(
+    spec: PipelineSpec, a: Artifact[object]
+) -> tuple[Artifact[object], dict[str, float]]:
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
     configs = [
         _prepare_pass(registry()[name], spec.options.get(name, {})) for name in spec.pipeline
     ]
 
     def _apply(
-        acc: tuple[Artifact, dict[str, float]],
+        acc: tuple[Artifact[object], dict[str, float]],
         config: tuple[Pass, Mapping[str, Any]],
-    ) -> tuple[Artifact, dict[str, float]]:
+    ) -> tuple[Artifact[object], dict[str, float]]:
         artifact, timings = acc
         p, overrides = config
+        _validate_payload_shape(artifact.payload, p.name, phase="input")
         seeded = Artifact(
             payload=artifact.payload,
             meta=_with_pass_options(artifact.meta, p.name, overrides),
         )
-        return _time_step((seeded, timings), p)
+        result, updated_timings = _time_step((seeded, timings), p)
+        _validate_payload_shape(result.payload, p.name, phase="output")
+        return result, updated_timings
 
-    return reduce(_apply, configs, (a, {}))
+    initial: tuple[Artifact[object], dict[str, float]] = (a, {})
+    return reduce(_apply, configs, initial)
 
 
 def _adapter_for(path: str):
@@ -163,6 +262,7 @@ def _adapter_for(path: str):
     ext = Path(path).suffix.lower()
     module = {
         ".epub": "pdf_chunker.adapters.io_epub",
+        ".txt": "pdf_chunker.adapters.io_text",
     }.get(ext, "pdf_chunker.adapters.io_pdf")
     return import_module(module)
 
@@ -180,24 +280,50 @@ def _excluded_all(path: str, exclude: str | None) -> bool:
         return set(range(1, len(doc) + 1)) <= excluded
 
 
-def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
+def _load_document_metadata(path: str | None) -> dict[str, Any] | None:
+    """Read document metadata from a JSON or YAML mapping file."""
+    if not path:
+        return None
+
+    def _json_safe(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {str(key): _json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_json_safe(item) for item in value]
+        if isinstance(value, (datetime, date)):
+            return value.isoformat().replace("+00:00", "Z")
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        return str(value)
+
+    data = import_module("yaml").safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    if not isinstance(data, Mapping):
+        raise TypeError("metadata file must contain a top-level mapping")
+    return _json_safe(data)
+
+
+def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[object]:
     """Load ``path`` honoring PDF exclusions from ``spec``."""
     spec_opts = (spec or PipelineSpec()).options
-    pdf_opts = spec_opts.get("pdf_parse", {})
+    parser_name = choose_parser(Path(path).suffix.lower())
+    parse_opts = spec_opts.get(parser_name, {})
     text_clean_opts = spec_opts.get("text_clean", {})
 
-    exclude = pdf_opts.get("exclude_pages")
+    exclude = parse_opts.get("exclude_pages")
     # EPUB-specific spine exclusion (takes precedence over exclude_pages for EPUB)
-    exclude_spine = pdf_opts.get("exclude_spine")
+    exclude_spine = parse_opts.get("exclude_spine")
     # Propagate interactive mode to PDF extraction so aggressive footer
     # detection is skipped, allowing downstream interactive confirmation
     interactive = text_clean_opts.get("interactive_footers", False)
     # Zone exclusion margins
-    footer_margin = pdf_opts.get("footer_margin")
-    header_margin = pdf_opts.get("header_margin")
+    footer_margin = parse_opts.get("footer_margin")
+    header_margin = parse_opts.get("header_margin")
+    document_metadata = _load_document_metadata(parse_opts.get("metadata_path"))
 
     abs_path = str(Path(path).resolve())
-    is_epub = Path(path).suffix.lower() == ".epub"
+    suffix = Path(path).suffix.lower()
+    is_epub = suffix == ".epub"
+    is_pdf = suffix == ".pdf"
     adapter = _adapter_for(path)
 
     # For EPUB, use exclude_spine if provided, otherwise fall back to exclude_pages
@@ -207,7 +333,7 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
     try:
         payload = (
             {"type": "page_blocks", "source_path": abs_path, "pages": []}
-            if not is_epub and _excluded_all(abs_path, exclude)
+            if is_pdf and _excluded_all(abs_path, exclude)
             else adapter.read(
                 path,
                 exclude_pages=epub_exclude if is_epub else exclude,
@@ -220,21 +346,24 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact:
         # Adapter doesn't support interactive/zone parameters (e.g., EPUB)
         payload = (
             {"type": "page_blocks", "source_path": abs_path, "pages": []}
-            if not is_epub and _excluded_all(abs_path, exclude)
+            if is_pdf and _excluded_all(abs_path, exclude)
             else adapter.read(path, exclude_pages=epub_exclude if is_epub else exclude)
         )
+    if document_metadata and isinstance(payload, Mapping):
+        payload = {**payload, "document_metadata": document_metadata}
     return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
 
 
-def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
+def _rows_from_payload(payload: Any) -> list[Chunk]:
     """Return chunk rows when ``payload`` is either a list or ``{"items": [...]}``."""
-    return (
+    rows = (
         payload
         if isinstance(payload, list)
-        else payload.get("items", [])
-        if isinstance(payload, Mapping)
-        else []
+        else payload.get("items", []) if isinstance(payload, Mapping) else []
     )
+    if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+        raise PipelineContractError("conversion output must be a list of mapping rows")
+    return cast(list[Chunk], rows)
 
 
 def _match(text: str, needle: str) -> bool:
@@ -263,10 +392,11 @@ def _trace_view(payload: Any, needle: str) -> Any:
     return payload
 
 
-def convert(path: str, spec: PipelineSpec) -> list[dict[str, Any]]:
+def convert(path: str, spec: PipelineSpec) -> list[Chunk]:
     """Convert document at ``path`` using ``spec`` and return emitted rows."""
+    validate_options(spec.options)
     artifact = _input_artifact(path, spec)
-    input_path = (artifact.meta or {}).get("input", "")
+    input_path = str((artifact.meta or {}).get("input", ""))
     steps = _enforce_invariants(spec, input_path=input_path)
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
     artifact, _ = _run_passes(run_spec, artifact)
@@ -320,7 +450,7 @@ def _generate_metadata_enabled(spec: PipelineSpec) -> bool:
 
 
 def _warning_checks(
-    a: Artifact, spec: PipelineSpec, generate_metadata: bool
+    a: Artifact[object], spec: PipelineSpec, generate_metadata: bool
 ) -> Iterable[tuple[str, bool]]:
     """Yield pairs of warning names and their boolean status."""
     payload = a.payload if isinstance(a.payload, Iterable) else []
@@ -349,7 +479,7 @@ def _warning_checks(
 
 
 def _collect_warnings(
-    a: Artifact,
+    a: Artifact[object],
     spec: PipelineSpec,
     *,
     generate_metadata: bool,
@@ -377,7 +507,7 @@ def _dependency_versions() -> dict[str, Any]:
     def version(n: str) -> Any:
         try:
             return getattr(import_module(n), "__version__", None)
-        except Exception:
+        except (ImportError, AttributeError):
             return None
 
     return {n: version(n) for n in names}
@@ -388,7 +518,7 @@ def _pass_hash(p: Pass) -> tuple[str, str]:
         path = inspect.getsourcefile(p.__class__)
         data = Path(path).read_bytes() if path else b""
         digest = md5(data).hexdigest() if data else ""
-    except Exception:
+    except (OSError, TypeError, ValueError):
         digest = ""
     return p.name, digest
 
@@ -397,7 +527,8 @@ def _pass_hashes(passes: Iterable[Pass]) -> dict[str, str]:
     return {name: h for name, h in (_pass_hash(p) for p in passes) if h}
 
 
-def _env_snapshot(passes: Iterable[Pass]) -> dict[str, Any]:
+def collect_environment(passes: Iterable[Pass]) -> dict[str, Any]:
+    """Collect report environment data in the imperative runner boundary."""
     return {
         "sys_version": sys.version,
         "platform": platform.platform(),
@@ -410,11 +541,14 @@ def assemble_report(
     timings: Mapping[str, float],
     meta: Mapping[str, Any],
     passes: Iterable[Pass],
+    *,
+    environment: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Purely assemble run report data without performing IO."""
+    """Assemble run report data from supplied values without performing I/O."""
     metrics = dict(meta.get("metrics") or {})
     counts = _legacy_counts(metrics)
-    env = _env_snapshot(passes)
+    del passes  # retained for compatibility with callers of the old signature
+    env = dict(environment or meta.get("environment") or {})
     return {
         "timings": dict(timings),
         "metrics": {**counts, **metrics, "env": env},
@@ -431,7 +565,7 @@ def write_run_report(spec: PipelineSpec, report: Mapping[str, Any]) -> None:
     Path(path).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
 
-def _timed(p: Pass, a: Artifact, timings: dict[str, float]) -> Artifact:
+def _timed(p: Pass, a: Artifact[object], timings: dict[str, float]) -> Artifact[object]:
     """Run ``p`` while recording its execution duration."""
     t0 = time.time()
     try:
@@ -441,7 +575,7 @@ def _timed(p: Pass, a: Artifact, timings: dict[str, float]) -> Artifact:
 
 
 def _meta_with_warnings(
-    a: Artifact, spec: PipelineSpec, opts: Mapping[str, Any]
+    a: Artifact[object], spec: PipelineSpec, opts: Mapping[str, Any]
 ) -> Mapping[str, Any]:
     """Return meta merged with options and warning indicators."""
     gen_meta = _generate_metadata_enabled(spec)
@@ -450,32 +584,44 @@ def _meta_with_warnings(
 
 
 def run_convert(
-    a: Artifact, spec: PipelineSpec, *, trace: str | None = None
-) -> tuple[Artifact, dict[str, float]]:
+    a: Artifact[object], spec: PipelineSpec, *, trace: str | None = None
+) -> tuple[Artifact[object], dict[str, float]]:
     """Run declared passes, emit outputs, and persist a run report."""
+    validate_options(spec.options)
     steps = _enforce_invariants(spec, input_path=str((a.meta or {}).get("input", "")))
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
-    existing = (a.meta or {}).get("options") or {}
+    existing = cast(Mapping[str, Any], (a.meta or {}).get("options") or {})
     opts = {**existing, **spec.options}
-    a = Artifact(payload=a.payload, meta={**(a.meta or {}), "options": opts})
+    run_meta = {**(a.meta or {}), "options": opts}
+    if trace:
+        run_meta["trace_transformations"] = True
+    a = Artifact(payload=a.payload, meta=run_meta)
     passes = [configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline]
+    environment = collect_environment(passes)
     timings: dict[str, float] = {}
     try:
         for p in passes:
+            _validate_payload_shape(a.payload, p.name, phase="input")
             if trace:
                 emit_trace.record_call(p.name)
             a = _timed(p, a, timings)
+            _validate_payload_shape(a.payload, p.name, phase="output")
             if trace:
                 emit_trace.write_snapshot(p.name, _trace_view(a.payload, trace))
                 emit_trace.write_dups(p.name, a.payload)
     except Exception as exc:
         meta = _meta_with_warnings(a, spec, opts)
-        report = assemble_report(timings, {**meta, "error": str(exc)}, passes)
+        report = assemble_report(
+            timings,
+            {**meta, "error": str(exc)},
+            passes,
+            environment=environment,
+        )
         write_run_report(spec, report)
         raise
     _maybe_emit_jsonl(a, spec, timings)
     meta = _meta_with_warnings(a, spec, opts)
-    report = assemble_report(timings, meta, passes)
+    report = assemble_report(timings, meta, passes, environment=environment)
     write_run_report(spec, report)
     return Artifact(payload=a.payload, meta=dict(meta)), timings
 

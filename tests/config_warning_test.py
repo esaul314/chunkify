@@ -8,8 +8,9 @@ from pdf_chunker.config import load_spec
 
 def test_disabled_pass_option_suppresses_warning(tmp_path):
     cfg = tmp_path / "pipeline.yaml"
-    cfg.write_text(textwrap.dedent(
-        """
+    cfg.write_text(
+        textwrap.dedent(
+            """
         pipeline: []
         options:
           ai_enrich:
@@ -17,7 +18,8 @@ def test_disabled_pass_option_suppresses_warning(tmp_path):
           "":
             foo: bar
         """
-    ))
+        )
+    )
     with warnings.catch_warnings(record=True) as w:
         load_spec(cfg)
     assert not w
@@ -75,3 +77,46 @@ def test_non_mapping_yaml_raises(tmp_path, monkeypatch):
 
     with pytest.raises(TypeError, match="top-level mapping"):
         load_spec(cfg)
+
+
+def test_known_pass_option_typo_fails_validation(tmp_path):
+    cfg = tmp_path / "pipeline.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """
+            pipeline: [split_semantic]
+            options:
+              split_semantic:
+                chunck_size: 100
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="unknown options for split_semantic: chunck_size"):
+        load_spec(cfg)
+
+
+def test_invalid_numeric_pass_option_fails_validation(tmp_path):
+    cfg = tmp_path / "pipeline.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """
+            pipeline: [split_semantic]
+            options:
+              split_semantic:
+                chunk_size: 0
+            """
+        )
+    )
+
+    with pytest.raises(ValueError, match="chunk_size must be at least 1"):
+        load_spec(cfg)
+
+
+def test_missing_spec_is_not_treated_as_empty_defaults(tmp_path):
+    with pytest.raises(FileNotFoundError, match="pipeline spec does not exist"):
+        load_spec(tmp_path / "missing.yaml")
+
+
+def test_none_spec_is_intentional_empty_default():
+    assert load_spec(None).pipeline == []

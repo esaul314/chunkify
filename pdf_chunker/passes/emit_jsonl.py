@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import reduce
 from itertools import takewhile
@@ -1226,6 +1226,50 @@ def _rows(
     return _enrich_rows_with_context(rows)
 
 
+def _canonical_rows(doc: Doc) -> list[Row]:
+    """Normalize already-semantic chunks without changing their boundaries.
+
+    ``split_semantic`` owns stitching, overlap, deduplication, sentence
+    boundaries, and chunk sizing on the canonical path.  This function is the
+    compatibility bridge from its internal ``meta`` field to the public JSONL
+    metadata key and performs only the final serialized-size validation.
+    """
+    config = _config()
+    rows: list[Row] = []
+    items = doc.get("items", [])
+    if not isinstance(items, list):
+        return rows
+
+    for index, item in enumerate(items):
+        if not isinstance(item, Mapping):
+            continue
+        text = item.get("text", "")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        metadata = item.get(config.metadata_key)
+        if not isinstance(metadata, Mapping):
+            metadata = item.get("metadata")
+        if not isinstance(metadata, Mapping):
+            metadata = item.get("meta")
+
+        row: Row = {"text": text.strip()}
+        if isinstance(metadata, Mapping) and metadata:
+            public_meta = dict(metadata)
+            chunk_id = public_meta.get("chunk_id")
+            if isinstance(chunk_id, str):
+                public_meta["chunk_id"] = _compat_chunk_id(chunk_id)
+            row[config.metadata_key] = public_meta
+
+        encoded_length = len(json.dumps(row, ensure_ascii=False))
+        if encoded_length > config.max_chars:
+            raise ValueError(
+                "semantic chunk exceeds JSONL size limit: "
+                f"chunk={index}, size={encoded_length}, limit={config.max_chars}"
+            )
+        rows.append(row)
+    return rows
+
+
 def _update_meta(meta: dict[str, Any] | None, count: int) -> dict[str, Any]:
     base = dict(meta or {})
     base.setdefault("metrics", {}).setdefault("emit_jsonl", {})["rows"] = count
@@ -1240,14 +1284,30 @@ class _EmitJsonlPass:
 
     def __call__(self, a: Artifact) -> Artifact:
         doc = a.payload if isinstance(a.payload, dict) else {}
+        canonical = (a.meta or {}).get("semantic_pipeline") == "canonical-v1"
         preserve = _preserve_chunks(a.meta)
         explicit_small = _explicit_small_chunks(a.meta)
         strategy = _resolve_bullet_strategy(self.bullet_strategy)
         rows = (
-            _rows(doc, preserve=preserve, explicit_small=explicit_small, strategy=strategy)
-            if doc.get("type") == "chunks"
-            else []
+            _canonical_rows(doc)
+            if canonical and doc.get("type") == "chunks"
+            else (
+                _rows(doc, preserve=preserve, explicit_small=explicit_small, strategy=strategy)
+                if doc.get("type") == "chunks"
+                else []
+            )
         )
+        if canonical and _config().dedup_debug:
+            metrics = (a.meta or {}).get("metrics")
+            split_metrics = (
+                metrics.get("split_semantic", {}) if isinstance(metrics, Mapping) else {}
+            )
+            dropped = (
+                split_metrics.get("deduplicated", 0) if isinstance(split_metrics, Mapping) else 0
+            )
+            if not isinstance(dropped, int):
+                dropped = 0
+            _log.warning("dedupe dropped %d duplicates", dropped)
         meta = _update_meta(a.meta, len(rows))
         return Artifact(payload=rows, meta=meta)
 

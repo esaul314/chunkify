@@ -1,52 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pdf_chunker.fallbacks import select_best_extraction
 from pdf_chunker.framework import Artifact, register
-
-Block = dict[str, Any]
-
-
-def _blocks_doc(blocks: list[Block], source: str) -> dict[str, Any]:
-    """Package ``blocks`` with their originating ``source`` path."""
-
-    return {"type": "blocks", "blocks": blocks, "source_path": source}
-
-
-def _score(blocks: list[Block]) -> float:
-    """Calculate a quality score for ``blocks`` using text assessment."""
-
-    from pdf_chunker.fallbacks import _assess_text_quality
-
-    text = "\n".join(b.get("text", "") for b in blocks)
-    return float(_assess_text_quality(text).get("quality_score", 0.0))
-
-
-def _metrics(reason: str | None, blocks: list[Block]) -> dict[str, float | str]:
-    """Return fallback metrics combining ``reason`` and quality ``score``."""
-
-    metrics: dict[str, float | str] = {"score": _score(blocks)}
-    return metrics if reason is None else {**metrics, "reason": reason}
-
-
-def _extract(path: str, reason: str | None) -> tuple[list[Block], dict[str, Any]]:
-    """Run fallback extraction for ``path`` and compute metrics."""
-
-    from pdf_chunker.fallbacks import execute_fallback_extraction
-
-    blocks = execute_fallback_extraction(path, fallback_reason=reason)
-    return blocks, _metrics(reason, blocks)
-
-
-def _meta(meta: dict[str, Any] | None, metrics: dict[str, float | str]) -> dict[str, Any]:
-    """Return a new meta dict with fallback metrics merged immutably."""
-
-    metrics_root = (meta or {}).get("metrics", {})
-    fallback = {**metrics_root.get("extraction_fallback", {}), **metrics}
-    return {
-        **(meta or {}),
-        "metrics": {**metrics_root, "extraction_fallback": fallback},
-    }
 
 
 class _ExtractionFallbackPass:
@@ -55,12 +13,49 @@ class _ExtractionFallbackPass:
     output_type = dict
 
     def __call__(self, a: Artifact) -> Artifact:
-        doc = a.payload if isinstance(a.payload, dict) else {}
-        path = doc.get("source_path", "")
-        reason = (a.meta or {}).get("fallback_reason")
-        blocks, metrics = _extract(path, reason)
-        meta = _meta(a.meta, metrics)
-        return Artifact(payload=_blocks_doc(blocks, path), meta=meta)
+        """Select an already-extracted candidate without touching the filesystem."""
+        payload = a.payload if isinstance(a.payload, Mapping) else {}
+        primary = payload.get("primary", payload.get("blocks", []))
+        candidates = payload.get("candidates", {})
+        excluded = payload.get("excluded_pages", set())
+        expected_pages = payload.get("expected_pages")
+
+        if not isinstance(primary, Sequence) or isinstance(primary, (str, bytes)):
+            primary = []
+        if not isinstance(candidates, Mapping):
+            candidates = {}
+        candidate_map = {
+            str(name): list(values)
+            for name, values in candidates.items()
+            if isinstance(values, Sequence) and not isinstance(values, (str, bytes))
+        }
+        excluded_set = (
+            {int(page) for page in excluded}
+            if isinstance(excluded, (set, frozenset, list, tuple))
+            else set()
+        )
+        expected_set = (
+            {int(page) for page in expected_pages}
+            if isinstance(expected_pages, (set, frozenset, list, tuple))
+            else None
+        )
+        quality_report: dict[str, Any] = {}
+        selected = select_best_extraction(
+            list(primary),
+            candidate_map,
+            excluded_set,
+            expected_pages=expected_set,
+            quality_report=quality_report,
+        )
+        result: dict[str, Any] = {"type": "blocks", "blocks": selected}
+        if payload.get("source_path") is not None:
+            result["source_path"] = payload["source_path"]
+        meta: dict[str, Any] = {**(a.meta or {})}
+        metrics_value = meta.get("metrics")
+        metrics = dict(metrics_value) if isinstance(metrics_value, Mapping) else {}
+        metrics["extraction_fallback"] = quality_report
+        meta["metrics"] = metrics
+        return Artifact(payload=result, meta=meta)
 
 
 extraction_fallback = register(_ExtractionFallbackPass())

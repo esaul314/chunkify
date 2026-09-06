@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from functools import reduce
 from typing import Any, cast
 
 Block = Doc = Mapping[str, Any]
@@ -51,11 +50,9 @@ def merge_adjacent_blocks(
     fold: Callable[[list[Record], Record], list[Record]],
     split_fn: Callable[[str], Iterable[str]],
 ) -> Iterator[Record]:
-    merged = reduce(
-        fold,
-        ((page, block, text_of(block)) for page, block in blocks),
-        cast(list[Record], []),
-    )
+    merged: list[Record] = []
+    for page, block in blocks:
+        merged = fold(merged, (page, block, text_of(block)))
     return ((page, block, text) for page, block, raw in merged for text in split_fn(raw) if text)
 
 

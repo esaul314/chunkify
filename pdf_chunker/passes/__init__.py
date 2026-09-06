@@ -14,6 +14,7 @@ _PASS_MODULES = [
     "detect_page_artifacts",
     "pdf_parse",
     "epub_parse",
+    "text_parse",
     "split_semantic",
     "text_clean",
 ]

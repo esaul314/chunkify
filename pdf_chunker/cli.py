@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util as ilu
 import json
 import os
 import sys
-import types
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
@@ -17,6 +17,33 @@ except ModuleNotFoundError:  # pragma: no cover - fallback when Typer is absent
     typer = None
 
 from pdf_chunker.config import PipelineSpec, load_spec
+
+
+@dataclass(frozen=True)
+class ConvertOptions:
+    """Normalized conversion options shared by every CLI frontend."""
+
+    input_path: Path
+    out: Path | None = None
+    metadata_file: Path | None = None
+    chunk_size: int | None = None
+    overlap: int | None = None
+    enrich: bool = False
+    exclude_pages: str | None = None
+    exclude_spine: str | None = None
+    no_metadata: bool = False
+    spec: str = "pipeline.yaml"
+    verbose: bool = False
+    trace: str | None = None
+    max_chars: int | None = None
+    footer_patterns: tuple[str, ...] | None = None
+    interactive: bool = False
+    interactive_footers: bool = False
+    interactive_lists: bool = False
+    footer_margin: float | None = None
+    header_margin: float | None = None
+    auto_detect_zones: bool = False
+    teach: bool = False
 
 
 def _spec_path_candidates(path: str | Path) -> Iterator[Path]:
@@ -32,7 +59,24 @@ def _spec_path_candidates(path: str | Path) -> Iterator[Path]:
 
 def _resolve_spec_path(path: str | Path) -> Path:
     """Pick the first existing pipeline spec from candidate locations."""
-    return next((p for p in _spec_path_candidates(path) if p.exists()), Path(path))
+    resolved = next((p for p in _spec_path_candidates(path) if p.exists()), None)
+    if resolved is None:
+        raise FileNotFoundError(f"pipeline spec does not exist: {path}")
+    return resolved
+
+
+@contextmanager
+def _temporary_environment(name: str, value: str):
+    """Temporarily set an environment variable and restore its prior value."""
+    original = os.environ.get(name)
+    os.environ[name] = value
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = original
 
 
 def _format_timings(timings: Mapping[str, float]) -> str:
@@ -54,28 +98,30 @@ def _safe(func: Callable[[], None]) -> None:
         _exit_with_error(exc)
 
 
-def _run_convert(
-    input_path: Path,
-    out: Path | None,
-    chunk_size: int | None,
-    overlap: int | None,
-    enrich: bool,
-    exclude_pages: str | None,
-    exclude_spine: str | None,
-    no_metadata: bool,
-    spec: str,
-    verbose: bool,
-    trace: str | None,
-    max_chars: int | None,
-    footer_patterns: tuple[str, ...] | None = None,
-    interactive: bool = False,
-    interactive_footers: bool = False,
-    interactive_lists: bool = False,
-    footer_margin: float | None = None,
-    header_margin: float | None = None,
-    auto_detect_zones: bool = False,
-    teach: bool = False,
-) -> None:
+def run_conversion(options: ConvertOptions) -> None:
+    """Execute one normalized conversion request for every CLI frontend."""
+    input_path = options.input_path
+    out = options.out
+    metadata_file = options.metadata_file
+    chunk_size = options.chunk_size
+    overlap = options.overlap
+    enrich = options.enrich
+    exclude_pages = options.exclude_pages
+    exclude_spine = options.exclude_spine
+    no_metadata = options.no_metadata
+    spec = options.spec
+    verbose = options.verbose
+    trace = options.trace
+    max_chars = options.max_chars
+    footer_patterns = options.footer_patterns
+    interactive = options.interactive
+    interactive_footers = options.interactive_footers
+    interactive_lists = options.interactive_lists
+    footer_margin = options.footer_margin
+    header_margin = options.header_margin
+    auto_detect_zones = options.auto_detect_zones
+    teach = options.teach
+
     # Resolve interactive flags: --interactive enables all
     effective_interactive_footers = interactive or interactive_footers
 
@@ -86,17 +132,51 @@ def _run_convert(
 
     # Load learned patterns if they exist
     learned_patterns = None
-    if teach or interactive:
+    if teach or interactive or interactive_footers or interactive_lists:
         from pdf_chunker.learned_patterns import LearnedPatterns
 
         learned_patterns = LearnedPatterns.load()
 
-    if max_chars:
-        os.environ["PDF_CHUNKER_JSONL_MAX_CHARS"] = str(max_chars)
+    if max_chars is not None:
+        if max_chars <= 0:
+            raise ValueError("max_chars must be greater than zero")
         if chunk_size is None:
             chunk_size = max_chars // 5
         if overlap is None:
             overlap = 0
+
+    spec_path = _resolve_spec_path(spec)
+    # Validate the spec and CLI overrides before opening or parsing the input.
+    preflight_zones = {
+        name: value
+        for name, value in {
+            "footer_margin": footer_margin,
+            "header_margin": header_margin,
+        }.items()
+        if value is not None
+    }
+    preflight_overrides = _cli_overrides(
+        input_path,
+        out,
+        metadata_file,
+        chunk_size,
+        overlap,
+        enrich,
+        exclude_pages,
+        exclude_spine,
+        no_metadata,
+        footer_patterns=footer_patterns,
+        interactive=interactive,
+        interactive_footers=interactive_footers,
+        interactive_lists=interactive_lists,
+        zones_config=preflight_zones,
+        learned_patterns=learned_patterns,
+        teach=teach,
+    )
+    preflight_spec = load_spec(spec_path, overrides=preflight_overrides)
+    from pdf_chunker.core_new import _enforce_invariants
+
+    _enforce_invariants(preflight_spec, input_path=str(input_path))
 
     # Parse exclude_pages to a set for zone detection
     excluded_page_set: set[int] = set()
@@ -151,11 +231,12 @@ def _run_convert(
     if header_margin is not None:
         zones_config["header_margin"] = header_margin
 
-    _input_artifact, run_convert, _ = _core_helpers(enrich)
     s = load_spec(
-        _resolve_spec_path(spec),
+        spec_path,
         overrides=_cli_overrides(
+            input_path,
             out,
+            metadata_file,
             chunk_size,
             overlap,
             enrich,
@@ -167,25 +248,87 @@ def _run_convert(
             interactive_footers=interactive_footers,
             interactive_lists=interactive_lists,
             zones_config=zones_config,
+            learned_patterns=learned_patterns,
+            teach=teach,
         ),
     )
     s = _enrich_spec(s) if enrich else s
-    _, timings = run_convert(_input_artifact(str(input_path), s), s, trace=trace)
-    if verbose:
-        print(_format_timings(timings))
+    from pdf_chunker.core_new import _input_artifact, run_convert
 
-    # Save learned patterns if --teach mode was enabled
-    if teach and learned_patterns is not None:
-        learned_patterns.save()
-        count = len(learned_patterns.patterns)
-        if count > 0:
-            print(f"teach: saved {count} learned pattern(s)")
+    env = (
+        _temporary_environment("PDF_CHUNKER_JSONL_MAX_CHARS", str(max_chars))
+        if max_chars is not None
+        else nullcontext()
+    )
+    with env:
+        _, timings = run_convert(_input_artifact(str(input_path), s), s, trace=trace)
+        if verbose:
+            print(_format_timings(timings))
 
-    print("convert: OK")
+        # Save learned patterns if --teach mode was enabled
+        if teach and learned_patterns is not None:
+            learned_patterns.save()
+            count = len(learned_patterns.patterns)
+            if count > 0:
+                print(f"teach: saved {count} learned pattern(s)")
+
+        print("convert: OK")
+
+
+def _run_convert(
+    input_path: Path,
+    out: Path | None,
+    metadata_file: Path | None,
+    chunk_size: int | None,
+    overlap: int | None,
+    enrich: bool,
+    exclude_pages: str | None,
+    exclude_spine: str | None,
+    no_metadata: bool,
+    spec: str,
+    verbose: bool,
+    trace: str | None,
+    max_chars: int | None,
+    footer_patterns: tuple[str, ...] | None = None,
+    interactive: bool = False,
+    interactive_footers: bool = False,
+    interactive_lists: bool = False,
+    footer_margin: float | None = None,
+    header_margin: float | None = None,
+    auto_detect_zones: bool = False,
+    teach: bool = False,
+) -> None:
+    """Compatibility adapter for callers using the former positional helper."""
+    run_conversion(
+        ConvertOptions(
+            input_path=input_path,
+            out=out,
+            metadata_file=metadata_file,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            enrich=enrich,
+            exclude_pages=exclude_pages,
+            exclude_spine=exclude_spine,
+            no_metadata=no_metadata,
+            spec=spec,
+            verbose=verbose,
+            trace=trace,
+            max_chars=max_chars,
+            footer_patterns=footer_patterns,
+            interactive=interactive,
+            interactive_footers=interactive_footers,
+            interactive_lists=interactive_lists,
+            footer_margin=footer_margin,
+            header_margin=header_margin,
+            auto_detect_zones=auto_detect_zones,
+            teach=teach,
+        )
+    )
 
 
 def _run_inspect() -> None:
-    _, _, run_inspect = _core_helpers(False)
+    from pdf_chunker.core_new import run_inspect
+
     print(json.dumps(run_inspect(), indent=2))
 
 
@@ -214,58 +357,69 @@ app = typer.Typer(add_completion=False, no_args_is_help=True) if typer else None
 def _core_helpers(
     enrich: bool,
 ) -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
-    """Load core functions while stubbing AI adapters when ``enrich`` is False."""
-    if enrich:
-        from pdf_chunker.core_new import (
-            _input_artifact,
-            run_convert,
-            run_inspect,
-        )  # pragma: no cover
-
-        return _input_artifact, run_convert, run_inspect
-
-    base = Path(__file__).resolve().parent / "adapters"
-    pkg = types.ModuleType("pdf_chunker.adapters")
-    pkg.__path__ = [str(base)]
-    sys.modules.setdefault("pdf_chunker.adapters", pkg)
-
-    def _load(name: str) -> None:
-        spec = ilu.spec_from_file_location(
-            f"pdf_chunker.adapters.{name}",
-            base / f"{name}.py",
-        )
-        if not spec or not spec.loader:
-            raise ImportError(f"Cannot load adapter module: {name}")
-        module = ilu.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        sys.modules[f"pdf_chunker.adapters.{name}"] = module
-        setattr(pkg, name, module)
-
-    for name in ("emit_jsonl", "io_pdf", "io_epub"):
-        _load(name)
+    """Return canonical runner helpers without mutating the import registry."""
+    del enrich
     from pdf_chunker.core_new import _input_artifact, run_convert, run_inspect
 
     return _input_artifact, run_convert, run_inspect
 
 
 def _cli_overrides(
-    out: Path | None,
-    chunk_size: int | None,
-    overlap: int | None,
-    enrich: bool,
-    exclude_pages: str | None,
-    exclude_spine: str | None,
-    no_metadata: bool,
+    input_path: Path = Path("input.pdf"),
+    out: Path | None = None,
+    metadata_file: Path | None = None,
+    chunk_size: int | None = None,
+    overlap: int | None = None,
+    enrich: bool = False,
+    exclude_pages: str | None = None,
+    exclude_spine: str | None = None,
+    no_metadata: bool = False,
     *,
     footer_patterns: tuple[str, ...] | None = None,
     interactive: bool = False,
     interactive_footers: bool = False,
     interactive_lists: bool = False,
     zones_config: dict[str, float] | None = None,
+    learned_patterns: Any = None,
+    teach: bool = False,
 ) -> dict[str, dict[str, Any]]:
+    suffix = input_path.suffix.lower()
+    parser_option_key = {
+        ".epub": "epub_parse",
+        ".txt": "text_parse",
+    }.get(suffix, "pdf_parse")
     # Resolve interactive flags: --interactive enables all, specific flags override
     effective_interactive_footers = interactive or interactive_footers
     effective_interactive_lists = interactive or interactive_lists
+
+    footer_callback = None
+    if effective_interactive_footers:
+        from pdf_chunker.interactive import make_cli_footer_prompt
+
+        footer_callback = make_cli_footer_prompt(default_is_footer=True)
+        if learned_patterns is not None:
+            from pdf_chunker.interactive import make_learned_footer_callback
+
+            footer_callback = make_learned_footer_callback(
+                footer_callback,
+                learned_patterns,
+                teach=teach,
+                source_file=str(input_path),
+            )
+    list_continuation_callback = None
+    if effective_interactive_lists:
+        from pdf_chunker.interactive import make_cli_list_continuation_prompt
+
+        list_continuation_callback = make_cli_list_continuation_prompt()
+        if learned_patterns is not None:
+            from pdf_chunker.interactive import make_learned_list_continuation_callback
+
+            list_continuation_callback = make_learned_list_continuation_callback(
+                list_continuation_callback,
+                learned_patterns,
+                teach=teach,
+                source_file=str(input_path),
+            )
 
     split_opts: dict[str, Any] = {
         k: v
@@ -274,6 +428,7 @@ def _cli_overrides(
             "overlap": overlap,
             "generate_metadata": False if no_metadata else None,
             "interactive_lists": True if effective_interactive_lists else None,
+            "list_continuation_callback": list_continuation_callback,
         }.items()
         if v is not None
     }
@@ -286,16 +441,16 @@ def _cli_overrides(
         if v is not None
     }
     enrich_opts: dict[str, Any] = {"enabled": True} if enrich else {}
-    parse_opts: dict[str, Any] = {
-        k: v
-        for k, v in {
-            "exclude_pages": exclude_pages,
-            "exclude_spine": exclude_spine,
-        }.items()
-        if v is not None
-    }
+    parse_pairs: dict[str, Any] = {}
+    if parser_option_key == "pdf_parse" and exclude_pages is not None:
+        parse_pairs["exclude_pages"] = exclude_pages
+    if parser_option_key == "epub_parse" and exclude_spine is not None:
+        parse_pairs["exclude_spine"] = exclude_spine
+    if metadata_file is not None:
+        parse_pairs["metadata_path"] = str(metadata_file)
+    parse_opts = parse_pairs
     # Add zone exclusion margins to pdf_parse options
-    if zones_config:
+    if zones_config and parser_option_key == "pdf_parse":
         parse_opts.update(zones_config)
     # Footer detection options (apply even if pass not in pipeline)
     artifact_opts: dict[str, Any] = {}
@@ -303,13 +458,14 @@ def _cli_overrides(
         artifact_opts["known_footer_patterns"] = footer_patterns
     if effective_interactive_footers:
         artifact_opts["interactive"] = True
+        artifact_opts["footer_callback"] = footer_callback
 
     # Build options, including artifact_opts in base even if pass isn't in pipeline
     base_opts = {
         "split_semantic": split_opts,
         "emit_jsonl": emit_opts,
         "ai_enrich": enrich_opts,
-        "pdf_parse": parse_opts,
+        parser_option_key: parse_opts,
     }
     if artifact_opts:
         # Merge into text_clean options for footer pattern handling
@@ -317,6 +473,7 @@ def _cli_overrides(
             **base_opts.get("text_clean", {}),
             "footer_patterns": artifact_opts.get("known_footer_patterns", ()),
             "interactive_footers": artifact_opts.get("interactive", False),
+            "footer_callback": artifact_opts.get("footer_callback"),
         }
     return {k: v for k, v in base_opts.items() if v}
 
@@ -345,7 +502,15 @@ if typer:
             dir_okay=False,
             readable=True,
         ),
-        out: Path | None = typer.Option(None, "--out"),
+        out: Path | None = typer.Option(None, "--out", "-o"),
+        metadata_file: Path | None = typer.Option(
+            None,
+            "--metadata-file",
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="JSON or YAML metadata to propagate to every emitted chunk",
+        ),
         chunk_size: int | None = typer.Option(None, "--chunk-size"),
         overlap: int | None = typer.Option(None, "--overlap"),
         enrich: bool = typer.Option(False, "--enrich/--no-enrich"),
@@ -402,27 +567,30 @@ if typer:
         ),
     ) -> None:
         _safe(
-            lambda: _run_convert(
-                input_path,
-                out,
-                chunk_size,
-                overlap,
-                enrich,
-                exclude_pages,
-                exclude_spine,
-                no_metadata,
-                spec,
-                verbose,
-                trace,
-                max_chars,
-                footer_patterns=tuple(footer_pattern) if footer_pattern else None,
-                interactive=interactive,
-                interactive_footers=interactive_footers,
-                interactive_lists=interactive_lists,
-                footer_margin=footer_margin,
-                header_margin=header_margin,
-                auto_detect_zones=auto_detect_zones,
-                teach=teach,
+            lambda: run_conversion(
+                ConvertOptions(
+                    input_path=input_path,
+                    out=out,
+                    metadata_file=metadata_file,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    enrich=enrich,
+                    exclude_pages=exclude_pages,
+                    exclude_spine=exclude_spine,
+                    no_metadata=no_metadata,
+                    spec=spec,
+                    verbose=verbose,
+                    trace=trace,
+                    max_chars=max_chars,
+                    footer_patterns=tuple(footer_pattern) if footer_pattern else None,
+                    interactive=interactive,
+                    interactive_footers=interactive_footers,
+                    interactive_lists=interactive_lists,
+                    footer_margin=footer_margin,
+                    header_margin=header_margin,
+                    auto_detect_zones=auto_detect_zones,
+                    teach=teach,
+                )
             )
         )
 
@@ -464,7 +632,8 @@ else:
 
         conv = sub.add_parser("convert")
         conv.add_argument("input_path", type=Path)
-        conv.add_argument("--out", type=Path)
+        conv.add_argument("-o", "--out", type=Path)
+        conv.add_argument("--metadata-file", type=Path)
         conv.add_argument("--chunk-size", type=int)
         conv.add_argument("--overlap", type=int)
         conv.add_argument("--enrich", dest="enrich", action="store_true")
@@ -532,27 +701,30 @@ else:
             auto_detect_zones=False,
             teach=False,
             func=lambda ns: _safe(
-                lambda: _run_convert(
-                    ns.input_path,
-                    ns.out,
-                    ns.chunk_size,
-                    ns.overlap,
-                    ns.enrich,
-                    ns.exclude_pages,
-                    ns.exclude_spine,
-                    ns.no_metadata,
-                    ns.spec,
-                    ns.verbose,
-                    ns.trace,
-                    ns.max_chars,
-                    footer_patterns=tuple(ns.footer_patterns) if ns.footer_patterns else None,
-                    interactive=ns.interactive,
-                    interactive_footers=ns.interactive_footers,
-                    interactive_lists=ns.interactive_lists,
-                    footer_margin=ns.footer_margin,
-                    header_margin=ns.header_margin,
-                    auto_detect_zones=ns.auto_detect_zones,
-                    teach=ns.teach,
+                lambda: run_conversion(
+                    ConvertOptions(
+                        input_path=ns.input_path,
+                        out=ns.out,
+                        metadata_file=ns.metadata_file,
+                        chunk_size=ns.chunk_size,
+                        overlap=ns.overlap,
+                        enrich=ns.enrich,
+                        exclude_pages=ns.exclude_pages,
+                        exclude_spine=ns.exclude_spine,
+                        no_metadata=ns.no_metadata,
+                        spec=ns.spec,
+                        verbose=ns.verbose,
+                        trace=ns.trace,
+                        max_chars=ns.max_chars,
+                        footer_patterns=tuple(ns.footer_patterns) if ns.footer_patterns else None,
+                        interactive=ns.interactive,
+                        interactive_footers=ns.interactive_footers,
+                        interactive_lists=ns.interactive_lists,
+                        footer_margin=ns.footer_margin,
+                        header_margin=ns.header_margin,
+                        auto_detect_zones=ns.auto_detect_zones,
+                        teach=ns.teach,
+                    )
                 )
             ),
         )

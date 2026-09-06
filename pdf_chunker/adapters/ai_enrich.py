@@ -1,6 +1,6 @@
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from functools import reduce
 from importlib import import_module
@@ -16,6 +16,10 @@ DEFAULT_AI_ENRICH_API_KEY = "sk-local"
 DEFAULT_AI_ENRICH_MAX_TOKENS = 256
 DEFAULT_AI_ENRICH_FALLBACK_MODEL = "gpt-4.1-nano"
 DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS = 128
+
+
+class CompletionError(RuntimeError):
+    """Raised when the external completion provider cannot answer."""
 
 
 class Client:
@@ -95,6 +99,113 @@ def _load_tag_configs(config_dir: str = "config/tags") -> dict[str, list[str]]:
     }
 
 
+def _sanitize_tag_configs(raw: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Normalize caller-supplied tag configuration at the adapter boundary."""
+    return {
+        str(category): sorted({str(tag).strip().lower() for tag in values if tag is not None})
+        for category, values in raw.items()
+        if isinstance(values, (list, tuple, set)) and values
+    }
+
+
+def resolve_completion(
+    options: Mapping[str, Any],
+) -> tuple[Callable[[str], str] | None, str | None]:
+    """Resolve a completion callback using adapter-owned configuration and I/O."""
+    completion = options.get("completion_fn")
+    if callable(completion):
+        return completion, "completion_fn"
+    try:
+        return (
+            init_llm(
+                api_key=options.get("api_key"),
+                model=options.get("model"),
+                api_base=options.get("api_base") or options.get("base_url"),
+                max_tokens=options.get("max_tokens"),
+                no_think=options.get("no_think"),
+            ),
+            "init_llm",
+        )
+    except (ImportError, OSError, ValueError) as exc:
+        return None, f"init_llm_error:{exc.__class__.__name__}"
+
+
+def resolve_fallback_completion(
+    options: Mapping[str, Any],
+) -> tuple[Callable[[str], str] | None, str | None]:
+    """Resolve the optional fallback completion callback in the adapter."""
+    if options.get("fallback_enabled") is False:
+        return None, "fallback_disabled"
+    try:
+        completion = init_fallback_llm(
+            api_key=options.get("fallback_api_key"),
+            model=options.get("fallback_model"),
+            api_base=options.get("fallback_api_base"),
+            max_tokens=options.get("fallback_max_tokens"),
+        )
+    except (ImportError, OSError, ValueError) as exc:
+        return None, f"init_fallback_llm_error:{exc.__class__.__name__}"
+    return completion, "init_fallback_llm" if completion else "fallback_unconfigured"
+
+
+def _tag_configs_for_options(options: Mapping[str, Any]) -> dict[str, list[str]]:
+    explicit = options.get("tag_configs")
+    if isinstance(explicit, Mapping):
+        sanitized = _sanitize_tag_configs(explicit)
+        if sanitized:
+            return sanitized
+
+    path_value = next(
+        (options.get(key) for key in ("tags_dir", "tags_path", "tags_file") if options.get(key)),
+        None,
+    )
+    if path_value:
+        path = Path(str(path_value))
+        if path.is_dir():
+            loaded = _load_tag_configs(str(path))
+        elif path.is_file():
+            try:
+                loaded = _sanitize_tag_configs(
+                    yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                )
+            except (OSError, TypeError, ValueError):
+                loaded = {}
+        else:
+            loaded = {}
+        if loaded:
+            return loaded
+    return _load_tag_configs()
+
+
+def prepare_options(options: Mapping[str, Any]) -> dict[str, Any]:
+    """Inject the configured enrichment client before a pass is executed."""
+    prepared = dict(options)
+    tag_configs = _tag_configs_for_options(prepared)
+    prepared["tag_configs"] = tag_configs
+    if prepared.get("client") is not None:
+        return prepared
+
+    completion, reason = resolve_completion(prepared)
+    if completion is None:
+        raise RuntimeError(
+            "ai_enrich enabled but no completion client could be constructed "
+            f"(reason={reason or 'unknown'})"
+        )
+    fallback_completion, fallback_reason = resolve_fallback_completion(prepared)
+    prepared["client"] = Client(
+        completion_fn=completion,
+        tag_configs=tag_configs or None,
+        fallback_completion_fn=fallback_completion,
+        fallback_min_chars=int(prepared.get("fallback_min_chars", 200)),
+    )
+    prepared["client_source"] = (
+        "adapter"
+        if fallback_reason in {None, "fallback_unconfigured", "fallback_disabled"}
+        else f"adapter+{fallback_reason}"
+    )
+    return prepared
+
+
 def init_llm(
     api_key: str | None = None,
     model: str | None = None,
@@ -130,9 +241,8 @@ def init_llm(
         or (DEFAULT_AI_ENRICH_API_KEY if prefers_local_key else None)
         or os.environ.get("OPENAI_API_KEY")
     )
-    resolved_max_tokens = (
-        max_tokens
-        or int(os.environ.get("PDF_CHUNKER_AI_ENRICH_MAX_TOKENS", DEFAULT_AI_ENRICH_MAX_TOKENS))
+    resolved_max_tokens = max_tokens or int(
+        os.environ.get("PDF_CHUNKER_AI_ENRICH_MAX_TOKENS", DEFAULT_AI_ENRICH_MAX_TOKENS)
     )
     if no_think is None:
         raw_no_think = os.environ.get("PDF_CHUNKER_AI_ENRICH_NO_THINK")
@@ -144,11 +254,12 @@ def init_llm(
         resolved_no_think = bool(no_think)
     if not key:
         raise ValueError(
-            "No API key found for AI enrichment. Set PDF_CHUNKER_AI_ENRICH_API_KEY or OPENAI_API_KEY."
+            "No API key found for AI enrichment. "
+            "Set PDF_CHUNKER_AI_ENRICH_API_KEY or OPENAI_API_KEY."
         )
     try:
         import litellm
-    except Exception as exc:  # pragma: no cover
+    except ImportError as exc:  # pragma: no cover
         raise ImportError("litellm is required for init_llm") from exc
 
     def completion(prompt: str) -> str:
@@ -169,7 +280,10 @@ def init_llm(
         if resolved_api_base:
             kwargs["api_base"] = resolved_api_base
             kwargs["custom_llm_provider"] = "openai"
-        response = litellm.completion(**kwargs)
+        try:
+            response = litellm.completion(**kwargs)
+        except Exception as exc:
+            raise CompletionError("AI completion request failed") from exc
         return response.choices[0].message.content
 
     return completion
@@ -199,22 +313,17 @@ def init_fallback_llm(
         or DEFAULT_AI_ENRICH_FALLBACK_MODEL
     )
     resolved_api_base = (
-        api_base
-        or os.environ.get("PDF_CHUNKER_AI_ENRICH_FALLBACK_API_BASE")
-        or None
+        api_base or os.environ.get("PDF_CHUNKER_AI_ENRICH_FALLBACK_API_BASE") or None
     )
-    resolved_max_tokens = (
-        max_tokens
-        or int(
-            os.environ.get(
-                "PDF_CHUNKER_AI_ENRICH_FALLBACK_MAX_TOKENS",
-                DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS,
-            )
+    resolved_max_tokens = max_tokens or int(
+        os.environ.get(
+            "PDF_CHUNKER_AI_ENRICH_FALLBACK_MAX_TOKENS",
+            DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS,
         )
     )
     try:
         import litellm
-    except Exception as exc:  # pragma: no cover
+    except ImportError as exc:  # pragma: no cover
         raise ImportError("litellm is required for init_fallback_llm") from exc
 
     def completion(prompt: str) -> str:
@@ -228,7 +337,10 @@ def init_fallback_llm(
         if resolved_api_base:
             kwargs["api_base"] = resolved_api_base
             kwargs["custom_llm_provider"] = "openai"
-        response = litellm.completion(**kwargs)
+        try:
+            response = litellm.completion(**kwargs)
+        except Exception as exc:
+            raise CompletionError("fallback AI completion request failed") from exc
         return response.choices[0].message.content
 
     return completion

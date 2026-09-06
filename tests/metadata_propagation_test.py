@@ -12,6 +12,13 @@ def test_metadata_propagation() -> None:
     doc = {
         "type": "page_blocks",
         "source_path": "src.pdf",
+        "document_metadata": {
+            "doc_id": "episode-001",
+            "source_kind": "podcast_episode",
+            "source_system": "podcast_addict",
+            "podcast_name": "Signal",
+            "episode_name": "Episode One",
+        },
         "pages": [
             {"page": 1, "blocks": [{"text": "- bullet"}]},
             {"page": 2, "blocks": [{"text": "1. first"}]},
@@ -28,6 +35,11 @@ def test_metadata_propagation() -> None:
     assert bullet_meta["block_type"] == "list_item"
     assert bullet_meta["language"] == "un"
     assert bullet_meta["location"] is None
+    assert bullet_meta["doc_id"] == "episode-001"
+    assert bullet_meta["source_kind"] == "podcast_episode"
+    assert bullet_meta["source_system"] == "podcast_addict"
+    assert bullet_meta["podcast_name"] == "Signal"
+    assert bullet_meta["episode_name"] == "Episode One"
 
     numbered_meta = chunks[1]["meta"]
     assert numbered_meta["list_kind"] == "numbered"
@@ -36,3 +48,5 @@ def test_metadata_propagation() -> None:
     assert numbered_meta["block_type"] == "list_item"
     assert numbered_meta["language"] == "un"
     assert numbered_meta["location"] is None
+    assert numbered_meta["doc_id"] == "episode-001"
+    assert numbered_meta["source_kind"] == "podcast_episode"

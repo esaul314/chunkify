@@ -121,11 +121,6 @@ class _DetectPageArtifactsPass:
 
         if self.known_footer_patterns or self.never_footer_patterns or self.footer_callback:
             callback = self.footer_callback
-            if self.interactive and callback is None:
-                # Import here to avoid circular deps; CLI sets up the prompt
-                from pdf_chunker.interactive import make_cli_footer_prompt
-
-                callback = make_cli_footer_prompt()
 
             self._footer_config = FooterConfig(
                 known_patterns=tuple(

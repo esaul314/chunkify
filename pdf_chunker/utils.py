@@ -1,20 +1,20 @@
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from functools import lru_cache, partial
+from functools import cache, lru_cache, partial
 from itertools import accumulate
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from haystack.dataclasses import Document
 
+from pdf_chunker.passes.split_semantic_lists import _block_list_kind
+from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.strategies.bullets import (
     BulletHeuristicStrategy,
     default_bullet_strategy,
 )
-from pdf_chunker.passes.split_semantic_lists import _block_list_kind
-from pdf_chunker.source_matchers import MATCHERS, Matcher
 from pdf_chunker.text_cleaning import _fix_double_newlines, _fix_split_words
 
 try:
@@ -23,7 +23,6 @@ except ImportError:  # pragma: no cover - optional dependency
     _load_cmudict = None
 
 import pyphen
-
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +43,7 @@ def _resolve_bullet_strategy(
     return strategy or default_bullet_strategy()
 
 
-@lru_cache(maxsize=None)
+@cache
 def _get_pyphen(lang: str = _READABILITY_LANG) -> pyphen.Pyphen:
     return pyphen.Pyphen(lang=lang)
 
@@ -394,6 +393,8 @@ def _build_metadata(
     source = normalized.get("source", {}) if isinstance(normalized, dict) else {}
 
     filename = source.get("filename", "Unknown")
+    source_name = source.get("source", filename)
+    source_file = source.get("source_file", filename)
     page = source.get("page", 0)
     location = source.get("location")
     page_range = source.get("page_range")
@@ -416,8 +417,8 @@ def _build_metadata(
     utterance_type, tags = _resolve_utterance_fields(utterance_info)
 
     base_metadata = {
-        "source": filename,
-        "source_file": filename,
+        "source": source_name,
+        "source_file": source_file,
         "chunk_id": _generate_chunk_id(filename, page_value, chunk_index),
         "page": page_value,
         "page_range": page_range_value,
@@ -429,6 +430,21 @@ def _build_metadata(
         "tags": tags,
         "importance": "medium",
     }
+    passthrough = {
+        key: value
+        for key, value in source.items()
+        if key
+        not in {
+            "filename",
+            "page",
+            "location",
+            "page_range",
+            "source",
+            "source_file",
+        }
+        and value is not None
+        and key not in base_metadata
+    }
 
     list_metadata = (
         {"list_kind": normalized["list_kind"]}
@@ -436,7 +452,7 @@ def _build_metadata(
         else {}
     )
 
-    metadata = {**base_metadata, **list_metadata}
+    metadata = {**base_metadata, **passthrough, **list_metadata}
     return {k: v for k, v in metadata.items() if k != "location" or v is None or v}
 
 

@@ -5,9 +5,6 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from collections.abc import Iterable as TypingIterable
 from concurrent.futures import ThreadPoolExecutor
-from functools import cache
-from os import PathLike
-from pathlib import Path
 from typing import Any, Protocol
 
 from pdf_chunker.framework import Artifact, register
@@ -46,31 +43,6 @@ def _copy_tag_configs(configs: Mapping[str, Iterable[str]]) -> dict[str, list[st
     return {str(category): [*tags] for category, tags in configs.items()}
 
 
-@cache
-def _load_default_tag_configs() -> dict[str, list[str]]:
-    from pdf_chunker.adapters.ai_enrich import _load_tag_configs as load_dir
-
-    return _copy_tag_configs(load_dir())
-
-
-def _load_tag_configs_from_path(path: Path) -> dict[str, list[str]]:
-    if path.is_dir():
-        from pdf_chunker.adapters.ai_enrich import _load_tag_configs as load_dir
-
-        return _copy_tag_configs(load_dir(config_dir=str(path)))
-    if path.is_file():
-        try:
-            import yaml
-        except Exception:  # pragma: no cover - optional dependency missing
-            return {}
-        try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        except Exception:  # pragma: no cover - defensive read guard
-            return {}
-        return _sanitize_tag_configs(_as_mapping(data))
-    return {}
-
-
 def _debug_enabled() -> bool:
     return os.getenv("PDF_CHUNKER_AI_ENRICH_DEBUG", "").strip().lower() in {
         "1",
@@ -107,32 +79,24 @@ def _debug_preview(text: str, limit: int = 300) -> str:
 
 
 def _tag_config_stats(configs: Mapping[str, Iterable[str]]) -> tuple[int, int]:
-    return len(configs), sum(len(tags) for tags in configs.values())
+    return len(configs), sum(sum(1 for _ in tags) for tags in configs.values())
 
 
 def _resolve_tag_configs(
     options: Mapping[str, Any],
     cached: dict[str, list[str]] | None,
 ) -> tuple[dict[str, list[str]], str]:
+    """Resolve only caller-supplied tag configuration in the pure pass."""
     explicit = options.get("tag_configs")
     if isinstance(explicit, Mapping):
         sanitized = _sanitize_tag_configs(explicit)
         if sanitized:
             return sanitized, "explicit"
 
-    path_value = next(
-        (options.get(key) for key in ("tags_dir", "tags_path", "tags_file") if options.get(key)),
-        None,
-    )
-    if isinstance(path_value, (str, Path, PathLike)):
-        loaded = _load_tag_configs_from_path(Path(path_value))
-        if loaded:
-            return loaded, f"path:{path_value}"
-
     if cached:
         return _copy_tag_configs(cached), "cached"
 
-    return _load_default_tag_configs(), "default"
+    return {}, "injected"
 
 
 def _resolve_options(meta: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -146,89 +110,19 @@ def _resolve_options(meta: Mapping[str, Any] | None) -> dict[str, Any]:
 def _resolve_completion(
     options: Mapping[str, Any],
 ) -> tuple[Callable[[str], str] | None, str | None]:
-    completion = options.get("completion_fn")
-    if callable(completion):
-        return completion, "completion_fn"
-    try:
-        from pdf_chunker.adapters.ai_enrich import init_llm
-    except Exception:  # pragma: no cover - adapters unavailable
-        return None, "missing_adapters"
-    try:
-        return init_llm(
-            api_key=options.get("api_key"),
-            model=options.get("model"),
-            api_base=options.get("api_base") or options.get("base_url"),
-            max_tokens=options.get("max_tokens"),
-            no_think=options.get("no_think"),
-        ), "init_llm"
-    except Exception as exc:  # pragma: no cover - missing credentials
-        return None, f"init_llm_error:{exc.__class__.__name__}"
+    """Compatibility shim; client construction belongs to the adapter."""
+    from pdf_chunker.adapters.ai_enrich import resolve_completion
+
+    return resolve_completion(options)
 
 
 def _resolve_fallback_completion(
     options: Mapping[str, Any],
 ) -> tuple[Callable[[str], str] | None, str | None]:
-    if options.get("fallback_enabled") is False:
-        return None, "fallback_disabled"
-    try:
-        from pdf_chunker.adapters.ai_enrich import init_fallback_llm
-    except Exception:  # pragma: no cover - adapters unavailable
-        return None, "missing_adapters"
-    try:
-        completion = init_fallback_llm(
-            api_key=options.get("fallback_api_key"),
-            model=options.get("fallback_model"),
-            api_base=options.get("fallback_api_base"),
-            max_tokens=options.get("fallback_max_tokens"),
-        )
-    except Exception as exc:  # pragma: no cover - missing credentials
-        return None, f"init_fallback_llm_error:{exc.__class__.__name__}"
-    return completion, "init_fallback_llm" if completion else "fallback_unconfigured"
+    """Compatibility shim; fallback client construction belongs to the adapter."""
+    from pdf_chunker.adapters.ai_enrich import resolve_fallback_completion
 
-
-def _ensure_client(
-    options: Mapping[str, Any],
-    fallback: "ClassifyClient | None",
-    tag_configs: dict[str, list[str]],
-    *,
-    completion_reason: str | None,
-) -> tuple["ClassifyClient | None", str | None]:
-    client = options.get("client")
-    if client:
-        return client, "client_option"  # type: ignore[return-value]
-    if fallback:
-        return fallback, "client_cached"
-
-    completion, reason = _resolve_completion(options)
-    if not completion:
-        if _debug_enabled():
-            logger.warning(
-                "ai_enrich debug: no completion client (reason=%s)",
-                reason or completion_reason or "unknown",
-            )
-        return None, reason or completion_reason or "missing_completion"
-    try:
-        from pdf_chunker.adapters.ai_enrich import Client
-    except Exception:  # pragma: no cover - adapters unavailable
-        if _debug_enabled():
-            logger.warning("ai_enrich debug: adapters unavailable for Client")
-        return None, "missing_adapters"
-    fallback_completion, fallback_reason = _resolve_fallback_completion(options)
-    try:
-        return Client(
-            completion_fn=completion,
-            tag_configs=tag_configs or None,
-            fallback_completion_fn=fallback_completion,
-            fallback_min_chars=int(options.get("fallback_min_chars", 200)),
-        ), (
-            "client_ready"
-            if fallback_reason in {None, "fallback_unconfigured", "fallback_disabled"}
-            else f"client_ready+{fallback_reason}"
-        )
-    except Exception as exc:  # pragma: no cover - client init failure
-        if _debug_enabled():
-            logger.warning("ai_enrich debug: Client initialization failed")
-        return None, f"client_init_error:{exc.__class__.__name__}"
+    return resolve_fallback_completion(options)
 
 
 def _iterable_items(value: Any) -> list[Any]:
@@ -245,7 +139,7 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
             return [], lambda _: items
         selected = set(indices)
 
-        def rebuild(enriched: Chunks) -> list[Any]:
+        def rebuild_list(enriched: Chunks) -> list[Any]:
             replacements = iter(enriched)
             return [
                 next(replacements) if index in selected else item
@@ -253,7 +147,7 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
             ]
 
         chunks = [dict(items[i]) for i in indices]
-        return chunks, rebuild
+        return chunks, rebuild_list
 
     if isinstance(payload, Mapping):
         items = _iterable_items(payload.get("items"))
@@ -266,7 +160,7 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
         selected = set(indices)
         base = {k: v for k, v in payload.items() if k != "items"}
 
-        def rebuild(enriched: Chunks) -> dict[str, Any]:
+        def rebuild_mapping(enriched: Chunks) -> dict[str, Any]:
             replacements = iter(enriched)
             updated = [
                 next(replacements) if index in selected else item
@@ -275,7 +169,7 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
             return {**base, "items": updated}
 
         chunks = [dict(items[i]) for i in indices]
-        return chunks, rebuild
+        return chunks, rebuild_mapping
 
     return [], lambda _: payload
 
@@ -303,17 +197,13 @@ _EXCLUDED_TAG_CATEGORIES = {"content_type"}
 _EXCLUDED_TAGS = set(UTTERANCE_TYPES)
 
 
-def _effective_tag_configs(
-    tag_configs: Mapping[str, TypingIterable[str]]
-) -> dict[str, list[str]]:
+def _effective_tag_configs(tag_configs: Mapping[str, TypingIterable[str]]) -> dict[str, list[str]]:
     effective: dict[str, list[str]] = {}
     for category, tags in tag_configs.items():
         if category in _EXCLUDED_TAG_CATEGORIES:
             continue
         filtered = _dedupe(
-            tag
-            for tag in tags
-            if isinstance(tag, str) and tag not in _EXCLUDED_TAGS
+            tag for tag in tags if isinstance(tag, str) and tag not in _EXCLUDED_TAGS
         )
         if filtered:
             effective[str(category)] = filtered
@@ -334,9 +224,7 @@ def _should_continue_tag_block(line: str) -> bool:
     lower = line.lower()
     if lower.startswith("classification:") or lower.startswith("response:"):
         return False
-    if ":" in line and not line.startswith(("-", "*", "•")):
-        return False
-    return True
+    return not (":" in line and not line.startswith(("-", "*", "•")))
 
 
 def _collect_tag_block(lines: list[str], start_index: int) -> list[str]:
@@ -355,7 +243,7 @@ def _literal_tags(text: str) -> list[str]:
         return []
     try:
         parsed = ast.literal_eval(text)
-    except Exception:
+    except (SyntaxError, TypeError, ValueError):
         return []
     if isinstance(parsed, str):
         return [parsed]
@@ -467,7 +355,8 @@ def _classification_repair_prompt(text_chunk: str) -> str:
     return (
         "Given the following text, choose the single best utterance type.\n\n"
         f"Classification: Choose exactly one from this list: {UTTERANCE_TYPES}.\n\n"
-        "Only use unclassified for front matter, bibliographic entries, indexes, tables of contents, or text with no clear communicative act.\n"
+        "Only use unclassified for front matter, bibliographic entries, indexes, "
+        "tables of contents, or text with no clear communicative act.\n"
         "Otherwise choose the nearest valid type.\n\n"
         "Respond in this exact format:\n"
         "Classification: [chosen_type]\n\n"
@@ -536,9 +425,11 @@ def classify_chunk_utterance(
         f"Classification: Choose the best fit from this list: {UTTERANCE_TYPES}.\n\n"
         f"{available_tags}\n\n"
         "Important rules for tags:\n"
-        "- Tags must describe subject matter, concepts, methods, technologies, or artifacts discussed in the text.\n"
+        "- Tags must describe subject matter, concepts, methods, technologies, or "
+        "artifacts discussed in the text.\n"
         "- Prefer tags that are explicitly grounded in the title or body text.\n"
-        "- Do not use utterance-type labels as tags, such as explanation, instruction, example, summary, critique, definition, opinion, or question.\n"
+        "- Do not use utterance-type labels as tags, such as explanation, instruction, "
+        "example, summary, critique, definition, opinion, or question.\n"
         "- Do not invent new tags.\n"
         "- If no allowed topical tag is clearly grounded in the text, return an empty list.\n\n"
         "Good tag examples:\n"
@@ -563,7 +454,7 @@ def classify_chunk_utterance(
                 completion_fn=completion_fn,
                 classification=classification,
             )
-    except Exception as exc:
+    except (RuntimeError, TimeoutError, ConnectionError, OSError, ValueError) as exc:
         if _debug_enabled():
             logger.warning(
                 "ai_enrich debug: completion failed (%s)",
@@ -588,7 +479,7 @@ def classify_chunk_utterance(
                 tags = fallback_tags
             if classification == "error" and fallback_classification != "unclassified":
                 classification = fallback_classification
-        except Exception as exc:
+        except (RuntimeError, TimeoutError, ConnectionError, OSError, ValueError) as exc:
             if _debug_enabled():
                 logger.warning(
                     "ai_enrich debug: fallback completion failed (%s)",
@@ -727,22 +618,16 @@ class _AiEnrichPass:
             )
             if not tag_configs:
                 logger.warning("ai_enrich debug: no tag configs loaded")
-        client, client_reason = _ensure_client(
-            options,
-            self._client,
-            tag_configs,
-            completion_reason=source,
-        )
+        client = options.get("client") or self._client
         if not client:
             raise RuntimeError(
-                f"ai_enrich enabled but no completion client (reason={client_reason or 'unknown'})"
+                "ai_enrich enabled but no completion client was injected; "
+                "construct one in the adapter or pass it in options"
             )
         if not chunks:
             if _debug_enabled() and not chunks:
                 logger.warning("ai_enrich debug: no chunks to enrich")
             return a
-        self._client = client
-        self._tag_configs = _copy_tag_configs(tag_configs)
         enriched = _classify_all(chunks, client=client, tag_configs=tag_configs)
         payload = rebuild_payload(enriched)
         meta = _update_meta(a.meta, len(enriched))

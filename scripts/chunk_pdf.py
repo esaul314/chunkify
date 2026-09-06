@@ -1,15 +1,10 @@
-"""Deprecated shim for the old ``chunk_pdf`` CLI.
-
-Accepts the historical flag set and forwards them to the modern
-``pdf_chunker`` command while emitting a deprecation notice.
-"""
+"""Deprecated thin frontend for the canonical ``pdf_chunker convert`` command."""
 
 from __future__ import annotations
 
-import argparse
 import io
-import tempfile
 import sys
+import tempfile
 from collections.abc import Sequence
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -17,32 +12,14 @@ from pathlib import Path
 from pdf_chunker import cli
 
 
-def _needs_help(argv: Sequence[str]) -> bool:
-    """Return ``True`` when ``-h`` or ``--help`` is present."""
+def _has_help(argv: Sequence[str]) -> bool:
+    """Return ``True`` when a help flag is present."""
     return any(flag in argv for flag in ("-h", "--help"))
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="chunk_pdf.py")
-    parser.add_argument("input_path", type=Path)
-    parser.add_argument("-o", "--out", type=Path)
-    parser.add_argument("--chunk-size", type=int)
-    parser.add_argument("--overlap", type=int)
-    parser.add_argument("--exclude-pages")
-    parser.add_argument("--no-metadata", action="store_true")
-    return parser
-
-
-def _to_cli_args(ns: argparse.Namespace) -> list[str]:
-    pairs = {
-        "--out": ns.out,
-        "--chunk-size": ns.chunk_size,
-        "--overlap": ns.overlap,
-        "--exclude-pages": ns.exclude_pages,
-    }
-    flags = [item for k, v in pairs.items() for item in (k, str(v)) if v is not None]
-    bools = ["--no-metadata"] if ns.no_metadata else []
-    return ["convert", str(ns.input_path), *flags, *bools]
+def _has_output(argv: Sequence[str]) -> bool:
+    """Return whether the caller supplied an output path."""
+    return any(arg in {"-o", "--out"} or arg.startswith("--out=") for arg in argv)
 
 
 def _exit_code(exc: BaseException) -> int | None:
@@ -71,16 +48,15 @@ def _exit_code(exc: BaseException) -> int | None:
 
 
 def _invoke_cli(argv: Sequence[str]) -> int:
-    """Execute the ``pdf_chunker`` CLI while normalising exit codes."""
+    """Execute the canonical CLI while normalising frontend exit codes."""
 
-    run = cli.app
     args = list(argv)
 
     try:
         if getattr(cli, "typer", None):
-            run(args=args, standalone_mode=False)
+            cli.app(args=args, standalone_mode=False)
         else:
-            run(args)
+            cli.app(args)
     except BaseException as exc:  # ``typer.Exit`` is not a ``SystemExit``
         code = _exit_code(exc)
         if code == 0:
@@ -97,25 +73,25 @@ def _delegate(argv: Sequence[str]) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Entry point retaining the old script's interface."""
+    """Retain the old entry point while sharing parsing and execution."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if _needs_help(args):
+    if _has_help(args):
         _delegate(["--help"])
         return
-    ns = _parser().parse_args(args)
-    out = ns.out
-    tmp: Path | None = None
-    if out is None:
-        handle = tempfile.NamedTemporaryFile(delete=False)
-        tmp = Path(handle.name)
-        handle.close()
-        ns.out = tmp
+
+    temp_path: Path | None = None
+    forwarded = ["convert", *args]
+    if not _has_output(args):
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            temp_path = Path(handle.name)
+        forwarded.extend(("--out", str(temp_path)))
+
     buffer = io.StringIO()
     with redirect_stdout(buffer):
-        _delegate(_to_cli_args(ns))
-    if tmp is not None:
-        print(tmp.read_text(encoding="utf-8"), end="")
-        tmp.unlink()
+        _delegate(forwarded)
+    if temp_path is not None:
+        print(temp_path.read_text(encoding="utf-8"), end="")
+        temp_path.unlink()
     report = Path("run_report.json")
     if report.exists():
         report.unlink()
