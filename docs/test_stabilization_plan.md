@@ -1,5 +1,9 @@
 # Test Stabilization Plan
 
+> **Historical record:** This is a dated stabilization handoff, not the active
+> work plan. Use [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md) for
+> current status, sequencing, and acceptance criteria.
+
 ## Completed Work
 * Restored whitespace-preserving chunk slices by recording word spans, slicing windows, and applying footer pruning without mutating the splitter, keeping `_split_text_into_chunks` pure and reusable.【F:pdf_chunker/splitter.py†L501-L606】
 * Isolated footer bullets and dense segments through `_record_trailing_footer_lines`, `_record_is_footer_candidate`, and the reworked `_collapse_records`, so merge decisions flow through functional helpers instead of inline mutation.【F:pdf_chunker/passes/split_semantic.py†L760-L1040】

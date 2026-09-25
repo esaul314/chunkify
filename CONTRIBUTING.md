@@ -31,7 +31,8 @@ Install system dependencies (for pdftotext fallback):
 apt-get install -y poppler-utils  # provides pdftotext
 ```
 
-Install in editable mode with dev dependencies:
+Install in editable mode with dev dependencies (EPUB support is part of the
+base runtime):
 
 ```bash
 pip install -e ".[dev]"
@@ -44,7 +45,7 @@ conversions locally:
 pip install -e ".[dev,enrichment]"
 ```
 
-If no extras exist yet:
+For the base runtime only:
 
 ```bash
 pip install -e .
@@ -64,7 +65,7 @@ Or run tools directly:
 
 ```bash
 pytest
-ruff check --fix .
+ruff check --no-fix .
 black .
 mypy pdf_chunker
 ```

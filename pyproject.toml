@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pdf-chunker"
 version = "0.1.0"
-description = "CLI pipeline to convert PDFs/EPUBs into JSONL for LoRA/RAG, with declarative passes."
+description = "CLI pipeline to convert PDFs, EPUBs, and plain-text transcripts into JSONL for LoRA/RAG."
 readme = {file = "README.md", content-type = "text/markdown"}
 authors = [{name = "Alex"}]
 requires-python = ">=3.10"
@@ -34,6 +34,8 @@ dependencies = [
   "PyMuPDF==1.26.3",
   "python-dotenv>=1.1.1",
   "pipe>=2.0",  # Infix composition for declarative pipelines
+  "ebooklib>=0.19",
+  "beautifulsoup4>=4.12",
 ]
 
 [project.optional-dependencies]
@@ -47,11 +49,15 @@ dev = [
   "mypy>=1.11.2",
   "nox>=2024.4.15",
   "types-PyYAML>=6.0.12",
-  "ebooklib>=0.19",
-  "beautifulsoup4>=4.12",
 ]
 enrichment = [
   "litellm>=1.73.6",
+]
+pdf-fallback = [
+  "pdfminer.six>=20250506",
+]
+pdf-enhancement = [
+  "pymupdf4llm>=0.0.27",
 ]
 
 [project.scripts]

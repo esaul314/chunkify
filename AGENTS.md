@@ -52,15 +52,22 @@ These priorities are applied **continuously**, including micro-decisions (naming
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Structure, boundaries, and mental models |
 | [CODESTYLE.md](CODESTYLE.md) | Code style, patterns, and formatting standards |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution workflow, quality gates, PR expectations |
+| [docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md) | Active implementation plan, status, acceptance criteria, and verification |
+| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Declared dependency profiles and reproducibility policy |
 | [docs/inline_style_schema.md](docs/inline_style_schema.md) | Inline style metadata schema |
-| [docs/REFACTORING_ROADMAP.md](docs/REFACTORING_ROADMAP.md) | Structural improvements and pattern registry proposal |
-| [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) | **Phase 4 implementation guide** (start here for interactive mode work) |
+| [docs/REFACTORING_ROADMAP.md](docs/REFACTORING_ROADMAP.md) | Historical structural-improvement proposal |
+| [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) | Historical completed interactive-mode plan |
 | [scripts/AGENTS.md](scripts/AGENTS.md) | Guidance for maintenance scripts |
 | [tests/AGENTS.md](tests/AGENTS.md) | Guidance for test modules |
 
 ---
 
-## Current Refactoring Status (2026-01-26)
+## Current Refactoring Status (2026-09-24)
+
+The active implementation status and sequencing live in
+[`docs/IMPLEMENTATION_ROADMAP.md`](docs/IMPLEMENTATION_ROADMAP.md). The completed
+phase notes below preserve useful architectural context but are not a separate
+work queue.
 
 **Phase 3 (Module Decomposition): COMPLETE**
 - `split_semantic.py` reduced from 1,962 → 771 lines (61% reduction)
@@ -110,27 +117,29 @@ Completed deliverables:
 
 4. 12 new tests for documentation-as-code validation
 
-See [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md) for full implementation details.
+See the historical [docs/STRATEGIC_REFACTORING_PLAN.md](docs/STRATEGIC_REFACTORING_PLAN.md)
+for the completed phase details.
 
 ---
 
 ## Stable Dependencies
-It is important to rely on well-supported libraries and keep them pinned to avoid accidental regressions. The following dependencies are considered stable and should be preserved:
+The declared dependency policy is maintained in
+[`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md). Keep the base runtime small enough
+for PDF, EPUB, and text conversion; install enrichment and PDF enhancement tools
+only for workflows that use them.
 
 | Library           | Role / Rationale                                                               |
 | ----------------- | ------------------------------------------------------------------------------ |
 | **PyMuPDF**       | High‑quality PDF parsing; preserves layout and metadata.                       |
-| **pdfminer.six**  | Pure‑Python PDF text extractor—good secondary fallback.                        |
-| **pdftotext**     | Stable C‑based CLI; useful when PyMuPDF isn’t available.                       |
-| **lxml**          | Robust XML/HTML handling for EPUB or structural heuristics.                    |
-| **regex**         | Advanced regular‑expression engine used heavily in cleaning.                   |
-| **haystack** (ai) | Required for chunk validation scripts that depend on its formatting utilities. |
+| **pdfminer.six**  | Optional pure-Python PDF fallback (`.[pdf-fallback]`). |
+| **pdftotext**     | Optional system fallback supplied by `poppler-utils`. |
+| **PyMuPDF4LLM**   | Optional PDF enhancement (`.[pdf-enhancement]`). |
+| **haystack-ai**   | Runtime document and metadata utilities. |
 
 ### Environment Setup
 - Always activate the local venv before running any repo commands:
   - `source pdf-env/bin/activate`
-- `pip install -e .[dev]`
-- `pip install nox`  # not preinstalled in some environments
+- `pip install -e ".[dev]"`
 - `apt-get install -y poppler-utils`  # provides `pdftotext`
 
 ### Quick Usage
@@ -282,19 +291,19 @@ The `text_clean` pass handles both:
 <!-- BEGIN AUTO-PASSES -->
 | Pass | Module | Responsibility |
 | --- | --- | --- |
-| `ai_enrich` | `pdf_chunker.passes.ai_enrich` |  |
+| `ai_enrich` | `pdf_chunker.passes.ai_enrich` | Optionally enrich canonical chunks with metadata and tags. |
 | `detect_doc_end` | `pdf_chunker.passes.detect_doc_end` | Detect end-of-document markers and truncate trailing pages. |
 | `detect_page_artifacts` | `pdf_chunker.passes.detect_page_artifacts` | Cleanup page artifacts (e.g., flatten markdown-like tables). |
-| `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` |  |
-| `epub_parse` | `pdf_chunker.passes.epub_parse` |  |
-| `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` |  |
-| `heading_detect` | `pdf_chunker.passes.heading_detect` |  |
+| `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` | Normalize canonical chunks into JSONL-ready rows. |
+| `epub_parse` | `pdf_chunker.passes.epub_parse` | Normalize EPUB adapter output into canonical page blocks. |
+| `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` | Select the best in-memory extraction candidate using quality metrics. |
+| `heading_detect` | `pdf_chunker.passes.heading_detect` | Annotate page blocks with heading metadata. |
 | `list_detect` | `pdf_chunker.passes.list_detect` | List detection pass. |
-| `merge_footers` | `pdf_chunker.passes.merge_footers` | Merge short trailing footer lines into a single block for stability. |
-| `pdf_parse` | `pdf_chunker.passes.pdf_parse` |  |
+| `merge_footers` | `pdf_chunker.passes.merge_footers` | Merge short trailing footer lines into a stable block. |
+| `pdf_parse` | `pdf_chunker.passes.pdf_parse` | Normalize PDF adapter output into canonical page blocks. |
 | `split_semantic` | `pdf_chunker.passes.split_semantic` | Split ``page_blocks`` into canonical ``chunks``. |
-| `text_parse` | `pdf_chunker.passes.text_parse` | Normalize plain-text transcript input into canonical ``page_blocks``. |
-| `text_clean` | `pdf_chunker.passes.text_clean` |  |
+| `text_clean` | `pdf_chunker.passes.text_clean` | Normalize text, whitespace, quotes, ligatures, and artifacts. |
+| `text_parse` | `pdf_chunker.passes.text_parse` | Normalize plain-text transcript input into canonical page blocks. |
 <!-- END AUTO-PASSES -->
 
 ## Project Structure for OpenAI Codex Navigation
@@ -670,7 +679,9 @@ For each task, follow this loop:
 > thin shims delegating to the pass implementations. There is no significant legacy code
 > to remove; these shims exist for backward compatibility with external consumers.
 >
-> See [REFACTORING_ROADMAP.md](docs/REFACTORING_ROADMAP.md) for structural improvement plans.
+> See the active [IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md) for
+> current work. The structural proposal is retained in the historical
+> [REFACTORING_ROADMAP.md](docs/REFACTORING_ROADMAP.md).
 
 The following table maps domain module functions to their corresponding passes:
 
@@ -741,10 +752,11 @@ Rollback options:
 * **Split-word merging guarded**: only joins across newlines or double spaces when the combined form is more common than its parts, avoiding merges like "no longer"→"nolonger".
 * **JSONL deduplication**: repeated sentences are trimmed during emission, even when the duplicate is followed by new material; run conversions with `--trace <phrase>` to verify expected lines survive.
 * **Dedup debug**: set `PDF_CHUNKER_DEDUP_DEBUG=1` to emit a warning for each dropped duplicate, a summary count, and a notice for any long sentences that still appear more than once after dedupe.
-* **Regression sweep status**: `nox -s tests` currently surfaces footer overlap, golden snapshot drift, heading merge whitespace, CLI flag wiring, and readability expectation regressions (see `PROJECT_BOOTSTRAP.md`'s “Regression Sweep — 2025-09-28” table for reproduction steps).
-* Possible regression where `text_cleaning.py` updated logic not applied
-* Overlap detection threshold may need tuning
-* Tag classification may not cover nested or multi-domain contexts
+* Quality and implementation risks are tracked in the active
+  [IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md); do not use the
+  archived regression sweep as current status.
+* Overlap tuning remains evidence-gated by corpus and retrieval evaluation.
+* Tag classification may not cover nested or multi-domain contexts.
 
 ### Streaming Extraction
 

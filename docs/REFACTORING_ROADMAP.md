@@ -7,6 +7,10 @@
 > **Note:** This document was the original proposal. For current implementation status,
 > see [STRATEGIC_REFACTORING_PLAN.md](STRATEGIC_REFACTORING_PLAN.md).
 
+> **Historical record:** The active implementation sequence is now
+> [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md). This document is
+> retained for the original refactoring rationale and completed-phase history.
+
 ---
 
 ## Implementation Status

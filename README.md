@@ -29,6 +29,10 @@ pipeline:
 pip install "pdf-chunker[enrichment]"
 ```
 
+For local development and optional PDF integrations, use the profiles in
+[the dependency policy](docs/DEPENDENCIES.md). EPUB dependencies are included in
+the base install because EPUB is a supported input format.
+
 ### Basic usage
 ```bash
 pdf_chunker convert "sample.pdf" --out out.jsonl --chunk-size 400 --overlap 50
@@ -50,6 +54,13 @@ headers and timestamps from semantic text, and keeps cue bounds in metadata as
 boundaries remain part of the transcript text. When a semantic chunk combines
 multiple cues, its timing metadata spans the first start and last end present;
 the adapter does not infer missing timestamps.
+
+The checked-in `pipeline.yaml` and `pipeline_rag.yaml` specs use `pdf_parse` as
+the parser slot. The canonical runner selects `pdf_parse`, `epub_parse`, or
+`text_parse` from the input suffix and rejects mixed parser families. Registered
+passes also include optional `extraction_fallback`, `detect_doc_end`,
+`detect_page_artifacts`, and `merge_footers`; see the generated pass table in
+[`AGENTS.md`](AGENTS.md).
 
 ### RAG-optimized spec
 ```bash

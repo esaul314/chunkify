@@ -1,6 +1,6 @@
 # pdf-chunker Implementation Roadmap
 
-**Status:** Ready for implementation
+**Status:** P2-C complete; further work follows the remaining roadmap packages
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -349,6 +349,20 @@ public documentation and test contract must agree with the implementation.
 
 ### P2-C — Documentation and dependency cleanup
 
+**Status: COMPLETE (2026-09-24)**
+
+**Delivered:**
+- The active plan and architecture documents now point to one current roadmap;
+  completed refactoring and stabilization plans are explicitly historical.
+- `pyproject.toml` is the dependency source of truth, with supported EPUB
+  dependencies in the base runtime and enrichment/PDF integrations as opt-in
+  extras; `requirements.txt` is only a compatibility shim.
+- README, agent guidance, architecture, pipeline specs, and the generated pass
+  table agree on `.pdf`/`.epub`/`.txt`, parser-slot behavior, and registered
+  pass names; consistency tests guard the agreement.
+- Generated/diagnostic scripts and historical AI notes are labeled separately
+  from the maintained conversion path.
+
 **Why:** Several documents describe completed phases or old failures while the code
 has moved on. This makes future agents repeat old investigations.
 
@@ -430,6 +444,7 @@ Use separate coherent commits, in this order:
 8. `refactor: simplify CLI and configuration validation`
 9. `test: add corpus quality evaluation` — complete
 10. `docs: reconcile roadmap and supported input formats` — complete
+11. `docs: reconcile active documentation and dependency policy` — complete
 
 If a package is too large for one review, split it by boundary, not by arbitrary
 file count. Each commit must leave the repository in a testable state.

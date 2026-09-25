@@ -7,6 +7,15 @@ CLI entry points and automation scripts.
 Please, keep this file up-to-date with the latest code structure. If you notice that the code structure has changed, please update this file accordingly.
 
 ## Responsibilities
+- Maintained operational scripts include `chunk_pdf.py`, `evaluate_corpus.py`,
+  `replay_from_snapshot.py`, `bisect_dups.py`, `detect_duplicates.py`,
+  `validate_chunks.sh`, and the small fixture/documentation generators used by
+  the test and CI workflows.
+- Diagnostic and experimental scripts include `benchmark_extraction.py`,
+  `compare_text_quality.py`, `epoche_platform_eng.py`, `eval_overlap.py`,
+  `experiment_pymupdf4llm.py`, `llm_correction.py`, and the ad-hoc repair or
+  investigation helpers. They are not part of the canonical conversion path;
+  changes to them must not be mistaken for pipeline behavior changes.
 - `evaluate_corpus.py`: Runs the tracked corpus manifest and writes a category-based
   quality report; it must not tune overlap or collapse categories into one score.
 - ```chunk_pdf.py`: Deprecated compatibility frontend delegating parsing and execution to
@@ -80,10 +89,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   WebVTT cue timing is retained as `timestamp_start`/`timestamp_end` metadata;
   PDF footer/artifact passes are not valid for `.txt` input.
 
-## Known Issues
+## Current boundary
 
-- Command-line help may be outdated.
-- `_apply.sh` exit codes not consistently handled.
+The canonical conversion implementation lives in `pdf_chunker/core_new.py` and
+`pdf_chunker/cli.py`. Scripts may inspect, replay, validate, or benchmark that
+path, but they must not introduce a second parser or chunking implementation.
 ```
 
 ---

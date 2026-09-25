@@ -2,7 +2,9 @@
 
 This repository is designed to be **easy to grasp**. Structure exists to reduce cognitive load.
 
-**pdf-chunker** is a modular Python library for processing large PDF and EPUB documents, generating semantically coherent chunks enriched with metadata for downstream LLM workflows (RAG, LoRA fine-tuning).
+**pdf-chunker** is a modular Python library for processing PDF, EPUB, and plain-text
+transcript documents, generating semantically coherent chunks enriched with metadata
+for downstream LLM workflows (RAG, LoRA fine-tuning).
 
 ---
 
@@ -13,6 +15,8 @@ This repository is designed to be **easy to grasp**. Structure exists to reduce 
 | [AGENTS.md](AGENTS.md) | Primary guidance for AI agents—domain map, constraints, workflow |
 | [CODESTYLE.md](CODESTYLE.md) | Code style, patterns, and formatting standards |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution workflow, quality gates, PR expectations |
+| [docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md) | Active implementation plan and current status |
+| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | Dependency profiles and reproducibility policy |
 | [docs/inline_style_schema.md](docs/inline_style_schema.md) | Inline style metadata schema for downstream processing |
 
 ---
@@ -64,7 +68,7 @@ pdf_chunker/
 ├── tests/                   # Mirrors package structure; golden snapshots in tests/golden/
 ├── scripts/                 # Operational scripts (CLI wrappers, diagnostics)
 ├── config/tags/             # YAML tag vocabularies for AI enrichment
-├── docs/                    # Additional documentation (inline_style_schema.md, etc.)
+├── docs/                    # Active roadmap, dependency policy, schemas, and historical plans
 ├── test_data/               # Base64-encoded test fixtures (ligature.b64, etc.)
 └── pipeline.yaml            # Default pipeline configuration
 ````
@@ -97,8 +101,9 @@ This split makes testing cheap and refactoring safe. Passes can be unit-tested w
 
 The pipeline implements a robust **three-phase** transformation (multiple configurable passes grouped into logical phases):
 
-1. **Structural Phase** (`pdf_parse`, `epub_parse`, `heading_detect`, `list_detect`)
-   - Extracts typographic and layout structure from PDF/EPUB
+1. **Structural Phase** (one parser plus optional structure passes)
+   - One of `pdf_parse`, `epub_parse`, or `text_parse` produces canonical page blocks
+   - `heading_detect` and `list_detect` add document structure when configured
    - Hybrid approach: font-size and style heuristics + PyMuPDF4LLM cleaning
    - Fallback logic with quality scoring: PyMuPDF → pdftotext → pdfminer.six
 
@@ -107,11 +112,16 @@ The pipeline implements a robust **three-phase** transformation (multiple config
    - Avoids splitting within sentences or headings
    - Generates metadata for each chunk: `chunk_id`, `source_file`, `page_range`, `heading`, `tags`, `text`
 
-3. **Enrichment Phase** (`ai_enrich`, `emit_jsonl`)
+3. **Enrichment and emission Phase** (`ai_enrich`, `emit_jsonl`)
    - Classifies and annotates chunks using external tag vocabularies
    - Supports multiple domains: generic, philosophy, psychology, technical, PM
    - `emit_jsonl` normalizes canonical rows and validates their serialized size
      before the writer emits JSONL
+
+The registered optional/compatibility passes are `extraction_fallback`,
+`detect_doc_end`, `detect_page_artifacts`, and `merge_footers`. The authoritative
+registered pass table is generated in `AGENTS.md` from `pdf_chunker.passes`; the
+two checked-in YAML specs use only the supported default and RAG compositions.
 
 ## 4) Canonical artifact contracts
 
@@ -160,6 +170,10 @@ bounds in block source metadata. The shared `text_clean → split_semantic →
 emit_jsonl` path then handles chunking and emission. For chunks spanning cues,
 `timestamp_start` and `timestamp_end` represent the first and last available
 bounds; missing timing is left missing rather than inferred.
+
+The `pdf_parse` entry in the checked-in pipeline specs is the parser slot: the
+canonical runner replaces it with `epub_parse` or `text_parse` for `.epub` and
+`.txt` inputs. A spec must not mix parser-family steps.
 
 ## 4.1) Corpus-quality evaluation
 

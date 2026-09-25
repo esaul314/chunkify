@@ -56,13 +56,13 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `.txt` pipelines must not include PDF artifact passes; the canonical runner
   rejects `merge_footers` and `detect_page_artifacts` for text input.
 
-## Known Issues
-- Footnote anchors may appear in the middle of chunks.
-- Page exclusion feature is not working reliably.
-- Metadata fields sometimes missing when fallback triggers.
-- Hyphenated continuation lines starting with bullet markers were not rejoined; this is now fixed in `text_cleaning._join_broken_words`.
-- Underscore emphasis is stripped during PyMuPDF4LLM cleanup.
-- Split-word merging is restricted to newline or double-space boundaries with frequency checks to avoid collapsing valid phrases.
+## Current boundary notes
+- Active implementation status and remaining risks are tracked in
+  `docs/IMPLEMENTATION_ROADMAP.md`.
+- Optional PDF enhancement and fallback dependencies are documented in
+  `docs/DEPENDENCIES.md`; base conversion must not require them.
+- Split-word merging is restricted to newline or double-space boundaries with
+  frequency checks to avoid collapsing valid phrases.
 ```
 
 ---

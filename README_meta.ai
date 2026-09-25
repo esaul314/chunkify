@@ -1,6 +1,10 @@
+> **Historical AI-generated notes:** This file is retained for context and is
+> not the current metadata contract. Use [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Here's the **Markdown version** of the structured JSONL example with explanatory context for each field. You can use this as a spec or prompt for the other AI agent:
 
 ---
+
 
 ## 🧾 Sample RAG Chunk with Rich Metadata (in JSON format)
 
@@ -70,4 +74,3 @@ Here's the **Markdown version** of the structured JSONL example with explanatory
 * Fields like `utterance_type`, `tone`, and `importance` are ideally generated using lightweight LLM prompts or classifiers for high consistency.
 
 ---
-

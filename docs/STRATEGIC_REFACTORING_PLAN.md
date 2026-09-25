@@ -4,6 +4,11 @@
 **Status:** PHASE 5 COMPLETE  
 **Author:** Codebase Steward (with system analysis)
 
+> **Historical record:** The active implementation sequence is now
+> [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md). This document records
+> the completed interactive-mode and documentation-as-code phases; its task lists
+> are not current work instructions.
+
 ---
 
 ## Implementation Progress
