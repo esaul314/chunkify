@@ -95,6 +95,39 @@ def test_ai_enrich_pass_enriches_chunk_containers() -> None:
     assert client.calls == 1
 
 
+def test_ai_enrich_preserves_transcript_provenance() -> None:
+    client = _DummyClient()
+    chunks = [
+        {
+            "text": "HOST: What is AI?",
+            "meta": {
+                "chunk_id": "episode.txt_p0_c0",
+                "location": "paragraph:1",
+                "timestamp_start": "00:00:01.000",
+                "timestamp_end": "00:00:04.000",
+            },
+        }
+    ]
+    result = ai_enrich(
+        Artifact(
+            payload=chunks,
+            meta={
+                "ai_enrich": {
+                    "client": client,
+                    "enabled": True,
+                    "tag_configs": {"generic": ["technical"]},
+                }
+            },
+        )
+    )
+
+    enriched = result.payload[0]
+    assert enriched["meta"]["chunk_id"] == "episode.txt_p0_c0"
+    assert enriched["meta"]["location"] == "paragraph:1"
+    assert enriched["meta"]["timestamp_start"] == "00:00:01.000"
+    assert enriched["metadata"]["timestamp_end"] == "00:00:04.000"
+
+
 def test_enrich_chunk_fallback_returns_default_classification() -> None:
     fallback = _enrich_chunk("hi", False, None)
     assert fallback == {"classification": "unclassified", "tags": []}

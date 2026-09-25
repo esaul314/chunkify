@@ -148,6 +148,10 @@ It is important to rely on well-supported libraries and keep them pinned to avoi
   ```bash
   pdf_chunker convert ./episode.txt --spec pipeline.yaml --out ./data/episode.jsonl --metadata-file ./episode.metadata.yaml --no-enrich
   ```
+  The text adapter normalizes UTF-8 BOM/CRLF input, removes WebVTT cue timing
+  lines from semantic text, preserves speaker labels, and emits cue bounds as
+  `timestamp_start`/`timestamp_end` metadata. PDF artifact passes such as
+  `merge_footers` and `detect_page_artifacts` are rejected for `.txt` input.
 - Evaluate the tracked representative corpus and write a reviewable report:
   ```bash
   python scripts/evaluate_corpus.py --manifest docs/corpus_manifest.yaml --output /tmp/pdf-chunker-quality.json

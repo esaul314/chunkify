@@ -8,19 +8,24 @@ from typing import Any
 
 _WEBVTT_HEADER = "WEBVTT"
 _CUE_INDEX_RE = re.compile(r"^\d+$")
+_TIMESTAMP_PART = r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?"
 _TIMESTAMP_RE = re.compile(
-    r"^(?:(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?)"
-    r"(?:\s*-->\s*(?:(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d{1,3})?))?$"
+    rf"^(?P<start>{_TIMESTAMP_PART})" rf"(?:\s*-->\s*(?P<end>{_TIMESTAMP_PART})(?:\s+[^\s].*)?)?$"
 )
-_SPEAKER_RE = re.compile(r"^[A-Z][A-Za-z0-9 .'\-]{0,79}:$")
+_SPEAKER_RE = re.compile(r"^(?:\[[^\]\r\n]{1,80}\]|[A-Za-z][A-Za-z0-9 .'\-]{0,79}):$")
 
 
 def _normalize_text(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
 
 
-def _is_timestamp(line: str) -> bool:
-    return bool(_TIMESTAMP_RE.match(line))
+def _timestamp_source(line: str) -> dict[str, str] | None:
+    match = _TIMESTAMP_RE.match(line)
+    if not match:
+        return None
+    start = match.group("start")
+    end = match.group("end") or start
+    return {"timestamp_start": start, "timestamp_end": end}
 
 
 def _is_speaker(line: str) -> bool:
@@ -31,18 +36,19 @@ def _join_block(lines: list[str]) -> str:
     return " ".join(line.strip() for line in lines if line.strip()).strip()
 
 
-def _iter_blocks(text: str) -> list[str]:
+def _iter_block_records(text: str) -> list[tuple[str, dict[str, str]]]:
     lines = _normalize_text(text).split("\n")
-    blocks: list[str] = []
+    blocks: list[tuple[str, dict[str, str]]] = []
     current: list[str] = []
-    pending_prefix: list[str] = []
+    pending_source: dict[str, str] | None = None
 
     def flush() -> None:
-        joined = _join_block([*pending_prefix, *current])
-        if joined and not _is_timestamp(joined):
-            blocks.append(joined)
+        nonlocal pending_source
+        joined = _join_block(current)
+        if joined:
+            blocks.append((joined, dict(pending_source or {})))
         current.clear()
-        pending_prefix.clear()
+        pending_source = None
 
     idx = 0
     while idx < len(lines):
@@ -52,13 +58,15 @@ def _iter_blocks(text: str) -> list[str]:
         if not stripped:
             flush()
             continue
-        if stripped == _WEBVTT_HEADER:
+        if stripped == _WEBVTT_HEADER or stripped.startswith(f"{_WEBVTT_HEADER} "):
             continue
-        if _CUE_INDEX_RE.match(stripped) and idx < len(lines) and _is_timestamp(lines[idx].strip()):
+        next_timestamp = _timestamp_source(lines[idx].strip()) if idx < len(lines) else None
+        if _CUE_INDEX_RE.match(stripped) and next_timestamp is not None:
             continue
-        if _is_timestamp(stripped):
+        timestamp_source = _timestamp_source(stripped)
+        if timestamp_source is not None:
             flush()
-            pending_prefix = [stripped]
+            pending_source = timestamp_source
             continue
         if current and _is_speaker(stripped):
             flush()
@@ -66,6 +74,11 @@ def _iter_blocks(text: str) -> list[str]:
 
     flush()
     return blocks
+
+
+def _iter_blocks(text: str) -> list[str]:
+    """Return normalized text blocks without their timing provenance."""
+    return [block for block, _ in _iter_block_records(text)]
 
 
 def read(path: str, exclude_pages: str | None = None, **_: Any) -> dict[str, Any]:
@@ -82,9 +95,10 @@ def read(path: str, exclude_pages: str | None = None, **_: Any) -> dict[str, Any
                 "filename": source_name,
                 "page": 1,
                 "location": f"paragraph:{index}",
+                **timing,
             },
         }
-        for index, text in enumerate(_iter_blocks(raw_text), start=1)
+        for index, (text, timing) in enumerate(_iter_block_records(raw_text), start=1)
     ]
     return {
         "type": "page_blocks",

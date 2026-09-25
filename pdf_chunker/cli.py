@@ -185,12 +185,11 @@ def run_conversion(options: ConvertOptions) -> None:
 
         excluded_page_set = parse_page_ranges(exclude_pages)
 
-    # Auto-detect footer/header zones if requested (PDF only - EPUBs don't have zones)
+    # Auto-detect footer/header zones if requested (PDF only).
     zones_config: dict[str, float] = {}
-    is_epub = str(input_path).lower().endswith(".epub")
-    if not is_epub and (
-        auto_detect_zones or (effective_interactive_footers and footer_margin is None)
-    ):
+    input_suffix = str(input_path).lower()
+    is_pdf = input_suffix.endswith(".pdf")
+    if is_pdf and (auto_detect_zones or (effective_interactive_footers and footer_margin is None)):
         try:
             import fitz
 
@@ -501,6 +500,7 @@ if typer:
             exists=True,
             dir_okay=False,
             readable=True,
+            help="Input document (.pdf, .epub, or .txt).",
         ),
         out: Path | None = typer.Option(None, "--out", "-o"),
         metadata_file: Path | None = typer.Option(
@@ -631,7 +631,11 @@ else:
         sub = parser.add_subparsers(dest="cmd", required=True)
 
         conv = sub.add_parser("convert")
-        conv.add_argument("input_path", type=Path)
+        conv.add_argument(
+            "input_path",
+            type=Path,
+            help="Input document (.pdf, .epub, or .txt).",
+        )
         conv.add_argument("-o", "--out", type=Path)
         conv.add_argument("--metadata-file", type=Path)
         conv.add_argument("--chunk-size", type=int)

@@ -101,6 +101,7 @@ def test_convert_help_lists_expected_flags() -> None:
         "--verbose",
     )
     assert all(f in out for f in flags)
+    assert ".pdf" in out and ".epub" in out and ".txt" in out
 
 
 def test_convert_cli_chunks_text_transcript_with_metadata(tmp_path: Path) -> None:
@@ -165,6 +166,7 @@ def test_convert_cli_chunks_text_transcript_with_metadata(tmp_path: Path) -> Non
     assert rows
     merged_text = " ".join(row["text"] for row in rows)
     assert "WEBVTT" not in merged_text
+    assert "00:00:01.000" not in merged_text
     assert "HOST: Welcome back." in merged_text
     assert "GUEST: Thanks for having me." in merged_text
     for row in rows:
@@ -183,6 +185,9 @@ def test_convert_cli_chunks_text_transcript_with_metadata(tmp_path: Path) -> Non
         assert metadata["transcript_url"] == "https://example.com/episode-001/transcript"
         assert metadata["transcript_source_url"] == "https://example.com/episode-001/source"
         assert metadata["transcript_source_kind"] == "webvtt"
+        assert metadata["chunk_id"].startswith("episode.txt_p0_c")
+    assert rows[0]["metadata"]["timestamp_start"] == "00:00:01.000"
+    assert rows[0]["metadata"]["timestamp_end"] == "00:00:06.000"
 
 
 def test_chunk_pdf_accepts_flags(tmp_path: Path) -> None:

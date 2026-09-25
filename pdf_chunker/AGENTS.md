@@ -50,6 +50,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - Use `text_cleaning.py` transforms before splitting.
 - Do not mix EPUB logic into PDF modules.
 - Keep transcript parsing light: adapter-side text normalization, pass-side pure chunking, and metadata passthrough into emitted rows.
+- Transcript timing is provenance, not semantic text: `io_text` emits
+  `timestamp_start`/`timestamp_end` source fields, and the shared splitter
+  carries first/last available cue bounds into chunk metadata.
+- `.txt` pipelines must not include PDF artifact passes; the canonical runner
+  rejects `merge_footers` and `detect_page_artifacts` for text input.
 
 ## Known Issues
 - Footnote anchors may appear in the middle of chunks.

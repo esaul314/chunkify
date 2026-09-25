@@ -1,6 +1,7 @@
 # pdf-chunker
 
-CLI pipeline to convert PDFs and EPUBs into JSONL chunks for RAG workflows.
+CLI pipeline to convert PDFs, EPUBs, and plain-text transcripts into JSONL chunks
+for RAG workflows.
 
 The CLI and library share one canonical runner. Library callers can use
 ``pdf_chunker.convert(path, PipelineSpec(...))``; the older
@@ -37,6 +38,18 @@ EPUB example:
 ```bash
 pdf_chunker convert "sample.epub" --out out.jsonl --chunk-size 400 --overlap 50
 ```
+
+Plain-text or WebVTT-style transcript example:
+```bash
+pdf_chunker convert "episode.txt" --out episode.jsonl --metadata-file episode.metadata.yaml --no-enrich
+```
+
+Transcript ingestion normalizes UTF-8 BOM/CRLF input, removes WebVTT cue
+headers and timestamps from semantic text, and keeps cue bounds in metadata as
+`timestamp_start` and `timestamp_end`. Speaker labels and blank-paragraph
+boundaries remain part of the transcript text. When a semantic chunk combines
+multiple cues, its timing metadata spans the first start and last end present;
+the adapter does not infer missing timestamps.
 
 ### RAG-optimized spec
 ```bash

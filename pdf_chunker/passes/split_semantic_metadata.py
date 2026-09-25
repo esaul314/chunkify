@@ -23,6 +23,9 @@ Chunk = dict[str, Any]
 
 _STOPWORD_TITLES = frozenset(word.title() for word in STOPWORDS)
 _FOOTNOTE_TAILS = {"", ".", ",", ";", ":"}
+_DOCUMENT_METADATA_SOURCE_FIELDS = frozenset(
+    {"filename", "page", "location", "page_range", "chunk_id"}
+)
 
 
 def _chunk_meta(chunk: Chunk) -> Mapping[str, Any]:
@@ -153,6 +156,33 @@ def _strip_nulls(source: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in source.items() if value is not None}
 
 
+def _timestamp_metadata(block: Block, source: Mapping[str, Any]) -> dict[str, str]:
+    """Return first/last transcript cue bounds carried by a block."""
+    candidates: list[Mapping[str, Any]] = [source]
+    source_blocks = block.get("source_blocks")
+    if isinstance(source_blocks, Iterable) and not isinstance(source_blocks, (str, bytes)):
+        candidates.extend(
+            candidate["source"]
+            for candidate in source_blocks
+            if isinstance(candidate, Mapping) and isinstance(candidate.get("source"), Mapping)
+        )
+
+    starts = [
+        value
+        for candidate in candidates
+        if isinstance((value := candidate.get("timestamp_start")), str) and value
+    ]
+    ends = [
+        value
+        for candidate in candidates
+        if isinstance((value := candidate.get("timestamp_end")), str) and value
+    ]
+    return {
+        **({"timestamp_start": starts[0]} if starts else {}),
+        **({"timestamp_end": ends[-1]} if ends else {}),
+    }
+
+
 def _with_source(
     block: Block,
     page: int,
@@ -161,8 +191,14 @@ def _with_source(
 ) -> Block:
     existing = _existing_source(block)
     fallback = _fallback_source(page, filename)
-    seeded = {**dict(document_metadata or {}), **fallback}
+    document_fields = {
+        key: value
+        for key, value in (document_metadata or {}).items()
+        if key not in _DOCUMENT_METADATA_SOURCE_FIELDS
+    }
+    seeded = {**document_fields, **fallback}
     merged = _merge_source(existing, seeded)
+    merged = {**merged, **_timestamp_metadata(block, merged)}
     return {**block, "source": _strip_nulls(merged)}
 
 

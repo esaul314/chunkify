@@ -317,6 +317,19 @@ quality on representative documents or downstream retrieval behavior.
 
 ### P2-B — Complete transcript/text ingestion as a supported path
 
+**Status: COMPLETE (2026-09-24)**
+
+**Delivered:**
+- `.txt` input is selected by the canonical parser map and runs through the
+  shared `text_clean → split_semantic → emit_jsonl` pipeline.
+- The text adapter normalizes BOM/CRLF, WebVTT cues, blank paragraphs, and
+  uppercase/lowercase/bracketed speaker labels; cue timing is provenance
+  metadata rather than semantic text.
+- Episode metadata is propagated while generated chunk identity and source
+  location remain authoritative; PDF artifact passes are rejected for text.
+- README, architecture/agent guidance, CLI help, and focused tests document the
+  supported contract.
+
 **Why:** The current worktree has the right small adapter-based direction, but the
 public documentation and test contract must agree with the implementation.
 
@@ -416,7 +429,7 @@ Use separate coherent commits, in this order:
 7. `refactor: consolidate semantic emission ownership`
 8. `refactor: simplify CLI and configuration validation`
 9. `test: add corpus quality evaluation` — complete
-10. `docs: reconcile roadmap and supported input formats`
+10. `docs: reconcile roadmap and supported input formats` — complete
 
 If a package is too large for one review, split it by boundary, not by arbitrary
 file count. Each commit must leave the repository in a testable state.

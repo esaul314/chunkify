@@ -46,3 +46,11 @@ def test_parse_step_replaced_for_text_input(monkeypatch: pytest.MonkeyPatch) -> 
     )
     steps = _enforce_invariants(spec, input_path="dummy.txt")
     assert steps == ["text_parse", "text_clean"]
+
+
+@pytest.mark.parametrize("artifact_pass", ["detect_page_artifacts", "merge_footers"])
+def test_pdf_artifact_passes_rejected_for_text_input(artifact_pass: str) -> None:
+    spec = PipelineSpec(pipeline=["pdf_parse", "text_clean", artifact_pass, "split_semantic"])
+
+    with pytest.raises(ValueError, match="not supported for .txt"):
+        _check(spec, "episode.txt")

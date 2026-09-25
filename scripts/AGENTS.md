@@ -72,6 +72,14 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   fallback use, artifact removals, chunk sizes, overlap, duplicate rate, and
   metadata completeness. Use retrieval evaluation separately before changing overlap.
 
+- Convert a transcript through the same canonical pipeline as other supported
+  inputs:
+  ```bash
+  pdf_chunker convert ./episode.txt --out ./data/episode.jsonl --metadata-file ./episode.metadata.yaml --no-enrich
+  ```
+  WebVTT cue timing is retained as `timestamp_start`/`timestamp_end` metadata;
+  PDF footer/artifact passes are not valid for `.txt` input.
+
 ## Known Issues
 
 - Command-line help may be outdated.

@@ -40,6 +40,9 @@ _PARSER_MAP: Final[Mapping[str, str]] = {
     }.items()
     for ext in exts
 }
+_TEXT_UNSUPPORTED_PASSES: Final[frozenset[str]] = frozenset(
+    {"detect_page_artifacts", "merge_footers"}
+)
 
 
 def choose_parser(suffix: str) -> str:
@@ -88,11 +91,23 @@ def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> list[str]:
     return [parser if s in parser_steps else s for s in steps]
 
 
+def _ensure_text_separation(steps: Sequence[str], ext: str) -> None:
+    """Reject PDF page-artifact passes when the input is plain text."""
+    if ext != ".txt":
+        return
+    unsupported = sorted(set(steps) & _TEXT_UNSUPPORTED_PASSES)
+    if unsupported:
+        raise ValueError(
+            "PDF artifact passes are not supported for .txt input: " + ", ".join(unsupported)
+        )
+
+
 def _enforce_invariants(spec: PipelineSpec, *, input_path: str) -> list[str]:
     """Return validated steps while enforcing order and media-type invariants."""
     validate_options(spec.options)
     ext = Path(input_path).suffix.lower()
     steps = _ensure_pdf_epub_separation(list(spec.pipeline), ext)
+    _ensure_text_separation(steps, ext)
     _ensure_clean_precedes_split(steps)
     return _pass_steps(PipelineSpec(pipeline=steps, options=spec.options))
 

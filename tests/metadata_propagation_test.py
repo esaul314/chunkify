@@ -18,6 +18,8 @@ def test_metadata_propagation() -> None:
             "source_system": "podcast_addict",
             "podcast_name": "Signal",
             "episode_name": "Episode One",
+            "chunk_id": "episode-level-id-must-not-win",
+            "location": "episode-level-location-must-not-win",
         },
         "pages": [
             {"page": 1, "blocks": [{"text": "- bullet"}]},
@@ -40,6 +42,8 @@ def test_metadata_propagation() -> None:
     assert bullet_meta["source_system"] == "podcast_addict"
     assert bullet_meta["podcast_name"] == "Signal"
     assert bullet_meta["episode_name"] == "Episode One"
+    assert bullet_meta["chunk_id"] == "src.pdf_p0_c0"
+    assert bullet_meta["location"] is None
 
     numbered_meta = chunks[1]["meta"]
     assert numbered_meta["list_kind"] == "numbered"
@@ -50,3 +54,5 @@ def test_metadata_propagation() -> None:
     assert numbered_meta["location"] is None
     assert numbered_meta["doc_id"] == "episode-001"
     assert numbered_meta["source_kind"] == "podcast_episode"
+    assert numbered_meta["chunk_id"] == "src.pdf_p1_c1"
+    assert numbered_meta["location"] is None

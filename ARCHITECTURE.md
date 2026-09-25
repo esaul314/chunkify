@@ -153,6 +153,14 @@ allows that path to be retired.
 
 Legacy block fields (`type`, `text`, `language`, `source`, `bbox`) are preserved when lifting into artifacts.
 
+Plain-text input uses `adapters/io_text.py` only for ingress normalization. It
+normalizes BOM/newline variants, groups WebVTT cues and speaker-labelled
+paragraphs, removes cue timing lines from semantic text, and stores exact cue
+bounds in block source metadata. The shared `text_clean → split_semantic →
+emit_jsonl` path then handles chunking and emission. For chunks spanning cues,
+`timestamp_start` and `timestamp_end` represent the first and last available
+bounds; missing timing is left missing rather than inferred.
+
 ## 4.1) Corpus-quality evaluation
 
 `docs/corpus_manifest.yaml` defines representative tracked fixtures and the
