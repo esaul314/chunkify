@@ -1,8 +1,17 @@
 # pdf-chunker Implementation Roadmap
 
-**Status:** P2-C complete; further work follows the remaining roadmap packages
+**Status:** Review checkpoint (2026-09-25); P2-C complete, P0-A quality-gate coverage remains open
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
+
+The implementation series is behaviorally green on the declared nox sessions and
+the representative smoke/evaluation checks, but the repository-wide P0-A baseline
+is not complete yet. The current nox lint/typecheck sessions still cover a narrow
+quality-path subset. Direct checks over `pdf_chunker`, `scripts`, and `tests` report
+remaining Ruff/Black findings, and direct package-wide mypy reports remaining type
+errors. Treat the narrow nox result as a scoped gate, not as evidence that every
+maintained module is clean. The next implementation step is to expand that scope
+incrementally without applying a repository-wide formatting mutation blindly.
 
 This document converts the repository audit into an execution plan. It is intentionally
 implementation-oriented: each work package explains why it exists, where to work, what
