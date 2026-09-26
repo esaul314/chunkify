@@ -11,6 +11,11 @@ def test_quality_paths_include_canonical_boundary_modules() -> None:
         "pdf_chunker/contracts.py",
         "pdf_chunker/framework.py",
         "pdf_chunker/core_new.py",
+        "pdf_chunker/env_utils.py",
+        "pdf_chunker/page_utils.py",
+        "pdf_chunker/fallbacks.py",
+        "pdf_chunker/evaluation.py",
+        "pdf_chunker/language.py",
     } <= set(QUALITY_PATHS)
 
 

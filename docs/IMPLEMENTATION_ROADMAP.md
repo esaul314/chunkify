@@ -138,14 +138,21 @@ dependency declarations.
 
 **Current increment (2026-09-26):**
 
-- The declared lint/Black target set now includes `contracts.py`, `framework.py`,
-  and `core_new.py`, alongside the existing maintained pass paths.
+- The declared lint/Black target set now includes the canonical runner boundary
+  (`contracts.py`, `framework.py`, and `core_new.py`) plus the clean utility and
+  quality-boundary modules (`env_utils.py`, `page_utils.py`, `fallbacks.py`,
+  `evaluation.py`, and `language.py`), alongside the existing maintained pass
+  paths.
 - Mypy uses the same production target set, so the canonical runner and its
-  typed artifact/registry boundary are checked under the declared mypy
-  configuration; supported-CI-Python verification remains a separate task.
+  typed artifact/registry boundary and adjacent pure utility modules are checked
+  under the declared mypy configuration; supported-CI-Python verification remains
+  a separate task.
 - `tests/bootstrap/test_quality_gate_scope.py` locks the command construction to
   those declarations and keeps lint-only helpers (`noxfile.py` and
   `tests/bootstrap`) separate from production type targets.
+- The 2026-09-26 utility batch was selected only after each module passed Ruff,
+  Black, and mypy independently; geometry and other modules with outstanding
+  findings remain outside the gate until their issues are handled deliberately.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 
