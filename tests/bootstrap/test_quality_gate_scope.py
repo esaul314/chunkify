@@ -19,6 +19,10 @@ def test_quality_paths_include_canonical_boundary_modules() -> None:
         "pdf_chunker/source_matchers.py",
         "pdf_chunker/patterns.py",
         "pdf_chunker/list_detection.py",
+        "pdf_chunker/passes/epub_parse.py",
+        "pdf_chunker/passes/text_parse.py",
+        "pdf_chunker/passes/semantic_dedupe.py",
+        "pdf_chunker/passes/transform_log.py",
     } <= set(QUALITY_PATHS)
 
 

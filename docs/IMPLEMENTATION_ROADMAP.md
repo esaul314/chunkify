@@ -157,6 +157,11 @@ dependency declarations.
   `list_detection.py`. Each module has focused behavioral coverage and passed
   Ruff, Black, and mypy independently before being added; larger modules with
   unresolved findings remain outside the gate.
+- The 2026-09-26 parser/observability batch adds `passes/epub_parse.py`,
+  `passes/text_parse.py`, `passes/semantic_dedupe.py`, and
+  `passes/transform_log.py`. These small pass and audit-log modules already have
+  parser, deduplication, and transformation-trace coverage; each passed Ruff,
+  Black, and mypy independently before being added.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 
