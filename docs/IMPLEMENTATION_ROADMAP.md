@@ -153,6 +153,10 @@ dependency declarations.
 - The 2026-09-26 utility batch was selected only after each module passed Ruff,
   Black, and mypy independently; geometry and other modules with outstanding
   findings remain outside the gate until their issues are handled deliberately.
+- The 2026-09-26 pure-domain batch adds `source_matchers.py`, `patterns.py`, and
+  `list_detection.py`. Each module has focused behavioral coverage and passed
+  Ruff, Black, and mypy independently before being added; larger modules with
+  unresolved findings remain outside the gate.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

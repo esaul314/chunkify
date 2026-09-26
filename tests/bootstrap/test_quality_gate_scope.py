@@ -16,6 +16,9 @@ def test_quality_paths_include_canonical_boundary_modules() -> None:
         "pdf_chunker/fallbacks.py",
         "pdf_chunker/evaluation.py",
         "pdf_chunker/language.py",
+        "pdf_chunker/source_matchers.py",
+        "pdf_chunker/patterns.py",
+        "pdf_chunker/list_detection.py",
     } <= set(QUALITY_PATHS)
 
 

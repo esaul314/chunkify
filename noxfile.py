@@ -21,6 +21,9 @@ QUALITY_PATHS: Final = (
     "pdf_chunker/fallbacks.py",
     "pdf_chunker/evaluation.py",
     "pdf_chunker/language.py",
+    "pdf_chunker/source_matchers.py",
+    "pdf_chunker/patterns.py",
+    "pdf_chunker/list_detection.py",
     "pdf_chunker/passes/emit_jsonl.py",
     "pdf_chunker/passes/split_semantic.py",
 )
