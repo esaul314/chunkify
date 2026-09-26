@@ -13,6 +13,9 @@ SESSION_DEPENDENCIES: Final = ("-e", ".[dev]")
 TEST_SESSION_DEPENDENCIES: Final = ("-e", ".[dev,enrichment]")
 QUALITY_PATHS: Final = (
     "pdf_chunker/__init__.py",
+    "pdf_chunker/contracts.py",
+    "pdf_chunker/framework.py",
+    "pdf_chunker/core_new.py",
     "pdf_chunker/passes/emit_jsonl.py",
     "pdf_chunker/passes/split_semantic.py",
 )
@@ -72,7 +75,7 @@ def lint(session: nox.Session) -> None:
 
 @nox.session
 def typecheck(session: nox.Session) -> None:
-    """Run mypy for the modules that currently have coverage."""
+    """Run mypy for the declared production quality paths."""
 
     _run(session, _typecheck_commands(), empty_message=TYPECHECK_EMPTY_MESSAGE)
 

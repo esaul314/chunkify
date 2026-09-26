@@ -143,7 +143,7 @@ This project uses:
 | Tool | Purpose | Command |
 |------|---------|--------|
 | **Black** | Code formatting | `black .` |
-| **Ruff** | Linting + import sorting | `ruff check --fix .` |
+| **Ruff** | Linting + import sorting | `ruff check --no-fix .` |
 | **mypy** | Static type checking | `mypy pdf_chunker` |
 | **pytest** | Testing | `pytest` or `nox -s tests` |
 | **nox** | Session runner | `nox -s lint`, `nox -s typecheck`, `nox -s tests` |

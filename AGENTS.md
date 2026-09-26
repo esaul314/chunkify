@@ -808,6 +808,11 @@ bash scripts/validate_chunks.sh
 
 All checks must pass before merging.
 
+The lint and typecheck sessions use the incremental production target set declared
+in `noxfile.py`; a passing session is not a claim that every maintained module is
+already clean. Expand that set in small, tested batches. Use `ruff check --no-fix`
+for diagnosis and review rather than applying repository-wide automatic fixes.
+
 ---
 
 ## Output Protocol: Voice + Ledger (Mandatory)

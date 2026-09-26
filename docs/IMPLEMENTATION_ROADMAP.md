@@ -1,17 +1,18 @@
 # pdf-chunker Implementation Roadmap
 
-**Status:** Review checkpoint (2026-09-25); P2-C complete, P0-A quality-gate coverage remains open
+**Status:** P0-A in progress (2026-09-26); canonical boundary batch covered, repository-wide coverage remains open
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
 The implementation series is behaviorally green on the declared nox sessions and
 the representative smoke/evaluation checks, but the repository-wide P0-A baseline
-is not complete yet. The current nox lint/typecheck sessions still cover a narrow
-quality-path subset. Direct checks over `pdf_chunker`, `scripts`, and `tests` report
-remaining Ruff/Black findings, and direct package-wide mypy reports remaining type
-errors. Treat the narrow nox result as a scoped gate, not as evidence that every
-maintained module is clean. The next implementation step is to expand that scope
-incrementally without applying a repository-wide formatting mutation blindly.
+is not complete yet. The nox lint/typecheck sessions now cover the canonical
+contract/runner boundary plus the previously maintained pass paths, while direct
+checks over `pdf_chunker`, `scripts`, and `tests` still report remaining
+Ruff/Black findings and package-wide mypy still reports remaining type errors.
+Treat the nox result as an explicit incremental gate, not as evidence that every
+maintained module is clean. Continue expanding that scope in small, reviewable
+batches without applying a repository-wide formatting mutation blindly.
 
 This document converts the repository audit into an execution plan. It is intentionally
 implementation-oriented: each work package explains why it exists, where to work, what
@@ -134,6 +135,19 @@ dependency declarations.
 4. Run the checks under the supported Python version used by CI, not only the local Python 3.14 environment.
 5. Make the dependency source of truth explicit. Add enrichment dependencies as an optional extra if enrichment is not required for base conversion; otherwise declare them as runtime dependencies. Reconcile or retire the stale frozen `requirements.txt`.
 6. Keep `ruff check --no-fix` as the default review command. Avoid automatic repository-wide mutation during diagnosis.
+
+**Current increment (2026-09-26):**
+
+- The declared lint/Black target set now includes `contracts.py`, `framework.py`,
+  and `core_new.py`, alongside the existing maintained pass paths.
+- Mypy uses the same production target set, so the canonical runner and its
+  typed artifact/registry boundary are checked under the declared mypy
+  configuration; supported-CI-Python verification remains a separate task.
+- `tests/bootstrap/test_quality_gate_scope.py` locks the command construction to
+  those declarations and keeps lint-only helpers (`noxfile.py` and
+  `tests/bootstrap`) separate from production type targets.
+- The remaining repository-wide findings are intentionally left for later
+  batches; they are not silently excluded from the documented baseline.
 
 **Acceptance criteria:**
 

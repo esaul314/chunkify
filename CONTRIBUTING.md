@@ -61,6 +61,11 @@ nox -s typecheck  # mypy pdf_chunker
 nox -s tests      # pytest
 ```
 
+The lint and typecheck sessions enforce the incremental production target set
+declared in `noxfile.py`. Expand that set only in reviewable batches; use
+`ruff check --no-fix pdf_chunker scripts tests` and `mypy pdf_chunker` as broader
+diagnostic checks while repository-wide debt remains.
+
 Or run tools directly:
 
 ```bash
