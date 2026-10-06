@@ -515,6 +515,7 @@ def _merge_meta(payload: Mapping[str, Any], classification: str, tags: list[str]
         **payload,
         "utterance_type": classification,
         "tags": tags,
+        "enrichment_status": "complete",
     }
 
 
@@ -527,6 +528,8 @@ def _classify_chunk(
     )
     classification = result.get("classification", "unclassified")
     tags = result.get("tags", [])
+    if classification == "error":
+        raise RuntimeError("AI enrichment completion failed for a chunk")
 
     meta_source = _meta_payload(chunk, "meta") or _meta_payload(chunk, "metadata")
     meta = _merge_meta(meta_source, classification, tags)

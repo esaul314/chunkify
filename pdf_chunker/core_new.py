@@ -611,15 +611,22 @@ def run_convert(
     if trace:
         run_meta["trace_transformations"] = True
     a = Artifact(payload=a.payload, meta=run_meta)
-    passes = [configure_pass(registry()[s], spec.options.get(s, {})) for s in run_spec.pipeline]
+    pass_configs = [
+        _prepare_pass(registry()[name], spec.options.get(name, {})) for name in run_spec.pipeline
+    ]
+    passes = [configured for configured, _ in pass_configs]
     environment = collect_environment(passes)
     timings: dict[str, float] = {}
     try:
-        for p in passes:
-            _validate_payload_shape(a.payload, p.name, phase="input")
+        for p, pass_options in pass_configs:
+            seeded = Artifact(
+                payload=a.payload,
+                meta=_with_pass_options(a.meta, p.name, pass_options),
+            )
+            _validate_payload_shape(seeded.payload, p.name, phase="input")
             if trace:
                 emit_trace.record_call(p.name)
-            a = _timed(p, a, timings)
+            a = _timed(p, seeded, timings)
             _validate_payload_shape(a.payload, p.name, phase="output")
             if trace:
                 emit_trace.write_snapshot(p.name, _trace_view(a.payload, trace))
