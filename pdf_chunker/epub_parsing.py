@@ -4,7 +4,7 @@ import os
 import sys
 from collections.abc import Iterable
 from functools import reduce
-from typing import TypedDict, cast
+from typing import NotRequired, TypedDict, cast
 
 import ebooklib
 from bs4 import BeautifulSoup, Tag
@@ -22,6 +22,7 @@ class TextBlock(TypedDict):
     text: str
     language: str
     source: dict[str, str | int]
+    list_kind: NotRequired[str]
 
 
 def get_element_text_content(element, *, omit_nested_lists: bool = False) -> str:
@@ -325,7 +326,7 @@ def _attach_heading_prefixes(
             pages = [p for p in page_candidates if isinstance(p, int)]
             if pages:
                 merged_source["page"] = min(pages)
-            merged = {
+            merged: TextBlock = {
                 **block,
                 "text": _join_block_text(heading_text, block["text"]),
                 "source": merged_source,
@@ -334,7 +335,8 @@ def _attach_heading_prefixes(
 
         return [], [*acc, block]
 
-    return reduce(step, blocks, ([], []))
+    initial: tuple[list[TextBlock], list[TextBlock]] = ([], [])
+    return reduce(step, blocks, initial)
 
 
 def _coalesce_body_blocks(
@@ -355,12 +357,13 @@ def _coalesce_body_blocks(
         if not _should_merge_blocks(previous, block, max_chars=max_chars, min_anchor=min_anchor):
             return [*acc, block]
 
-        merged_block = {
+        merged_block: TextBlock = {
             **previous,
             "text": _join_block_text(previous["text"], block["text"]),
             "source": _merged_source(previous, block),
         }
         return [*acc[:-1], merged_block]
 
-    merged_blocks = reduce(step, prepared, [])
+    initial: list[TextBlock] = []
+    merged_blocks = reduce(step, prepared, initial)
     return [*merged_blocks, *pending_headings]

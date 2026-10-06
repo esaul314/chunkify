@@ -24,6 +24,9 @@ QUALITY_PATHS: Final = (
     "pdf_chunker/source_matchers.py",
     "pdf_chunker/patterns.py",
     "pdf_chunker/list_detection.py",
+    "pdf_chunker/epub_parsing.py",
+    "pdf_chunker/passes/ai_enrich.py",
+    "pdf_chunker/passes/split_modules/segments.py",
     "pdf_chunker/passes/epub_parse.py",
     "pdf_chunker/passes/text_parse.py",
     "pdf_chunker/passes/semantic_dedupe.py",
@@ -31,7 +34,12 @@ QUALITY_PATHS: Final = (
     "pdf_chunker/passes/emit_jsonl.py",
     "pdf_chunker/passes/split_semantic.py",
 )
-LINT_EXTRA_PATHS: Final = ("noxfile.py", "tests/bootstrap")
+LINT_EXTRA_PATHS: Final = (
+    "noxfile.py",
+    "tests/bootstrap",
+    "tests/io_epub_adapter_test.py",
+    "tests/numbered_list_cross_page_chunk_test.py",
+)
 TEST_TARGETS: Final = ("tests",)
 TYPECHECK_EMPTY_MESSAGE: Final = "No typecheck targets yet."
 
