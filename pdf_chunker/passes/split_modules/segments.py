@@ -52,7 +52,7 @@ Record = tuple[int, "Block", str]
 # Constants
 # ---------------------------------------------------------------------------
 
-SOFT_LIMIT = 8000
+SOFT_LIMIT = 4000
 _AVERAGE_CHARS_PER_TOKEN = 4.7
 _ENDS_SENTENCE = re.compile(r'[.!?]["\'""\u2019]?\s*$')
 _NUMBERED_TWO_RE = re.compile(r"(?:^|\n|\s)2[.)]\s+")

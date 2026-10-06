@@ -456,9 +456,19 @@ def classify_chunk_utterance(
             )
     except (RuntimeError, TimeoutError, ConnectionError, OSError, ValueError) as exc:
         if _debug_enabled():
+            cause = exc.__cause__
+            status = getattr(cause, "status_code", None) or getattr(cause, "status", None)
+            code = getattr(cause, "code", None)
+            # Provider error text is useful for diagnosing HTTP failures. Keep it
+            # debug-only and bounded; never log the prompt or request kwargs.
+            detail = str(cause)[:240] if cause is not None else ""
             logger.warning(
-                "ai_enrich debug: completion failed (%s)",
+                "ai_enrich debug: completion failed type=%s cause=%s status=%s code=%s detail=%r",
                 exc.__class__.__name__,
+                cause.__class__.__name__ if cause is not None else None,
+                status,
+                code,
+                detail,
             )
         return {"classification": "error", "tags": []}
 

@@ -52,6 +52,26 @@ def test_read_epub_adapter(tmp_path: Path) -> None:
     assert pages[0]["blocks"][0]["text"] == "Hello world"
 
 
+def test_nested_list_item_does_not_duplicate_descendant_text() -> None:
+    from bs4 import BeautifulSoup
+
+    from pdf_chunker.epub_parsing import _element_to_block
+
+    soup = BeautifulSoup(
+        "<ol><li><a>Chapter 1</a><ol><li><a>Section 1.1</a></li></ol></li></ol>",
+        "html.parser",
+    )
+    outer, inner = soup.find_all("li")
+
+    outer_block = _element_to_block(outer, "book.epub", "nav.xhtml", 1)
+    inner_block = _element_to_block(inner, "book.epub", "nav.xhtml", 1)
+
+    assert outer_block is not None
+    assert inner_block is not None
+    assert outer_block["text"] == "1. Chapter 1"
+    assert inner_block["text"] == "1. Section 1.1"
+
+
 def test_navigation_provenance_is_replaced_when_coalesced() -> None:
     from pdf_chunker.epub_parsing import _coalesce_body_blocks
 

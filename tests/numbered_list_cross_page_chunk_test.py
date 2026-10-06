@@ -52,3 +52,28 @@ def test_numbered_list_overflow_allows_merge() -> None:
     text = items[0]["text"]
     assert "1. First item ends here." in text
     assert "2. Second item starts next page." in text
+
+
+def test_long_numbered_list_overflow_is_capped() -> None:
+    blocks = [
+        {
+            "type": "list_item",
+            "list_kind": "numbered",
+            "text": f"{number}. entry-{number} " + ("detail " * 80),
+        }
+        for number in range(1, 9)
+    ]
+    doc = {
+        "type": "page_blocks",
+        "source_path": "src.epub",
+        "pages": [{"page": 1, "blocks": blocks}],
+    }
+
+    items = make_splitter(chunk_size=400, overlap=0, generate_metadata=True)(
+        Artifact(payload=doc)
+    ).payload["items"]
+
+    assert len(items) > 1
+    joined = "\n".join(item["text"] for item in items)
+    assert all(f"entry-{number}" in joined for number in range(1, 9))
+    assert max(len(item["text"]) for item in items) <= 4000

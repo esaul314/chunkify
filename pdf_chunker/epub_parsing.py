@@ -24,15 +24,24 @@ class TextBlock(TypedDict):
     source: dict[str, str | int]
 
 
-def get_element_text_content(element) -> str:
-    """Extract text from BeautifulSoup element without extra separators."""
+def get_element_text_content(element, *, omit_nested_lists: bool = False) -> str:
+    """Extract text from a BeautifulSoup element without extra separators.
+
+    When extracting a list item, nested lists are emitted as their own items and
+    must not be copied into the parent item as well.
+    """
 
     def _to_text(child) -> str:
         if hasattr(child, "stripped_strings"):
             return " ".join(child.stripped_strings)
         return child
 
-    return " ".join(_to_text(child) for child in element.contents)
+    contents = (
+        child
+        for child in element.contents
+        if not (omit_nested_lists and isinstance(child, Tag) and child.name in {"ol", "ul"})
+    )
+    return " ".join(_to_text(child) for child in contents)
 
 
 def _prefixed_list_text(element, text: str) -> str:
@@ -47,7 +56,7 @@ def _prefixed_list_text(element, text: str) -> str:
 
 def _element_to_block(element, filename: str, item_name: str, spine_index: int) -> TextBlock | None:
     """Convert a BeautifulSoup element into a TextBlock."""
-    raw_text = get_element_text_content(element)
+    raw_text = get_element_text_content(element, omit_nested_lists=element.name == "li")
     block_text = clean_paragraph(raw_text)
     if not block_text:
         return None
