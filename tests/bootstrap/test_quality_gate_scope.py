@@ -42,6 +42,11 @@ def test_quality_paths_include_canonical_boundary_modules() -> None:
         "pdf_chunker/passes/chunk_options.py",
         "pdf_chunker/passes/chunk_pipeline.py",
         "pdf_chunker/passes/sentence_fusion.py",
+        "pdf_chunker/passes/heading_detect.py",
+        "pdf_chunker/passes/list_detect.py",
+        "pdf_chunker/passes/merge_footers.py",
+        "pdf_chunker/passes/detect_doc_end.py",
+        "pdf_chunker/passes/metrics.py",
     } <= set(QUALITY_PATHS)
 
 
@@ -62,6 +67,10 @@ def test_semantic_helper_tests_are_lint_checked() -> None:
         "tests/chunk_pipeline_test.py",
         "tests/sentence_fusion_test.py",
     } <= set(LINT_EXTRA_PATHS)
+
+
+def test_structure_pass_tests_are_lint_checked() -> None:
+    assert "tests/structure_pass_purity_test.py" in LINT_EXTRA_PATHS
 
 
 @pytest.mark.parametrize("session_name", ("lint", "typecheck", "tests"))

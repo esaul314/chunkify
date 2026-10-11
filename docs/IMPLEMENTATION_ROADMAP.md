@@ -212,6 +212,31 @@ dependency declarations.
   policy, semantic rule, or golden fixture is introduced. Broader package
   diagnostics still report 340 Ruff findings and 39 mypy errors in 16 files;
   these remain outside the completed batch, not outside the roadmap.
+- The 2026-10-11 structure-pass batch adds `passes/heading_detect.py`,
+  `passes/list_detect.py`, `passes/merge_footers.py`, and `passes/detect_doc_end.py`
+  to Ruff, Black, and mypy, together with the small pure `passes/metrics.py`
+  updater. Failing-first tests exposed nested metric mutation of input artifacts
+  in all four passes. A data-first, keyword-configured copy-on-write transform
+  preserves unrelated entries and supports partial application; property tests
+  check right-biased composition, empty-update identity, and input preservation.
+  The passes retain their detection rules, payload shape, ordering, and metric
+  values. Malformed metric containers now raise an explicit `TypeError` instead
+  of an incidental attribute/item error; no malformed data is silently discarded.
+  Targeted import/type/format cleanup removes each pass's existing findings.
+  The new lint/format-checked test module also covers no-op payloads, missing
+  metadata, footer length/count boundaries and provenance, latest document-end
+  marker/search-window behavior, one-shot heading annotation, and page-local
+  list continuation. All three nox sessions pass on Python 3.11.17 (33 production
+  type targets and 50 lint/format files). The new module has 54 passing behavior
+  cases; scope guards, documentation consistency, and metadata integration give
+  146 passing focused cases. Collection finds 1,055 tests without errors, generated
+  merge documentation is current, all seven corpus cases pass, and the canonical
+  PDF smoke retains its sentinel. An in-memory comparison against the pre-change
+  passes gives identical output payloads/metadata for 8,037 cases while also
+  verifying input-artifact preservation in the new implementation. Diff review
+  found no further actionable issues. No dependency, Python-version policy,
+  detection rule, or golden fixture changed. Broader package diagnostics now
+  report 286 Ruff findings and 35 mypy errors in 12 files; P0-A remains open.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

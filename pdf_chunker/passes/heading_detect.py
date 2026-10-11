@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Heading detection pass using fallback heuristics.
 
 Each block is annotated with heading metadata based on
@@ -8,7 +6,11 @@ leans on functional iteration to keep the transform stateless and
 composable within the pipeline.
 """
 
-from typing import Any, Dict, Iterable, List, Optional
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from typing import Any
 
 from pdf_chunker.framework import Artifact, register
 from pdf_chunker.heading_detection import (
@@ -18,10 +20,9 @@ from pdf_chunker.heading_detection import (
     _has_heading_starter,
     get_heading_hierarchy,
 )
-import re
+from pdf_chunker.passes.metrics import with_metrics
 
-
-Block = Dict[str, Any]
+Block = dict[str, Any]
 
 
 _HEADING_STYLE_TAGS = frozenset({"bold", "caps", "small_caps", "large"})
@@ -45,10 +46,13 @@ def _inline_style_ratio(block: Block, styles: Iterable[str]) -> float:
 
 
 def _promote_heading(block: Block) -> bool:
-    return _inline_style_ratio(block, _HEADING_STYLE_TAGS) >= 0.6 or _inline_style_ratio(block, _CAPS_STYLE_TAGS) >= 0.8
+    return (
+        _inline_style_ratio(block, _HEADING_STYLE_TAGS) >= 0.6
+        or _inline_style_ratio(block, _CAPS_STYLE_TAGS) >= 0.8
+    )
 
 
-def _estimate_threshold(text: str) -> Optional[int]:
+def _estimate_threshold(text: str) -> int | None:
     words = text.split()
     checks = (
         (len(words) <= 3 and not text.endswith(TRAILING_PUNCTUATION), 3),
@@ -100,7 +104,8 @@ def _annotate(block: Block) -> Block:
     return enriched
 
 
-def annotate_headings(blocks: Iterable[Block]) -> List[Block]:
+def annotate_headings(blocks: Iterable[Block]) -> list[Block]:
+    """Annotate blocks in input order, consuming the iterable once without mutation."""
     return [_annotate(b) for b in blocks]
 
 
@@ -109,7 +114,7 @@ class _HeadingDetectPass:
     input_type = list
     output_type = list
 
-    def __call__(self, a: Artifact) -> Artifact:
+    def __call__(self, a: Artifact[object]) -> Artifact[object]:
         blocks = a.payload
         if not isinstance(blocks, list):
             return a
@@ -117,10 +122,10 @@ class _HeadingDetectPass:
         enhanced = annotate_headings(blocks)
         hierarchy = get_heading_hierarchy(enhanced)
 
-        meta = dict(a.meta or {})
-        metrics = meta.setdefault("metrics", {}).setdefault("heading_detect", {})
-        metrics["headings"] = len(hierarchy)
-        meta["heading_hierarchy"] = hierarchy
+        meta = {
+            **with_metrics(a.meta, pass_name=self.name, updates={"headings": len(hierarchy)}),
+            "heading_hierarchy": hierarchy,
+        }
         return Artifact(payload=enhanced, meta=meta)
 
 

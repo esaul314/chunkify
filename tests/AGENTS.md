@@ -19,6 +19,10 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   partially applied stages and keyword-index builders
 - `sentence_fusion_test.py`: Merge-budget boundary cases, completed/unfinished
   sentence-run flushing, and property-based content/order/input preservation
+- `structure_pass_purity_test.py`: Input-artifact preservation across four structure
+  passes; partial application and right-biased metric-update composition; explicit
+  malformed-metric failures; footer length/count boundaries, document-end search
+  precedence, one-shot heading annotation, and page-local list continuation
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
 - `io_epub_adapter_test.py`: EPUB adapter extraction, stable spine grouping,
@@ -60,6 +64,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   tests/passes/test_split_semantic_parity.py`; the first two modules are also
   included in the nox lint/format scope.
 - Leverage ```tests/utils/common.sh` for shared setup.
+- For structure-pass changes, run `pytest tests/structure_pass_purity_test.py
+  tests/heading_detect_pass_test.py tests/list_detect_pass_test.py
+  tests/test_merge_footers.py tests/test_doc_end_detection.py`. The purity module
+  is included in the nox lint/format scope; property tests also verify the metric
+  updater's composition, empty-update identity, and input-preservation laws.
 
 ## Utilities & Fixtures
 - `tests/utils/common.sh`: Shell helpers for CLI-oriented tests

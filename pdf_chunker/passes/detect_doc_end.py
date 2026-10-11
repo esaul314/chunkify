@@ -1,15 +1,17 @@
+"""Detect end markers within the last three pages and report copied metrics."""
+
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Iterable, List, Tuple
-
-import logging
+from collections.abc import Iterable
+from typing import Any
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.passes.metrics import with_metrics
 
-Block = Dict[str, Any]
-Page = Dict[str, Any]
+Block = dict[str, Any]
+Page = dict[str, Any]
 
 DOT_LEADER_RE = re.compile(r"(?:\.\s*){3,}")
 DOC_END_RE = re.compile(r"^(?:THE\s+)?END(?:\s+OF\s+DOCUMENT)?\.?$")
@@ -31,14 +33,13 @@ def _is_artifact(text: str) -> bool:
 
 def _is_doc_end_page(blocks: Iterable[Block]) -> bool:
     texts = [
-        b.get("text", "").strip()
-        for b in blocks
-        if b.get("text") and not _is_artifact(b["text"])
+        b.get("text", "").strip() for b in blocks if b.get("text") and not _is_artifact(b["text"])
     ]
     return len(texts) == 1 and bool(DOC_END_RE.fullmatch(texts[0]))
 
 
-def _doc_end_index(pages: List[Page]) -> int | None:
+def _doc_end_index(pages: list[Page]) -> int | None:
+    """Select the latest qualifying marker, restricted to the final three pages."""
     for offset, page in enumerate(reversed(pages[-3:]), 1):
         idx = len(pages) - offset
         if _is_doc_end_page(page.get("blocks", [])):
@@ -46,7 +47,7 @@ def _doc_end_index(pages: List[Page]) -> int | None:
     return None
 
 
-def _truncate_pages(pages: List[Page]) -> Tuple[List[Page], int]:
+def _truncate_pages(pages: list[Page]) -> tuple[list[Page], int]:
     idx = _doc_end_index(pages)
     if idx is None:
         logger.debug("no doc-end marker found")
@@ -65,14 +66,12 @@ class _DetectDocEndPass:
     input_type = object
     output_type = object
 
-    def __call__(self, a: Artifact) -> Artifact:
+    def __call__(self, a: Artifact[object]) -> Artifact[object]:
         payload = a.payload
         if not isinstance(payload, dict) or payload.get("type") != "page_blocks":
             return a
         pages, truncated = _truncate_pages(payload.get("pages", []))
-        meta = dict(a.meta or {})
-        metrics = meta.setdefault("metrics", {})
-        metrics.setdefault("detect_doc_end", {})["truncated_pages"] = truncated
+        meta = with_metrics(a.meta, pass_name=self.name, updates={"truncated_pages": truncated})
         return Artifact(payload={**payload, "pages": pages}, meta=meta)
 
 

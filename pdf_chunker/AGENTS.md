@@ -28,6 +28,10 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `passes/chunk_pipeline.py`: Composable block/record iterators with injected folds
   and builders; metadata builders receive `index` by keyword.
 - `passes/sentence_fusion.py`: Pure sentence-run transitions and merge-budget decisions.
+- `passes/metrics.py`: Data-first, copy-on-write per-pass metric updates.
+- `passes/heading_detect.py`, `passes/list_detect.py`, `passes/merge_footers.py`,
+  and `passes/detect_doc_end.py`: Structure transforms that preserve input payloads
+  and nested metadata while reporting their own metrics.
 - `passes/emit_jsonl.py`: Normalizes canonical chunks for JSONL and validates
   serialized size; unmarked direct callers use the legacy compatibility path.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
@@ -75,6 +79,12 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `chunk_options`, `chunk_pipeline`, and `sentence_fusion` are included in the
   incremental Python 3.11 quality gate. Run `nox -s lint typecheck tests` when
   changing their types, transitions, or collaborator interfaces.
+- Structure passes and `passes/metrics.py` are also quality-gated. Use
+  `partial(with_metrics, pass_name="list_detect", updates=counts)` when a reusable
+  metadata stage is useful; pass metadata as the remaining input. The updater
+  preserves unrelated entries and copies the changed containers, then `Artifact`
+  detaches nested metadata. Existing metric containers must be mappings;
+  malformed containers raise an explicit `TypeError` rather than being discarded.
 ```
 
 ---
