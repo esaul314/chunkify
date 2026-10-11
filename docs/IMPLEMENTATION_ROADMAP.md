@@ -267,6 +267,38 @@ dependency declarations.
   dependency, Python-version policy, cleanup rule, or golden fixture changed.
   Broader package diagnostics still report 286 Ruff findings and now 31 mypy
   errors in 11 files; repository-wide P0-A coverage remains the next task.
+- The 2026-10-11 text-cleaning batch adds `passes/text_clean.py` to Ruff, Black,
+  and mypy. Failing-first checks expose mutation of nested normalization/document
+  metrics for string and page-block inputs; copy-on-write updates reuse
+  `passes/metrics.py` while preserving the legacy root `metrics.normalized` flag.
+  Ordered maps with partially applied data-first block/page stages replace local
+  accumulation loops. Counts still mean surviving non-empty blocks, style coverage
+  is calculated over those blocks, page numbers retain precedence, and footer
+  decisions retain page/block order. Existing text/style transforms, runtime pattern
+  precedence, injected callback/cache effects, conditional metric retention, and
+  string-only compatibility behavior remain unchanged. Invalid option/metric
+  containers now raise explicit `TypeError` rather than incidental attribute/item
+  errors; invalid regexes still propagate. Marker writes use the compatibility
+  functions' attribute dictionaries, preserving wrapper identity, installation
+  idempotence, and original-callable references without suppressing type errors.
+  These import-time wrappers remain a compatibility boundary, not a claim of full
+  module purity. The lint/format-checked regression module adds 47 behavior cases,
+  including one-shot input, partial application, page-concatenation and whitespace
+  idempotence laws, style/provenance preservation, callback format/order policy,
+  empty inputs, retained metrics, and wrapper installation. One new scope guard
+  accompanies the extended production assertion. All three nox sessions pass on
+  Python 3.11.17 (35 production type targets and 54 lint/format files), 220 focused
+  cases pass, collection finds 1,147 tests without errors, generated merge docs are
+  current, all seven corpus cases pass, and the canonical PDF smoke retains its
+  sentinel. An in-memory comparison against the previous pass matches exact
+  payload/metadata outputs and callback traces for 9,396 cases across string and
+  document inputs, styles, page layouts, formats, pattern overrides, and existing
+  metrics; current input artifacts are preserved in every case. Diff review found
+  no further actionable issues. Existing corpus warnings remain and do not imply
+  perfect text preservation. No new dependency, Python policy, cleaning rule,
+  public interface removal, or golden fixture change is introduced. Broader package
+  diagnostics still report 286 Ruff findings and now 26 mypy errors in 10 files;
+  repository-wide P0-A coverage remains the next task.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

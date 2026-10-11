@@ -47,6 +47,7 @@ def test_quality_paths_include_canonical_boundary_modules() -> None:
         "pdf_chunker/passes/merge_footers.py",
         "pdf_chunker/passes/detect_doc_end.py",
         "pdf_chunker/passes/detect_page_artifacts.py",
+        "pdf_chunker/passes/text_clean.py",
         "pdf_chunker/passes/metrics.py",
     } <= set(QUALITY_PATHS)
 
@@ -76,6 +77,10 @@ def test_structure_pass_tests_are_lint_checked() -> None:
 
 def test_page_artifact_pass_tests_are_lint_checked() -> None:
     assert "tests/page_artifact_pass_test.py" in LINT_EXTRA_PATHS
+
+
+def test_text_clean_purity_tests_are_lint_checked() -> None:
+    assert "tests/text_clean_purity_test.py" in LINT_EXTRA_PATHS
 
 
 @pytest.mark.parametrize("session_name", ("lint", "typecheck", "tests"))

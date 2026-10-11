@@ -29,6 +29,8 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   and builders; metadata builders receive `index` by keyword.
 - `passes/sentence_fusion.py`: Pure sentence-run transitions and merge-budget decisions.
 - `passes/metrics.py`: Data-first, copy-on-write per-pass metric updates.
+- `passes/text_clean.py`: Ordered text/style cleanup and copied normalization
+  metrics, with explicit injected footer callbacks and compatibility wrappers.
 - `passes/heading_detect.py`, `passes/list_detect.py`, `passes/merge_footers.py`,
   `passes/detect_doc_end.py`, and `passes/detect_page_artifacts.py`: Structure
   transforms that preserve input payloads and nested metadata while reporting
@@ -95,6 +97,17 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   fields remain accepted for compatibility, but this path does not classify
   ambiguous footers or invoke callbacks. Malformed option containers raise
   `TypeError`; prior decision metrics are retained when a run has no new decisions.
+- Text cleanup is also quality-gated. Use `partial(_clean_doc,
+  footer_patterns=compiled, inline_patterns=inline)` from `passes.text_clean`
+  for a reusable data-first stage. Page/block iterators are consumed once in order;
+  surviving blocks determine count and style coverage. Page numbers override
+  block-local numbers, and nonempty runtime patterns replace instance patterns.
+  String payloads use the legacy text-only path and only set `metrics.normalized`;
+  document cleanup uses `with_metrics` and retains conditional metrics without a
+  new value. Option/metric containers must be mappings (`TypeError` otherwise).
+  Injected callback/cache effects and idempotent import-time compatibility wrappers
+  remain unchanged; do not describe this whole module as strictly side-effect-free
+  or remove those wrappers without separate compatibility coverage.
 ```
 
 ---

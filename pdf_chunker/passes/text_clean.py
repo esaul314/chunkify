@@ -1,13 +1,21 @@
+"""Ordered text/style cleanup with copied metrics and injected footer decisions.
+
+The data-first cleanup helpers support partial application. Callback/cache effects
+and import-time compatibility wrappers are retained; this module does not create
+prompt I/O. Without effectful collaborators, cleanup preserves its input values.
+"""
+
 from __future__ import annotations
 
 import re
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import wraps
+from functools import partial, wraps
 from typing import Any, cast
 
 from pdf_chunker.framework import Artifact, register
+from pdf_chunker.passes.metrics import with_metrics
 
 
 def _apply_fixpoint(transform: Callable[[str], str], text: str) -> str:
@@ -63,7 +71,7 @@ def _patch_clean_paragraph() -> None:
         cleaned = clean_paragraph(paragraph)
         return _normalize_nbsp_like(cleaned)
 
-    _wrapped._normalizes_nbsp = True
+    _wrapped.__dict__["_normalizes_nbsp"] = True
     _text_cleaning.clean_paragraph = _wrapped
 
 
@@ -109,7 +117,7 @@ def _patch_split_text_into_chunks() -> None:
         chunks = [_render_chunk(window) for window in windows]
         return _splitter._dedupe_overlapping_chunks(chunks) or [_render_chunk(materialized)]
 
-    _wrapped._preserves_raw_fragment = True
+    _wrapped.__dict__["_preserves_raw_fragment"] = True
     _splitter._split_text_into_chunks = _wrapped
 
 
@@ -262,29 +270,26 @@ def _clean_page(
     interactive_heuristic: bool = False,
     source_path: str | None = None,
 ) -> tuple[dict[str, Any], int, list[str]]:
-    """Clean all blocks in ``page`` and return the block count and stripped footers."""
+    """Map blocks once in order, then filter empty text and aggregate footers.
+
+    Page numbers override block-local numbers as before. The returned count is
+    the number of surviving blocks, not the number of text changes. Inputs are
+    preserved; supplied callbacks/caches retain their own effect semantics.
+    """
     page_num = page.get("page", 0)
-    all_stripped: list[str] = []
-    cleaned_blocks = []
-
-    for b in page.get("blocks", []):
-        # Pass page number to block
-        b_with_page = {**b, "page": page_num}
-        cleaned_block, stripped = _clean_block(
-            b_with_page,
-            footer_patterns,
-            inline_patterns,
-            footer_callback,
-            footer_cache,
-            interactive_heuristic=interactive_heuristic,
-            source_path=source_path,
-        )
-        all_stripped.extend(stripped)
-        cleaned_blocks.append(cleaned_block)
-
-    # Filter out blocks that became empty after footer stripping
-    non_empty = [b for b in cleaned_blocks if b.get("text", "").strip()]
-    return {**page, "blocks": non_empty}, len(non_empty), all_stripped
+    clean_block = partial(
+        _clean_block,
+        footer_patterns=footer_patterns,
+        inline_patterns=inline_patterns,
+        footer_callback=footer_callback,
+        footer_cache=footer_cache,
+        interactive_heuristic=interactive_heuristic,
+        source_path=source_path,
+    )
+    results = tuple(clean_block({**block, "page": page_num}) for block in page.get("blocks", []))
+    non_empty = [block for block, _ in results if block.get("text", "").strip()]
+    stripped = [footer for _, footers in results for footer in footers]
+    return {**page, "blocks": non_empty}, len(non_empty), stripped
 
 
 def _clean_doc(
@@ -297,27 +302,27 @@ def _clean_doc(
     interactive_heuristic: bool = False,
     source_path: str | None = None,
 ) -> tuple[dict[str, Any], int, dict[str, Any], list[str]]:
-    """Clean document pages and aggregate block metrics."""
-    all_stripped: list[str] = []
-    pages_with_counts = []
+    """Map one-shot page input once, preserving order and aggregating metrics.
 
-    for p in doc.get("pages", []):
-        cleaned_page, count, stripped = _clean_page(
-            p,
-            footer_patterns,
-            inline_patterns,
-            footer_callback,
-            footer_cache,
-            interactive_heuristic=interactive_heuristic,
-            source_path=source_path,
-        )
-        pages_with_counts.append((cleaned_page, count))
-        all_stripped.extend(stripped)
-
-    pages = [p for p, _ in pages_with_counts]
-    blocks = sum(c for _, c in pages_with_counts)
+    Takes data first so settings can be partially applied. Output is eager;
+    counts and footer decisions concatenate in page/block order. Style coverage
+    is calculated over surviving blocks across the whole document.
+    """
+    clean_page = partial(
+        _clean_page,
+        footer_patterns=footer_patterns,
+        inline_patterns=inline_patterns,
+        footer_callback=footer_callback,
+        footer_cache=footer_cache,
+        interactive_heuristic=interactive_heuristic,
+        source_path=source_path,
+    )
+    results = tuple(clean_page(page) for page in doc.get("pages", []))
+    pages = [page for page, _, _ in results]
+    blocks = sum(count for _, count, _ in results)
     style_metrics = _inline_style_metrics(pages)
-    return {**doc, "pages": pages}, blocks, style_metrics, all_stripped
+    stripped = [footer for _, _, footers in results for footer in footers]
+    return {**doc, "pages": pages}, blocks, style_metrics, stripped
 
 
 @dataclass
@@ -326,7 +331,14 @@ class _TextCleanPass:
 
     Attributes:
         footer_patterns: Regex strings that identify footers to strip
-        interactive_footers: Whether to prompt for footer confirmation (reserved)
+        interactive_footers: Enable heuristics when a callback is supplied
+
+    Nonempty runtime patterns replace instance patterns; empty overrides retain
+    them. String input takes the legacy text-only path, without footer options
+    or per-document metrics. Document cleanup preserves prior conditional metric
+    entries when there is no new value to report. Invalid option/metric containers
+    raise ``TypeError``; regex compilation errors still propagate. Callbacks are
+    supplied by the caller; the pass does not construct a prompt.
     """
 
     name: str = field(default="text_clean", init=False)
@@ -358,13 +370,18 @@ class _TextCleanPass:
 
             self._footer_cache = FooterDecisionCache()
 
-    def __call__(self, a: Artifact) -> Artifact:
+    def __call__(self, a: Artifact[object]) -> Artifact[object]:
         payload = a.payload
         block_count: int | None = None
         cleaned: str | dict[str, Any]
 
         # Check for runtime options
-        opts = (a.meta or {}).get("options", {}).get("text_clean", {})
+        options = (a.meta or {}).get("options", {})
+        if not isinstance(options, Mapping):
+            raise TypeError("artifact options must be a mapping")
+        opts = options.get(self.name, {})
+        if not isinstance(opts, Mapping):
+            raise TypeError(f"options for pass {self.name!r} must be a mapping")
         runtime_patterns = opts.get("footer_patterns", ())
         runtime_interactive = opts.get("interactive_footers", False)
 
@@ -423,20 +440,33 @@ class _TextCleanPass:
             return a
 
         meta = dict(a.meta or {})
-        metrics = meta.setdefault("metrics", {})
-        metrics["normalized"] = True
         if block_count is not None:
-            text_metrics = metrics.setdefault("text_clean", {})
-            text_metrics["blocks"] = block_count
-            text_metrics.update(style_metrics)
-            if block_patterns or inline_patterns:
-                text_metrics["footer_patterns_applied"] = len(block_patterns)
-                text_metrics["inline_patterns_applied"] = len(inline_patterns)
-            if interactive_heuristic:
-                text_metrics["interactive_heuristic"] = True
-            if stripped_footers:
-                text_metrics["inline_footers_stripped"] = len(stripped_footers)
-        return Artifact(payload=cleaned, meta=meta)
+            meta = with_metrics(
+                meta,
+                pass_name=self.name,
+                updates={
+                    "blocks": block_count,
+                    **style_metrics,
+                    **(
+                        {
+                            "footer_patterns_applied": len(block_patterns),
+                            "inline_patterns_applied": len(inline_patterns),
+                        }
+                        if block_patterns or inline_patterns
+                        else {}
+                    ),
+                    **({"interactive_heuristic": True} if interactive_heuristic else {}),
+                    **(
+                        {"inline_footers_stripped": len(stripped_footers)}
+                        if stripped_footers
+                        else {}
+                    ),
+                },
+            )
+        metrics = meta.get("metrics", {})
+        if not isinstance(metrics, Mapping):
+            raise TypeError("artifact metrics must be a mapping")
+        return Artifact(payload=cleaned, meta={**meta, "metrics": {**metrics, "normalized": True}})
 
 
 text_clean = register(_TextCleanPass())

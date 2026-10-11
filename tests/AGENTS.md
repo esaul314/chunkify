@@ -28,6 +28,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   count/decision aggregation and page-concatenation laws, runtime option precedence,
   inert callback/cache compatibility, retained metrics, and explicit malformed
   option/metric and invalid-regex failures
+- `text_clean_purity_test.py`: String/document nested-metric preservation, missing
+  metrics and empty documents, text-only compatibility, retained conditional
+  metrics, one-shot page/block ordering, partially applied cleanup, page-concatenation
+  and whitespace-idempotence laws, surviving-block style telemetry, runtime pattern
+  precedence, callback format/order policy, explicit malformed-container failures,
+  and idempotent compatibility-wrapper installation with preserved markers
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
 - `io_epub_adapter_test.py`: EPUB adapter extraction, stable spine grouping,
@@ -79,6 +85,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   tests/interactive_footer_test.py`. The dedicated regression module is included
   in the nox lint/format scope. Do not add prompting behavior incidentally while
   changing this pure cleanup boundary.
+- For text-cleaning boundary changes, run `pytest tests/text_clean_purity_test.py
+  tests/text_clean_pass_test.py tests/test_inline_styles.py
+  tests/interactive_footer_test.py tests/property/test_clean_idempotence.py`.
+  The new purity module is lint/format checked. Use in-memory callback stubs and
+  isolate compatibility-wrapper installation with `monkeypatch`; input-artifact
+  preservation does not imply that injected callbacks or caches have no effects.
 
 ## Utilities & Fixtures
 - `tests/utils/common.sh`: Shell helpers for CLI-oriented tests

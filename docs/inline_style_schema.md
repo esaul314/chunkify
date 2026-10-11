@@ -81,9 +81,13 @@ The extraction phase currently emits the ✅ tags from the status table above. A
 future PyMuPDF4LLM bridge).
 
 ### Cleaning alignment (`pdf_chunker.passes.text_clean`)
-* `_inline_style_metrics` calculates `inline_style_block_ratio` and `inline_style_tag_counts` for run-level telemetry.
-* `_remap_inline_styles` rebuilds spans after ligature fixes, hyphen merges, or whitespace edits by delegating to the
+* `_inline_style_metrics` calculates `inline_style_block_ratio` and `inline_style_tag_counts` over surviving non-empty
+  blocks across the whole cleaned document, not an average of per-page ratios.
+* `_clean_block` rebuilds spans after ligature fixes, hyphen merges, or whitespace edits by delegating to the
   normalization helpers.
+* `_clean_page` and `_clean_doc` map one-shot inputs once in page/block order. The pass records style telemetry using
+  copy-on-write metric updates, preserving input spans and nested metadata. String-only compatibility input reports
+  `metrics.normalized` without recalculating document style telemetry.
 
 ### Downstream consumers
 * **`split_semantic`**
@@ -113,7 +117,7 @@ This produces `artifacts/trace/<run_id>/<step>_inline_styles.json`. Each entry l
 ### Debugging & troubleshooting checklist
 * **Extraction sanity:** Use `tests/test_inline_styles.py::test_inline_style_extraction` as a template; feed a minimal PDF block
   through `_extract_block_inline_styles` and assert span locations.
-* **Cleaning drift:** When spans misalign after hyphen or ligature fixes, inspect `_remap_inline_styles` outputs in trace files
+* **Cleaning drift:** When spans misalign after hyphen or ligature fixes, inspect `_clean_block` outputs in trace files
   and verify `build_index_map` produces a sensible mapping.
 * **Chunk anomalies:** If captions or footnotes regress, set `PDF_CHUNKER_DEBUG_INLINE=1` (env flag read by tests) to keep
   `_footnote_spans` in emitted chunks for inspection, or instrument `split_semantic._collect_superscripts` locally.

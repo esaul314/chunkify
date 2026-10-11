@@ -279,6 +279,15 @@ The `text_clean` pass handles both:
 - The pipeline wraps it to match inline structure: `\n\n{pattern}\s+\d{1,3}(?=\s|$)`
 - Inline footers are stripped surgically; block-level footers require full match
 
+The `text_clean` pass preserves input payloads and nested metric containers. Its
+`blocks` metric counts surviving non-empty blocks, not changed blocks. Runtime
+patterns replace instance patterns only when non-empty. For a reusable in-memory
+stage, use `partial(_clean_doc, footer_patterns=compiled_patterns)` from
+`pdf_chunker.passes.text_clean`; pages and blocks are consumed once in order.
+Callbacks and caches remain explicit collaborators with their existing effects;
+the pass never constructs a prompt. String payloads retain the legacy text-only
+path and report only `metrics.normalized`, preserving existing document metrics.
+
 ### Debugging Directions
 - When JSONL lines begin mid-sentence or phrases like "Most engineers" repeat, inspect the `split_semantic` pass before focusing on downstream emission or deduplication.
 - Ensure `_get_split_fn` pipes `semantic_chunker` through `merge_conversational_chunks` prior to `iter_word_chunks` and `_soft_segments`; skipping this step truncates or duplicates sentences.
@@ -420,6 +429,7 @@ pdf_chunker/
     ├── sentence_fusion_test.py      # Budget boundaries and coalescing properties
     ├── structure_pass_purity_test.py # Structure boundaries and metric-update laws
     ├── page_artifact_pass_test.py    # Ordered cleanup and option-precedence laws
+    ├── text_clean_purity_test.py     # Ordered text/style cleanup and metadata preservation
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py
