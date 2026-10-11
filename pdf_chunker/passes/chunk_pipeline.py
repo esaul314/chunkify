@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Protocol, TypeAlias, cast
 
-Block = Doc = Mapping[str, Any]
-Record = tuple[int, Block, str]
+Block: TypeAlias = dict[str, Any]
+Doc: TypeAlias = Mapping[str, Any]
+Record: TypeAlias = tuple[int, Block, str]
+
+
+class _MetadataBuilder(Protocol):
+    """A chunk builder accepting the enumerated index by keyword."""
+
+    def __call__(self, text: str, block: Block, page: int, /, *, index: int) -> dict[str, Any]: ...
 
 
 def _page_from_source(value: Any) -> int | None:
@@ -35,6 +42,13 @@ def _resolve_page(block: Block, page: Mapping[str, Any], fallback: int) -> int:
 
 
 def iter_blocks(doc: Doc) -> Iterator[tuple[int, Block]]:
+    """Yield blocks lazily in input order, without changing their mappings.
+
+    Page provenance prefers the block source, then the page source, then the
+    page number; absent integer provenance falls back to the one-based position.
+    Pages and blocks may each be one-shot iterables.
+    """
+
     pages = doc.get("pages", cast(Iterable[Mapping[str, Any]], ()))
     return (
         (_resolve_page(block, page, index + 1), block)
@@ -50,6 +64,12 @@ def merge_adjacent_blocks(
     fold: Callable[[list[Record], Record], list[Record]],
     split_fn: Callable[[str], Iterable[str]],
 ) -> Iterator[Record]:
+    """Fold blocks eagerly, then split nonempty text lazily in record order.
+
+    The injected fold owns merging; this iterator does not mutate input blocks.
+    Keyword-only collaborators allow partially applying the stage to a stream.
+    """
+
     merged: list[Record] = []
     for page, block in blocks:
         merged = fold(merged, (page, block, text_of(block)))
@@ -62,6 +82,12 @@ def attach_headings(
     is_heading: Callable[[Block], bool],
     merge_block_text: Callable[[Sequence[str], str], str],
 ) -> Iterator[Record]:
+    """Attach consecutive headings to the next body using a copied body block.
+
+    The first pending heading supplies page provenance. Unheaded records pass
+    through unchanged; trailing headings without a body are not emitted.
+    """
+
     pending_page: int | None = None
     pending_texts: list[str] = []
     for page, block, text in records:
@@ -85,8 +111,14 @@ def chunk_records(
     *,
     generate_metadata: bool,
     build_plain: Callable[[str], dict[str, Any]],
-    build_with_meta: Callable[[str, Block, int, int], dict[str, Any]],
+    build_with_meta: _MetadataBuilder,
 ) -> Iterator[dict[str, Any]]:
+    """Build chunks lazily with stable zero-based IDs and optional metadata.
+
+    Only the selected builder is called. Metadata builders receive ``index``
+    by keyword, including when their other settings are partially applied.
+    """
+
     return (
         {
             "id": str(index),

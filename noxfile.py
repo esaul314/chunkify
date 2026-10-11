@@ -36,6 +36,9 @@ QUALITY_PATHS: Final = (
     "pdf_chunker/passes/text_parse.py",
     "pdf_chunker/passes/semantic_dedupe.py",
     "pdf_chunker/passes/transform_log.py",
+    "pdf_chunker/passes/chunk_options.py",
+    "pdf_chunker/passes/chunk_pipeline.py",
+    "pdf_chunker/passes/sentence_fusion.py",
     "pdf_chunker/passes/emit_jsonl.py",
     "pdf_chunker/passes/split_semantic.py",
 )
@@ -45,6 +48,8 @@ LINT_EXTRA_PATHS: Final = (
     "tests/io_epub_adapter_test.py",
     "tests/pdf_parse_pass_test.py",
     "tests/utils_test.py",
+    "tests/chunk_pipeline_test.py",
+    "tests/sentence_fusion_test.py",
     "tests/numbered_list_cross_page_chunk_test.py",
 )
 TEST_TARGETS: Final = ("tests",)

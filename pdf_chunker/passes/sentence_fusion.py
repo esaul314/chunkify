@@ -169,15 +169,14 @@ class _BudgetView:
             return False
         if not self.within_hard_limit:
             return False
-        if self.dense_fragments and not (
-            self.sentence_completion_pending
+        return (
+            not self.dense_fragments
+            or self.sentence_completion_pending
             or (
                 self.budget.hard_limit is not None
                 and self.budget.effective_total <= self.budget.hard_limit
             )
-        ):
-            return False
-        return True
+        )
 
     def violates(self) -> bool:
         if not self.within_hard_limit:
@@ -309,10 +308,14 @@ def _merge_sentence_fragments(
         budget_violation = view.violates()
         if budget_violation and not allow_overflow:
             return _MergeDecision(False, False, dense_fragments)
-        if target_limit is not None and budget.effective_total > target_limit:
-            if budget.hard_limit is None or budget.effective_total > budget.hard_limit:
-                if dense_fragments and not allow_overflow:
-                    return _MergeDecision(False, False, dense_fragments)
+        if (
+            target_limit is not None
+            and budget.effective_total > target_limit
+            and (budget.hard_limit is None or budget.effective_total > budget.hard_limit)
+            and dense_fragments
+            and not allow_overflow
+        ):
+            return _MergeDecision(False, False, dense_fragments)
         head = lead[0]
         continuation_chars = ",.;:)]\"'"
         if not (continuation_lead or head.islower() or head in continuation_chars):
@@ -432,6 +435,12 @@ def _merge_sentence_fragments(
 
 
 def _coalesce_sentence_runs(chunks: Iterable[str]) -> list[str]:
+    """Join runs ending in sentence punctuation, preserving word order.
+
+    Consume the input once and return a new list. Unterminated trailing
+    fragments remain separate rather than implying a sentence boundary.
+    """
+
     def _combine(parts: tuple[str, ...]) -> str:
         return " ".join(segment.strip() for segment in parts if segment.strip()).strip()
 
@@ -455,10 +464,11 @@ def _coalesce_sentence_runs(chunks: Iterable[str]) -> list[str]:
             return _flush(acc, updated_buffer), ()
         return acc, updated_buffer
 
+    initial: tuple[list[str], tuple[str, ...]] = ([], ())
     merged, pending = reduce(
         _consume,
         chunks,
-        ([], ()),
+        initial,
     )
     return _flush(merged, pending)
 

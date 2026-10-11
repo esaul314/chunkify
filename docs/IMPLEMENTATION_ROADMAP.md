@@ -193,6 +193,25 @@ dependency declarations.
   failure was also exercised with a deliberately nonexistent interpreter.
   No conversion policy or golden fixture changed; repository-wide scope
   expansion remains the next P0-A task.
+- The 2026-10-11 semantic-helper batch adds `passes/chunk_options.py`,
+  `passes/chunk_pipeline.py`, and `passes/sentence_fusion.py` to Ruff, Black,
+  and mypy. Explicit aliases matching canonical dictionary blocks and a small
+  keyword-index callback protocol describe the existing iterator/builder
+  interface accurately; a typed initial accumulator makes the existing pure
+  coalescing fold type-checkable.
+  Two equivalent Boolean simplifications keep the same merge-budget decisions.
+  Focused tests cover immutable option/metric updates, provenance precedence,
+  one-shot iterator order and laziness, partially applied stages/builders,
+  heading attachment, stable chunk IDs, budget boundaries, and sentence-run
+  content preservation. Both new test modules are lint/format checked, and
+  scope regression tests guard the expanded declarations. All three supported
+  nox sessions, 163 focused tests, collection, generated documentation, and
+  seven corpus cases pass; the canonical PDF smoke retains its sentinel.
+  Comparison with the pre-change implementation gives identical results for
+  1,600 budget states and 9,720 fusion cases. No new dependency, Python-version
+  policy, semantic rule, or golden fixture is introduced. Broader package
+  diagnostics still report 340 Ruff findings and 39 mypy errors in 16 files;
+  these remain outside the completed batch, not outside the roadmap.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

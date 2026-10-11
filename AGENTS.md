@@ -363,6 +363,9 @@ pdf_chunker/
 │   ├── text_processing.py         # Shared text manipulation utilities
 │   ├── passes/                    # Registered pipeline passes
 │   │   ├── __init__.py
+│   │   ├── chunk_options.py      # Immutable semantic options and metric updates
+│   │   ├── chunk_pipeline.py     # Composable block/record iterators and builders
+│   │   ├── sentence_fusion.py    # Pure sentence-run folds and merge budgets
 │   │   ├── emit_jsonl.py          # Canonical row normalization and JSONL prep
 │   │   ├── emit_jsonl_lists.py    # List detection and rebalancing utilities
 │   │   ├── emit_jsonl_text.py     # Text manipulation utilities for emission
@@ -411,6 +414,8 @@ pdf_chunker/
     ├── artifact_block_test.py
     ├── bullet_list_test.py
     ├── chunk_pdf_integration_test.py
+    ├── chunk_pipeline_test.py       # Iterator composition, option/metric preservation
+    ├── sentence_fusion_test.py      # Budget boundaries and coalescing properties
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py

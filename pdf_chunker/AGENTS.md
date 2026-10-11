@@ -24,6 +24,10 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `splitter.py`: Enforces chunk boundaries and semantic cohesion.
 - `passes/split_semantic.py`: Canonical semantic owner for stitching, boundaries,
   overlap, deduplication, footnote cleanup, and chunk metadata.
+- `passes/chunk_options.py`: Immutable semantic sizing options and copied metric updates.
+- `passes/chunk_pipeline.py`: Composable block/record iterators with injected folds
+  and builders; metadata builders receive `index` by keyword.
+- `passes/sentence_fusion.py`: Pure sentence-run transitions and merge-budget decisions.
 - `passes/emit_jsonl.py`: Normalizes canonical chunks for JSONL and validates
   serialized size; unmarked direct callers use the legacy compatibility path.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
@@ -63,6 +67,14 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   `docs/DEPENDENCIES.md`; base conversion must not require them.
 - Split-word merging is restricted to newline or double-space boundaries with
   frequency checks to avoid collapsing valid phrases.
+- Semantic iterator stages take their input stream first and collaborators as
+  keyword-only settings, so `partial(chunk_records, generate_metadata=True,
+  build_plain=plain_builder, build_with_meta=metadata_builder)` is a reusable
+  stage. A metadata builder may itself be partially applied but must accept
+  `(text, block, page, *, index)`; inputs remain unmodified.
+- `chunk_options`, `chunk_pipeline`, and `sentence_fusion` are included in the
+  incremental Python 3.11 quality gate. Run `nox -s lint typecheck tests` when
+  changing their types, transitions, or collaborator interfaces.
 ```
 
 ---

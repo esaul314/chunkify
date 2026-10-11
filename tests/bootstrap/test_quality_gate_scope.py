@@ -39,6 +39,9 @@ def test_quality_paths_include_canonical_boundary_modules() -> None:
         "pdf_chunker/passes/text_parse.py",
         "pdf_chunker/passes/semantic_dedupe.py",
         "pdf_chunker/passes/transform_log.py",
+        "pdf_chunker/passes/chunk_options.py",
+        "pdf_chunker/passes/chunk_pipeline.py",
+        "pdf_chunker/passes/sentence_fusion.py",
     } <= set(QUALITY_PATHS)
 
 
@@ -52,6 +55,13 @@ def test_lint_commands_are_derived_from_declared_paths() -> None:
 
 def test_typecheck_command_is_derived_from_quality_paths() -> None:
     assert _typecheck_commands() == (("mypy", *QUALITY_PATHS),)
+
+
+def test_semantic_helper_tests_are_lint_checked() -> None:
+    assert {
+        "tests/chunk_pipeline_test.py",
+        "tests/sentence_fusion_test.py",
+    } <= set(LINT_EXTRA_PATHS)
 
 
 @pytest.mark.parametrize("session_name", ("lint", "typecheck", "tests"))

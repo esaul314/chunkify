@@ -14,6 +14,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `ai_enrich_pass_test.py`: Pass-level enrichment and metadata injection
 - `convert_returns_rows_test.py`: `convert` yields rows for chunk dict payloads
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection
+- `chunk_pipeline_test.py`: Immutable option/metric updates, provenance precedence,
+  one-shot iterator order/laziness, heading attachment, stable chunk IDs, and
+  partially applied stages and keyword-index builders
+- `sentence_fusion_test.py`: Merge-budget boundary cases, completed/unfinished
+  sentence-run flushing, and property-based content/order/input preservation
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
 - `io_epub_adapter_test.py`: EPUB adapter extraction, stable spine grouping,
@@ -50,6 +55,10 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - Shell and Python tests must pass independently
 - Use idempotent tests.
 - Prefer functional assertions on outputs.
+- For semantic-helper changes, run `pytest tests/chunk_pipeline_test.py
+  tests/sentence_fusion_test.py tests/semantic_chunking_test.py
+  tests/passes/test_split_semantic_parity.py`; the first two modules are also
+  included in the nox lint/format scope.
 - Leverage ```tests/utils/common.sh` for shared setup.
 
 ## Utilities & Fixtures
