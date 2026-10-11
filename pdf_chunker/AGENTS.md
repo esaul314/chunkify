@@ -30,8 +30,9 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `passes/sentence_fusion.py`: Pure sentence-run transitions and merge-budget decisions.
 - `passes/metrics.py`: Data-first, copy-on-write per-pass metric updates.
 - `passes/heading_detect.py`, `passes/list_detect.py`, `passes/merge_footers.py`,
-  and `passes/detect_doc_end.py`: Structure transforms that preserve input payloads
-  and nested metadata while reporting their own metrics.
+  `passes/detect_doc_end.py`, and `passes/detect_page_artifacts.py`: Structure
+  transforms that preserve input payloads and nested metadata while reporting
+  their own metrics.
 - `passes/emit_jsonl.py`: Normalizes canonical chunks for JSONL and validates
   serialized size; unmarked direct callers use the legacy compatibility path.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
@@ -85,6 +86,15 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   preserves unrelated entries and copies the changed containers, then `Artifact`
   detaches nested metadata. Existing metric containers must be mappings;
   malformed containers raise an explicit `TypeError` rather than being discarded.
+- Page-artifact cleanup maps each page once and aggregates counts and decisions
+  in page/block order. Use `partial(_clean_doc, footer_config=config)` for a
+  reusable data-first cleanup stage in focused tests. The pass flattens tables
+  before matching known footer patterns; matching removes the entire block.
+  Runtime known patterns or a callback replace the instance config, while empty
+  patterns and never-pattern-only overrides retain it. Callback/cache/interactive
+  fields remain accepted for compatibility, but this path does not classify
+  ambiguous footers or invoke callbacks. Malformed option containers raise
+  `TypeError`; prior decision metrics are retained when a run has no new decisions.
 ```
 
 ---

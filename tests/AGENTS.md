@@ -19,10 +19,15 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   partially applied stages and keyword-index builders
 - `sentence_fusion_test.py`: Merge-budget boundary cases, completed/unfinished
   sentence-run flushing, and property-based content/order/input preservation
-- `structure_pass_purity_test.py`: Input-artifact preservation across four structure
+- `structure_pass_purity_test.py`: Input-artifact preservation across five structure
   passes; partial application and right-biased metric-update composition; explicit
   malformed-metric failures; footer length/count boundaries, document-end search
   precedence, one-shot heading annotation, and page-local list continuation
+- `page_artifact_pass_test.py`: Table-before-pattern precedence, whole-block footer
+  removal and provenance, one-shot page input, partially applied cleanup, ordered
+  count/decision aggregation and page-concatenation laws, runtime option precedence,
+  inert callback/cache compatibility, retained metrics, and explicit malformed
+  option/metric and invalid-regex failures
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
 - `io_epub_adapter_test.py`: EPUB adapter extraction, stable spine grouping,
@@ -69,6 +74,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   tests/test_merge_footers.py tests/test_doc_end_detection.py`. The purity module
   is included in the nox lint/format scope; property tests also verify the metric
   updater's composition, empty-update identity, and input-preservation laws.
+- For page-artifact cleanup, also run `pytest tests/page_artifact_pass_test.py
+  tests/test_page_artifacts.py tests/text_clean_pass_test.py
+  tests/interactive_footer_test.py`. The dedicated regression module is included
+  in the nox lint/format scope. Do not add prompting behavior incidentally while
+  changing this pure cleanup boundary.
 
 ## Utilities & Fixtures
 - `tests/utils/common.sh`: Shell helpers for CLI-oriented tests

@@ -237,6 +237,36 @@ dependency declarations.
   found no further actionable issues. No dependency, Python-version policy,
   detection rule, or golden fixture changed. Broader package diagnostics now
   report 286 Ruff findings and 35 mypy errors in 12 files; P0-A remains open.
+- The 2026-10-11 page-artifact batch adds `passes/detect_page_artifacts.py` to
+  Ruff, Black, and mypy. Failing-first tests expose input-artifact metric mutation
+  and a second run overwriting the first result's recorded count. Reusing the
+  existing copy-on-write metric updater fixes both without a new abstraction.
+  An eager ordered map and declarative aggregation replace the document fold's
+  hidden decision-list mutation; the data-first helper accepts one-shot page
+  iterables and can be partially applied to footer settings. Cleanup rules,
+  page/block order, provenance, metric values, and runtime override precedence
+  are unchanged. Table flattening precedes whole-block known-pattern removal.
+  Callback/cache/interactive fields remain accepted but are not invoked by this
+  path; misleading prompting documentation is corrected rather than silently
+  introducing new behavior. Malformed option/metric containers now raise explicit
+  `TypeError` instead of incidental attribute/item errors, and invalid regexes
+  still propagate. The dedicated lint/format-checked regression module covers
+  cleanup boundaries, ordered decisions, empty inputs, option precedence,
+  callback/cache preservation, retained metrics, and page-concatenation laws.
+  The shared purity suite now includes all five structure passes, adding six
+  behavior cases alongside 37 dedicated cases and one new scope guard. All three
+  nox sessions pass on Python 3.11.17 (34 production type targets and 52 lint/format
+  files). The final focused run passes 243 cases, collection finds 1,099 tests
+  without errors, generated merge documentation is current, all seven corpus
+  cases pass, and the canonical PDF smoke retains its sentinel. An in-memory
+  comparison against the prior pass gives identical payloads and metadata for
+  19,200 valid cases across table/footer/plain text, page layouts, runtime overrides,
+  and existing metrics; current inputs are preserved in every case. Diff review
+  found no further actionable issues. Existing evaluation warnings remain, so
+  passing corpus criteria are not a claim of perfect text preservation. No new
+  dependency, Python-version policy, cleanup rule, or golden fixture changed.
+  Broader package diagnostics still report 286 Ruff findings and now 31 mypy
+  errors in 11 files; repository-wide P0-A coverage remains the next task.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

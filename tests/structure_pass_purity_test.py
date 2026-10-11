@@ -11,12 +11,19 @@ from hypothesis import strategies as st
 
 from pdf_chunker.framework import Artifact, Pass
 from pdf_chunker.passes.detect_doc_end import _truncate_pages, detect_doc_end
+from pdf_chunker.passes.detect_page_artifacts import detect_page_artifacts
 from pdf_chunker.passes.heading_detect import annotate_headings, heading_detect
 from pdf_chunker.passes.list_detect import list_detect
 from pdf_chunker.passes.merge_footers import _merge_trailing_short_lines, merge_footers
 from pdf_chunker.passes.metrics import with_metrics
 
-STRUCTURE_PASSES = (heading_detect, list_detect, merge_footers, detect_doc_end)
+STRUCTURE_PASSES = (
+    heading_detect,
+    list_detect,
+    merge_footers,
+    detect_doc_end,
+    detect_page_artifacts,
+)
 
 
 def _payload(step: Pass) -> Any:

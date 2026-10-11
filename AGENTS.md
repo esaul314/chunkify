@@ -371,6 +371,7 @@ pdf_chunker/
 │   │   ├── emit_jsonl_lists.py    # List detection and rebalancing utilities
 │   │   ├── emit_jsonl_text.py     # Text manipulation utilities for emission
 │   │   ├── extraction_fallback.py
+│   │   ├── detect_page_artifacts.py # Ordered pure table/footer cleanup
 │   │   ├── heading_detect.py
 │   │   ├── list_detect.py
 │   │   ├── pdf_parse.py
@@ -418,6 +419,7 @@ pdf_chunker/
     ├── chunk_pipeline_test.py       # Iterator composition, option/metric preservation
     ├── sentence_fusion_test.py      # Budget boundaries and coalescing properties
     ├── structure_pass_purity_test.py # Structure boundaries and metric-update laws
+    ├── page_artifact_pass_test.py    # Ordered cleanup and option-precedence laws
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py

@@ -44,6 +44,7 @@ QUALITY_PATHS: Final = (
     "pdf_chunker/passes/list_detect.py",
     "pdf_chunker/passes/merge_footers.py",
     "pdf_chunker/passes/detect_doc_end.py",
+    "pdf_chunker/passes/detect_page_artifacts.py",
     "pdf_chunker/passes/emit_jsonl.py",
     "pdf_chunker/passes/split_semantic.py",
 )
@@ -56,6 +57,7 @@ LINT_EXTRA_PATHS: Final = (
     "tests/chunk_pipeline_test.py",
     "tests/sentence_fusion_test.py",
     "tests/structure_pass_purity_test.py",
+    "tests/page_artifact_pass_test.py",
     "tests/numbered_list_cross_page_chunk_test.py",
 )
 TEST_TARGETS: Final = ("tests",)

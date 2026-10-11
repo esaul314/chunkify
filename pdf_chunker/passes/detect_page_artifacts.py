@@ -1,22 +1,21 @@
 """Cleanup page artifacts (e.g., flatten markdown-like tables).
 
-This pass provides optional interactive footer confirmation for ambiguous cases.
+This pass flattens leading markdown tables, then removes entire blocks matching
+known footer patterns. Callback/cache settings remain accepted for compatibility;
+this cleanup path does not classify ambiguous footers or invoke callbacks.
 Configure via pipeline options:
 
     detect_page_artifacts:
       known_footer_patterns:
         - "Collective Wisdom.*\\d+"
         - "Book Title.*\\d{1,3}$"
-      never_footer_patterns:
-        - "^Chapter \\d+"
-      interactive: true  # Enable interactive prompts (CLI only)
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from functools import reduce
 from typing import Any
 
 from pdf_chunker import page_artifacts
@@ -26,6 +25,7 @@ from pdf_chunker.interactive import (
     FooterConfig,
     FooterDecisionCache,
 )
+from pdf_chunker.passes.metrics import with_metrics
 
 Block = dict[str, Any]
 
@@ -78,31 +78,28 @@ def _clean_doc(
     footer_config: FooterConfig | None = None,
     footer_cache: FooterDecisionCache | None = None,
 ) -> tuple[dict[str, Any], int, list[str]]:
-    """Clean all pages in a document."""
-    all_decisions: list[str] = []
+    """Map pages once, preserving order, then aggregate counts and decisions.
 
-    def step(
-        acc: tuple[list[dict[str, Any]], int],
-        page: dict[str, Any],
-    ) -> tuple[list[dict[str, Any]], int]:
-        pages, total = acc
-        cleaned, changed, decisions = _clean_page(page, footer_config, footer_cache)
-        all_decisions.extend(decisions)
-        return [*pages, cleaned], total + changed
-
-    pages, total = reduce(step, doc.get("pages", []), ([], 0))
-    return {**doc, "pages": pages}, total, all_decisions
+    Data is first so callers can partially apply footer settings. Input pages
+    may be a one-shot iterable; the result is eager, like the canonical payload.
+    Neither the document nor the supplied configuration/cache is mutated.
+    """
+    results = tuple(_clean_page(page, footer_config, footer_cache) for page in doc.get("pages", []))
+    return (
+        {**doc, "pages": [page for page, _, _ in results]},
+        sum(changed for _, changed, _ in results),
+        [decision for _, _, decisions in results for decision in decisions],
+    )
 
 
 @dataclass
 class _DetectPageArtifactsPass:
-    """Pass to detect and remove page artifacts (headers, footers, etc.).
+    """Flatten tables and remove known footers without mutating input artifacts.
 
-    Attributes:
-        known_footer_patterns: Regex patterns that always identify footers
-        never_footer_patterns: Regex patterns for text that is never a footer
-        interactive: Enable interactive prompts for ambiguous cases
-        footer_callback: Optional callback for programmatic confirmation
+    Runtime known patterns or a callback replace the instance footer config.
+    Empty patterns and never-pattern-only overrides retain that config. This
+    path uses only known patterns; other footer settings are compatibility fields.
+    Options and metrics must be mappings; malformed containers raise TypeError.
     """
 
     name: str = field(default="detect_page_artifacts", init=False)
@@ -137,13 +134,18 @@ class _DetectPageArtifactsPass:
             )
             self._footer_cache = FooterDecisionCache()
 
-    def __call__(self, a: Artifact) -> Artifact:
+    def __call__(self, a: Artifact[object]) -> Artifact[object]:
         payload = a.payload
         if not isinstance(payload, dict) or payload.get("type") != "page_blocks":
             return a
 
         # Check for runtime options that might override instance config
-        opts = (a.meta or {}).get("options", {}).get("detect_page_artifacts", {})
+        options = (a.meta or {}).get("options", {})
+        if not isinstance(options, Mapping):
+            raise TypeError("artifact options must be a mapping")
+        opts = options.get(self.name, {})
+        if not isinstance(opts, Mapping):
+            raise TypeError(f"options for pass {self.name!r} must be a mapping")
         footer_config = self._footer_config
         footer_cache = self._footer_cache
 
@@ -154,12 +156,14 @@ class _DetectPageArtifactsPass:
 
         cleaned_doc, changed, decisions = _clean_doc(payload, footer_config, footer_cache)
 
-        meta = dict(a.meta or {})
-        metrics = meta.setdefault("metrics", {})
-        pass_metrics = metrics.setdefault("detect_page_artifacts", {})
-        pass_metrics["blocks_cleaned"] = changed
-        if decisions:
-            pass_metrics["footer_decisions"] = decisions
+        meta = with_metrics(
+            a.meta,
+            pass_name=self.name,
+            updates={
+                "blocks_cleaned": changed,
+                **({"footer_decisions": decisions} if decisions else {}),
+            },
+        )
 
         return Artifact(payload=cleaned_doc, meta=meta)
 
