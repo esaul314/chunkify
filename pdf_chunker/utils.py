@@ -74,6 +74,8 @@ def _list_words(text: str, *, lowercase: bool = False) -> list[str]:
 
 
 def _normalize_sentence_boundaries(text: str) -> str:
+    """Insert inferred sentence stops for readability calculations only."""
+
     lines = text.splitlines()
     if len(lines) <= 1:
         return text
@@ -91,9 +93,11 @@ def _normalize_sentence_boundaries(text: str) -> str:
         return first_char.isalpha() and first_char.isupper()
 
     return "".join(
-        f"{line}{'. \n' if _needs_sentence_break(line, lines[index + 1]) else '\n'}"
-        if index < len(lines) - 1
-        else line
+        (
+            line + (". \n" if _needs_sentence_break(line, lines[index + 1]) else "\n")
+            if index < len(lines) - 1
+            else line
+        )
         for index, line in enumerate(lines)
     )
 

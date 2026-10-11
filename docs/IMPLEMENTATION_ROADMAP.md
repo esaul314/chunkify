@@ -1,6 +1,6 @@
 # pdf-chunker Implementation Roadmap
 
-**Status:** P0-A in progress (2026-10-11); ingress boundary covered, repository-wide coverage remains open
+**Status:** P0-A in progress (2026-10-11); Python 3.11 verified, repository-wide coverage remains open
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -136,7 +136,7 @@ dependency declarations.
 5. Make the dependency source of truth explicit. Add enrichment dependencies as an optional extra if enrichment is not required for base conversion; otherwise declare them as runtime dependencies. Reconcile or retire the stale frozen `requirements.txt`.
 6. Keep `ruff check --no-fix` as the default review command. Avoid automatic repository-wide mutation during diagnosis.
 
-**Current increment (2026-09-26):**
+**Current increments (through 2026-10-11):**
 
 - The declared lint/Black target set now includes the canonical runner boundary
   (`contracts.py`, `framework.py`, and `core_new.py`) plus the clean utility and
@@ -145,8 +145,8 @@ dependency declarations.
   paths.
 - Mypy uses the same production target set, so the canonical runner and its
   typed artifact/registry boundary and adjacent pure utility modules are checked
-  under the declared mypy configuration; supported-CI-Python verification remains
-  a separate task.
+  under the declared mypy configuration. Supported-CI-Python verification is
+  addressed by the 2026-10-11 interpreter increment below.
 - `tests/bootstrap/test_quality_gate_scope.py` locks the command construction to
   those declarations and keeps lint-only helpers (`noxfile.py` and
   `tests/bootstrap`) separate from production type targets.
@@ -173,6 +173,26 @@ dependency declarations.
   three parser passes. The parser test module is also lint/format checked.
   Existing text normalization and in-memory fallback tests cover the adjacent
   adapters and selection boundary; conversion behavior is unchanged.
+- The 2026-10-11 interpreter increment explicitly selects Python 3.11 for all
+  three nox sessions, matching CI, and treats an unavailable interpreter as a
+  failure rather than a skipped check. Regression tests guard each session's
+  interpreter, the failure policy, and agreement with CI's setup steps. See
+  `CONTRIBUTING.md` for local installation or optional standalone provisioning
+  through recent `nox[pbs]` tooling; explicit other-interpreter runs are
+  exploratory, not a substitute for the supported-Python baseline.
+- That supported-runtime check exposed one Python 3.12-only f-string in the
+  readability helper in `utils.py`, which prevented package import on Python
+  3.11. String concatenation preserves the existing pure transformation and
+  exact output; twelve normalization cases lock punctuation, blank lines,
+  indentation, and short-heading behavior. A parametrized syntax check covers
+  every production module, including ones not imported by other tests, using
+  the actual session interpreter. `tests/utils_test.py` is now lint/format
+  checked; broader `utils.py` lint/format/type debt remains outside that scope.
+- Local lint, typecheck, and the full non-legacy test session have now passed
+  under Python 3.11.17 with the declared dependency profiles. Missing-runtime
+  failure was also exercised with a deliberately nonexistent interpreter.
+  No conversion policy or golden fixture changed; repository-wide scope
+  expansion remains the next P0-A task.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

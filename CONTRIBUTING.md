@@ -61,6 +61,22 @@ nox -s typecheck  # mypy pdf_chunker
 nox -s tests      # pytest
 ```
 
+All three sessions explicitly use Python 3.11, matching CI, regardless of the
+interpreter running nox. A missing interpreter fails the run instead of skipping
+the checks. Install Python 3.11 locally, or let a recent nox provision an isolated
+standalone interpreter:
+
+```bash
+python -m pip install --upgrade "nox[pbs]"
+nox -s lint typecheck tests
+```
+
+Provisioning needs network access on the first run and does not replace
+`pdf-env`. The downloader is optional developer tooling, not a project runtime
+dependency. An exploratory run on another interpreter is explicit, for example
+`nox --force-python 3.14 -s lint typecheck tests`; it does not substitute for the
+supported-Python baseline.
+
 The lint and typecheck sessions enforce the incremental production target set
 declared in `noxfile.py`. Expand that set only in reviewable batches; use
 `ruff check --no-fix pdf_chunker scripts tests` and `mypy pdf_chunker` as broader

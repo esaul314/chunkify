@@ -6,6 +6,9 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `bootstrap/test_quality_gate_scope.py`: Declared lint/typecheck paths, explicit
+  supported-Python sessions, missing-interpreter failure policy, CI agreement,
+  and syntax parsing of all production modules on the session interpreter
 - `pdf_extraction_test.py`: Extractor accuracy and fallback thresholds
 - `ai_enrichment_test.py`: Classification correctness and tag injection
 - `ai_enrich_pass_test.py`: Pass-level enrichment and metadata injection
@@ -32,6 +35,8 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `test_conversion_epub_cli.py`: CLI EPUB conversion parity with golden output
 - `splitter_transform_test.py`: Chunk splitting of cleaned text artifacts
 - `text_cleaning_transform_test.py`: Ligature, underscore, and hyphenation normalization
+- `utils_test.py`: Source tracing and readability-only sentence normalization,
+  including punctuation, indentation, short headings, and blank boundaries
 - `rag_pipeline_readiness_test.py`: RAG pipeline overlap, metadata completeness, and LiteLLM preflight
 - `corpus_evaluation_test.py`: Corpus manifest loading and category-based quality metrics
 - `documentation_consistency_test.py`: Active roadmap, dependency, pipeline, and pass-table alignment

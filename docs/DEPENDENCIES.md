@@ -26,6 +26,12 @@ primary PyMuPDF extraction path remains the default.
 
 ## Reproducibility
 
+The quality-gate baseline uses Python 3.11 explicitly in both `noxfile.py` and
+CI. Local nox sessions must not silently inherit a newer host interpreter or
+skip missing interpreters. See [CONTRIBUTING.md](../CONTRIBUTING.md#2-quality-gates-run-before-pushing)
+for setup, optional standalone-Python provisioning, and explicit exploratory
+interpreter overrides. Provisioning tools are not base runtime dependencies.
+
 The project currently uses version ranges in `pyproject.toml` rather than
 committing a machine-specific lockfile. The local `pdf-env` and any generated
 `pip freeze` output are environment artifacts, not repository policy. If release

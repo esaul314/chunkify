@@ -9,6 +9,7 @@ import nox
 Command = tuple[str, ...]
 
 ROOT: Final = Path(__file__).parent
+SUPPORTED_PYTHON: Final = "3.11"
 SESSION_DEPENDENCIES: Final = ("-e", ".[dev]")
 TEST_SESSION_DEPENDENCIES: Final = ("-e", ".[dev,enrichment]")
 QUALITY_PATHS: Final = (
@@ -43,10 +44,14 @@ LINT_EXTRA_PATHS: Final = (
     "tests/bootstrap",
     "tests/io_epub_adapter_test.py",
     "tests/pdf_parse_pass_test.py",
+    "tests/utils_test.py",
     "tests/numbered_list_cross_page_chunk_test.py",
 )
 TEST_TARGETS: Final = ("tests",)
 TYPECHECK_EMPTY_MESSAGE: Final = "No typecheck targets yet."
+
+# Missing runtimes must not turn skipped checks into a successful baseline.
+nox.options.error_on_missing_interpreters = True
 
 
 def _existing(paths: Iterable[str]) -> tuple[str, ...]:
@@ -91,21 +96,21 @@ def _run(
         session.run(*command)
 
 
-@nox.session
+@nox.session(python=SUPPORTED_PYTHON)
 def lint(session: nox.Session) -> None:
     """Run static analysis via Ruff and Black."""
 
     _run(session, _lint_commands())
 
 
-@nox.session
+@nox.session(python=SUPPORTED_PYTHON)
 def typecheck(session: nox.Session) -> None:
     """Run mypy for the declared production quality paths."""
 
     _run(session, _typecheck_commands(), empty_message=TYPECHECK_EMPTY_MESSAGE)
 
 
-@nox.session
+@nox.session(python=SUPPORTED_PYTHON)
 def tests(session: nox.Session) -> None:
     """Execute the pytest suite."""
 

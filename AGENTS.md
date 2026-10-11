@@ -813,6 +813,13 @@ in `noxfile.py`; a passing session is not a claim that every maintained module i
 already clean. Expand that set in small, tested batches. Use `ruff check --no-fix`
 for diagnosis and review rather than applying repository-wide automatic fixes.
 
+All three nox sessions request Python 3.11, matching CI, and fail if it is
+unavailable. To provision it without replacing the local venv, install the
+optional developer downloader with `python -m pip install --upgrade "nox[pbs]"`,
+then run `nox -s lint typecheck tests`. See `CONTRIBUTING.md` for setup details;
+an explicit `nox --force-python 3.14 -s lint typecheck tests` run is exploratory,
+not supported-Python baseline evidence.
+
 ---
 
 ## Output Protocol: Voice + Ledger (Mandatory)
