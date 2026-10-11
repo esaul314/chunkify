@@ -13,6 +13,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection
 - `page_exclusion_test.py`: Page range and filter correctness
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
+- `io_epub_adapter_test.py`: EPUB adapter extraction, stable spine grouping,
+  unknown-location ordering, and navigation provenance
+- `pdf_parse_pass_test.py`: Shared PDF/EPUB/text parser normalization, one-shot
+  input ordering, extraction-quality metrics, and input preservation
+- `extraction_fallback_pass_test.py`: Selection from in-memory extraction candidates
+  and reporting of the selected engine and reason
 - `process_document_override_test.py`: Callable override injection
 - `env_utils_test.py`: Environment flag toggles via `monkeypatch`
 - `list_detection_edge_case_test.py`: Bullet list parsing edge cases

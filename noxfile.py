@@ -25,8 +25,12 @@ QUALITY_PATHS: Final = (
     "pdf_chunker/patterns.py",
     "pdf_chunker/list_detection.py",
     "pdf_chunker/epub_parsing.py",
+    "pdf_chunker/adapters/io_epub.py",
+    "pdf_chunker/adapters/io_text.py",
     "pdf_chunker/passes/ai_enrich.py",
     "pdf_chunker/passes/split_modules/segments.py",
+    "pdf_chunker/passes/pdf_parse.py",
+    "pdf_chunker/passes/extraction_fallback.py",
     "pdf_chunker/passes/epub_parse.py",
     "pdf_chunker/passes/text_parse.py",
     "pdf_chunker/passes/semantic_dedupe.py",
@@ -38,6 +42,7 @@ LINT_EXTRA_PATHS: Final = (
     "noxfile.py",
     "tests/bootstrap",
     "tests/io_epub_adapter_test.py",
+    "tests/pdf_parse_pass_test.py",
     "tests/numbered_list_cross_page_chunk_test.py",
 )
 TEST_TARGETS: Final = ("tests",)

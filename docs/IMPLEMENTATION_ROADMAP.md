@@ -1,6 +1,6 @@
 # pdf-chunker Implementation Roadmap
 
-**Status:** P0-A in progress (2026-09-26); canonical boundary batch covered, repository-wide coverage remains open
+**Status:** P0-A in progress (2026-10-11); ingress boundary covered, repository-wide coverage remains open
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -162,6 +162,17 @@ dependency declarations.
   `passes/transform_log.py`. These small pass and audit-log modules already have
   parser, deduplication, and transformation-trace coverage; each passed Ruff,
   Black, and mypy independently before being added.
+- The October EPUB work also brought `epub_parsing.py`, `passes/ai_enrich.py`,
+  and `passes/split_modules/segments.py` into the declared gate, with EPUB
+  adapter and cross-page numbered-list tests included in lint/format checks.
+- The 2026-10-11 ingress batch adds `adapters/io_epub.py`, `adapters/io_text.py`,
+  `passes/pdf_parse.py`, and `passes/extraction_fallback.py` to Ruff, Black, and
+  mypy. The EPUB adapter needed only import and formatting cleanup. New tests
+  cover stable grouping of one-shot block iterators, unknown locations/pages,
+  extraction-report propagation, and preservation of input values across all
+  three parser passes. The parser test module is also lint/format checked.
+  Existing text normalization and in-memory fallback tests cover the adjacent
+  adapters and selection boundary; conversion behavior is unchanged.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

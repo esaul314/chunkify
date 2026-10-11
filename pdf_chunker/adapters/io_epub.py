@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from itertools import groupby
 from pathlib import Path
-from typing import Any, Iterable, cast
+from typing import Any, cast
 
 
 def _page_key(mapping: dict[str, int], block: dict[str, Any]) -> int:
@@ -49,6 +50,7 @@ def read_epub(path: str, spine: str | None = None) -> dict[str, Any]:
 
     import ebooklib
     from ebooklib import epub
+
     from pdf_chunker.epub_parsing import (
         EPUB_DOCUMENT_CHAR_LIMIT,
         EPUB_DOCUMENT_MIN_TARGET,
@@ -78,9 +80,7 @@ def read_epub(path: str, spine: str | None = None) -> dict[str, Any]:
     return {
         "type": "page_blocks",
         "source_path": abs_path,
-        "pages": _group_blocks(
-            cast(Iterable[dict[str, Any]], grouped_blocks), mapping
-        ),
+        "pages": _group_blocks(cast(Iterable[dict[str, Any]], grouped_blocks), mapping),
     }
 
 

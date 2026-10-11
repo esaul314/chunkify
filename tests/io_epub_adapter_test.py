@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,30 @@ def test_read_epub_adapter(tmp_path: Path) -> None:
     pages = doc["pages"]
     assert len(pages) == 1
     assert pages[0]["blocks"][0]["text"] == "Hello world"
+
+
+def test_spine_grouping_keeps_unknown_locations_last_and_preserves_order() -> None:
+    from pdf_chunker.adapters.io_epub import _group_blocks
+
+    mapping = {"first.xhtml": 1, "second.xhtml": 2}
+    blocks = [
+        {"text": "Second chapter, first block.", "source": {"location": "second.xhtml"}},
+        {"text": "Unknown location, first block.", "source": {"location": "appendix.xhtml"}},
+        {"text": "First chapter.", "source": {"location": "first.xhtml"}},
+        {"text": "Second chapter, second block.", "source": {"location": "second.xhtml"}},
+        {"text": "Unknown location, second block.", "source": {}},
+    ]
+    original = deepcopy(blocks)
+
+    pages = _group_blocks(iter(blocks), mapping)
+
+    assert pages == [
+        {"page": 1, "blocks": [blocks[2]]},
+        {"page": 2, "blocks": [blocks[0], blocks[3]]},
+        {"page": 3, "blocks": [blocks[1], blocks[4]]},
+    ]
+    assert blocks == original
+    assert mapping == {"first.xhtml": 1, "second.xhtml": 2}
 
 
 def test_nested_list_item_does_not_duplicate_descendant_text() -> None:
