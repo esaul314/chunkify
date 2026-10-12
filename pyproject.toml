@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pdf-chunker"
-version = "0.1.2"
+version = "0.1.3"
 description = "CLI pipeline to convert PDFs, EPUBs, and plain-text transcripts into JSONL for LoRA/RAG."
 readme = {file = "README.md", content-type = "text/markdown"}
 authors = [{name = "Alex"}]
@@ -52,6 +52,8 @@ dev = [
 ]
 enrichment = [
   "litellm>=1.73.6",
+  "tokenizers>=0.22.2",
+  "Jinja2>=3.1.6",
 ]
 pdf-fallback = [
   "pdfminer.six>=20250506",

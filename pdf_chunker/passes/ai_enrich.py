@@ -409,14 +409,21 @@ def classify_chunk_utterance(
         return {"classification": "unclassified", "tags": []}
 
     tag_configs = _effective_tag_configs(tag_configs)
-    tag_lines = [f"- {cat}: {', '.join(tags)}\n" for cat, tags in tag_configs.items()]
+    # Advertise only candidates that the unchanged result grounding can accept.
+    # Keep the full vocabulary for parsing and fallback; never shorten source text.
+    prompt_tag_configs = {
+        category: grounded
+        for category, tags in tag_configs.items()
+        if (grounded := _grounded_tags(tags, text_chunk))
+    }
+    tag_lines = [f"- {cat}: {', '.join(tags)}\n" for cat, tags in prompt_tag_configs.items()]
     available_tags = (
         (
             "\n\nAllowed topical tags by category:\n"
             + "".join(tag_lines)
             + "\nChoose 1-4 tags only from this list."
         )
-        if tag_configs
+        if prompt_tag_configs
         else ""
     )
 

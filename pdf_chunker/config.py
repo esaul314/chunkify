@@ -73,6 +73,7 @@ _KNOWN_OPTIONS: dict[str, frozenset[str]] = {
             "fallback_min_chars",
             "fallback_max_tokens",
             "max_tokens",
+            "request_budget",
         }
     ),
     "emit_jsonl": frozenset({"output_path", "drop_meta"}),

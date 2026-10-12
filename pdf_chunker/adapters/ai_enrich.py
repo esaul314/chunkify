@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -7,6 +8,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
 
+from pdf_chunker.adapters.request_budget import prepare_request_counter
 from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
 
 yaml = cast(Any, import_module("yaml"))
@@ -16,6 +18,7 @@ DEFAULT_AI_ENRICH_API_KEY = "sk-local"
 DEFAULT_AI_ENRICH_MAX_TOKENS = 256
 DEFAULT_AI_ENRICH_FALLBACK_MODEL = "gpt-4.1-nano"
 DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS = 128
+logger = logging.getLogger(__name__)
 
 
 class CompletionError(RuntimeError):
@@ -123,6 +126,11 @@ def resolve_completion(
                 api_base=options.get("api_base") or options.get("base_url"),
                 max_tokens=options.get("max_tokens"),
                 no_think=options.get("no_think"),
+                **(
+                    {"request_budget": options["request_budget"]}
+                    if "request_budget" in options
+                    else {}
+                ),
             ),
             "init_llm",
         )
@@ -212,6 +220,7 @@ def init_llm(
     api_base: str | None = None,
     max_tokens: int | None = None,
     no_think: bool | None = None,
+    request_budget: Mapping[str, Any] | None = None,
 ) -> Callable[[str], str]:
     """Return a completion function configured with an API key."""
     from dotenv import load_dotenv  # lazy import
@@ -257,6 +266,16 @@ def init_llm(
             "No API key found for AI enrichment. "
             "Set PDF_CHUNKER_AI_ENRICH_API_KEY or OPENAI_API_KEY."
         )
+    if type(resolved_max_tokens) is not int or resolved_max_tokens < 1:
+        raise ValueError("AI max_tokens must be a positive integer")
+    if request_budget is not None and not isinstance(request_budget, Mapping):
+        raise ValueError("request_budget must be a mapping")
+    budget_contract = dict(request_budget) if request_budget is not None else None
+    request_counter = (
+        prepare_request_counter(budget_contract, model=resolved_model)
+        if budget_contract is not None
+        else None
+    )
     try:
         import litellm
     except ImportError as exc:  # pragma: no cover
@@ -270,13 +289,31 @@ def init_llm(
             "Qwen/Qwen3-14B-AWQ",
         }:
             prompt = f"/no_think\n{prompt}"
+        messages = [{"role": "user", "content": prompt}]
         kwargs = {
             "model": resolved_model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "temperature": 0.0,
             "max_tokens": resolved_max_tokens,
             "api_key": key,
         }
+        if request_counter is not None and budget_contract is not None:
+            input_tokens = request_counter(messages)
+            context = budget_contract["context_tokens"]
+            margin = budget_contract.get("margin_tokens", 64)
+            if input_tokens + resolved_max_tokens + margin > context:
+                logger.warning(
+                    "ai_enrich request budget refused: input=%d output=%d margin=%d context=%d",
+                    input_tokens,
+                    resolved_max_tokens,
+                    margin,
+                    context,
+                )
+                raise CompletionError(
+                    "AI request exceeds verified context budget: "
+                    f"input={input_tokens}, output={resolved_max_tokens}, "
+                    f"margin={margin}, context={context}"
+                )
         if resolved_api_base:
             kwargs["api_base"] = resolved_api_base
             kwargs["custom_llm_provider"] = "openai"

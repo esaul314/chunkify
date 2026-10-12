@@ -11,6 +11,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   and syntax parsing of all production modules on the session interpreter
 - `pdf_extraction_test.py`: Extractor accuracy and fallback thresholds
 - `ai_enrichment_test.py`: Classification correctness and tag injection
+- `ai_enrich_request_budget_test.py`: Complete wire messages, output/margin
+  boundaries, immutable caller contract, cache/hash/model mismatch, grounding,
+  and explicit enrichment failure without false completion.
+- `ai_enrich_context_fixtures_test.py`: Optional offline hash-pinned privately configured source fixtures, complete request/tokenizer equivalence on82chunks,
+  unchanged parent/emitter provenance; absent local fixtures skip, changed ones fail.
 - `ai_enrich_pass_test.py`: Pass-level enrichment and metadata injection
 - `convert_returns_rows_test.py`: `convert` yields rows for chunk dict payloads
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection

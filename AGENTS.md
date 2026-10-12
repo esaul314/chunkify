@@ -170,6 +170,14 @@ only for workflows that use them.
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
 - The default metadata-enrichment path uses a local OpenAI-compatible router with model alias `qwen3-8b-local`, base URL `http://localhost:8100/v1`, and dummy key `sk-local`.
+- RAG enrichment advertises only tags eligible under the existing grounding rule,
+  retaining full source text/IDs and full vocabulary for result validation.
+  `pipeline_rag.yaml` opts into hash-pinned offline complete-request admission
+  for Qwen3-8B/revision4da05a8e/context4096, including output reservation and64
+  margin. Revalidate those pins against serving configuration before changing them.
+  Missing/mismatched cached files or oversized primary/repair requests fail before
+  transport; no truncation or model-weight loading. See
+  [request budget](docs/ENRICHMENT_REQUEST_BUDGET.md).
 - When grounded tags come back empty, `pdf_chunker` can optionally retry tagging with a cheap OpenAI fallback model. The default fallback model is `gpt-4.1-nano` and it only runs when `OPENAI_API_KEY` or `PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY` is available.
 - Override it when needed with:
   ```bash

@@ -20,6 +20,11 @@ supported input format. AI enrichment, the pure-Python PDF fallback, and the
 PyMuPDF4LLM enhancement remain opt-in so base conversion stays usable without
 those integrations.
 
+The enrichment extra also declares `tokenizers` and `Jinja2` for optional
+hash-pinned, offline full-request admission. These read cached tokenizer/template
+files, not model weights; they do not download missing snapshots. Base conversion
+does not import them. See [request budget](ENRICHMENT_REQUEST_BUDGET.md).
+
 The PDF `pdftotext` fallback also requires the system `poppler-utils` package;
 it is not a Python dependency. When neither optional fallback is available, the
 primary PyMuPDF extraction path remains the default.

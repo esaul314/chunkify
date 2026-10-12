@@ -38,6 +38,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `passes/emit_jsonl.py`: Normalizes canonical chunks for JSONL and validates
   serialized size; unmarked direct callers use the legacy compatibility path.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
+- `adapters/request_budget.py`: Optional cached-tokenizer/template admission
+  for the explicit RAG Qwen8B serving contract; no downloads or model loading.
+  The enrichment adapter counts the complete wire message plus output/margin
+  before any primary or classification-repair transport. Pass prompt grounding
+  preserves full text/IDs and full vocabulary for response validation.
 - `adapters/io_text.py`: Plain-text transcript ingestion into canonical `page_blocks`.
 - `utils.py`: Metadata mapping and helper functions.
 - `env_utils.py`: Environment flag helpers.

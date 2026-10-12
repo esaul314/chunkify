@@ -33,5 +33,15 @@ options:
     model: "qwen3-8b-local"
     api_base: "http://localhost:8100/v1"
     tags_dir: "config/tags"
+    # Offline complete-request admission for the managed the downstream retrieval coordinator 8B profile.
+    # Revalidate against the serving model/revision/context before changing pins.
+    request_budget:
+      model: "Qwen/Qwen3-8B-AWQ"
+      revision: "4da05a8edb55c6046cce958586c33b61da07bb79"
+      context_tokens: 4096
+      margin_tokens: 64
+      enable_thinking: false
+      tokenizer_sha256: "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+      tokenizer_config_sha256: "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101"
   emit_jsonl:
     output_path: "out.jsonl"
