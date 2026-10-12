@@ -178,8 +178,11 @@ only for workflows that use them.
   `pipeline_rag.yaml` opts into hash-pinned offline complete-request admission
   for Qwen3-8B/revision4da05a8e/context4096, including output reservation and64
   margin. Revalidate those pins against serving configuration before changing them.
-  Missing/mismatched cached files or oversized primary/repair requests fail before
-  transport; no truncation or model-weight loading. See
+  Missing/mismatched cached files or impossible primary/repair budgets fail before
+  transport;0.1.5 lossless contiguous enrichment windows handle oversized parents
+  while preserving full stored text/IDs/provenance. Every window request and repair
+  retains complete-wire admission; window failure fails the source. No truncation
+  or model-weight loading. See
   [request budget](docs/ENRICHMENT_REQUEST_BUDGET.md).
 - When grounded tags come back empty, `pdf_chunker` can optionally retry tagging with a cheap OpenAI fallback model. The default fallback model is `gpt-4.1-nano` and it only runs when `OPENAI_API_KEY` or `PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY` is available.
 - Override it when needed with:

@@ -281,7 +281,7 @@ def init_llm(
     except ImportError as exc:  # pragma: no cover
         raise ImportError("litellm is required for init_llm") from exc
 
-    def completion(prompt: str) -> str:
+    def messages_for(prompt: str) -> list[dict[str, str]]:
         if resolved_no_think and resolved_model in {
             "qwen3-8b-local",
             "Qwen/Qwen3-8B-AWQ",
@@ -289,7 +289,20 @@ def init_llm(
             "Qwen/Qwen3-14B-AWQ",
         }:
             prompt = f"/no_think\n{prompt}"
-        messages = [{"role": "user", "content": prompt}]
+        return [{"role": "user", "content": prompt}]
+
+    def request_fits(prompt: str) -> bool:
+        if request_counter is None or budget_contract is None:
+            return True
+        return (
+            request_counter(messages_for(prompt))
+            + resolved_max_tokens
+            + budget_contract.get("margin_tokens", 64)
+            <= budget_contract["context_tokens"]
+        )
+
+    def completion(prompt: str) -> str:
+        messages = messages_for(prompt)
         kwargs = {
             "model": resolved_model,
             "messages": messages,
@@ -323,6 +336,10 @@ def init_llm(
             raise CompletionError("AI completion request failed") from exc
         return response.choices[0].message.content
 
+    # Optional pure capability: planning and transport use the SAME wire contract.
+    # Unbudgeted/custom callbacks keep their previous one-request behavior.
+    if request_counter is not None:
+        cast(Any, completion).request_fits = request_fits
     return completion
 
 

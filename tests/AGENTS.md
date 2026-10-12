@@ -23,8 +23,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `ai_enrich_request_budget_test.py`: Complete wire messages, output/margin
   boundaries, immutable caller contract, cache/hash/model mismatch, grounding,
   and explicit enrichment failure without false completion.
+  Also covers lossless Unicode windows, nonmonotone counting, guarded repair,
+  deterministic aggregation, single-request compatibility and partial failure.
 - `ai_enrich_context_fixtures_test.py`: Optional offline hash-pinned privately configured source fixtures, complete request/tokenizer equivalence on82chunks,
   unchanged parent/emitter provenance; absent local fixtures skip, changed ones fail.
+  Includes hash-pinned optional oversized-parent/window regression using exact
+  cached wire-token counting and offline provider stubs; no real inference.
 - `ai_enrich_pass_test.py`: Pass-level enrichment and metadata injection
 - `convert_returns_rows_test.py`: `convert` yields rows for chunk dict payloads
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection

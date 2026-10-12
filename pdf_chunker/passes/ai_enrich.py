@@ -396,19 +396,8 @@ def _parse_completion(
     return classification, tags
 
 
-def classify_chunk_utterance(
-    text_chunk: str,
-    *,
-    tag_configs: dict[str, list[str]],
-    completion_fn: Callable[[str], str],
-    fallback_completion_fn: Callable[[str], str] | None = None,
-    fallback_min_chars: int = 200,
-) -> dict[str, Any]:
-    """Classify ``text_chunk`` and assign relevant tags using ``completion_fn``."""
-    if not text_chunk or not text_chunk.strip():
-        return {"classification": "unclassified", "tags": []}
-
-    tag_configs = _effective_tag_configs(tag_configs)
+def _classification_prompt(text_chunk: str, tag_configs: dict[str, list[str]]) -> str:
+    """Build the unchanged grounded prompt without shortening canonical text."""
     # Advertise only candidates that the unchanged result grounding can accept.
     # Keep the full vocabulary for parsing and fallback; never shorten source text.
     prompt_tag_configs = {
@@ -427,7 +416,7 @@ def classify_chunk_utterance(
         else ""
     )
 
-    prompt = (
+    return (
         "Given the following text, identify its primary utterance type and assign topical tags.\n\n"
         f"Classification: Choose the best fit from this list: {UTTERANCE_TYPES}.\n\n"
         f"{available_tags}\n\n"
@@ -451,6 +440,111 @@ def classify_chunk_utterance(
         "Response:"
     )
 
+
+def _enrichment_windows(
+    text: str,
+    *,
+    tag_configs: dict[str, list[str]],
+    request_fits: Callable[[str], bool],
+) -> list[str]:
+    """Partition contiguous text losslessly; no token monotonicity assumption.
+
+    Every leaf must fit BOTH primary and possible repair messages. Halving
+    terminates even for whitespace-free multilingual text; boundaries prefer
+    whitespace near the midpoint without removing it. Stored parent is untouched.
+    """
+    pending = [text]
+    windows: list[str] = []
+    while pending:
+        part = pending.pop()
+        if request_fits(_classification_prompt(part, tag_configs)) and request_fits(
+            _classification_repair_prompt(part)
+        ):
+            windows.append(part)
+            continue
+        if len(part) < 2:
+            raise ValueError("Enrichment instructions or single character exceed request budget")
+        midpoint = len(part) // 2
+        boundary = next(
+            (i + 1 for i in range(midpoint - 1, midpoint // 2 - 1, -1) if part[i].isspace()),
+            midpoint,
+        )
+        pending.extend((part[boundary:], part[:boundary]))
+    return windows
+
+
+def classify_chunk_utterance(
+    text_chunk: str,
+    *,
+    tag_configs: dict[str, list[str]],
+    completion_fn: Callable[[str], str],
+    fallback_completion_fn: Callable[[str], str] | None = None,
+    fallback_min_chars: int = 200,
+) -> dict[str, Any]:
+    """Classify full text, using lossless windows only for budgeted callbacks."""
+    if not text_chunk or not text_chunk.strip():
+        return {"classification": "unclassified", "tags": []}
+
+    tag_configs = _effective_tag_configs(tag_configs)
+    request_fits = getattr(completion_fn, "request_fits", None)
+    try:
+        windows = (
+            _enrichment_windows(text_chunk, tag_configs=tag_configs, request_fits=request_fits)
+            if callable(request_fits)
+            else [text_chunk]
+        )
+    except (RuntimeError, TimeoutError, ConnectionError, OSError, ValueError):
+        return {"classification": "error", "tags": []}
+    if len(windows) > 1:
+        # Each window follows the existing parsing/grounding/repair/fallback path.
+        # No recursive planning: transport still guards every actual request.
+        results = []
+        for window in windows:
+            result = _classify_window(
+                window,
+                tag_configs=tag_configs,
+                completion_fn=completion_fn,
+                fallback_completion_fn=fallback_completion_fn,
+                fallback_min_chars=fallback_min_chars,
+                require_fallback_success=True,
+            )
+            if result["classification"] == "error":
+                return {"classification": "error", "tags": []}
+            results.append(result)
+        scores: dict[str, int] = {}
+        for window, result in zip(windows, results, strict=True):
+            label = result["classification"]
+            scores[label] = scores.get(label, 0) + len(window.strip())
+        meaningful = {key: value for key, value in scores.items() if key != "unclassified"}
+        classification = max(meaningful or scores, key=lambda key: (meaningful or scores)[key])
+        return {
+            "classification": classification,
+            "tags": _grounded_tags(
+                _dedupe(tag for result in results for tag in result["tags"]), text_chunk
+            ),
+        }
+    return _classify_window(
+        text_chunk,
+        tag_configs=tag_configs,
+        completion_fn=completion_fn,
+        fallback_completion_fn=fallback_completion_fn,
+        fallback_min_chars=fallback_min_chars,
+    )
+
+
+def _classify_window(
+    text_chunk: str,
+    *,
+    tag_configs: dict[str, list[str]],
+    completion_fn: Callable[[str], str],
+    fallback_completion_fn: Callable[[str], str] | None,
+    fallback_min_chars: int,
+    require_fallback_success: bool = False,
+) -> dict[str, Any]:
+    """Existing single-window classification with full validation vocabulary."""
+    if not text_chunk.strip():
+        return {"classification": "unclassified", "tags": []}
+    prompt = _classification_prompt(text_chunk, tag_configs)
     try:
         response_text = completion_fn(prompt).strip()
         classification, tags = _parse_completion(response_text, tag_configs)
@@ -497,6 +591,8 @@ def classify_chunk_utterance(
             if classification == "error" and fallback_classification != "unclassified":
                 classification = fallback_classification
         except (RuntimeError, TimeoutError, ConnectionError, OSError, ValueError) as exc:
+            if require_fallback_success:
+                return {"classification": "error", "tags": []}
             if _debug_enabled():
                 logger.warning(
                     "ai_enrich debug: fallback completion failed (%s)",

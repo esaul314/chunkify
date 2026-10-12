@@ -8,10 +8,12 @@ from tests.local_source_controls import private_value
 import json
 import os
 import socket
+import sys
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 REVISION = '4da05a8edb55c6046cce958586c33b61da07bb79'
 TOKENIZER_HASHES = {'tokenizer.json': 'aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4', 'tokenizer_config.json': 'd5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101'}
@@ -19,6 +21,53 @@ PREFIX_HASH = private_value('control_001', '')
 CANONICAL_CHUNK_HASHES = private_value('context_chunk_hashes', {})
 REPO = Path(__file__).resolve().parents[1]
 PREFIX_PASSES = ['pdf_parse', 'text_clean', 'heading_detect', 'split_semantic']
+
+def test_oversized_source_lossless_windows_with_exact_wire_budget(rendered_counter, monkeypatch):
+    """Reproduce the previously refused real PDF; provider is strictly offline."""
+    pytest.importorskip('fitz')
+    source = _required_file(Path(os.environ.get('PDF_CHUNKER_CONTEXT_oversized_source_PDF', private_value('control_003', ''))), private_value('control_004', ''))
+    import yaml
+    from pdf_chunker.adapters import ai_enrich as adapter
+    from pdf_chunker.config import PipelineSpec
+    from pdf_chunker.core_new import convert
+    from pdf_chunker.passes.ai_enrich import _classification_prompt, _classification_repair_prompt, _classify_chunk, _effective_tag_configs, _enrichment_windows
+    data = yaml.safe_load((REPO / 'pipeline_rag.yaml').read_text())
+    prefix = {'pipeline': PREFIX_PASSES, 'options': {name: deepcopy(data['options'][name]) for name in PREFIX_PASSES if name in data['options']}}
+    assert sha256(json.dumps(prefix, sort_keys=True).encode()).hexdigest() == PREFIX_HASH
+    chunks = convert(str(source), PipelineSpec(**prefix))
+    original = deepcopy(chunks)
+    options = deepcopy(data['options']['ai_enrich'])
+    options['tags_dir'] = str(REPO / 'config/tags')
+    tags = _effective_tag_configs(adapter._tag_configs_for_options(options))
+    independent_count, snapshot = rendered_counter
+    monkeypatch.setenv('HF_HUB_CACHE', str(snapshot.parents[2]))
+    captured = []
+
+    def provider(**kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='Classification: explanation\nTags: []'))])
+    monkeypatch.setitem(sys.modules, 'litellm', SimpleNamespace(completion=provider))
+    completion = adapter.init_llm(api_key='offline-test', model=options['model'], max_tokens=options.get('max_tokens', 256), request_budget=options['request_budget'])
+    client = adapter.Client(completion_fn=completion, tag_configs=tags)
+    oversized = [c for c in chunks if independent_count(_classification_prompt(c['text'], tags)) + 320 > 4096]
+    assert oversized, 'fixture no longer reproduces oversized complete request'
+    for chunk in oversized:
+        before = deepcopy(chunk)
+        windows = _enrichment_windows(chunk['text'], tag_configs=tags, request_fits=completion.request_fits)
+        assert ''.join(windows) == chunk['text']
+        assert len(windows) > 1
+        assert all((independent_count(_classification_prompt(w, tags)) + 320 <= 4096 for w in windows))
+        assert all((independent_count(_classification_repair_prompt(w)) + 320 <= 4096 for w in windows))
+        enriched = _classify_chunk(chunk, client=client, tag_configs=tags)
+        assert _without_enrichment(enriched) == _without_enrichment(before)
+        assert enriched['metadata']['enrichment_status'] == 'complete'
+    assert captured
+    for call in captured:
+        prompt = call['messages'][0]['content'].removeprefix('/no_think\n')
+        assert independent_count(prompt) + call['max_tokens'] + 64 <= 4096
+    assert chunks == original
+    max_original_input = max((independent_count(_classification_prompt(c['text'], tags)) for c in oversized))
+    print(f'oversized_source chunks={len(chunks)} oversized={len(oversized)} windows={len(captured)} max_original_input={max_original_input} parent_text_ids_provenance=unchanged transport=offline budget=4096')
 
 @dataclass(frozen=True)
 class SourceFixture:

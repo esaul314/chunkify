@@ -47,6 +47,10 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   The enrichment adapter counts the complete wire message plus output/margin
   before any primary or classification-repair transport. Pass prompt grounding
   preserves full text/IDs and full vocabulary for response validation.
+  Version0.1.5 optionally partitions enrichment input into deterministic lossless
+  contiguous windows when complete primary/repair messages exceed budget. All
+  windows must succeed; stable weighted classification/tag-union aggregation
+  changes only enrichment fields, not canonical parent bytes/IDs/provenance.
 - `adapters/io_text.py`: Plain-text transcript ingestion into canonical `page_blocks`.
 - `utils.py`: Metadata mapping and helper functions.
 - `env_utils.py`: Environment flag helpers.

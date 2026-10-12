@@ -35,15 +35,34 @@ repair uses the same guarded callback. Other callers without request_budget
 retain their prior adapter behavior; unrelated optional fallback providers do
 not inherit the local Qwen context contract.
 
-An overflow does not truncate, skip or mark a source complete. The existing
-conversion failure remains retryable and cannot be published as a successful
-artifact. Lossless enrichment-window splitting is not implemented by this guard;
-any source still oversized after candidate reduction needs explicit reviewed
-handling before whole-corpus acceptance.
+Version0.1.5 adds deterministic lossless enrichment windows for this opted-in
+callback. A fitting primary/possible-repair pair retains its original single
+classification path. Oversized text is halved into contiguous character slices,
+preferring whitespace near the midpoint, until BOTH complete request forms fit.
+This makes no assumption that tokenizer counts are monotone. Windows concatenate
+exactly to the parent; canonical stored text, IDs and source provenance do not
+change. No model weights, downloads, token truncation or context bypass are used.
+
+Every window follows the existing full-vocabulary parsing, grounding, repair and
+optional fallback path. Parent classification uses the largest sum of stripped
+character lengths among classified windows, ties resolved by first document
+appearance; unclassified windows win only when no meaningful classification
+exists. Tags are a stable deduplicated union, validated against the full effective
+vocabulary and grounded against the complete parent. Identical model choices are
+not promised. A failed window or repair fails the source immediately; impossible
+instruction/single-character budgets fail without provider transport. Neither
+partial windows nor conversion failures can be published as successful artifacts.
+
+The completion callback exposes an optional `request_fits(prompt)` capability,
+using exactly the same immutable tokenizer/wire/output/margin contract as actual
+transport. Custom or unbudgeted callbacks retain their original behavior. Window
+planning is in-memory; tokenizer cache loading remains adapter-owned. Every actual
+primary or repair request still repeats admission before provider transport.
 
 Tests:
 ```bash
 pytest tests/ai_enrich_request_budget_test.py tests/ai_enrichment_test.py tests/ai_enrich_pass_test.py
+pytest -s tests/ai_enrich_context_fixtures_test.py
 nox -s lint typecheck tests
 ```
 
