@@ -851,6 +851,16 @@ in `noxfile.py`; a passing session is not a claim that every maintained module i
 already clean. Expand that set in small, tested batches. Use `ruff check --no-fix`
 for diagnosis and review rather than applying repository-wide automatic fixes.
 
+The `QUALITY_PATHS`, `LINT_EXTRA_PATHS`, and `TEST_TARGETS` groups are required:
+empty declarations or blank paths raise `ValueError`, and missing files/directories
+raise `FileNotFoundError` listing the affected group and its missing targets in
+first-seen order. Sessions validate before dependency installation or tool execution;
+they must not quietly shrink their scope or succeed without a test/type command.
+After a deliberate target move, update `noxfile.py` and run
+`pytest tests/bootstrap/test_quality_gate_scope.py`, then `nox -s lint typecheck tests`.
+Valid target spelling, ordered deduplication, commands, and dependency profiles
+remain unchanged. These filesystem checks belong to tooling, not pure passes.
+
 All three nox sessions request Python 3.11, matching CI, and fail if it is
 unavailable. To provision it without replacing the local venv, install the
 optional developer downloader with `python -m pip install --upgrade "nox[pbs]"`,

@@ -325,6 +325,35 @@ dependency declarations.
   dependency, Python policy, detection rule, public API, or golden fixture changes.
   Broader package diagnostics report 283 Ruff findings and 25 mypy errors in nine
   files; repository-wide P0-A coverage remains open.
+- The 2026-10-11 target-resolution increment closes a gap in the gate itself:
+  missing declared paths were silently filtered out, and empty type/test targets
+  could yield no command while their sessions succeeded. All three declaration
+  groups (`QUALITY_PATHS`, `LINT_EXTRA_PATHS`, and `TEST_TARGETS`) are now required,
+  non-empty, and free of blank paths. Each session validates its groups before
+  dependency installation or tool execution. Missing targets raise
+  `FileNotFoundError` listing the affected group and all its missing paths in
+  first-seen order; empty groups or blank paths raise `ValueError`. This also
+  prevents an empty string from accidentally targeting the repository root.
+  The data-first resolver consumes one-shot declarations once and returns an
+  ordered, deduplicated tuple; its diagnostic scope is keyword-configured and
+  supports partial application. Filesystem validation remains in tooling, not
+  document-processing passes. Valid target spelling, commands, dependencies,
+  interpreter policy, and gate scope are unchanged (37 production type targets
+  and 59 lint/format files); obsolete empty-command success paths are removed.
+  Twenty-eight initial failing regression cases reproduce the gap. The final
+  suite adds 36 cases covering every group/session, ordered diagnostics, validation
+  before session effects, literal nonblank path spelling, duplicate handling,
+  input-preservation/idempotence laws, and unchanged valid-session execution.
+  All three nox sessions pass on Python 3.11.17, 128 focused cases pass, collection
+  finds 1,255 tests without errors, and generated merge documentation is current.
+  An isolated negative nox invocation reports all three sessions failed and exits
+  nonzero for missing declarations, without installing dependencies or running
+  check commands; no real checkout target is removed. Before/after comparisons
+  match all three valid command plans and 363 ordered target-resolution cases.
+  Diff review found no further actionable issues. Contributor and stewardship
+  guidance document deliberate path updates after moves. Existing test warnings
+  and broader repository debt remain; P0-A is still open. No document-processing
+  code, dependency declaration, public API, Python policy, or golden fixture changed.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

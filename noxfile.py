@@ -68,20 +68,35 @@ LINT_EXTRA_PATHS: Final = (
     "tests/ai_enrich_context_fixtures_test.py",
 )
 TEST_TARGETS: Final = ("tests",)
-TYPECHECK_EMPTY_MESSAGE: Final = "No typecheck targets yet."
 
 # Missing runtimes must not turn skipped checks into a successful baseline.
 nox.options.error_on_missing_interpreters = True
 
 
-def _existing(paths: Iterable[str]) -> tuple[str, ...]:
-    """Return the subset of ``paths`` that exist, preserving declaration order."""
+def _existing(paths: Iterable[str], *, scope: str = "quality") -> tuple[str, ...]:
+    """Require every declared target instead of silently narrowing the gate.
 
-    return tuple(path for path in dict.fromkeys(paths) if (ROOT / path).exists())
+    Consume the input once and deduplicate in first-seen order. Empty declarations
+    and blank paths are invalid; nonblank path spelling is preserved. Report all
+    missing paths in the group before any command is built. Filesystem checks stay
+    in this tooling boundary, not in document-processing passes.
+    """
+
+    targets = tuple(dict.fromkeys(paths))
+    if not targets:
+        raise ValueError(f"No targets declared for {scope}.")
+    if any(not path.strip() for path in targets):
+        raise ValueError(f"Blank targets declared for {scope}.")
+    missing = tuple(path for path in targets if not (ROOT / path).exists())
+    if missing:
+        raise FileNotFoundError(f"Missing declared {scope} targets: {', '.join(missing)}.")
+    return targets
 
 
 def _lint_commands() -> tuple[Command, ...]:
-    targets = _existing((*QUALITY_PATHS, *LINT_EXTRA_PATHS))
+    production = _existing(QUALITY_PATHS, scope="production quality")
+    extras = _existing(LINT_EXTRA_PATHS, scope="lint-only")
+    targets = tuple(dict.fromkeys((*production, *extras)))
     return (
         ("ruff", "check", "--no-fix", *targets),
         ("black", "--check", *targets),
@@ -89,13 +104,13 @@ def _lint_commands() -> tuple[Command, ...]:
 
 
 def _typecheck_commands() -> tuple[Command, ...]:
-    targets = _existing(QUALITY_PATHS)
-    return (("mypy", *targets),) if targets else ()
+    targets = _existing(QUALITY_PATHS, scope="production quality")
+    return (("mypy", *targets),)
 
 
 def _test_commands() -> tuple[Command, ...]:
-    targets = _existing(TEST_TARGETS)
-    return (("pytest", "-q", "-m", "not legacy_parity", *targets),) if targets else ()
+    targets = _existing(TEST_TARGETS, scope="tests")
+    return (("pytest", "-q", "-m", "not legacy_parity", *targets),)
 
 
 def _run(
@@ -103,15 +118,10 @@ def _run(
     commands: tuple[Command, ...],
     *,
     dependencies: tuple[str, ...] = SESSION_DEPENDENCIES,
-    empty_message: str | None = None,
 ) -> None:
-    """Install shared dependencies and execute ``commands`` within ``session``."""
+    """Install dependencies and execute commands after target validation."""
 
     session.install(*dependencies)
-    if not commands:
-        if empty_message is not None:
-            session.log(empty_message)
-        return
     for command in commands:
         session.run(*command)
 
@@ -127,7 +137,7 @@ def lint(session: nox.Session) -> None:
 def typecheck(session: nox.Session) -> None:
     """Run mypy for the declared production quality paths."""
 
-    _run(session, _typecheck_commands(), empty_message=TYPECHECK_EMPTY_MESSAGE)
+    _run(session, _typecheck_commands())
 
 
 @nox.session(python=SUPPORTED_PYTHON)

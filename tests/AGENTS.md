@@ -8,7 +8,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 ## Coverage
 - `bootstrap/test_quality_gate_scope.py`: Declared lint/typecheck paths, explicit
   supported-Python sessions, missing-interpreter failure policy, CI agreement,
-  and syntax parsing of all production modules on the session interpreter
+  and syntax parsing of all production modules on the session interpreter;
+  missing/empty/blank targets fail before dependency or command effects, with
+  ordered diagnostics, one-shot/partially applied target resolution, duplicate
+  handling, input-preservation/idempotence laws, literal path spelling, and
+  unchanged valid-session command order and dependency profiles
 - `pdf_extraction_test.py`: Extractor accuracy and fallback thresholds
 - `geometry_contract_test.py`: In-memory strict margin/selection boundaries,
   partial application, stable rounded-bin ranking and cutoff laws, exact bounded
@@ -79,6 +83,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - Avoid asserting on intermediate state unless necessary
 - Shell and Python tests must pass independently
 - Use idempotent tests.
+- For quality-gate workflow changes, run
+  `pytest tests/bootstrap/test_quality_gate_scope.py tests/documentation_consistency_test.py`,
+  followed by `nox -s lint typecheck tests`. Test missing declarations against a
+  temporary root with a recording session; never delete real production targets
+  to reproduce a scope failure. Target groups must be non-empty, contain no blank
+  paths, and resolve completely before session dependency/command effects.
 - For geometric-zone changes, run `pytest tests/geometry_contract_test.py
   tests/geometry_test.py tests/bootstrap/test_quality_gate_scope.py`. The contract
   module is lint/format checked and uses in-memory pages without local PDFs.

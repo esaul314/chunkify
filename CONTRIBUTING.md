@@ -82,6 +82,22 @@ declared in `noxfile.py`. Expand that set only in reviewable batches; use
 `ruff check --no-fix pdf_chunker scripts tests` and `mypy pdf_chunker` as broader
 diagnostic checks while repository-wide debt remains.
 
+Target declarations are required, not best-effort discovery. `QUALITY_PATHS`,
+`LINT_EXTRA_PATHS`, and `TEST_TARGETS` must each be non-empty and contain no blank
+paths. Each session validates its groups before installing dependencies or running
+tools. A missing file or directory raises `FileNotFoundError` with the affected
+group and every missing path in first-seen order; an empty group or blank path
+raises `ValueError`. Restore a missing target or deliberately update the declaration
+and scope tests after a move—do not rely on a deleted file silently leaving the
+gate. Valid declarations retain their spelling, ordered deduplication, commands,
+and dependency profiles. For example, after moving a gated module, update its path
+in `noxfile.py`, then run:
+
+```bash
+pytest tests/bootstrap/test_quality_gate_scope.py
+nox -s lint typecheck tests
+```
+
 Or run tools directly:
 
 ```bash
