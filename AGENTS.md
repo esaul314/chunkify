@@ -170,6 +170,9 @@ only for workflows that use them.
   pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
 - The default metadata-enrichment path uses a local OpenAI-compatible router with model alias `qwen3-8b-local`, base URL `http://localhost:8100/v1`, and dummy key `sk-local`.
+- EPUB body recovery includes div/span/direct container text while preserving
+  semantic navigation/list behavior. CPU-only regression:
+  `pytest -s tests/epub_body_markup_test.py`; see `docs/EPUB_BODY_RECOVERY.md`.
 - RAG enrichment advertises only tags eligible under the existing grounding rule,
   retaining full source text/IDs and full vocabulary for result validation.
   `pipeline_rag.yaml` opts into hash-pinned offline complete-request admission

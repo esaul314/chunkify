@@ -55,6 +55,7 @@ LINT_EXTRA_PATHS: Final = (
     "noxfile.py",
     "tests/bootstrap",
     "tests/io_epub_adapter_test.py",
+    "tests/epub_body_markup_test.py",
     "tests/pdf_parse_pass_test.py",
     "tests/utils_test.py",
     "tests/chunk_pipeline_test.py",

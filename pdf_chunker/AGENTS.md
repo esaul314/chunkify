@@ -22,7 +22,9 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `page_utils.py`: Page range parsing/filtering.
 - `geometry.py`: Position-based zone selection and scoring, plus existing PDF
   extraction and interactive-discovery compatibility boundaries.
-- `epub_parsing.py`: Spine discovery and exclusion.
+- `epub_parsing.py`: Spine discovery/exclusion and ordered uncovered body-markup
+  recovery; preserves semantic list/navigation behavior without duplicate wrappers.
+  CPU regression procedure: `pytest -s tests/epub_body_markup_test.py`.
 - `splitter.py`: Enforces chunk boundaries and semantic cohesion.
 - `passes/split_semantic.py`: Canonical semantic owner for stitching, boundaries,
   overlap, deduplication, footnote cleanup, and chunk metadata.

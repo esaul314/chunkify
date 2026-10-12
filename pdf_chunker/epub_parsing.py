@@ -7,7 +7,7 @@ from functools import reduce
 from typing import NotRequired, TypedDict, cast
 
 import ebooklib
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 from ebooklib import epub
 
 from .heading_detection import _detect_heading_fallback
@@ -91,6 +91,88 @@ def _element_to_block(element, filename: str, item_name: str, spine_index: int) 
     return result
 
 
+_SEMANTIC_TAGS = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6"}
+_CONTAINER_TAGS = {
+    "div",
+    "section",
+    "article",
+    "main",
+    "blockquote",
+    "ol",
+    "ul",
+    "table",
+    "tr",
+    "td",
+}
+_NONREADING_TAGS = {"script", "style", "nav", "noscript"}
+
+
+def _inline_body_text(node: Tag | NavigableString) -> str:
+    """Preserve inline word fragments; line breaks separate adjacent words."""
+    if isinstance(node, Comment):
+        return ""
+    if isinstance(node, NavigableString):
+        return str(node)
+    if node.name in _NONREADING_TAGS:
+        return ""
+    if node.name == "br":
+        return "\n"
+    return "".join(
+        _inline_body_text(child)
+        for child in node.children
+        if isinstance(child, (Tag, NavigableString))
+    )
+
+
+def _text_element(parts: list[str]) -> Tag | None:
+    """Make an independent paragraph; never reparent or mutate the input DOM."""
+    text = "".join(parts)
+    if not text.strip():
+        return None
+    element = BeautifulSoup("", "html.parser").new_tag("p")
+    element.string = text
+    return element
+
+
+def _body_elements(container: Tag) -> Iterable[Tag]:
+    """Yield semantic blocks and uncovered body text once, in document order.
+
+    Container wrappers are traversed, not emitted wholesale. A semantic block
+    owns its inline descendants; nested list items retain separate list metadata.
+    """
+    pending: list[str] = []
+    for child in container.children:
+        if isinstance(child, Tag) and child.name in _NONREADING_TAGS:
+            if child.name == "nav":
+                # Keep the existing semantic TOC/list contract, but never
+                # recover new arbitrary navigation text as body paragraphs.
+                paragraph = _text_element(pending)
+                if paragraph is not None:
+                    yield paragraph
+                pending = []
+                yield from child.find_all(list(_SEMANTIC_TAGS))
+            continue
+        if isinstance(child, Tag) and (
+            child.name in _SEMANTIC_TAGS | _CONTAINER_TAGS
+            or child.find(list(_SEMANTIC_TAGS | _CONTAINER_TAGS))
+        ):
+            paragraph = _text_element(pending)
+            if paragraph is not None:
+                yield paragraph
+            pending = []
+            if child.name in _SEMANTIC_TAGS:
+                yield child
+                if child.name == "li":
+                    yield from child.find_all("li")
+            else:
+                yield from _body_elements(child)
+        elif isinstance(child, (Tag, NavigableString)):
+            pending.append(_inline_body_text(child))
+    paragraph = _text_element(pending)
+    if paragraph is not None:
+        yield paragraph
+
+
 def process_epub_item(item: epub.EpubHtml, filename: str, spine_index: int) -> list[TextBlock]:
     """Convert a spine item into structured text blocks."""
     soup = BeautifulSoup(item.get_content(), "html.parser")
@@ -101,18 +183,7 @@ def process_epub_item(item: epub.EpubHtml, filename: str, spine_index: int) -> l
     body_tag = cast(Tag, body)
 
     item_name = item.get_name()
-    elements = body_tag.find_all(
-        [
-            "p",
-            "li",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-        ]
-    )
+    elements = _body_elements(body_tag)
 
     blocks = (_element_to_block(element, filename, item_name, spine_index) for element in elements)
     filtered = [
