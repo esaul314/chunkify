@@ -238,6 +238,16 @@ pdf_chunker convert ./book.pdf --footer-margin 40 --out ./out.jsonl
 pdf_chunker convert ./book.pdf --header-margin 50 --out ./out.jsonl
 ```
 
+Geometric selection and scoring in `pdf_chunker.geometry` are quality-gated and
+data-first. For a reusable in-memory stage, use
+`partial(_get_bottom_blocks, page_height=800, margin_percent=0.1)` with positioned
+blocks as the remaining input. Strict header/footer boundaries leave blocks
+exactly on the margin untouched. Rounded-position frequency ties retain
+first-seen order; candidate confidence counts observations, not unique pages.
+Candidate formatting preserves inputs and limits previews to three samples and
+70 source characters before flattening newlines. Extraction and interactive
+discovery retain their existing effects; the whole module is not a pure pass.
+
 This approach:
 - Filters blocks at extraction time (before text merging)
 - Uses consistent Y coordinates rather than text patterns
@@ -438,6 +448,7 @@ pdf_chunker/
     ├── structure_pass_purity_test.py # Structure boundaries and metric-update laws
     ├── page_artifact_pass_test.py    # Ordered cleanup and option-precedence laws
     ├── text_clean_purity_test.py     # Ordered text/style cleanup and metadata preservation
+    ├── geometry_contract_test.py     # Pure zone scoring, strict margins, bounded previews
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py

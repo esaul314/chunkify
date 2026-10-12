@@ -28,6 +28,7 @@ def test_quality_paths_include_canonical_boundary_modules() -> None:
         "pdf_chunker/fallbacks.py",
         "pdf_chunker/evaluation.py",
         "pdf_chunker/language.py",
+        "pdf_chunker/geometry.py",
         "pdf_chunker/source_matchers.py",
         "pdf_chunker/patterns.py",
         "pdf_chunker/list_detection.py",
@@ -81,6 +82,10 @@ def test_page_artifact_pass_tests_are_lint_checked() -> None:
 
 def test_text_clean_purity_tests_are_lint_checked() -> None:
     assert "tests/text_clean_purity_test.py" in LINT_EXTRA_PATHS
+
+
+def test_geometry_contract_tests_are_lint_checked() -> None:
+    assert "tests/geometry_contract_test.py" in LINT_EXTRA_PATHS
 
 
 @pytest.mark.parametrize("session_name", ("lint", "typecheck", "tests"))

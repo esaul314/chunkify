@@ -20,6 +20,8 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `fallbacks.py`: Quality assessment and block-level extraction fallbacks.
 - `language.py`: Default language utilities.
 - `page_utils.py`: Page range parsing/filtering.
+- `geometry.py`: Position-based zone selection and scoring, plus existing PDF
+  extraction and interactive-discovery compatibility boundaries.
 - `epub_parsing.py`: Spine discovery and exclusion.
 - `splitter.py`: Enforces chunk boundaries and semantic cohesion.
 - `passes/split_semantic.py`: Canonical semantic owner for stitching, boundaries,
@@ -75,6 +77,17 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 ## Current boundary notes
 - Active implementation status and remaining risks are tracked in
   `docs/IMPLEMENTATION_ROADMAP.md`.
+- Geometry is included in the incremental quality gate. Its in-memory helpers
+  are data-first: `partial(_get_bottom_blocks, page_height=800,
+  margin_percent=0.1)` selects positioned blocks without modifying them.
+  Margins are strict, rounding uses Python's nearest-integer bins, frequency ties
+  retain first-seen order, and confidence counts observations rather than unique
+  pages. `partial(_analyze_all_zone_candidates, texts_by_position=samples,
+  min_count=2)` builds a reusable scoring stage; returned sample lists are borrowed.
+  `ZoneCandidate.format_for_prompt()` is pure and bounds previews to three samples
+  and 70 source characters before newline flattening. Document extraction retains
+  partial results on errors, and interactive discovery prints/prompts: do not
+  describe the whole module as pure or change these compatibility effects here.
 - Optional PDF enhancement and fallback dependencies are documented in
   `docs/DEPENDENCIES.md`; base conversion must not require them.
 - Split-word merging is restricted to newline or double-space boundaries with

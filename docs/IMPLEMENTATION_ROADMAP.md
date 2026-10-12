@@ -299,6 +299,32 @@ dependency declarations.
   public interface removal, or golden fixture change is introduced. Broader package
   diagnostics still report 286 Ruff findings and now 26 mypy errors in 10 files;
   repository-wide P0-A coverage remains the next task.
+- The 2026-10-11 geometry batch adds `geometry.py` to Ruff, Black, and mypy.
+  Independent checks identified two long prompt lines, an unused preview-loop
+  index, and a stale type suppression. A pure candidate comprehension and bounded
+  preview projection replace local accumulation without a new abstraction.
+  Data-first selection/scoring helpers retain their existing signatures and
+  support partial application; Python rounding, first-seen frequency ties,
+  observation-based confidence, borrowed sample lists, strict margin boundaries,
+  and exact prompt text are unchanged. The lint/format-checked in-memory contract
+  module adds 50 behavior cases, including a stable-ranking/cutoff property,
+  serialization, sampling after one-based exclusions, confidence thresholds,
+  zero-based content-page order, partial extraction on errors, and unavailable
+  backend behavior. Failing-first scope checks guard both new declarations.
+  Documentation distinguishes pure scoring/presentation from existing document
+  extraction and interactive effects; the latter and the extraction error policy
+  remain compatibility boundaries, not a claim of whole-module purity.
+  All three nox sessions pass on Python 3.11.17 (37 production type targets and
+  59 lint/format files, including the preceding request-budget increment).
+  The focused run passes 154 cases, collection finds 1,219 tests without errors,
+  generated merge documentation is current, all seven corpus cases pass, and the
+  canonical PDF smoke retains its sentinel. Exact before/after comparisons match
+  7,775 scoring/consistency cases and 6,138 prompt cases with input preservation.
+  Diff review found no further actionable issues. Existing test/corpus warnings
+  remain; passing corpus criteria do not imply perfect text preservation. No new
+  dependency, Python policy, detection rule, public API, or golden fixture changes.
+  Broader package diagnostics report 283 Ruff findings and 25 mypy errors in nine
+  files; repository-wide P0-A coverage remains open.
 - The remaining repository-wide findings are intentionally left for later
   batches; they are not silently excluded from the documented baseline.
 

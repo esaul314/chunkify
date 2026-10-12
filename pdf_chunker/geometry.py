@@ -9,13 +9,26 @@ nearly identical Y coordinates on every page. This positional consistency is
 a much stronger signal than text patterns.
 
 Usage:
-    from pdf_chunker.geometry import detect_footer_zone, DocumentZones
+    from functools import partial
+    from pdf_chunker.geometry import detect_document_zones, DocumentZones
+    from pdf_chunker.geometry import _get_bottom_blocks
 
     # Automatic detection
     zones = detect_document_zones(doc)
 
     # Manual specification
     zones = DocumentZones(footer_margin=40)  # exclude bottom 40 points
+
+    # Reusable, data-first in-memory selection stage (strict boundary)
+    bottom_blocks = partial(_get_bottom_blocks, page_height=800, margin_percent=0.1)
+    candidates = bottom_blocks(positioned_blocks)
+
+Zone selection and scoring are pure in-memory transforms. Frequency ties retain
+first-seen order after Python's nearest-integer rounding; confidence counts
+observations, not unique pages. Candidate sample lists are borrowed unchanged.
+Document extraction and interactive discovery remain compatibility boundaries:
+the latter prints and may prompt, and extraction retains its existing partial
+result on an error. This module is not wholly side-effect-free.
 """
 
 from __future__ import annotations
@@ -33,7 +46,7 @@ if TYPE_CHECKING:
 try:
     import fitz
 except ImportError:
-    fitz = None  # type: ignore
+    fitz = None
 
 
 @dataclass(frozen=True)
@@ -104,7 +117,7 @@ class DocumentZones:
         return block.y0 < self.header_margin
 
     def should_exclude(self, block: TextBlock, page_height: float) -> bool:
-        """Check if block should be excluded based on zones."""
+        """Exclude strict header/footer interiors; side margins are stored only."""
         return self.is_in_footer(block, page_height) or self.is_in_header(block, page_height)
 
     def to_dict(self) -> dict[str, Any]:
@@ -198,6 +211,9 @@ def _analyze_zone_consistency(
 ) -> tuple[float | None, float]:
     """Analyze Y positions for consistency.
 
+    Positions share a bin only when ``round`` gives the same integer. Ties
+    prefer the first observed bin; ``tolerance`` is retained but unused.
+
     Returns:
         Tuple of (most_common_y, confidence) where confidence is 0.0-1.0
     """
@@ -222,7 +238,12 @@ def _analyze_all_zone_candidates(
     texts_by_position: dict[int, list[str]],
     min_count: int = 2,
 ) -> list[tuple[float, float, list[str]]]:
-    """Analyze Y positions and return ALL candidates sorted by frequency.
+    """Return rounded bins meeting ``min_count``, ranked by observation count.
+
+    Equal counts retain first-seen order. Confidence uses all observations,
+    including bins below the cutoff. Sample lists are borrowed without mutation;
+    missing sample bins receive an empty list. Keyword settings support partial
+    application with positions as the remaining, data-first input.
 
     Returns:
         List of (y_position, confidence, sample_texts) tuples, sorted by confidence descending.
@@ -238,15 +259,11 @@ def _analyze_all_zone_candidates(
         return []
 
     total = len(y_positions)
-    candidates = []
-
-    for y_pos, count in counter.most_common():
-        if count >= min_count:
-            confidence = count / total
-            texts = texts_by_position.get(y_pos, [])
-            candidates.append((float(y_pos), confidence, texts))
-
-    return candidates
+    return [
+        (float(y_pos), count / total, texts_by_position.get(y_pos, []))
+        for y_pos, count in counter.most_common()
+        if count >= min_count
+    ]
 
 
 def detect_footer_zone(
@@ -458,19 +475,26 @@ class ZoneCandidate:
     total_pages: int
 
     def format_for_prompt(self, index: int = 0) -> str:
-        """Format candidate for user prompt."""
-        lines = [
+        """Render without I/O: first three samples, truncated before flattening.
+
+        Preview bounds count source characters (70), then add an ellipsis when
+        needed, flatten newlines, and strip surrounding whitespace. The supplied
+        index is displayed unchanged; samples and detection data are unmodified.
+        """
+        edge = "top" if self.zone_type == "header" else "bottom"
+        lines = (
             f"[{index}] {self.zone_type.title()} Zone Candidate",
-            f"    Position: {self.y_position:.1f}pt from top ({self.margin:.1f}pt margin from {'top' if self.zone_type == 'header' else 'bottom'})",
-            f"    Confidence: {self.confidence:.0%} ({self.pages_detected}/{self.total_pages} pages)",
+            f"    Position: {self.y_position:.1f}pt from top "
+            f"({self.margin:.1f}pt margin from {edge})",
+            f"    Confidence: {self.confidence:.0%} "
+            f"({self.pages_detected}/{self.total_pages} pages)",
             "    Sample content:",
-        ]
-        for i, text in enumerate(self.sample_texts[:3], 1):
-            preview = text[:70] + "..." if len(text) > 70 else text
-            # Escape newlines for display
-            preview = preview.replace("\n", " ").strip()
-            lines.append(f"      • {preview}")
-        return "\n".join(lines)
+        )
+        previews = (
+            (text[:70] + "..." if len(text) > 70 else text).replace("\n", " ").strip()
+            for text in self.sample_texts[:3]
+        )
+        return "\n".join((*lines, *(f"      • {preview}" for preview in previews)))
 
 
 def _collect_zone_data(

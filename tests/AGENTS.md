@@ -10,6 +10,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   supported-Python sessions, missing-interpreter failure policy, CI agreement,
   and syntax parsing of all production modules on the session interpreter
 - `pdf_extraction_test.py`: Extractor accuracy and fallback thresholds
+- `geometry_contract_test.py`: In-memory strict margin/selection boundaries,
+  partial application, stable rounded-bin ranking and cutoff laws, exact bounded
+  prompt formatting, input preservation, one-based detection exclusions versus
+  zero-based content pages, confidence thresholds, partial extraction on errors,
+  and unavailable-backend compatibility
 - `ai_enrichment_test.py`: Classification correctness and tag injection
 - `ai_enrich_request_budget_test.py`: Complete wire messages, output/margin
   boundaries, immutable caller contract, cache/hash/model mismatch, grounding,
@@ -74,6 +79,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - Avoid asserting on intermediate state unless necessary
 - Shell and Python tests must pass independently
 - Use idempotent tests.
+- For geometric-zone changes, run `pytest tests/geometry_contract_test.py
+  tests/geometry_test.py tests/bootstrap/test_quality_gate_scope.py`. The contract
+  module is lint/format checked and uses in-memory pages without local PDFs.
+  Existing real-PDF smoke tests remain separate; no interactive prompt or file
+  access is needed to verify selection, scoring, or presentation.
 - Prefer functional assertions on outputs.
 - For semantic-helper changes, run `pytest tests/chunk_pipeline_test.py
   tests/sentence_fusion_test.py tests/semantic_chunking_test.py
