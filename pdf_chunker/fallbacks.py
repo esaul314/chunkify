@@ -195,13 +195,24 @@ def _text_to_blocks(text: str, filepath: str, method: str) -> list[dict]:
     return blocks
 
 
-def _extract_with_pdftotext(filepath: str, exclude_pages: str | None = None) -> list[dict]:
+def _extract_with_pdftotext(
+    filepath: str,
+    exclude_pages: str | None = None,
+    *,
+    expected_page_count: int | None = None,
+) -> list[dict]:
     try:
         excluded = parse_page_ranges(exclude_pages) if exclude_pages else set()
         cmd = ["pdftotext", "-layout", filepath, "-"]
         result = run_pdftotext(cmd)
         if result.returncode != 0:
             return []
+        if expected_page_count is not None:
+            # Poppler terminates each page with form feed, including blank pages.
+            # Validate BEFORE exclusions/cleanup so a partial body cannot pass.
+            raw_pages = result.stdout.split("\f")
+            if raw_pages[-1] != "" or len(raw_pages) - 1 != expected_page_count:
+                return []
         raw_text = _filter_text_by_pages(result.stdout, excluded)
         if _assess_text_quality(raw_text)["quality_score"] < 0.7:
             return []

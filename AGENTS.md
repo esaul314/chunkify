@@ -184,6 +184,12 @@ only for workflows that use them.
   Default remains serial; page order/output/provenance are unchanged. Select
   authorized safe CPUs explicitly, retain the converter PGID and normal stage
   lifecycle gates. See `docs/PDF_OCR_RECOVERY.md`; this is CPU-only parallelism.
+- Version0.1.8 adds explicit native-text-only `PDF_CHUNKER_PDF_READER=pdftotext`.
+  It uses bounded C-locale pdfinfo and the existing quality-gated Poppler fallback
+  without MuPDF calls, preserving original provenance and all selected page slots.
+  OCR/enhancement/interaction/geometric margins refuse; unset the variable for
+  existing behavior. See `docs/PDF_POPPLER_READER.md` for the generic optional
+  path+rawSHA+pagecount adapter test and pending source acceptance gates.
 - RAG enrichment advertises only tags eligible under the existing grounding rule,
   retaining full source text/IDs and full vocabulary for result validation.
   `pipeline_rag.yaml` opts into hash-pinned offline complete-request admission

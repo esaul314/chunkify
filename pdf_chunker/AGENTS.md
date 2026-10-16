@@ -57,6 +57,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   `PDF_CHUNKER_OCR_CPUS` optionally selects two/three CPU-bound spawn workers;
   independent PDF handles, bounded ordered page groups, inherited PGID, no GPU
   concurrency or default behavior change. See `docs/PDF_OCR_RECOVERY.md`.
+  Version0.1.8 also accepts explicit native-only `PDF_CHUNKER_PDF_READER=pdftotext`:
+  bounded C-locale pdfinfo counting, existing fallback quality/cleanup/timeout,
+  complete selected page slots and original source path/method without MuPDF calls.
+  Incompatible OCR/enhancement/interactive/zone settings refuse. See
+  `docs/PDF_POPPLER_READER.md`; default/OCR implementations remain unchanged.
 - `adapters/io_epub.py`: Default EbookLib reader plus explicit
   `PDF_CHUNKER_EPUB_RECOVERY=1` for declared body extraction when optional
   resources/navigation fail; absent or encrypted body content is never accepted.

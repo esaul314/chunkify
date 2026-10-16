@@ -65,6 +65,11 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `io_pdf_parallel_ocr_test.py`: Explicit CPU-pool bounds, serial/default parity,
   ordered original-source metadata, errors without partial success, inherited
   worker PGID/affinity and optional real-book exact-payload/timing comparison.
+- `io_pdf_poppler_test.py`: Explicit native-only Poppler selection, MuPDF sentinel,
+  actual subprocess runner argv/timeout, mocked Poppler command contract, strict
+  raw page slots, quality/exclusion/provenance/error/refusal cases, generated PDF
+  integration, and an optional real-source adapter test requiring explicit
+  path+rawSHA256+expectedpagecount pins. No AI, network, artifact or index work.
 - `epub_body_markup_test.py`: Container body recovery without duplicate text;
   optional hash-pinned private-control CPU-only in-memory rows.
 - `pdf_parse_pass_test.py`: Shared PDF/EPUB/text parser normalization, one-shot

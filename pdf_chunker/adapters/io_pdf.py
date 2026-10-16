@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import re
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict
 from itertools import groupby
 from pathlib import Path
-from subprocess import CompletedProcess, run
+from subprocess import CompletedProcess, TimeoutExpired, run
 from typing import Any
 
 import fitz  # PyMuPDF
@@ -19,6 +20,78 @@ from pdf_chunker.language import default_language
 from pdf_chunker.page_utils import parse_page_ranges
 
 _PDFTOTEXT_TIMEOUT = 60
+
+
+def _poppler_page_count(path: str, timeout: int) -> int:
+    """Read one positive PDF page count without entering MuPDF."""
+    try:
+        result = run(
+            ["pdfinfo", path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+            env={**os.environ, "LC_ALL": "C", "LANG": "C"},
+        )
+    except (OSError, TimeoutExpired, UnicodeError) as exc:
+        raise RuntimeError("Poppler pdfinfo failed or timed out") from exc
+    counts = re.findall(r"^Pages:[ \t]*([0-9]+)[ \t]*$", result.stdout, re.MULTILINE)
+    fields = re.findall(r"^Pages:.*$", result.stdout, re.MULTILINE)
+    if result.returncode or len(fields) != 1 or len(counts) != 1:
+        raise RuntimeError("Poppler pdfinfo did not return one valid page count")
+    if len(counts[0]) > 10 or not 1 <= int(counts[0]) <= 2**31 - 1:
+        raise RuntimeError("Poppler pdfinfo returned an invalid page count")
+    return int(counts[0])
+
+
+def _read_pdftotext(path: str, excluded: set[int], timeout: int) -> dict[str, Any]:
+    """Native text only, retaining every included page slot and original source."""
+    from pdf_chunker.fallbacks import (
+        _assess_block_quality,
+        _extract_with_pdftotext,
+        _record_quality_report,
+    )
+
+    # pdfinfo/pdftotext can otherwise interpret a leading '-' as an option.
+    command_path = str(Path(path).absolute())
+    page_count = _poppler_page_count(command_path, timeout)
+    selected = set(range(1, page_count + 1)) - excluded
+    blocks = (
+        _extract_with_pdftotext(
+            command_path,
+            _format_exclusions(sorted(excluded)),
+            expected_page_count=page_count,
+        )
+        if selected
+        else []
+    )
+    if selected and not blocks:
+        raise RuntimeError("Poppler native text failed, empty, incomplete, or below quality threshold")
+    for block in blocks:
+        source = block.get("source", {})
+        page = source.get("page")
+        if type(page) is not int or page not in selected or "page_range" in source:
+            raise RuntimeError("Poppler returned an invalid or excluded block page")
+        if source.get("method") != "pdftotext" or source.get("filename") != Path(path).name:
+            raise RuntimeError("Poppler returned invalid source provenance")
+    blocks = [
+        {**block, "source": {**block["source"], "filename": Path(path).name, "path": path}}
+        for block in blocks
+    ]
+    grouped = {page["page"]: page["blocks"] for page in _group_blocks(blocks)}
+    quality_report: dict[str, Any] = {}
+    _record_quality_report(
+        quality_report,
+        {"pdftotext": _assess_block_quality(blocks, selected)},
+        "pdftotext",
+        "explicit_native_reader",
+    )
+    return {
+        "type": "page_blocks",
+        "source_path": path,
+        "pages": [{"page": page, "blocks": grouped.get(page, [])} for page in sorted(selected)],
+        "extraction_quality": quality_report,
+    }
 
 
 def _page_key(block: dict[str, Any]) -> int:
@@ -409,12 +482,33 @@ def read(
     ``PDF_CHUNKER_OCR_LANGUAGE`` opts into 200-dpi full-page Tesseract OCR
     for included pages still without text after native/fallback extraction.
     OCR failures raise with the original path and one-based page number.
+    ``PDF_CHUNKER_PDF_READER=pdftotext`` explicitly selects native Poppler text
+    and pdfinfo page counting, with no MuPDF calls. OCR, enhancement, interactive
+    extraction and geometric margins are incompatible with this mode.
     """
 
     global _PDFTOTEXT_TIMEOUT
     _PDFTOTEXT_TIMEOUT = timeout
     abs_path = str(Path(path))
     excluded = _excluded(exclude_pages)
+    reader = os.getenv("PDF_CHUNKER_PDF_READER")
+    if reader is not None:
+        if reader != "pdftotext":
+            raise ValueError("PDF_CHUNKER_PDF_READER must be 'pdftotext' or unset")
+        if (
+            os.getenv("PDF_CHUNKER_OCR_LANGUAGE", "").strip()
+            or os.getenv("PDF_CHUNKER_OCR_CPUS", "").strip()
+            or use_pymupdf4llm
+            or interactive
+            or footer_margin is not None
+            or header_margin is not None
+        ):
+            raise ValueError("Poppler native reader cannot use OCR, enhancement, interaction or zones")
+        if type(timeout) is not int or timeout <= 0:
+            raise ValueError("Poppler reader requires a positive integer timeout")
+        if Path(abs_path).suffix.lower() != ".pdf":
+            raise ValueError("Poppler reader requires a .pdf source; no format reclassification")
+        return _read_pdftotext(abs_path, excluded, timeout)
     # Zone margins are now applied at extraction time (before block merging)
     quality_report: dict[str, Any] = {}
     blocks = _all_blocks(
