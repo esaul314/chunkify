@@ -13,6 +13,7 @@ from typing import Any
 
 import fitz  # PyMuPDF
 
+from pdf_chunker.language import default_language
 from pdf_chunker.page_utils import parse_page_ranges
 
 _PDFTOTEXT_TIMEOUT = 60
@@ -198,6 +199,74 @@ def _ensure_all_pages(
     ]
 
 
+def _recover_ocr_pages(
+    path: str,
+    blocks: list[dict[str, Any]],
+    excluded: set[int],
+    language: str,
+    *,
+    footer_margin: float | None,
+    header_margin: float | None,
+    quality_report: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Append OCR text once for included pages still empty after extraction.
+
+    Text-bearing cross-page blocks already cover their entire source range.
+    OCR boxes/indices refer to the original page, never a temporary raster PDF.
+    """
+    populated = {
+        page for block in blocks if block.get("text", "").strip() for page in _block_pages(block)
+    }
+    missing = [
+        page for page in _page_numbers(path) if page not in excluded and page not in populated
+    ]
+    recovered: list[dict[str, Any]] = []
+    recovered_pages: list[int] = []
+    if missing:
+        page_number = missing[0]
+        try:
+            with fitz.open(path) as document:
+                for page_number in missing:
+                    page = document[page_number - 1]
+                    textpage = page.get_textpage_ocr(language=language, dpi=200, full=True)
+                    page_blocks = [
+                        {
+                            "type": "paragraph",
+                            "text": raw[4].strip(),
+                            "language": default_language(),
+                            "source": {
+                                "filename": Path(path).name,
+                                "path": path,
+                                "page": page_number,
+                                "index": raw[5],
+                                "location": None,
+                                "method": "pymupdf_ocr",
+                            },
+                            "bbox": tuple(raw[:4]),
+                            "inline_styles": None,
+                        }
+                        for raw in page.get_text("blocks", textpage=textpage)
+                        if raw[6] == 0
+                        and raw[4].strip()
+                        and not (header_margin and raw[1] < header_margin)
+                        and not (footer_margin and raw[3] > page.rect.height - footer_margin)
+                    ]
+                    if page_blocks:
+                        recovered_pages.append(page_number)
+                        recovered.extend(page_blocks)
+        except Exception as exc:
+            raise RuntimeError(f"OCR failed for {path!r}, page {page_number}: {exc}") from exc
+    quality_report["ocr"] = {
+        "language": language,
+        "dpi": 200,
+        "attempted_pages": missing,
+        "recovered_pages": recovered_pages,
+        "recovered_blocks": len(recovered),
+        "recovered_characters": sum(len(block["text"]) for block in recovered),
+    }
+    return blocks + recovered
+
+
 def _filter_by_zones(
     path: str,
     blocks: list[dict[str, Any]],
@@ -271,6 +340,10 @@ def read(
             downstream interactive confirmation
         footer_margin: Points from bottom to exclude as footer zone
         header_margin: Points from top to exclude as header zone
+
+    ``PDF_CHUNKER_OCR_LANGUAGE`` opts into 200-dpi full-page Tesseract OCR
+    for included pages still without text after native/fallback extraction.
+    OCR failures raise with the original path and one-based page number.
     """
 
     global _PDFTOTEXT_TIMEOUT
@@ -288,6 +361,17 @@ def read(
         header_margin=header_margin,
         quality_report=quality_report,
     )
+    ocr_language = os.getenv("PDF_CHUNKER_OCR_LANGUAGE", "").strip()
+    if ocr_language:
+        blocks = _recover_ocr_pages(
+            abs_path,
+            blocks,
+            excluded,
+            ocr_language,
+            footer_margin=footer_margin,
+            header_margin=header_margin,
+            quality_report=quality_report,
+        )
 
     filtered = [b for b in blocks if b.get("source", {}).get("page") not in excluded]
     grouped = _group_blocks(filtered)

@@ -173,6 +173,12 @@ only for workflows that use them.
 - EPUB body recovery includes div/span/direct container text while preserving
   semantic navigation/list behavior. CPU-only regression:
   `pytest -s tests/epub_body_markup_test.py`; see `docs/EPUB_BODY_RECOVERY.md`.
+- Version0.1.6 adds explicit recovery for supported sources that otherwise fail:
+  `PDF_CHUNKER_OCR_LANGUAGE=eng` enables 200-dpi native OCR only for PDF pages
+  with no extracted text, and `PDF_CHUNKER_EPUB_RECOVERY=1` reads declared EPUB
+  bodies when optional packaging/navigation is broken. OCR installations may require TESSDATA_PREFIX to identify the system tessdata directory. Defaults remain unchanged;
+  missing/encrypted body content remains an error. See
+  `docs/PDF_OCR_RECOVERY.md` and `docs/EPUB_PACKAGING_RECOVERY.md`.
 - RAG enrichment advertises only tags eligible under the existing grounding rule,
   retaining full source text/IDs and full vocabulary for result validation.
   `pipeline_rag.yaml` opts into hash-pinned offline complete-request admission

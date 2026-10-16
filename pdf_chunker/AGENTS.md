@@ -52,6 +52,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   windows must succeed; stable weighted classification/tag-union aggregation
   changes only enrichment fields, not canonical parent bytes/IDs/provenance.
 - `adapters/io_text.py`: Plain-text transcript ingestion into canonical `page_blocks`.
+- `adapters/io_pdf.py`: Existing native/fallback PDF extraction plus optional
+  `PDF_CHUNKER_OCR_LANGUAGE` recovery of text-empty pages using installed OCR.
+- `adapters/io_epub.py`: Default EbookLib reader plus explicit
+  `PDF_CHUNKER_EPUB_RECOVERY=1` for declared body extraction when optional
+  resources/navigation fail; absent or encrypted body content is never accepted.
 - `utils.py`: Metadata mapping and helper functions.
 - `env_utils.py`: Environment flag helpers.
 - `page_artifacts.py`: Header/footer detection utilities, `strip_artifacts`.

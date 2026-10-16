@@ -56,6 +56,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `epub_spine_test.py`: Spine index parsing and exclusion logic
 - `io_epub_adapter_test.py`: EPUB adapter extraction, stable spine grouping,
   unknown-location ordering, and navigation provenance
+- `epub_packaging_recovery_test.py`: Opt-in declared-body recovery, preserved
+  reading order/source bytes, strict absent/encrypted-body failures, and
+  hash-pinned optional affected books without enrichment or publication.
+- `io_pdf_ocr_test.py`: Opt-in text-empty-page OCR, unchanged native/default
+  behavior, source provenance, margins/exclusions, explicit engine failures,
+  and a generated raster-only PDF integration using installed Tesseract.
 - `epub_body_markup_test.py`: Container body recovery without duplicate text;
   optional hash-pinned private-control CPU-only in-memory rows.
 - `pdf_parse_pass_test.py`: Shared PDF/EPUB/text parser normalization, one-shot
