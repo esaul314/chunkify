@@ -5,18 +5,22 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
-from contextlib import redirect_stdout
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+
+import structlog
+from structlog.testing import capture_logs
 
 from pdf_chunker import fallbacks
 from pdf_chunker.adapters import io_pdf
@@ -36,11 +40,20 @@ class PopplerReaderTest(unittest.TestCase):
         self.opened = self.enterContext(
             patch.object(io_pdf.fitz, "open", create=True, side_effect=AssertionError("MuPDF call"))
         )
-        for name in ("_all_blocks", "_primary_blocks", "_page_numbers", "_ensure_all_pages",
-                     "_recover_ocr_pages", "_filter_by_zones", "ProcessPoolExecutor"):
+        for name in (
+            "_all_blocks",
+            "_primary_blocks",
+            "_page_numbers",
+            "_ensure_all_pages",
+            "_recover_ocr_pages",
+            "_filter_by_zones",
+            "ProcessPoolExecutor",
+        ):
             self.enterContext(patch.object(io_pdf, name, side_effect=AssertionError(name)))
         self.enterContext(
-            patch.object(fallbacks, "_extract_with_pdfminer", side_effect=AssertionError("pdfminer"))
+            patch.object(
+                fallbacks, "_extract_with_pdfminer", side_effect=AssertionError("pdfminer")
+            )
         )
         self.runner = self.enterContext(patch.object(io_pdf, "run", side_effect=self._run_tool))
         self.timeout_before = io_pdf._PDFTOTEXT_TIMEOUT
@@ -63,10 +76,15 @@ class PopplerReaderTest(unittest.TestCase):
         self.assertEqual(result["pages"][2]["blocks"][0]["text"], PROSE + " Final page retained.")
         for page in result["pages"]:
             for block in page["blocks"]:
-                self.assertEqual(block["source"], {
-                    "filename": "Original Source.pdf", "path": self.path,
-                    "page": page["page"], "method": "pdftotext",
-                })
+                self.assertEqual(
+                    block["source"],
+                    {
+                        "filename": "Original Source.pdf",
+                        "path": self.path,
+                        "page": page["page"],
+                        "method": "pdftotext",
+                    },
+                )
         info_call, text_call = self.runner.call_args_list
         command_path = str(Path(self.path).absolute())
         self.assertEqual(info_call.args, (["pdfinfo", command_path],))
@@ -76,11 +94,12 @@ class PopplerReaderTest(unittest.TestCase):
         self.assertEqual(info_call.kwargs["timeout"], 17)
         self.assertTrue(info_call.kwargs["capture_output"])
         self.assertTrue(info_call.kwargs["text"])
-        self.assertEqual(text_call.args, (["pdftotext", "-layout", command_path, "-"],))
+        self.assertEqual(text_call.args, (["pdftotext", command_path, "-"],))
         self.assertEqual(text_call.kwargs, {"capture_output": True, "text": True, "timeout": 17})
         quality = result["extraction_quality"]
         self.assertEqual(quality["selected_engine"], "pdftotext")
         self.assertEqual(quality["reason"], "explicit_native_reader")
+        self.assertEqual(quality["text_order"], "reading")
         self.assertEqual(quality["missing_pages"], [2])
         self.opened.assert_not_called()
 
@@ -89,6 +108,27 @@ class PopplerReaderTest(unittest.TestCase):
         result = io_pdf.read(self.path)
         self.assertEqual(result["pages"][0]["blocks"][0]["text"], PROSE * 10000)
         self.assertTrue(result["pages"][2]["blocks"][0]["text"].endswith("End sentinel."))
+
+    def test_reading_order_keeps_quality_gate_and_legacy_layout_default(self) -> None:
+        padding = " " * 60
+        layout = (padding.join(PROSE.split(" ")) + "\n") * 20
+        reading = (PROSE + "\n") * 20
+        self.assertLess(fallbacks._assess_text_quality(layout)["quality_score"], 0.7)
+        self.assertGreaterEqual(fallbacks._assess_text_quality(reading)["quality_score"], 0.7)
+        self.assertEqual("".join(layout.split()), "".join(reading.split()))
+
+        def rendered(cmd, **kwargs):
+            if cmd[0] == "pdfinfo":
+                return CompletedProcess(cmd, 0, self.info, "")
+            body = layout if "-layout" in cmd else reading
+            return CompletedProcess(cmd, 0, body + "\f\f" + PROSE + "\f", "")
+
+        self.runner.side_effect = rendered
+        result = io_pdf.read(self.path)
+        self.assertEqual([page["page"] for page in result["pages"]], [1, 2, 3])
+        self.assertIn(PROSE, result["pages"][0]["blocks"][0]["text"])
+        self.assertEqual(fallbacks._extract_with_pdftotext(self.path), [])
+        self.assertEqual(self.runner.call_args.args[0], ["pdftotext", "-layout", self.path, "-"])
 
     def test_exclusions_keep_original_page_numbers_and_all_excluded_is_empty(self) -> None:
         for exclusions in ("1-2", [1, 2], (1, 2)):
@@ -108,17 +148,33 @@ class PopplerReaderTest(unittest.TestCase):
             io_pdf.read(self.path, exclude_pages="1,3")
 
     def test_partial_extra_missing_delimiters_and_garbage_are_rejected(self) -> None:
-        for body in ("", "\f\f\f", f"{PROSE}\f", f"{PROSE}\f\f",
-                     f"{PROSE}\f\f\f\f", f"{PROSE}\f\f{PROSE}", "�" * 1000 + "\f\f\f"):
+        for body in (
+            "",
+            "\f\f\f",
+            f"{PROSE}\f",
+            f"{PROSE}\f\f",
+            f"{PROSE}\f\f\f\f",
+            f"{PROSE}\f\f{PROSE}",
+            "�" * 1000 + "\f\f\f",
+        ):
             with self.subTest(length=len(body)):
                 self.body = body
                 with self.assertRaisesRegex(RuntimeError, "native text"):
                     io_pdf.read(self.path)
 
     def test_pdfinfo_malformed_duplicate_zero_negative_or_overflow_counts(self) -> None:
-        for info in ("", "Pages: zero\n", "Pages: 0\n", "Pages: -3\n", "Pages: 3.0\n",
-                     "Pages: ３\n", "Pages: 3\nPages: 3\n", "Pages: 3\nPages: bad\n",
-                     "Pages: 99999999999999999\n", "Pages: 2147483648\n"):
+        for info in (
+            "",
+            "Pages: zero\n",
+            "Pages: 0\n",
+            "Pages: -3\n",
+            "Pages: 3.0\n",
+            "Pages: ３\n",
+            "Pages: 3\nPages: 3\n",
+            "Pages: 3\nPages: bad\n",
+            "Pages: 99999999999999999\n",
+            "Pages: 2147483648\n",
+        ):
             with self.subTest(info=info):
                 self.info = info
                 with self.assertRaisesRegex(RuntimeError, "page count"):
@@ -128,12 +184,17 @@ class PopplerReaderTest(unittest.TestCase):
         for tool in ("pdfinfo", "pdftotext"):
             for error in (FileNotFoundError(tool), TimeoutExpired(tool, 17), "exit"):
                 with self.subTest(tool=tool, error=type(error).__name__):
-                    def fail(cmd, **kwargs):
-                        if cmd[0] == tool:
-                            if error == "exit":
-                                return CompletedProcess(cmd, 1, self.info if tool == "pdfinfo"
-                                                        else self.body, "private diagnostics")
-                            raise error
+
+                    def fail(cmd, *, _tool=tool, _error=error, **kwargs):
+                        if cmd[0] == _tool:
+                            if _error == "exit":
+                                return CompletedProcess(
+                                    cmd,
+                                    1,
+                                    self.info if _tool == "pdfinfo" else self.body,
+                                    "private diagnostics",
+                                )
+                            raise _error
                         return self._run_tool(cmd, **kwargs)
 
                     self.runner.side_effect = fail
@@ -150,12 +211,18 @@ class PopplerReaderTest(unittest.TestCase):
         self.runner.assert_not_called()
 
     def test_ocr_enhancement_interaction_and_margins_refuse_before_subprocess(self) -> None:
-        for key, value in (("PDF_CHUNKER_OCR_LANGUAGE", "eng"),
-                           ("PDF_CHUNKER_OCR_CPUS", "28,29,30")):
+        for key, value in (
+            ("PDF_CHUNKER_OCR_LANGUAGE", "eng"),
+            ("PDF_CHUNKER_OCR_CPUS", "28,29,30"),
+        ):
             with patch.dict(os.environ, {key: value}), self.assertRaisesRegex(ValueError, "OCR"):
                 io_pdf.read(self.path)
-        for options in ({"use_pymupdf4llm": True}, {"interactive": True},
-                        {"footer_margin": 0}, {"header_margin": 40}):
+        for options in (
+            {"use_pymupdf4llm": True},
+            {"interactive": True},
+            {"footer_margin": 0},
+            {"header_margin": 40},
+        ):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 io_pdf.read(self.path, **options)
         self.runner.assert_not_called()
@@ -172,20 +239,35 @@ class PopplerReaderTest(unittest.TestCase):
         self.runner.assert_not_called()
 
     def test_invalid_blocks_cannot_disappear_or_be_reclassified(self) -> None:
-        base = {"type": "paragraph", "text": PROSE, "source": {
-            "filename": "Original Source.pdf", "page": 1, "method": "pdftotext"}}
-        for source in ({"page": 0}, {"page": 4}, {"page": True}, {"page": "1"},
-                       {"page": 2}, {"page_range": (1, 4)}, {"method": "pdfminer"},
-                       {"filename": "repaired.pdf"}):
+        base = {
+            "type": "paragraph",
+            "text": PROSE,
+            "source": {"filename": "Original Source.pdf", "page": 1, "method": "pdftotext"},
+        }
+        for source in (
+            {"page": 0},
+            {"page": 4},
+            {"page": True},
+            {"page": "1"},
+            {"page": 2},
+            {"page_range": (1, 4)},
+            {"method": "pdfminer"},
+            {"filename": "repaired.pdf"},
+        ):
             with self.subTest(source=source):
                 block = {**base, "source": {**base["source"], **source}}
-                with patch.object(fallbacks, "_extract_with_pdftotext", return_value=[block]):
-                    with self.assertRaises(RuntimeError):
-                        io_pdf.read(self.path, exclude_pages="2")
+                with (
+                    patch.object(fallbacks, "_extract_with_pdftotext", return_value=[block]),
+                    self.assertRaises(RuntimeError),
+                ):
+                    io_pdf.read(self.path, exclude_pages="2")
 
     def test_source_blocks_are_copied_and_leading_dash_path_is_safe(self) -> None:
-        block = {"type": "paragraph", "text": PROSE, "source": {
-            "filename": "-original.pdf", "page": 1, "method": "pdftotext"}}
+        block = {
+            "type": "paragraph",
+            "text": PROSE,
+            "source": {"filename": "-original.pdf", "page": 1, "method": "pdftotext"},
+        }
         before = deepcopy(block)
         with patch.object(fallbacks, "_extract_with_pdftotext", return_value=[block]):
             result = io_pdf.read("-original.pdf")
@@ -196,12 +278,19 @@ class PopplerReaderTest(unittest.TestCase):
 
     def test_default_dispatch_remains_unchanged(self) -> None:
         os.environ.pop("PDF_CHUNKER_PDF_READER")
-        with patch.object(io_pdf, "_all_blocks", return_value=[]) as primary:
-            with patch.object(io_pdf, "_ensure_all_pages", return_value=[]) as ensure:
-                self.assertEqual(io_pdf.read(self.path), {
-                    "type": "page_blocks", "source_path": self.path,
-                    "pages": [], "extraction_quality": {},
-                })
+        with (
+            patch.object(io_pdf, "_all_blocks", return_value=[]) as primary,
+            patch.object(io_pdf, "_ensure_all_pages", return_value=[]) as ensure,
+        ):
+            self.assertEqual(
+                io_pdf.read(self.path),
+                {
+                    "type": "page_blocks",
+                    "source_path": self.path,
+                    "pages": [],
+                    "extraction_quality": {},
+                },
+            )
         primary.assert_called_once()
         ensure.assert_called_once()
         self.runner.assert_not_called()
@@ -213,10 +302,16 @@ class PopplerReaderTest(unittest.TestCase):
 
     def test_real_subprocess_runner_preserves_argv_and_enforces_timeout(self) -> None:
         with patch.object(io_pdf, "run", subprocess.run):
-            result = io_pdf.run_pdftotext([
-                sys.executable, "-c", "import sys; print(repr(sys.argv[1:]))",
-                "source with spaces.pdf", "-",
-            ], timeout=5)
+            result = io_pdf.run_pdftotext(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; print(repr(sys.argv[1:]))",
+                    "source with spaces.pdf",
+                    "-",
+                ],
+                timeout=5,
+            )
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout.strip(), "['source with spaces.pdf', '-']")
             with self.assertRaises(TimeoutExpired):
@@ -227,8 +322,11 @@ class PopplerReaderTest(unittest.TestCase):
 
 class OptionalRealPopplerTest(unittest.TestCase):
     def test_explicit_hash_pinned_source_adapter_only(self) -> None:
-        keys = ("PDF_CHUNKER_POPPLER_TEST_PATH", "PDF_CHUNKER_POPPLER_TEST_SHA256",
-                "PDF_CHUNKER_POPPLER_TEST_PAGES")
+        keys = (
+            "PDF_CHUNKER_POPPLER_TEST_PATH",
+            "PDF_CHUNKER_POPPLER_TEST_SHA256",
+            "PDF_CHUNKER_POPPLER_TEST_PAGES",
+        )
         values = [os.getenv(key) for key in keys]
         if all(value is None for value in values):
             self.skipTest("optional real source requires explicit path, SHA256 and page count")
@@ -251,8 +349,20 @@ class OptionalRealPopplerTest(unittest.TestCase):
             for key in ("PDF_CHUNKER_OCR_LANGUAGE", "PDF_CHUNKER_OCR_CPUS"):
                 os.environ.pop(key, None)
             os.environ["PDF_CHUNKER_PDF_READER"] = "pdftotext"
-            with patch.object(io_pdf.fitz, "open", side_effect=AssertionError("MuPDF call")):
-                result = io_pdf.read(raw_path, timeout=60)
+            # Existing cleanup uses stdlib handlers that may cache stderr.
+            # Silence only this test process and restore its prior state.
+            disabled_before = logging.root.manager.disable
+            try:
+                logging.disable(logging.CRITICAL)
+                with (
+                    patch.object(io_pdf.fitz, "open", side_effect=AssertionError("MuPDF call")),
+                    capture_logs(),
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()),
+                ):
+                    result = io_pdf.read(raw_path, timeout=60)
+            finally:
+                logging.disable(disabled_before)
         # Use fail messages that never include private body text.
         if result["source_path"] != raw_path or result["type"] != "page_blocks":
             self.fail("source path/type mismatch")
@@ -262,8 +372,12 @@ class OptionalRealPopplerTest(unittest.TestCase):
         for page in result["pages"]:
             populated += bool(page["blocks"])
             for block in page["blocks"]:
-                expected_source = {"filename": path.name, "path": raw_path,
-                                   "page": page["page"], "method": "pdftotext"}
+                expected_source = {
+                    "filename": path.name,
+                    "path": raw_path,
+                    "page": page["page"],
+                    "method": "pdftotext",
+                }
                 if block["source"] != expected_source:
                     self.fail("original source provenance mismatch")
                 characters += len(block["text"])
@@ -272,14 +386,25 @@ class OptionalRealPopplerTest(unittest.TestCase):
             self.fail("no native body or wrong reader")
         if raw_hash() != expected_hash:
             self.fail("raw source SHA256 changed during extraction")
-        print(json.dumps({"sha256": expected_hash, "pages": len(result["pages"]),
-                          "populated_pages": populated, "blocks": blocks,
-                          "characters": characters}, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "sha256": expected_hash,
+                    "pages": len(result["pages"]),
+                    "populated_pages": populated,
+                    "blocks": blocks,
+                    "characters": characters,
+                },
+                sort_keys=True,
+            )
+        )
 
 
 class GeneratedPopplerIntegrationTest(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("pdfinfo") and shutil.which("pdftotext"),
-                         "installed Poppler pdfinfo and pdftotext are required")
+    @unittest.skipUnless(
+        shutil.which("pdfinfo") and shutil.which("pdftotext"),
+        "installed Poppler pdfinfo and pdftotext are required",
+    )
     def test_generated_pdf_with_real_poppler_and_mupdf_sentinel(self) -> None:
         # Build a tiny three-page PDF using only bytes; no MuPDF fixture creation.
         objects = [
@@ -293,8 +418,9 @@ class GeneratedPopplerIntegrationTest(unittest.TestCase):
             )
             text = PROSE if number != 5 else ""
             stream = f"BT /F1 10 Tf 40 700 Td ({text}) Tj ET".encode()
-            objects.append(f"<< /Length {len(stream)} >>\nstream\n".encode()
-                           + stream + b"\nendstream")
+            objects.append(
+                f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"\nendstream"
+            )
         objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
         payload = b"%PDF-1.4\n"
         offsets = [0]
@@ -304,8 +430,9 @@ class GeneratedPopplerIntegrationTest(unittest.TestCase):
         xref = len(payload)
         payload += f"xref\n0 {len(offsets)}\n0000000000 65535 f \n".encode()
         payload += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:])
-        payload += (f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
-                    f"startxref\n{xref}\n%%EOF\n").encode()
+        payload += (
+            f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n" f"startxref\n{xref}\n%%EOF\n"
+        ).encode()
         with TemporaryDirectory(dir=Path(__file__).resolve().parents[1]) as directory:
             path = Path(directory) / "Generated native.pdf"
             path.write_bytes(payload)
@@ -320,12 +447,18 @@ class GeneratedPopplerIntegrationTest(unittest.TestCase):
             self.assertEqual([p["page"] for p in selected["pages"]], [3])
             for page in (result["pages"][0], result["pages"][2], selected["pages"][0]):
                 self.assertEqual(page["blocks"][0]["text"].strip(), PROSE)
-                self.assertEqual(page["blocks"][0]["source"], {
-                    "filename": path.name, "path": str(path),
-                    "page": page["page"], "method": "pdftotext",
-                })
-            self.assertEqual(hashlib.sha256(path.read_bytes()).digest(),
-                             hashlib.sha256(payload).digest())
+                self.assertEqual(
+                    page["blocks"][0]["source"],
+                    {
+                        "filename": path.name,
+                        "path": str(path),
+                        "page": page["page"],
+                        "method": "pdftotext",
+                    },
+                )
+            self.assertEqual(
+                hashlib.sha256(path.read_bytes()).digest(), hashlib.sha256(payload).digest()
+            )
 
 
 class OptionalPinContractTest(unittest.TestCase):
@@ -339,10 +472,16 @@ class OptionalPinContractTest(unittest.TestCase):
     def test_partial_and_invalid_pins_fail_before_source_access(self) -> None:
         cases = [
             {"PDF_CHUNKER_POPPLER_TEST_PATH": "/not-read.pdf"},
-            {"PDF_CHUNKER_POPPLER_TEST_PATH": "/not-read.pdf",
-             "PDF_CHUNKER_POPPLER_TEST_SHA256": "invalid", "PDF_CHUNKER_POPPLER_TEST_PAGES": "313"},
-            {"PDF_CHUNKER_POPPLER_TEST_PATH": "/not-read.pdf",
-             "PDF_CHUNKER_POPPLER_TEST_SHA256": "a" * 64, "PDF_CHUNKER_POPPLER_TEST_PAGES": "0"},
+            {
+                "PDF_CHUNKER_POPPLER_TEST_PATH": "/not-read.pdf",
+                "PDF_CHUNKER_POPPLER_TEST_SHA256": "invalid",
+                "PDF_CHUNKER_POPPLER_TEST_PAGES": "313",
+            },
+            {
+                "PDF_CHUNKER_POPPLER_TEST_PATH": "/not-read.pdf",
+                "PDF_CHUNKER_POPPLER_TEST_SHA256": "a" * 64,
+                "PDF_CHUNKER_POPPLER_TEST_PAGES": "0",
+            },
         ]
         for pins in cases:
             with patch.dict(os.environ, pins), patch.object(Path, "open") as opened:
@@ -357,33 +496,70 @@ class OptionalPinContractTest(unittest.TestCase):
             path.write_bytes(raw)
             expected_hash = hashlib.sha256(raw).hexdigest()
             for count in (313, 434):
-                pins = {"PDF_CHUNKER_POPPLER_TEST_PATH": str(path),
-                        "PDF_CHUNKER_POPPLER_TEST_SHA256": expected_hash,
-                        "PDF_CHUNKER_POPPLER_TEST_PAGES": str(count)}
+                pins = {
+                    "PDF_CHUNKER_POPPLER_TEST_PATH": str(path),
+                    "PDF_CHUNKER_POPPLER_TEST_SHA256": expected_hash,
+                    "PDF_CHUNKER_POPPLER_TEST_PAGES": str(count),
+                }
                 pages = [{"page": page, "blocks": []} for page in range(1, count + 1)]
-                pages[-1]["blocks"] = [{"text": "private text sentinel", "source": {
-                    "filename": path.name, "path": str(path),
-                    "page": count, "method": "pdftotext"}}]
-                document = {"type": "page_blocks", "source_path": str(path), "pages": pages,
-                            "extraction_quality": {"selected_engine": "pdftotext"}}
+                pages[-1]["blocks"] = [
+                    {
+                        "text": "private text sentinel",
+                        "source": {
+                            "filename": path.name,
+                            "path": str(path),
+                            "page": count,
+                            "method": "pdftotext",
+                        },
+                    }
+                ]
+                document = {
+                    "type": "page_blocks",
+                    "source_path": str(path),
+                    "pages": pages,
+                    "extraction_quality": {"selected_engine": "pdftotext"},
+                }
                 output = io.StringIO()
-                with patch.dict(os.environ, pins), patch.object(io_pdf, "read", return_value=document):
-                    with redirect_stdout(output):
-                        self.case.test_explicit_hash_pinned_source_adapter_only()
+                errors = io.StringIO()
+                stdlogger = logging.getLogger("pdf_chunker.page_artifacts")
+                disabled_before = logging.root.manager.disable
+
+                def noisy_read(*args, _document=document, _stdlogger=stdlogger, **kwargs):
+                    _stdlogger.warning("private text sentinel")
+                    structlog.get_logger().warning("private text sentinel")
+                    print("private text sentinel")
+                    print("private text sentinel", file=sys.stderr)
+                    return _document
+
+                with (
+                    patch.dict(os.environ, pins),
+                    patch.object(io_pdf, "read", side_effect=noisy_read),
+                    patch.object(stdlogger, "handlers", [logging.StreamHandler(errors)]),
+                    patch.object(stdlogger, "propagate", False),
+                    redirect_stdout(output),
+                    redirect_stderr(errors),
+                ):
+                    self.case.test_explicit_hash_pinned_source_adapter_only()
                 counts = json.loads(output.getvalue())
                 self.assertEqual(counts["pages"], count)
                 self.assertEqual(counts["sha256"], expected_hash)
                 self.assertNotIn("private text sentinel", output.getvalue())
+                self.assertNotIn("private text sentinel", errors.getvalue())
+                self.assertEqual(logging.root.manager.disable, disabled_before)
                 self.assertNotIn(str(path), output.getvalue())
                 with patch.dict(os.environ, {**pins, "PDF_CHUNKER_POPPLER_TEST_SHA256": "0" * 64}):
                     with patch.object(io_pdf, "read") as read, self.assertRaises(AssertionError):
                         self.case.test_explicit_hash_pinned_source_adapter_only()
                     read.assert_not_called()
-                def changed_source(*args, **kwargs):
-                    path.write_bytes(b"changed synthetic bytes")
-                    return document
 
-                with patch.dict(os.environ, pins), patch.object(io_pdf, "read", changed_source):
-                    with self.assertRaisesRegex(AssertionError, "changed during"):
-                        self.case.test_explicit_hash_pinned_source_adapter_only()
+                def changed_source(*args, _document=document, **kwargs):
+                    path.write_bytes(b"changed synthetic bytes")
+                    return _document
+
+                with (
+                    patch.dict(os.environ, pins),
+                    patch.object(io_pdf, "read", changed_source),
+                    self.assertRaisesRegex(AssertionError, "changed during"),
+                ):
+                    self.case.test_explicit_hash_pinned_source_adapter_only()
                 path.write_bytes(raw)

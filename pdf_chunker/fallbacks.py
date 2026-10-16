@@ -200,10 +200,11 @@ def _extract_with_pdftotext(
     exclude_pages: str | None = None,
     *,
     expected_page_count: int | None = None,
+    preserve_layout: bool = True,
 ) -> list[dict]:
     try:
         excluded = parse_page_ranges(exclude_pages) if exclude_pages else set()
-        cmd = ["pdftotext", "-layout", filepath, "-"]
+        cmd = ["pdftotext", *(["-layout"] if preserve_layout else []), filepath, "-"]
         result = run_pdftotext(cmd)
         if result.returncode != 0:
             return []

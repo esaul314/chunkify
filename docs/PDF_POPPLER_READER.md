@@ -8,7 +8,9 @@ The adapter uses `pdfinfo` with `LC_ALL=C`, `LANG=C`, a positive integer timeout
 (default60 seconds), and one positive page count (at most the PDF integer limit,
 2147483647). It then calls the existing
 `fallbacks._extract_with_pdftotext` / `run_pdftotext` with the existing
-`pdftotext -layout ABSOLUTE_ORIGINAL_PATH -` arguments and timeout. The absolute
+standard reading-order `pdftotext ABSOLUTE_ORIGINAL_PATH -` arguments and timeout.
+The legacy fallback still defaults to `-layout`; only this opt-in reader selects
+`preserve_layout=False`. Its quality report records `text_order=reading`. The absolute
 argument prevents leading-dash option confusion; returned provenance retains the
 adapter's original `str(Path(path))`, original filename, one-based page and method
 `pdftotext`. There is no repaired copy, new dependency or automatic format change.
@@ -34,8 +36,8 @@ Existing exclusions remain one-based with ranges/sequences; out-of-range exclusi
 numbers have no effect, as before. Selecting no pages returns an empty page list
 after pdfinfo without invoking pdftotext. Selecting only blank pages fails.
 
-Without `expected_page_count`, the shared fallback's previous behavior is retained
-byte for byte. No OCR implementation, CPU configuration, pipeline, caller,
+Without the new keyword arguments, the shared fallback's previous behavior is
+retained byte for byte. No OCR implementation, CPU configuration, pipeline, caller,
 enrichment, indexing or default-reader behavior is changed by this candidate.
 
 ## Verification

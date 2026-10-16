@@ -61,12 +61,15 @@ def _read_pdftotext(path: str, excluded: set[int], timeout: int) -> dict[str, An
             command_path,
             _format_exclusions(sorted(excluded)),
             expected_page_count=page_count,
+            preserve_layout=False,
         )
         if selected
         else []
     )
     if selected and not blocks:
-        raise RuntimeError("Poppler native text failed, empty, incomplete, or below quality threshold")
+        raise RuntimeError(
+            "Poppler native text failed, empty, incomplete, or below quality threshold"
+        )
     for block in blocks:
         source = block.get("source", {})
         page = source.get("page")
@@ -86,6 +89,7 @@ def _read_pdftotext(path: str, excluded: set[int], timeout: int) -> dict[str, An
         "pdftotext",
         "explicit_native_reader",
     )
+    quality_report["text_order"] = "reading"
     return {
         "type": "page_blocks",
         "source_path": path,
@@ -503,7 +507,9 @@ def read(
             or footer_margin is not None
             or header_margin is not None
         ):
-            raise ValueError("Poppler native reader cannot use OCR, enhancement, interaction or zones")
+            raise ValueError(
+                "Poppler native reader cannot use OCR, enhancement, interaction or zones"
+            )
         if type(timeout) is not int or timeout <= 0:
             raise ValueError("Poppler reader requires a positive integer timeout")
         if Path(abs_path).suffix.lower() != ".pdf":
