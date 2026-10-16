@@ -23,6 +23,7 @@ class OcrRecoveryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.enterContext(patch.dict(os.environ))
         os.environ.pop('PDF_CHUNKER_OCR_LANGUAGE', None)
+        os.environ.pop('PDF_CHUNKER_OCR_CPUS', None)
         self.path = 'library/Original Source.pdf'
         self.primary = self.enterContext(patch.object(io_pdf, '_primary_blocks', return_value=[]))
         self.fallback = self.enterContext(patch.object(io_pdf, '_fallback_blocks', return_value=[]))

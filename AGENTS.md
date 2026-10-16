@@ -179,6 +179,11 @@ only for workflows that use them.
   bodies when optional packaging/navigation is broken. OCR installations may require TESSDATA_PREFIX to identify the system tessdata directory. Defaults remain unchanged;
   missing/encrypted body content remains an error. See
   `docs/PDF_OCR_RECOVERY.md` and `docs/EPUB_PACKAGING_RECOVERY.md`.
+- Version0.1.7 optionally sets `PDF_CHUNKER_OCR_CPUS=28,29,30` for at most three
+  spawn OCR workers, each with an independent PDF handle and one OCR thread.
+  Default remains serial; page order/output/provenance are unchanged. Select
+  authorized safe CPUs explicitly, retain the converter PGID and normal stage
+  lifecycle gates. See `docs/PDF_OCR_RECOVERY.md`; this is CPU-only parallelism.
 - RAG enrichment advertises only tags eligible under the existing grounding rule,
   retaining full source text/IDs and full vocabulary for result validation.
   `pipeline_rag.yaml` opts into hash-pinned offline complete-request admission

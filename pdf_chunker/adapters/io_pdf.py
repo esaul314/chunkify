@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict
 from itertools import groupby
@@ -199,6 +201,81 @@ def _ensure_all_pages(
     ]
 
 
+def _ocr_cpus() -> tuple[int, ...]:
+    """Explicit small CPU pool; absence preserves the existing serial path."""
+    value = os.getenv("PDF_CHUNKER_OCR_CPUS", "").strip()
+    if not value:
+        return ()
+    fields = value.split(",")
+    if not 2 <= len(fields) <= 3 or any(
+        not field.isascii() or not field.isdecimal() for field in fields
+    ):
+        raise ValueError("PDF_CHUNKER_OCR_CPUS requires two or three distinct CPU numbers")
+    cpus = tuple(int(field) for field in fields)
+    if len(set(cpus)) != len(cpus) or not hasattr(os, "sched_setaffinity"):
+        raise ValueError("PDF_CHUNKER_OCR_CPUS requires distinct CPUs and Linux affinity support")
+    return cpus
+
+
+def _ocr_worker_init(cpus: tuple[int, ...]) -> None:
+    # Workers retain the converter's PGID. No detached child or forced teardown.
+    os.sched_setaffinity(0, cpus)
+    os.environ["OMP_THREAD_LIMIT"] = "1"
+
+
+def _ocr_page_blocks(path, page_number, page, language, footer_margin, header_margin):
+    textpage = page.get_textpage_ocr(language=language, dpi=200, full=True)
+    return [
+        {
+            "type": "paragraph",
+            "text": raw[4].strip(),
+            "language": default_language(),
+            "source": {
+                "filename": Path(path).name,
+                "path": path,
+                "page": page_number,
+                "index": raw[5],
+                "location": None,
+                "method": "pymupdf_ocr",
+            },
+            "bbox": tuple(raw[:4]),
+            "inline_styles": None,
+        }
+        for raw in page.get_text("blocks", textpage=textpage)
+        if raw[6] == 0
+        and raw[4].strip()
+        and not (header_margin and raw[1] < header_margin)
+        and not (footer_margin and raw[3] > page.rect.height - footer_margin)
+    ]
+
+
+def _ocr_page_task(task):
+    path, page_number, language, footer_margin, header_margin = task
+    try:
+        # PyMuPDF document/page objects are never shared across processes.
+        with fitz.open(path) as document:
+            return _ocr_page_blocks(
+                path, page_number, document[page_number - 1], language, footer_margin, header_margin
+            )
+    except Exception as exc:
+        raise RuntimeError(f"OCR failed for {path!r}, page {page_number}: {exc}") from exc
+
+
+def _parallel_ocr_pages(path, missing, language, footer_margin, header_margin, cpus):
+    """At most len(cpus) pages in flight; drain on error without killing children."""
+    with ProcessPoolExecutor(
+        max_workers=len(cpus),
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_ocr_worker_init,
+        initargs=(cpus,),
+    ) as pool:
+        for start in range(0, len(missing), len(cpus)):
+            pages = missing[start : start + len(cpus)]
+            tasks = [(path, page, language, footer_margin, header_margin) for page in pages]
+            # map yields input order, independent of worker completion order.
+            yield from zip(pages, pool.map(_ocr_page_task, tasks), strict=True)
+
+
 def _recover_ocr_pages(
     path: str,
     blocks: list[dict[str, Any]],
@@ -214,6 +291,7 @@ def _recover_ocr_pages(
     Text-bearing cross-page blocks already cover their entire source range.
     OCR boxes/indices refer to the original page, never a temporary raster PDF.
     """
+    cpus = _ocr_cpus()
     populated = {
         page for block in blocks if block.get("text", "").strip() for page in _block_pages(block)
     }
@@ -222,35 +300,22 @@ def _recover_ocr_pages(
     ]
     recovered: list[dict[str, Any]] = []
     recovered_pages: list[int] = []
-    if missing:
+    if missing and cpus:
+        for page_number, page_blocks in _parallel_ocr_pages(
+            path, missing, language, footer_margin, header_margin, cpus
+        ):
+            if page_blocks:
+                recovered_pages.append(page_number)
+                recovered.extend(page_blocks)
+    elif missing:
         page_number = missing[0]
         try:
             with fitz.open(path) as document:
                 for page_number in missing:
                     page = document[page_number - 1]
-                    textpage = page.get_textpage_ocr(language=language, dpi=200, full=True)
-                    page_blocks = [
-                        {
-                            "type": "paragraph",
-                            "text": raw[4].strip(),
-                            "language": default_language(),
-                            "source": {
-                                "filename": Path(path).name,
-                                "path": path,
-                                "page": page_number,
-                                "index": raw[5],
-                                "location": None,
-                                "method": "pymupdf_ocr",
-                            },
-                            "bbox": tuple(raw[:4]),
-                            "inline_styles": None,
-                        }
-                        for raw in page.get_text("blocks", textpage=textpage)
-                        if raw[6] == 0
-                        and raw[4].strip()
-                        and not (header_margin and raw[1] < header_margin)
-                        and not (footer_margin and raw[3] > page.rect.height - footer_margin)
-                    ]
+                    page_blocks = _ocr_page_blocks(
+                        path, page_number, page, language, footer_margin, header_margin
+                    )
                     if page_blocks:
                         recovered_pages.append(page_number)
                         recovered.extend(page_blocks)

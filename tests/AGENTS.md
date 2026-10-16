@@ -62,6 +62,9 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `io_pdf_ocr_test.py`: Opt-in text-empty-page OCR, unchanged native/default
   behavior, source provenance, margins/exclusions, explicit engine failures,
   and a generated raster-only PDF integration using installed Tesseract.
+- `io_pdf_parallel_ocr_test.py`: Explicit CPU-pool bounds, serial/default parity,
+  ordered original-source metadata, errors without partial success, inherited
+  worker PGID/affinity and optional real-book exact-payload/timing comparison.
 - `epub_body_markup_test.py`: Container body recovery without duplicate text;
   optional hash-pinned private-control CPU-only in-memory rows.
 - `pdf_parse_pass_test.py`: Shared PDF/EPUB/text parser normalization, one-shot

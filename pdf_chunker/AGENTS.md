@@ -54,6 +54,9 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `adapters/io_text.py`: Plain-text transcript ingestion into canonical `page_blocks`.
 - `adapters/io_pdf.py`: Existing native/fallback PDF extraction plus optional
   `PDF_CHUNKER_OCR_LANGUAGE` recovery of text-empty pages using installed OCR.
+  `PDF_CHUNKER_OCR_CPUS` optionally selects two/three CPU-bound spawn workers;
+  independent PDF handles, bounded ordered page groups, inherited PGID, no GPU
+  concurrency or default behavior change. See `docs/PDF_OCR_RECOVERY.md`.
 - `adapters/io_epub.py`: Default EbookLib reader plus explicit
   `PDF_CHUNKER_EPUB_RECOVERY=1` for declared body extraction when optional
   resources/navigation fail; absent or encrypted body content is never accepted.
