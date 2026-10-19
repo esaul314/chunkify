@@ -731,3 +731,14 @@ original checkout as its fixture working directory, the project virtualenv
 activated, and candidate code imported from the isolated worktree. Python 3.11
 nox lint and typecheck pass. No production conversion or source retry has been
 run; the candidate remains separate from the active checkout.
+
+
+## Serialized JSONL size admission - candidate 0.1.10
+
+The isolated lossless-admission candidate checks the final serialized record
+budget before enrichment and splits only when required. It preserves original
+text, source metadata, ordering and per-part identity; if metadata already uses
+the reserved chunk_part field, it refuses rather than overwriting that identity.
+Inputs carrying both internal meta and emitted metadata retain both mappings.
+The candidate is source-only until its tests, provenance, project review and
+normal runtime admission gates pass; no failed source has been retried.

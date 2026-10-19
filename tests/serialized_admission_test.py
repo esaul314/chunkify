@@ -108,6 +108,55 @@ def test_pipeline_admits_before_enrichment_and_emits_bounded_rows() -> None:
 
 
 
+def test_split_preserves_emitted_metadata_when_meta_and_metadata_coexist() -> None:
+    source = ('Long source sentence with exact spacing.\n' * 100)
+    client = _RecordingClient()
+    spec = PipelineSpec(
+        pipeline=["ai_enrich", "emit_jsonl"],
+        options={
+            "ai_enrich": {
+                "enabled": True,
+                "client": client,
+                "tag_configs": {"topic": ["bounded-tag"]},
+            },
+            "emit_jsonl": {"max_chars": 512},
+        },
+    )
+    artifact = Artifact(
+        payload={
+            "type": "chunks",
+            "items": [
+                {
+                    "text": source,
+                    "meta": {"chunk_id": "internal-id", "internal": "kept"},
+                    "metadata": {"source": "Book.pdf", "edition": "public"},
+                }
+            ],
+        },
+        meta={"semantic_pipeline": "canonical-v1"},
+    )
+
+    result, _ = _run_passes(spec, artifact)
+    rows = result.payload
+
+    assert len(rows) > 1
+    assert [row["metadata"]["chunk_part"] for row in rows] == list(range(len(rows)))
+    assert all(row["metadata"]["source"] == "Book.pdf" for row in rows)
+    assert all(row["metadata"]["edition"] == "public" for row in rows)
+    assert "".join(row["text"] for row in rows) == source
+    assert all(len(json.dumps(row, ensure_ascii=False)) <= 512 for row in rows)
+
+
+def test_admission_refuses_to_overwrite_existing_chunk_part_identity() -> None:
+    with pytest.raises(ValueError, match="already has chunk_part metadata"):
+        _admit_chunks_for_jsonl(
+            [{"text": "x" * 2000, "metadata": {"chunk_part": "upstream"}}],
+            max_chars=256,
+            metadata_key="metadata",
+            tag_configs={},
+        )
+
+
 def test_canonical_emitter_honors_configured_hard_limit() -> None:
     spec = PipelineSpec(
         pipeline=["emit_jsonl"],

@@ -170,7 +170,12 @@ def _admit_chunks_for_jsonl(
         text = chunk.get("text", "")
         if not isinstance(text, str):
             raise TypeError("JSONL admission requires chunk text to be a string")
-        source_meta = dict(_meta_payload(chunk, "meta") or _meta_payload(chunk, "metadata"))
+        # Match the metadata mapping that emit_jsonl will serialize.
+        source_meta = dict(
+            _meta_payload(chunk, metadata_key)
+            or _meta_payload(chunk, "metadata")
+            or _meta_payload(chunk, "meta")
+        )
         projected = {
             **source_meta,
             "utterance_type": "statement_of_fact",
@@ -194,13 +199,14 @@ def _admit_chunks_for_jsonl(
             if size == 0:
                 raise ValueError("serialized metadata exceeds JSONL record limit before enrichment")
             piece, remaining = remaining[:size], remaining[size:]
-            result.append(
-                {
-                    **chunk,
-                    "text": piece,
-                    "meta": {**source_meta, "chunk_part": part},
-                }
-            )
+            if "chunk_part" in source_meta:
+                raise ValueError("cannot split a chunk that already has chunk_part metadata")
+            split_chunk = {**chunk, "text": piece}
+            for key in dict.fromkeys(("meta", "metadata", metadata_key)):
+                original = _meta_payload(chunk, key)
+                if original or key == "meta":
+                    split_chunk[key] = {**dict(original or source_meta), "chunk_part": part}
+            result.append(split_chunk)
             part += 1
     return result
 
@@ -208,7 +214,11 @@ def _admit_chunks_for_jsonl(
 def _validate_enriched_jsonl_size(chunks: Chunks, *, max_chars: int, metadata_key: str) -> None:
     """Refuse unexpected enrichment output that exceeds the admitted record size."""
     for index, chunk in enumerate(chunks):
-        metadata = _meta_payload(chunk, "meta") or _meta_payload(chunk, "metadata")
+        metadata = (
+            _meta_payload(chunk, metadata_key)
+            or _meta_payload(chunk, "metadata")
+            or _meta_payload(chunk, "meta")
+        )
         if _serialized_record_size(chunk.get("text", ""), metadata, metadata_key) > max_chars:
             raise ValueError(
                 f"enriched JSONL record {index} exceeds the admitted {max_chars}-character limit"
