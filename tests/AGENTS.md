@@ -30,6 +30,9 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
   Includes hash-pinned optional oversized-parent/window regression using exact
   cached wire-token counting and offline provider stubs; no real inference.
 - `ai_enrich_pass_test.py`: Pass-level enrichment and metadata injection
+- `serialized_admission_test.py`: Pre-enrichment serialized JSONL budget,
+  lossless escaped-Unicode splitting, metadata refusal, source identity, and
+  canonical pipeline reconstruction/emission with bounded record sizes.
 - `convert_returns_rows_test.py`: `convert` yields rows for chunk dict payloads
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection
 - `chunk_pipeline_test.py`: Immutable option/metric updates, provenance precedence,

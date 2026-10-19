@@ -1,4 +1,5 @@
 import ast
+import json
 import logging
 import os
 import re
@@ -125,6 +126,95 @@ def _resolve_fallback_completion(
     return resolve_fallback_completion(options)
 
 
+def _serialized_record_size(text: str, metadata: Mapping[str, Any], metadata_key: str) -> int:
+    """Return the emitter-compatible JSON character count for one record."""
+    return len(
+        json.dumps(
+            {"text": text, metadata_key: dict(metadata)},
+            ensure_ascii=False,
+        )
+    )
+
+
+def _largest_fitting_prefix(
+    text: str,
+    *,
+    metadata: Mapping[str, Any],
+    metadata_key: str,
+    max_chars: int,
+) -> int:
+    """Find the longest exact text prefix whose serialized row fits."""
+    low, high = 1, len(text)
+    best = 0
+    while low <= high:
+        middle = (low + high) // 2
+        if _serialized_record_size(text[:middle], metadata, metadata_key) <= max_chars:
+            best = middle
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
+
+
+def _admit_chunks_for_jsonl(
+    chunks: Chunks,
+    *,
+    max_chars: int,
+    metadata_key: str,
+    tag_configs: Mapping[str, Iterable[str]],
+) -> Chunks:
+    """Losslessly split chunks against a conservative enriched JSONL budget."""
+    tags = sorted(_valid_tags(_effective_tag_configs(tag_configs)))
+    result: Chunks = []
+    for chunk in chunks:
+        text = chunk.get("text", "")
+        if not isinstance(text, str):
+            raise TypeError("JSONL admission requires chunk text to be a string")
+        source_meta = dict(_meta_payload(chunk, "meta") or _meta_payload(chunk, "metadata"))
+        projected = {
+            **source_meta,
+            "utterance_type": "statement_of_fact",
+            "tags": tags,
+            "enrichment_status": "complete",
+        }
+        if _serialized_record_size(text, projected, metadata_key) <= max_chars:
+            result.append(chunk)
+            continue
+
+        remaining = text
+        part = 0
+        while remaining:
+            part_meta = {**projected, "chunk_part": part}
+            size = _largest_fitting_prefix(
+                remaining,
+                metadata=part_meta,
+                metadata_key=metadata_key,
+                max_chars=max_chars,
+            )
+            if size == 0:
+                raise ValueError("serialized metadata exceeds JSONL record limit before enrichment")
+            piece, remaining = remaining[:size], remaining[size:]
+            result.append(
+                {
+                    **chunk,
+                    "text": piece,
+                    "meta": {**source_meta, "chunk_part": part},
+                }
+            )
+            part += 1
+    return result
+
+
+def _validate_enriched_jsonl_size(chunks: Chunks, *, max_chars: int, metadata_key: str) -> None:
+    """Refuse unexpected enrichment output that exceeds the admitted record size."""
+    for index, chunk in enumerate(chunks):
+        metadata = _meta_payload(chunk, "meta") or _meta_payload(chunk, "metadata")
+        if _serialized_record_size(chunk.get("text", ""), metadata, metadata_key) > max_chars:
+            raise ValueError(
+                f"enriched JSONL record {index} exceeds the admitted {max_chars}-character limit"
+            )
+
+
 def _iterable_items(value: Any) -> list[Any]:
     return (
         list(value) if isinstance(value, Iterable) and not isinstance(value, (str, bytes)) else []
@@ -138,13 +228,16 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
         if not indices:
             return [], lambda _: items
         selected = set(indices)
+        first = indices[0]
 
         def rebuild_list(enriched: Chunks) -> list[Any]:
-            replacements = iter(enriched)
-            return [
-                next(replacements) if index in selected else item
-                for index, item in enumerate(items)
-            ]
+            updated: list[Any] = []
+            for index, item in enumerate(items):
+                if index == first:
+                    updated.extend(enriched)
+                elif index not in selected:
+                    updated.append(item)
+            return updated
 
         chunks = [dict(items[i]) for i in indices]
         return chunks, rebuild_list
@@ -158,14 +251,16 @@ def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
             base = {k: v for k, v in payload.items() if k != "items"}
             return [], lambda _: {**base, "items": items}
         selected = set(indices)
+        first = indices[0]
         base = {k: v for k, v in payload.items() if k != "items"}
 
         def rebuild_mapping(enriched: Chunks) -> dict[str, Any]:
-            replacements = iter(enriched)
-            updated = [
-                next(replacements) if index in selected else item
-                for index, item in enumerate(items)
-            ]
+            updated: list[Any] = []
+            for index, item in enumerate(items):
+                if index == first:
+                    updated.extend(enriched)
+                elif index not in selected:
+                    updated.append(item)
             return {**base, "items": updated}
 
         chunks = [dict(items[i]) for i in indices]
@@ -744,7 +839,22 @@ class _AiEnrichPass:
             if _debug_enabled() and not chunks:
                 logger.warning("ai_enrich debug: no chunks to enrich")
             return a
+        max_chars = options.get("jsonl_max_chars")
+        metadata_key = options.get("jsonl_metadata_key", "metadata")
+        if isinstance(max_chars, int) and max_chars > 0:
+            chunks = _admit_chunks_for_jsonl(
+                chunks,
+                max_chars=max_chars,
+                metadata_key=str(metadata_key),
+                tag_configs=tag_configs,
+            )
         enriched = _classify_all(chunks, client=client, tag_configs=tag_configs)
+        if isinstance(max_chars, int) and max_chars > 0:
+            _validate_enriched_jsonl_size(
+                enriched,
+                max_chars=max_chars,
+                metadata_key=str(metadata_key),
+            )
         payload = rebuild_payload(enriched)
         meta = _update_meta(a.meta, len(enriched))
         return Artifact(payload=payload, meta=meta)

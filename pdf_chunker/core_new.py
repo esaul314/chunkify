@@ -249,9 +249,19 @@ def _run_passes(
     spec: PipelineSpec, a: Artifact[object]
 ) -> tuple[Artifact[object], dict[str, float]]:
     """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
-    configs = [
-        _prepare_pass(registry()[name], spec.options.get(name, {})) for name in spec.pipeline
-    ]
+    configs = []
+    for name in spec.pipeline:
+        overrides = dict(spec.options.get(name, {}))
+        if name == "ai_enrich" and overrides.get("enabled") and "emit_jsonl" in spec.pipeline:
+            from pdf_chunker.passes.emit_jsonl import EmitConfig
+
+            emit_options = spec.options.get("emit_jsonl", {})
+            emit_config = EmitConfig.from_env()
+            max_chars = emit_options.get("max_chars", emit_config.max_chars)
+            metadata_key = emit_options.get("metadata_key", emit_config.metadata_key)
+            overrides["jsonl_max_chars"] = max_chars
+            overrides["jsonl_metadata_key"] = metadata_key
+        configs.append(_prepare_pass(registry()[name], overrides))
 
     def _apply(
         acc: tuple[Artifact[object], dict[str, float]],

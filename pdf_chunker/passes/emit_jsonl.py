@@ -5,7 +5,7 @@ import logging
 import os
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import reduce
 from itertools import takewhile
 from typing import Any, cast
@@ -1226,7 +1226,7 @@ def _rows(
     return _enrich_rows_with_context(rows)
 
 
-def _canonical_rows(doc: Doc) -> list[Row]:
+def _canonical_rows(doc: Doc, *, config: EmitConfig | None = None) -> list[Row]:
     """Normalize already-semantic chunks without changing their boundaries.
 
     ``split_semantic`` owns stitching, overlap, deduplication, sentence
@@ -1234,7 +1234,7 @@ def _canonical_rows(doc: Doc) -> list[Row]:
     compatibility bridge from its internal ``meta`` field to the public JSONL
     metadata key and performs only the final serialized-size validation.
     """
-    config = _config()
+    config = config or _config()
     rows: list[Row] = []
     items = doc.get("items", [])
     if not isinstance(items, list):
@@ -1244,15 +1244,18 @@ def _canonical_rows(doc: Doc) -> list[Row]:
         if not isinstance(item, Mapping):
             continue
         text = item.get("text", "")
-        if not isinstance(text, str) or not text.strip():
+        if not isinstance(text, str):
             continue
         metadata = item.get(config.metadata_key)
         if not isinstance(metadata, Mapping):
             metadata = item.get("metadata")
         if not isinstance(metadata, Mapping):
             metadata = item.get("meta")
+        pre_admitted = isinstance(metadata, Mapping) and "chunk_part" in metadata
+        if not (text if pre_admitted else text.strip()):
+            continue
 
-        row: Row = {"text": text.strip()}
+        row: Row = {"text": text if pre_admitted else text.strip()}
         if isinstance(metadata, Mapping) and metadata:
             public_meta = dict(metadata)
             chunk_id = public_meta.get("chunk_id")
@@ -1288,8 +1291,21 @@ class _EmitJsonlPass:
         preserve = _preserve_chunks(a.meta)
         explicit_small = _explicit_small_chunks(a.meta)
         strategy = _resolve_bullet_strategy(self.bullet_strategy)
+        pipeline_options = (a.meta or {}).get("options")
+        emit_options = (
+            pipeline_options.get("emit_jsonl", {}) if isinstance(pipeline_options, Mapping) else {}
+        )
+        config = _config()
+        if isinstance(emit_options, Mapping):
+            updates = {
+                key: value
+                for key, value in emit_options.items()
+                if key in EmitConfig.__dataclass_fields__
+            }
+            if updates:
+                config = replace(config, **updates)
         rows = (
-            _canonical_rows(doc)
+            _canonical_rows(doc, config=config)
             if canonical and doc.get("type") == "chunks"
             else (
                 _rows(doc, preserve=preserve, explicit_small=explicit_small, strategy=strategy)

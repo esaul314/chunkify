@@ -41,6 +41,13 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   their own metrics.
 - `passes/emit_jsonl.py`: Normalizes canonical chunks for JSONL and validates
   serialized size; unmarked direct callers use the legacy compatibility path.
+  Canonical enriched chunks marked with `chunk_part` retain their exact text
+  boundaries and whitespace through final serialization.
+- `passes/ai_enrich.py`: When `ai_enrich` and `emit_jsonl` share the canonical
+  pipeline, exact serialized-record admission runs before classification using
+  the configured JSONL limit. Oversized chunks are split losslessly with stable
+  `chunk_part` and source metadata; non-fitting metadata or unexpected enrichment
+  expansion fails explicitly instead of dropping or truncating text.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
 - `adapters/request_budget.py`: Optional cached-tokenizer/template admission
   for the explicit RAG Qwen8B serving contract; no downloads or model loading.
