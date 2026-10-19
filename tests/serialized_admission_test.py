@@ -7,7 +7,7 @@ import pytest
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.core_new import _run_passes
 from pdf_chunker.framework import Artifact
-from pdf_chunker.passes.ai_enrich import _admit_chunks_for_jsonl
+from pdf_chunker.passes.ai_enrich import _admit_chunks_for_jsonl, _payload_chunks
 
 
 class _RecordingClient:
@@ -120,3 +120,25 @@ def test_canonical_emitter_honors_configured_hard_limit() -> None:
 
     with pytest.raises(ValueError, match="semantic chunk exceeds JSONL size limit"):
         _run_passes(spec, artifact)
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_split_reconstruction_preserves_interleaved_non_chunk_order(wrapped: bool) -> None:
+    items = [{"text": "first"}, "unrelated", {"text": "second"}]
+    payload = {"type": "chunks", "items": items} if wrapped else items
+
+    chunks, rebuild = _payload_chunks(payload)
+    marker = next(key for key in chunks[0] if key.startswith("__pdf_chunker_original_item_index__"))
+    enriched = [
+        {**chunks[0], "text": "first-a"},
+        {**chunks[0], "text": "first-b"},
+        {**chunks[1], "text": "second-a"},
+    ]
+
+    result = rebuild(enriched)
+    result_items = result["items"] if wrapped else result
+
+    assert [item.get("text", item) if isinstance(item, dict) else item for item in result_items] == [
+        "first-a", "first-b", "unrelated", "second-a"
+    ]
+    assert all(marker not in item for item in result_items if isinstance(item, dict))

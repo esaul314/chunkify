@@ -222,49 +222,55 @@ def _iterable_items(value: Any) -> list[Any]:
 
 
 def _payload_chunks(payload: Any) -> tuple[Chunks, Callable[[Chunks], Any]]:
-    if isinstance(payload, list):
-        items = list(payload)
+    def indexed_chunks(items: list[Any]) -> tuple[Chunks, Callable[[Chunks], list[Any]]]:
         indices = [i for i, item in enumerate(items) if isinstance(item, Mapping)]
         if not indices:
             return [], lambda _: items
-        selected = set(indices)
-        first = indices[0]
 
-        def rebuild_list(enriched: Chunks) -> list[Any]:
+        selected = set(indices)
+        marker = "__pdf_chunker_original_item_index__"
+        while any(marker in item for item in items if isinstance(item, Mapping)):
+            marker += "_"
+
+        chunks: Chunks = []
+        for index in indices:
+            chunk = dict(items[index])
+            chunk[marker] = index
+            chunks.append(chunk)
+
+        def rebuild(enriched: Chunks) -> list[Any]:
+            grouped: dict[int, list[dict[str, Any]]] = {}
+            for chunk in enriched:
+                if not isinstance(chunk, Mapping) or marker not in chunk:
+                    raise ValueError("enrichment output lost its original chunk index")
+                indexed = dict(chunk)
+                index = indexed.pop(marker)
+                if type(index) is not int or index not in selected:
+                    raise ValueError("enrichment output has an invalid original chunk index")
+                grouped.setdefault(index, []).append(indexed)
+            if set(grouped) != selected:
+                raise ValueError("enrichment output is missing an original chunk group")
+
             updated: list[Any] = []
             for index, item in enumerate(items):
-                if index == first:
-                    updated.extend(enriched)
-                elif index not in selected:
+                if index in selected:
+                    updated.extend(grouped[index])
+                else:
                     updated.append(item)
             return updated
 
-        chunks = [dict(items[i]) for i in indices]
-        return chunks, rebuild_list
+        return chunks, rebuild
+
+    if isinstance(payload, list):
+        return indexed_chunks(list(payload))
 
     if isinstance(payload, Mapping):
         items = _iterable_items(payload.get("items"))
         if not items:
             return [], lambda _: payload
-        indices = [i for i, item in enumerate(items) if isinstance(item, Mapping)]
-        if not indices:
-            base = {k: v for k, v in payload.items() if k != "items"}
-            return [], lambda _: {**base, "items": items}
-        selected = set(indices)
-        first = indices[0]
-        base = {k: v for k, v in payload.items() if k != "items"}
-
-        def rebuild_mapping(enriched: Chunks) -> dict[str, Any]:
-            updated: list[Any] = []
-            for index, item in enumerate(items):
-                if index == first:
-                    updated.extend(enriched)
-                elif index not in selected:
-                    updated.append(item)
-            return {**base, "items": updated}
-
-        chunks = [dict(items[i]) for i in indices]
-        return chunks, rebuild_mapping
+        base = {key: value for key, value in payload.items() if key != "items"}
+        chunks, rebuild_items = indexed_chunks(items)
+        return chunks, lambda enriched: {**base, "items": rebuild_items(enriched)}
 
     return [], lambda _: payload
 

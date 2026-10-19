@@ -716,20 +716,18 @@ The roadmap is complete when:
 ## 2026-10-19 candidate - pre-enrichment JSONL size admission
 
 The isolated branch codex/early-jsonl-size-admission-20261019 starts from
-2fe64ae44ef759dd1b3663e8d318933d0b3c06a5. In the canonical pipeline, the
-configured JSONL record limit now reaches AI enrichment. Before classification,
-chunks are measured as complete serialized rows with conservative enrichment
-metadata; oversized text is partitioned by exact string slices and marked with
-chunk_part. The payload adapter expands those additional chunks without
-dropping other payload items. Final emission preserves marked text boundaries
-and rejects any unexpected enriched record that exceeds the same limit.
+2fe64ae44ef759dd1b3663e8d318933d0b3c06a5. The candidate package version is
+0.1.9. In the canonical pipeline, the configured JSONL record limit reaches AI
+enrichment. Before classification, chunks are measured as complete serialized
+rows with conservative enrichment metadata; oversized text is partitioned by
+exact string slices and marked with chunk_part. The payload adapter groups split
+results by original item index, retaining interleaved non-chunk items in place.
+Final emission preserves marked text boundaries and rejects unexpected
+post-enrichment overflow.
 
-Focused admission, emitter, enrichment, chunk-pipeline, option-propagation and
-documentation tests pass. The full suite passes using Python 3.14 and the
-original checkout as its working directory so retained untracked PDF fixtures
-remain available. Python 3.11 nox lint and typecheck pass. Its full test session
-has four environment-bound failures: two need those untracked PDFs in the
-candidate cwd, and two optional real-book OCR checks need Tesseract, which is
-absent. The candidate remains isolated and has not been released or applied to
-conversion of the retained failure sources. Do not claim those source failures
-resolved until they are rerun from an accepted release.
+Six focused admission/reconstruction tests pass, including wrapped and
+unwrapped payloads with interleaved items. The full suite passes with the
+original checkout as its fixture working directory, the project virtualenv
+activated, and candidate code imported from the isolated worktree. Python 3.11
+nox lint and typecheck pass. No production conversion or source retry has been
+run; the candidate remains separate from the active checkout.

@@ -48,6 +48,8 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   the configured JSONL limit. Oversized chunks are split losslessly with stable
   `chunk_part` and source metadata; non-fitting metadata or unexpected enrichment
   expansion fails explicitly instead of dropping or truncating text.
+- AI enrichment payload adaptation preserves original order when one input
+  expands into multiple JSONL-sized chunks; non-chunk payload items stay in place.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
 - `adapters/request_budget.py`: Optional cached-tokenizer/template admission
   for the explicit RAG Qwen8B serving contract; no downloads or model loading.
