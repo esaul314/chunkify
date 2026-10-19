@@ -199,7 +199,10 @@ def _admit_chunks_for_jsonl(
             if size == 0:
                 raise ValueError("serialized metadata exceeds JSONL record limit before enrichment")
             piece, remaining = remaining[:size], remaining[size:]
-            if "chunk_part" in source_meta:
+            if any(
+                "chunk_part" in _meta_payload(chunk, key)
+                for key in dict.fromkeys(("meta", "metadata", metadata_key))
+            ):
                 raise ValueError("cannot split a chunk that already has chunk_part metadata")
             split_chunk = {**chunk, "text": piece}
             for key in dict.fromkeys(("meta", "metadata", metadata_key)):

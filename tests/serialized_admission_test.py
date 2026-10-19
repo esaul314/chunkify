@@ -150,7 +150,7 @@ def test_split_preserves_emitted_metadata_when_meta_and_metadata_coexist() -> No
 def test_admission_refuses_to_overwrite_existing_chunk_part_identity() -> None:
     with pytest.raises(ValueError, match="already has chunk_part metadata"):
         _admit_chunks_for_jsonl(
-            [{"text": "x" * 2000, "metadata": {"chunk_part": "upstream"}}],
+            [{"text": "x" * 2000, "meta": {"chunk_part": "upstream"}, "metadata": {"source": "Book.pdf"}}],
             max_chars=256,
             metadata_key="metadata",
             tag_configs={},
