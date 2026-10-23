@@ -349,6 +349,15 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[obj
     suffix = Path(path).suffix.lower()
     is_epub = suffix == ".epub"
     is_pdf = suffix == ".pdf"
+    from pdf_chunker.adapters.io_joplin_epub import read_bound_article
+
+    bound = read_bound_article(abs_path, document_metadata or {})
+    if bound is not None:
+        payload, proof = bound
+        return Artifact(
+            payload=payload,
+            meta={"metrics": {}, "input": abs_path, "verified_joplin_markdown": proof},
+        )
     adapter = _adapter_for(path)
 
     # For EPUB, use exclude_spine if provided, otherwise fall back to exclude_pages

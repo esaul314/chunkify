@@ -1226,7 +1226,9 @@ def _rows(
     return _enrich_rows_with_context(rows)
 
 
-def _canonical_rows(doc: Doc, *, config: EmitConfig | None = None) -> list[Row]:
+def _canonical_rows(
+    doc: Doc, *, config: EmitConfig | None = None, preserve_text: bool = False
+) -> list[Row]:
     """Normalize already-semantic chunks without changing their boundaries.
 
     ``split_semantic`` owns stitching, overlap, deduplication, sentence
@@ -1251,7 +1253,7 @@ def _canonical_rows(doc: Doc, *, config: EmitConfig | None = None) -> list[Row]:
             metadata = item.get("metadata")
         if not isinstance(metadata, Mapping):
             metadata = item.get("meta")
-        pre_admitted = isinstance(metadata, Mapping) and "chunk_part" in metadata
+        pre_admitted = preserve_text or (isinstance(metadata, Mapping) and "chunk_part" in metadata)
         if not (text if pre_admitted else text.strip()):
             continue
 
@@ -1305,7 +1307,9 @@ class _EmitJsonlPass:
             if updates:
                 config = replace(config, **updates)
         rows = (
-            _canonical_rows(doc, config=config)
+            _canonical_rows(
+                doc, config=config, preserve_text="verified_joplin_markdown" in (a.meta or {})
+            )
             if canonical and doc.get("type") == "chunks"
             else (
                 _rows(doc, preserve=preserve, explicit_small=explicit_small, strategy=strategy)

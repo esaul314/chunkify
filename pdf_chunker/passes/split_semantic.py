@@ -769,6 +769,10 @@ class _SplitSemanticPass:
         options = SplitOptions.from_base(
             self.chunk_size, self.overlap, self.min_chunk_size
         ).with_meta(a.meta)
+        from pdf_chunker.passes.joplin_markdown import PROOF_KEY, split_verified
+
+        if PROOF_KEY in (a.meta or {}):
+            return split_verified(a, options.chunk_size)
         split_fn, metric_fn = _get_split_fn(
             options.chunk_size, options.overlap, options.min_chunk_size
         )

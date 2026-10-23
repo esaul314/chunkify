@@ -371,6 +371,19 @@ class _TextCleanPass:
             self._footer_cache = FooterDecisionCache()
 
     def __call__(self, a: Artifact[object]) -> Artifact[object]:
+        from pdf_chunker.passes.joplin_markdown import PROOF_KEY, verified_text
+
+        if PROOF_KEY in (a.meta or {}):
+            verified_text(a)
+            preserved_meta = dict(a.meta or {})
+            previous_metrics = preserved_meta.get("metrics", {})
+            if not isinstance(previous_metrics, Mapping):
+                raise TypeError("artifact metrics must be a mapping")
+            preserved_meta["metrics"] = {
+                **previous_metrics,
+                "text_clean": {"strategy": "verified_markdown_passthrough"},
+            }
+            return Artifact(payload=a.payload, meta=preserved_meta)
         payload = a.payload
         block_count: int | None = None
         cleaned: str | dict[str, Any]
