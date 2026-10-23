@@ -209,7 +209,7 @@ def test_end_to_end_verified_markdown_is_exact_and_deterministic(fixture):
         m = r["metadata"]
         assert m["joplin_references"] == [f.ref]
         assert m["source_file"] == "fixture.epub"
-        assert m["source_text_strategy"] == "contiguous_markdown_v2"
+        assert m["source_text_strategy"] == "contiguous_markdown_v3"
         assert CONTROL[m["source_char_start"] : m["source_char_end"]] == r["text"]
         assert "chunk_part" not in m
     assert any(
@@ -392,3 +392,26 @@ def test_oversized_context_is_held_before_real_native_enrichment(fixture):
         ]
         == source
     )
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "[1]: not *actually* like server rendered react, since srr only happens the first page load.",
+        r"[1]: [https://reference.example.org/wiki/Example\_Author\_(Sample_State\_ex...](https://reference.example.org/wiki/Example_Author_(Sample_State_politician))",
+        "```text\n[1]: https://example.org/literal-code\n```",
+    ],
+)
+def test_actual_literal_reference_prefix_does_not_coalesce_whole_document(fixture, literal):
+    from markdown_it import MarkdownIt
+
+    source = "# Literal reference control\n\n" + "Independent paragraph.\n\n" * 100 + literal + "\n"
+    env = {}
+    MarkdownIt("commonmark").parse(source, env)
+    assert not env.get("references")
+    f = fixture
+    change_text(f, source)
+    rows = convert(f.binding["path"], spec(f))
+    assert len(rows) > 1
+    assert "".join(row["text"] for row in rows) == source
+    assert [item for row in rows for item in structures(row["text"])] == structures(source)

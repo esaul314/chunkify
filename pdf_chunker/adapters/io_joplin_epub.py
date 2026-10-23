@@ -288,6 +288,6 @@ def read_bound_article(source_path, document_metadata):
             "schema": 1,
             "content_sha256": expected["content_sha256"],
             "source_sha256": binding["source_sha256"],
-            "strategy": "contiguous_markdown_v2",
+            "strategy": "contiguous_markdown_v3",
         },
     )

@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from pathlib import PurePath
 from typing import Any, cast
 
+from markdown_it import MarkdownIt
+
 from pdf_chunker.framework import Artifact
 from pdf_chunker.passes.split_semantic_metadata import build_chunk_with_meta
 
@@ -32,7 +34,9 @@ def slices(text: str, target_words: int) -> list[tuple[int, int]]:
     """
     # A reference definition can affect any paragraph in the document. Keep
     # its original context intact; native size admission will hold it if needed.
-    if re.search(r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*<?\S", text):
+    reference_env: dict[str, Any] = {}
+    MarkdownIt("commonmark").enable("table").parse(text, reference_env)
+    if reference_env.get("references"):
         return [(0, len(text))] if text else []
     lines = text.splitlines(keepends=True)
     following = [""] * len(lines)
@@ -102,7 +106,7 @@ def split_verified(artifact: Artifact, target_words: int) -> Artifact:
             {
                 "source_char_start": start,
                 "source_char_end": end,
-                "source_text_strategy": "contiguous_markdown_v2",
+                "source_text_strategy": "contiguous_markdown_v3",
             }
         )
         items.append(chunk)
@@ -111,7 +115,7 @@ def split_verified(artifact: Artifact, target_words: int) -> Artifact:
         **meta.get("metrics", {}),
         "split_semantic": {
             "chunks": len(items),
-            "strategy": "contiguous_markdown_v2",
+            "strategy": "contiguous_markdown_v3",
             "overlap": 0,
         },
     }
