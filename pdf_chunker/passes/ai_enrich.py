@@ -861,12 +861,17 @@ class _AiEnrichPass:
         max_chars = options.get("jsonl_max_chars")
         metadata_key = options.get("jsonl_metadata_key", "metadata")
         if isinstance(max_chars, int) and max_chars > 0:
-            chunks = _admit_chunks_for_jsonl(
+            admitted = _admit_chunks_for_jsonl(
                 chunks,
                 max_chars=max_chars,
                 metadata_key=str(metadata_key),
                 tag_configs=tag_configs,
             )
+            if "verified_joplin_markdown" in (a.meta or {}) and len(admitted) != len(chunks):
+                raise ValueError(
+                    "verified Markdown context exceeds native JSONL budget; review required"
+                )
+            chunks = admitted
         enriched = _classify_all(chunks, client=client, tag_configs=tag_configs)
         if isinstance(max_chars, int) and max_chars > 0:
             _validate_enriched_jsonl_size(

@@ -209,7 +209,7 @@ def test_end_to_end_verified_markdown_is_exact_and_deterministic(fixture):
         m = r["metadata"]
         assert m["joplin_references"] == [f.ref]
         assert m["source_file"] == "fixture.epub"
-        assert m["source_text_strategy"] == "contiguous_markdown_v1"
+        assert m["source_text_strategy"] == "contiguous_markdown_v2"
         assert CONTROL[m["source_char_start"] : m["source_char_end"]] == r["text"]
         assert "chunk_part" not in m
     assert any(
@@ -286,3 +286,109 @@ def test_real_native_enrichment_and_serialized_admission_preserve_source(fixture
     assert "".join(row["text"] for row in result.payload) == CONTROL
     assert all(row["metadata"]["enrichment_status"] == "complete" for row in result.payload)
     assert all(row["metadata"]["joplin_references"] == [f.ref] for row in result.payload)
+
+
+# Regression context from the independently retained Wiretap source, where a
+# chunk beginning with the five-space nested bullet became indented code.
+LIST_CONTEXT = """1. Start the local demonstration.
+2. Configure the local home app:
+   * Host the static files somewhere reachable.
+3. Deploy the local home app to your account:
+   * Add a fake device:
+
+     ```
+     npm run firebase --prefix functions/ -- functions:config:set \
+         strand1.leds=16 strand1.channel=1
+     npm run deploy --prefix functions/
+     ```
+
+     + This tells the cloud fulfillment to include an `otherDeviceIds` field.
+   * From the Actions Console, configure the local home SDK.
+
+A separate unindented paragraph ends the list.
+"""
+
+
+def change_text(f, text):
+    f.text = text
+    digest = sha(text.encode())
+    f.record["capture"].update(markdown=text, sha256=digest)
+    f.ref["capture"]["sha256"] = digest
+    f.meta["content_sha256"] = f.meta["content_generation"] = digest
+    f.quality["reviewed"][0]["capture_sha256"] = digest
+    f.rewrite()
+    f.metadata = article.metadata(f.binding, "technology")
+    f.metadata_path.write_text(json.dumps(f.metadata))
+
+
+def structures(text):
+    from markdown_it import MarkdownIt
+
+    return [
+        (t.type, t.content) for t in MarkdownIt().parse(text) if t.type in {"fence", "code_block"}
+    ]
+
+
+def test_actual_nested_list_boundary_keeps_rendered_code_context(fixture):
+    f = fixture
+    change_text(f, LIST_CONTEXT)
+    config = spec(f)
+    config.options["split_semantic"]["chunk_size"] = 1
+    config.options["split_semantic"]["overlap"] = 0
+    rows = convert(f.binding["path"], config)
+    assert "".join(row["text"] for row in rows) == LIST_CONTEXT
+    assert [item for row in rows for item in structures(row["text"])] == structures(LIST_CONTEXT)
+    assert structures(LIST_CONTEXT)[0][0] == "fence"
+    assert all(not row["text"].startswith("     + This") for row in rows)
+
+
+def test_document_reference_targets_remain_with_every_use(fixture):
+    from markdown_it import MarkdownIt
+
+    f = fixture
+    source = (
+        "# Reviewed reference context\n\nSee [the report][1] and [the paper][2].\n\n"
+        + "Independent intervening prose.\n\n" * 100
+        + "[1]:<https://research.example.org/reports/2001/07/REPORT-01-07.pdf>\n\n"
+        + "[2]:<https://archive.example.org/download/pdf/123456789.pdf>\n"
+    )
+    change_text(f, source)
+    rows = convert(f.binding["path"], spec(f))
+    assert len(rows) == 1
+    assert rows[0]["text"] == source
+
+    def links(text):
+        return [
+            child.attrGet("href")
+            for token in MarkdownIt().parse(text)
+            for child in (token.children or [])
+            if child.type == "link_open"
+        ]
+
+    assert links(rows[0]["text"]) == links(source)
+    assert len(links(source)) == 2
+
+
+def test_oversized_context_is_held_before_real_native_enrichment(fixture):
+    from pdf_chunker.core_new import _run_passes
+
+    f = fixture
+    source = (
+        "# Large reference context\n\n[link][1]\n\n"
+        + "word " * 10000
+        + "\n\n[1]: https://example.org/source\n"
+    )
+    change_text(f, source)
+    client = RecordingClient()
+    config = spec(f)
+    config.pipeline.insert(-1, "ai_enrich")
+    config.options["ai_enrich"] = {"enabled": True, "client": client, "tag_configs": {}}
+    with pytest.raises(ValueError, match="context exceeds native JSONL budget"):
+        _run_passes(config, _input_artifact(f.binding["path"], config))
+    assert client.inputs == []
+    assert (
+        article.read_bound_article(f.binding["path"], f.metadata)[0]["pages"][0]["blocks"][0][
+            "text"
+        ]
+        == source
+    )

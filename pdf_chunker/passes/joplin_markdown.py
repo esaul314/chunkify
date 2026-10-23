@@ -30,10 +30,21 @@ def slices(text: str, target_words: int) -> list[tuple[int, int]]:
     No overlap or deduplication: the ordered source slices concatenate exactly.
     An oversized atom remains intact for real serialized admission downstream.
     """
+    # A reference definition can affect any paragraph in the document. Keep
+    # its original context intact; native size admission will hold it if needed.
+    if re.search(r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*<?\S", text):
+        return [(0, len(text))] if text else []
+    lines = text.splitlines(keepends=True)
+    following = [""] * len(lines)
+    next_nonblank = ""
+    for index in range(len(lines) - 1, -1, -1):
+        following[index] = next_nonblank
+        if lines[index].strip():
+            next_nonblank = lines[index]
     ends = []
     fence = None
     offset = 0
-    for line in text.splitlines(keepends=True):
+    for line_index, line in enumerate(lines):
         marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
         if marker:
             token = marker.group(1)
@@ -47,7 +58,17 @@ def slices(text: str, target_words: int) -> list[tuple[int, int]]:
                 fence = None
         offset += len(line)
         if fence is None and not line.strip():
-            ends.append(offset)
+            next_line = following[line_index]
+            # Starting a new chunk with a list continuation loses its container
+            # and may turn prose into indented code. Keep complete loose/nested
+            # lists, adjacent list items and quote continuations with their lead.
+            needs_lead = bool(next_line) and (
+                next_line[0].isspace()
+                or re.match(r"^(?:[-+*]|[0-9]{1,9}[.)])\s|^>", next_line) is not None
+            )
+            if not needs_lead:
+                ends.append(offset)
+
     if not ends or ends[-1] != len(text):
         ends.append(len(text))
     result = []
@@ -81,7 +102,7 @@ def split_verified(artifact: Artifact, target_words: int) -> Artifact:
             {
                 "source_char_start": start,
                 "source_char_end": end,
-                "source_text_strategy": "contiguous_markdown_v1",
+                "source_text_strategy": "contiguous_markdown_v2",
             }
         )
         items.append(chunk)
@@ -90,7 +111,7 @@ def split_verified(artifact: Artifact, target_words: int) -> Artifact:
         **meta.get("metrics", {}),
         "split_semantic": {
             "chunks": len(items),
-            "strategy": "contiguous_markdown_v1",
+            "strategy": "contiguous_markdown_v2",
             "overlap": 0,
         },
     }
