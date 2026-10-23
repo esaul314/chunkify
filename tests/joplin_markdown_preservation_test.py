@@ -397,7 +397,10 @@ def test_oversized_context_is_held_before_real_native_enrichment(fixture):
 @pytest.mark.parametrize(
     "literal",
     [
-        "[1]: not *actually* like server rendered react, since srr only happens the first page load.",
+        (
+            "[1]: not *actually* like server rendered react, since "
+            "srr only happens the first page load."
+        ),
         r"[1]: [https://reference.example.org/wiki/Example\_Author\_(Sample_State\_ex...](https://reference.example.org/wiki/Example_Author_(Sample_State_politician))",
         "```text\n[1]: https://example.org/literal-code\n```",
     ],
