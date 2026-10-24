@@ -17,6 +17,11 @@ Supported input formats for this project are:
 
 For corpus-ingestion workflows, skip unsupported formats such as `.mobi`, `.azw3`, `.djvu`, and `.chm` unless they have first been converted into a supported format outside this project.
 
+Library integrations can also compare verified article inputs using opt-in
+[conversion descriptors](docs/CONVERSION_DESCRIPTORS.md), which distinguish logical
+note associations from content revisions and physical sources. Cache execution and
+downstream writes remain separate work.
+
 ## Quickstart
 
 ### Installation

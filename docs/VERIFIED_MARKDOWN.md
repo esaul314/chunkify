@@ -100,7 +100,10 @@ exact reconstruction, unchanged reruns after another document, Unicode metadata,
 tampering and refusal before enrichment. They use an injected in-process client;
 no model service or upstream source admission is exercised.
 
-P1-E remains open for explicit document-text and HTML input, supplied text,
-conversion descriptors and association/cache invalidation, complete byte preflight,
-and downstream integration qualification. P2-D receipts and cleanup follow those
-contracts. Existing EPUB sources, releases and vector-store contents are unchanged.
+The next increment adds opt-in [conversion descriptors](CONVERSION_DESCRIPTORS.md)
+and independent note associations, with fresh evidence verification and pure
+new/changed/unchanged comparison. Effective runner settings/version resolution and
+validated cache reuse remain open, alongside document-text/HTML/supplied-text input,
+complete byte preflight and downstream integration qualification. P2-D receipts
+and cleanup follow those contracts. Existing EPUB sources, releases and vector-store
+contents are unchanged.

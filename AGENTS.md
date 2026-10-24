@@ -150,6 +150,13 @@ only for workflows that use them.
   See `docs/VERIFIED_MARKDOWN.md` for evidence preparation, exact UTF-8 policy
   and remaining P1-E work. Markdown uses shared `text_parse` normalization but
   never the transcript reader; its cue-like lines, code and tables stay exact.
+- For opt-in article identity, use
+  `describe_bound_article(binding, corpus="technology", contract=resolved_contract)`
+  from `pdf_chunker.adapters.io_joplin_epub`, then
+  `compare_conversion(current, previous=previous_descriptor)` from
+  `pdf_chunker.conversion_descriptor`. The adapter re-verifies evidence; the pure
+  comparison writes nothing. See `docs/CONVERSION_DESCRIPTORS.md` for version pins,
+  independent note associations and the remaining runner/cache qualification.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -397,6 +404,7 @@ pdf_chunker/
 │   ├── core_new.py                # Canonical CLI/library runner and invariants
 │   ├── core.py                    # Frozen legacy process_document compatibility API
 │   ├── contracts.py               # Typed page/block/chunk/run-report contracts
+│   ├── conversion_descriptor.py   # Pure immutable article identity and comparison
 │   ├── framework.py               # Generic artifacts and pass registry
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
@@ -481,6 +489,7 @@ pdf_chunker/
     ├── text_clean_purity_test.py     # Ordered text/style cleanup and metadata preservation
     ├── geometry_contract_test.py     # Pure zone scoring, strict margins, bounded previews
     ├── verified_markdown_ingress_test.py # Synthetic article evidence, parity and exact bytes
+    ├── conversion_descriptor_test.py # Contract/association laws and verified identity
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py

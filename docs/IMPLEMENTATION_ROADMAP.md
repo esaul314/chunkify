@@ -10,7 +10,7 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-**Status:** P0-A remains open; first P1-E verified Markdown increment implemented (2026-10-24), qualification below
+**Status:** P0-A remains open; P1-E verified Markdown and opt-in descriptor increments implemented (2026-10-24), qualification below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -45,9 +45,10 @@ git status --short
 git log -8 --date=short --pretty=format:'%h %ad %s'
 ```
 
-The worktree already contains pending user changes for plain-text/transcript ingestion
-and metadata propagation. Preserve those changes. Do not reset, clean, or overwrite
-unrelated files.
+Inspect the live worktree rather than assuming the historical pending changes are
+still present. Plain-text/transcript ingestion and metadata propagation are now
+tracked. Preserve any current unrelated changes and untracked files; do not reset,
+clean or overwrite them.
 
 ## 2. Mission and non-negotiable constraints
 
@@ -530,7 +531,8 @@ configuration accepts too many invalid states.
 ### P1-E — Support recurring article ingestion without EPUB wrappers
 
 **Status: IN PROGRESS (2026-10-24).** Direct proof-bound `.md` ingress is the first
-implemented increment; the remaining contract and input work below is open.
+implemented increment. Opt-in descriptors and independent note associations are
+also implemented; effective runner resolution, reuse and remaining inputs are open.
 Deliver explicit document-text and HTML inputs in small increments under
 P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
 
@@ -572,14 +574,44 @@ match exactly, all seven corpus cases pass, and the canonical PDF smoke retains 
 sentinel. Existing test/corpus warnings and repository-wide P0-A debt remain.
 Diff review found no further actionable issues; no dependencies or goldens changed.
 
-**Next boundaries:** Define the format-neutral conversion descriptor and logical
-note/content/physical-source association contract before cache reuse or receipts.
-Current note references survive format changes, but chunk IDs still include the
-physical filename; cross-format chunk identity and downstream idempotency are not
-established. Current admission measures its existing `max_chars` contract, not a
-new UTF-8 byte preflight. Document-mode `.txt`, HTML, supplied text, deterministic
-invalidation and integration qualification remain open. Existing wrappers are not
-retired, and no release or corpus migration is selected.
+**Descriptor increment:** See [CONVERSION_DESCRIPTORS.md](CONVERSION_DESCRIPTORS.md).
+The pure data-first builder snapshots declared versions/resolved configuration,
+exact UTF-8 content revision, physical source and complete metadata into immutable
+records. Logical note associations retain content, corpus and full per-note
+provenance independently of the physical envelope. The adapter's opt-in
+`describe_bound_article` re-verifies existing evidence before constructing these
+records. Pure comparison reports new/changed/unchanged and affected fields; it
+does not execute reuse or delete references. This is the next dependency for
+repeatable ingestion, not a second converter or a receipt framework.
+
+Mapping order is irrelevant; sequence order remains significant. JSON snapshots
+reject opaque clients/callbacks, non-string keys, nonfinite values and invalid
+Unicode. Metadata changes conservatively change complete conversion identity;
+changing one note preserves the other note's association. Markdown and EPUB share
+content and note identity but keep distinct conversion keys, reflecting existing
+physical chunk IDs/payloads. The descriptor carries every supplied native
+metadata field, including evidence bindings, without changing emitted rows.
+
+**Descriptor verification:** The new API was absent at the failing-first check.
+33 dedicated synthetic regression/property cases now pass; together with ingress,
+preservation, transcript, documentation and scope checks, the focused run passes
+215 cases. Collection finds 1,431 tests without errors (the new production module
+also adds a syntax-scope case). All three nox sessions pass on Python 3.11.17 with
+the documented OCR language-data setting, 40 production type targets and 66
+lint/format files. Generated merge docs and `git diff --check` pass. Existing
+optional skips, return-value warnings and the PyMuPDF deprecation warning remain.
+Diff review confirms the existing conversion path is unchanged; the new adapter
+method is opt-in. No dependencies, goldens or unrelated files changed.
+
+**Next boundaries:** Resolve effective canonical runner settings and implementation/
+dependency versions into this contract, then qualify validated base-artifact and
+separate enrichment reuse. The current descriptor validates declared structure,
+not completeness of caller-supplied pins/settings. An unchanged input key alone
+cannot prove cached-output integrity, successful completion or source approval.
+Cross-format chunk identity and downstream idempotency are not established.
+Current admission measures its existing `max_chars` contract, not a new UTF-8 byte
+preflight. Document-mode `.txt`, HTML, supplied text and integration qualification
+remain open. Existing wrappers are not retired; no release or migration is selected.
 
 **Reuse before adding:** The current Joplin EPUB adapter verifies the article
 proof and supplies `verified_joplin_markdown`; the shared Markdown passes retain
@@ -870,7 +902,7 @@ Use separate coherent commits, in this order:
 9. `test: add corpus quality evaluation` — complete
 10. `docs: reconcile roadmap and supported input formats` — complete
 11. `docs: reconcile active documentation and dependency policy` — complete
-12. Direct verified Markdown implemented; document text, HTML and conversion contracts remain open under P1-E.
+12. Direct verified Markdown and opt-in descriptors implemented; effective runner contracts/reuse, document text and HTML remain open under P1-E.
 13. Bounded artifacts and resumable completion receipts — proposed P2-D.
 
 If a package is too large for one review, split it by boundary, not by arbitrary

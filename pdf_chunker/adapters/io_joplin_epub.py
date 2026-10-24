@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from pdf_chunker.conversion_descriptor import ConversionDescriptor, describe_conversion
+
 CORPORA = {
     "coaching",
     "literature",
@@ -98,6 +100,28 @@ def _source_text(raw: bytes, *, suffix: str, row: Mapping[str, Any]) -> str:
 def metadata(binding: Mapping[str, Any], corpus: str | None) -> dict[str, Any]:
     """Read exact source/sidecar/final approval; retain the existing metadata API."""
     return _verified_article(binding, corpus)[1]
+
+
+def describe_bound_article(
+    binding: Mapping[str, Any], *, corpus: str, contract: Mapping[str, object]
+) -> ConversionDescriptor:
+    """Verify fresh evidence, then describe conversion inputs without writing.
+
+    Logical note associations omit the physical envelope; the complete descriptor
+    retains that envelope and all native metadata. Settings/version resolution
+    belongs to the caller. A descriptor is not source approval or a cache receipt.
+    """
+    text, native = _verified_article(binding, corpus)
+    return describe_conversion(
+        text,
+        source_path=binding["path"],
+        source_format=Path(binding["path"]).suffix.lower(),
+        source_sha256=binding["source_sha256"],
+        metadata=native,
+        references={"joplin:" + ref["note_id"]: ref for ref in native["joplin_references"]},
+        corpus=corpus,
+        contract=contract,
+    )
 
 
 def _verified_article(binding: Mapping[str, Any], corpus: str | None) -> tuple[str, dict[str, Any]]:

@@ -13,6 +13,14 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - `config.py`: Pipeline-spec loader with explicit no-spec handling and per-pass option validation.
 - `core.py`: Frozen legacy ``process_document`` compatibility API with injectable stages.
 - `contracts.py`: Typed-in-practice page, block, chunk, and run-metric boundary contracts.
+- `conversion_descriptor.py`: Pure data-first `describe_conversion(text, **inputs)`
+  and `compare_conversion(current, previous=...)`, usable with `partial`. Frozen
+  records hold detached canonical JSON snapshots; sorted logical references keep
+  separate content/routing/provenance associations. Physical source and complete
+  metadata remain in the conversion key because current row IDs/payloads depend
+  on them. No cache execution or reference deletion. Caller-resolved settings and
+  pinned implementation/schema/serialization versions are mandatory; automatic
+  effective-runner resolution is still pending. See `docs/CONVERSION_DESCRIPTORS.md`.
 - `framework.py`: Generic artifact carrier, collision-safe pass registry, and legacy runner.
 - `parsing.py`: Structural block extraction.
 - `text_cleaning.py`: Ligature repair, quote normalization, control-character removal.
@@ -69,6 +77,9 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   Example: `pdf_chunker convert ./article.md --spec pipeline.yaml
   --metadata-file ./native-metadata.json --out ./article.jsonl --no-enrich`.
   See `docs/VERIFIED_MARKDOWN.md` for approval and normalization requirements.
+  `describe_bound_article(binding, corpus="technology", contract=resolved_contract)`
+  re-verifies the same evidence before constructing a descriptor and retains one
+  `joplin:<note-id>` association per note. A descriptor never bypasses source proof.
 - `passes/joplin_markdown.py`: Existing contiguous source slices for verified
   articles from either format; no new Markdown engine or transcript cue stripping.
   Logical note references remain intact; chunk IDs retain physical filenames.

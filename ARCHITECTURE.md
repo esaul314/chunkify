@@ -30,6 +30,7 @@ pdf_chunker/
 │   ├── core_new.py          # Canonical CLI/library runner and invariant enforcement
 │   ├── core.py              # Frozen process_document compatibility API
 │   ├── contracts.py         # Typed page/block/chunk/run-report contracts
+│   ├── conversion_descriptor.py # Pure article identity snapshots and comparison
 │   ├── cli.py               # Typer CLI: convert / inspect commands
 │   ├── config.py            # Pydantic Settings + YAML pipeline spec loader
 │   ├── framework.py         # Artifact/Pass registry + pipeline runner
@@ -178,6 +179,15 @@ the shared Joplin adapter verifies its exact raw UTF-8 bytes, sidecar and approv
 It bypasses transcript ingestion and reuses the existing contiguous Markdown
 passes. See `docs/VERIFIED_MARKDOWN.md`; ordinary unverified Markdown is refused.
 A spec must not mix parser-family steps.
+
+Article conversion descriptors are a separate opt-in library boundary. The shared
+Joplin adapter re-verifies evidence, then pure `describe_conversion` snapshots the
+physical source, content revision, declared conversion contract, full metadata
+and sorted independent note associations. `compare_conversion` reports changed
+fields without executing work or deleting references. This preserves logical
+identity across Markdown/EPUB while retaining distinct complete keys for today's
+physical chunk IDs/payloads. Effective runner configuration/version resolution and
+validated artifact reuse remain pending; see `docs/CONVERSION_DESCRIPTORS.md`.
 
 ## 4.1) Corpus-quality evaluation
 

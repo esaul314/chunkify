@@ -15,6 +15,7 @@ TEST_SESSION_DEPENDENCIES: Final = ("-e", ".[dev,enrichment]")
 QUALITY_PATHS: Final = (
     "pdf_chunker/__init__.py",
     "pdf_chunker/contracts.py",
+    "pdf_chunker/conversion_descriptor.py",
     "pdf_chunker/framework.py",
     "pdf_chunker/core_new.py",
     "pdf_chunker/env_utils.py",
@@ -59,6 +60,7 @@ LINT_EXTRA_PATHS: Final = (
     "tests/io_epub_adapter_test.py",
     "tests/joplin_markdown_preservation_test.py",
     "tests/verified_markdown_ingress_test.py",
+    "tests/conversion_descriptor_test.py",
     "tests/epub_body_markup_test.py",
     "tests/pdf_parse_pass_test.py",
     "tests/utils_test.py",

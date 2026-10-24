@@ -6,6 +6,11 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `conversion_descriptor_test.py`: Pure descriptor/association identity, scoped
+  content/settings/metadata invalidation, mapping-order and input-preservation
+  laws, immutable snapshots, partial application, strict JSON/version contracts,
+  verified Markdown/EPUB logical identity and intervening-document reruns, tampered
+  evidence, and a two-note metadata update retaining both references in real rows.
 - `verified_markdown_ingress_test.py`: Synthetic proof-bound `.md`/EPUB parity,
   exact UTF-8 reconstruction including cue-like content, unchanged JSONL bytes
   after an intervening document, actual CLI output, Unicode JSON/YAML metadata,
@@ -107,6 +112,10 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters
 
 ## AI Agent Guidance
+- For conversion identity changes, add `tests/conversion_descriptor_test.py` to
+  the direct article ingress regression run below. Use only synthetic approved
+  captures in temporary roots. Comparison does not establish cache completion,
+  downstream idempotency or permission to delete a missing note association.
 - For direct article ingress, run `pytest tests/verified_markdown_ingress_test.py
   tests/joplin_markdown_preservation_test.py tests/text_adapter_test.py`, then
   `nox -s lint typecheck tests`. Generate synthetic evidence in temporary roots;
