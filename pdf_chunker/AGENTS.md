@@ -25,6 +25,13 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   emit_defaults=..., split_defaults=...)` and frozen `PreparedArticleConversion`.
   Resolve sizing with `SplitOptions`, retain supplied JSON settings and fill
   emission defaults without reading the environment or changing inputs.
+- `article_output.py`: Pure data-first `validate_article_output(data,
+  descriptor=descriptor, expected_sha256=retained_hash)` validates pinned base
+  JSONL serialization, complete-row character limits, ordered generated IDs,
+  native provenance/precedence, readability schema and exact source reconstruction.
+  Use `partial` for repeated checks. Frozen `ValidatedArticleOutput` stores bytes;
+  `rows()` returns detached containers. No evidence/terminal authority or I/O;
+  retain hashes independently from cached bytes.
 - `adapters/article_conversion.py`: Read-only
   `prepare_bound_conversion(binding, spec, corpus="technology")` resolves actual
   runner defaults, fingerprints package Python sources and installed runtime
@@ -32,8 +39,13 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   Execute `convert(binding["path"], prepared.spec())` with its detached spec.
   Only the canonical base article composition is qualified; enrichment, custom
   pipelines and interactions refuse. Dictionary resource/state pins are included;
-  execution/output validation and cache reuse remain open. Preparation writes no
-  artifacts or receipts.
+  `execute_bound_conversion(binding, prepared=prepared, corpus="technology")`
+  re-prepares before/after the synchronous runner and returns validated bytes only
+  after normal completion and matching snapshots. It writes no files/receipts,
+  including a configured `output_path`. Exceptions propagate without completion
+  or runtime repair. Persistent observable drift refuses; concurrent/transient
+  mutation and imported-code attestation remain outside this bounded contract.
+  Persisted completion and cache reuse remain open.
 - `adapters/readability_runtime.py`: Use `collect_readability_runtime()` to inspect
   raw CMU/Pyphen resource hashes and effective loaded-table hashes. Canonical
   hashing is pure and data-first; discovery stays in this adapter. Optional CMU

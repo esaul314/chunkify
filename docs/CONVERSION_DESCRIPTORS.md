@@ -3,8 +3,9 @@
 P1-E now exposes an opt-in library contract for comparing article conversion
 inputs. It separates logical note references, content revisions, physical sources
 and conversion settings. Base article preparation also resolves runner defaults
-and fingerprints the installed implementation/runtime. It does not change
-`convert()`, emitted chunk IDs or JSONL, and it does not execute a cache, write
+and fingerprints the installed implementation/runtime. Guarded in-memory execution
+also validates completed base output. These opt-in APIs do not change
+`convert()`, emitted chunk IDs or JSONL, and do not execute a cache, write
 receipts or update a vector store.
 
 ## Resolved base article preparation
@@ -118,11 +119,86 @@ resource and table mutations remain observable.
 This remains an input snapshot, not a hermetic runtime attestation. Keep code,
 dictionaries and runtime state stable between preparation and conversion. Source
 changes after import, replacement callables and concurrent mutation are outside
-this contract; execution is still the existing `convert` API, without a guard
-around the whole run. Fresh source verification remains mandatory. Before enabling
-artifact reuse, add output hash/schema/reconstruction checks, terminal completion
-and execution-state validation. An unchanged prepared descriptor alone cannot
-certify any of these. There is no cache executor or enrichment reuse yet.
+this contract. For before/after drift detection and completed output validation,
+use the opt-in execution adapter below. Fresh source verification remains mandatory;
+an unchanged prepared descriptor alone cannot certify completion or output integrity.
+There is no cache executor or enrichment reuse yet.
+
+## Guarded execution and output validation
+
+```python
+from functools import partial
+
+from pdf_chunker.adapters.article_conversion import execute_bound_conversion
+from pdf_chunker.article_output import validate_article_output
+
+execute = partial(execute_bound_conversion, corpus="technology")
+output = execute(binding, prepared=prepared)
+rows = output.rows()  # Fresh containers; changing them cannot alter stored bytes.
+print(output.conversion_key, output.sha256, output.size_bytes, output.row_count)
+
+# For future storage/readback: retain the completed run's hash independently.
+check = partial(validate_article_output, descriptor=prepared.descriptor,
+                expected_sha256=output.sha256)
+checked = check(output.jsonl)
+```
+
+Execution re-prepares the same binding and explicit spec before and after calling
+the existing synchronous `convert` runner. Both frozen snapshots must match the
+original preparation, including source evidence, native metadata, configuration,
+package/runtime and readability state. Altered spec snapshots, changed inputs,
+persistent runtime drift or inconsistent caches refuse. Correct cache warming and
+intervening documents remain identity-neutral. The returned rows are serialized
+through the existing writer's literal-Unicode JSONL policy without writing files;
+even a configured `output_path` is not written by this API, matching `convert`.
+
+A successful return follows normal runner completion, matching post-execution
+verification and pure output validation. Exceptions propagate without a completion
+value or state repair. No child process, exit code, durable receipt, artifact
+publication or resume claim is involved. A caller must not treat a partial file,
+an input descriptor, or a separately constructed output value as completion proof.
+
+The pure data-first validator accepts bytes, a descriptor and a retained expected
+SHA-256. It checks the hash before parsing, then requires:
+
+- Strict UTF-8 JSONL under the pinned serialization policy, with one object per
+  line and a final newline. Duplicate keys, nonfinite numbers, invalid Unicode,
+  alternate escaping/spacing, BOMs, blank rows and CRLF framing refuse.
+- Exactly text and the resolved metadata key per row, required base metadata and
+  readability schema, generated chunk IDs in order, and the complete serialized
+  row within the resolved `max_chars` limit. That limit remains characters;
+  `size_bytes` measures actual UTF-8 bytes and is not a downstream byte preflight.
+- Native provenance fields with the current generated-field precedence, including
+  all logical references and evidence bindings. Native null passthrough fields
+  are omitted; native identity/readability/location collisions cannot override
+  generated values. Unexpected row or metadata fields refuse this bounded schema.
+- Contiguous exact character offsets from zero, nonempty source slices, and a
+  hash of the complete ordered reconstruction equal to `content_sha256`. Missing,
+  reordered, duplicated or changed text refuses even with a newly computed hash.
+
+`ValidatedArticleOutput` is frozen and stores immutable JSONL bytes, conversion
+key and row count; its byte count/hash are derived. Readability values are checked
+for schema and finite numeric form; the validator does not re-run dictionary
+algorithms or independently certify the runner's numeric result. It validates the
+current base schema rather than introducing another chunking or metadata engine.
+Existing pure list normalization supplies the converter's block/list fields,
+including its current treatment of list-looking lines inside code; it is not
+reimplemented or changed here. Schema changes require an explicit validator/version
+update.
+
+Pure validation does not verify evidence or terminal execution. Retain output
+hashes independently from a trusted completed run; hashing arbitrary cached bytes
+and supplying that same hash does not establish integrity. Neither public record
+construction nor the validator grants approval authority. Persisted completion
+records and validated cache reads remain future work under P1-E/P2-D.
+
+Before/after snapshots detect lasting observable changes, not temporary changes
+that are undone, concurrent execution, replaced callables or source edits after
+import. Keep the runtime stable and serialize this workflow at the caller boundary.
+There is no lock or hermetic runtime attestation. Each guard repeats full source,
+dictionary and cache inspection; the cost described above applies twice per
+execution. Rows and serialized bytes are held in memory; there is no new streaming
+or resource-limit guarantee.
 
 ## Verified adapter usage
 
@@ -214,7 +290,8 @@ gate applies before sharing them; do not put credentials into configuration.
 ## Verification and remaining work
 
 ```bash
-pytest tests/article_readability_runtime_test.py tests/article_conversion_test.py \
+pytest tests/article_output_test.py tests/article_readability_runtime_test.py \
+  tests/article_conversion_test.py \
   tests/conversion_descriptor_test.py \
   tests/verified_markdown_ingress_test.py \
   tests/joplin_markdown_preservation_test.py tests/text_adapter_test.py
@@ -230,12 +307,18 @@ unchanged rerun after another article. Readability cases cover raw/loaded dictio
 changes independently, optional CMU fallback, unreadable resources, inconsistent
 cache refusal without repair, normal warming and real ordered JSONL byte parity.
 No source admission or model call occurs.
+Output tests additionally cover strict wire/hash/schema rejection, source and
+provenance reconstruction, generated-field precedence, Unicode partition laws,
+detached results, actual custom-key Markdown/EPUB execution, no writes on success
+or failure, pre-execution refusal, mid-run source/proof/metadata/runtime changes,
+normal real dictionary warming and identical output after an intervening source.
 
 Base article preparation connects effective runner settings/version resolution
 for the qualified composition above, including readability resource/state pins.
-Next validate base artifacts and execution/completion assumptions, then resolve
-and validate the separate enrichment contract.
-A persisted descriptor reader, batch execution, receipts, UTF-8 row preflight,
+Guarded in-memory execution and pure base-output validation now qualify normal
+synchronous completion and lasting observable drift. Next add persisted descriptor
+and completion validation before cache reuse, then resolve and validate the
+separate enrichment contract. Batch execution, receipts, UTF-8 row preflight,
 document-text/HTML inputs and the
 downstream idempotency pilot remain open. P0-A and P2-D remain open as recorded in
 the [implementation roadmap](IMPLEMENTATION_ROADMAP.md).

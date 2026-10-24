@@ -1,4 +1,4 @@
-"""Read-only preparation of verified base article conversions for the runner."""
+"""Preparation and guarded in-memory execution of verified base articles."""
 
 from __future__ import annotations
 
@@ -10,14 +10,16 @@ import unicodedata
 from collections.abc import Mapping
 from importlib.metadata import distributions
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from pdf_chunker.adapters.emit_jsonl import _serialize
 from pdf_chunker.adapters.io_joplin_epub import describe_bound_article
 from pdf_chunker.adapters.readability_runtime import collect_readability_runtime
 from pdf_chunker.article_conversion import PreparedArticleConversion, resolve_article_spec
+from pdf_chunker.article_output import ValidatedArticleOutput, validate_article_output
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.conversion_descriptor import _snapshot
-from pdf_chunker.core_new import _load_document_metadata
+from pdf_chunker.core_new import _load_document_metadata, convert
 from pdf_chunker.framework import registry
 from pdf_chunker.passes.chunk_options import SplitOptions
 from pdf_chunker.passes.emit_jsonl import EmitConfig
@@ -97,3 +99,31 @@ def prepare_bound_conversion(
     if native != json.loads(descriptor.metadata_json):
         raise ValueError("native metadata differs from verified article evidence")
     return PreparedArticleConversion(descriptor, _snapshot(resolved.model_dump()))
+
+
+def execute_bound_conversion(
+    binding: Mapping[str, Any], *, prepared: PreparedArticleConversion, corpus: str
+) -> ValidatedArticleOutput:
+    """Return validated bytes only after normal completion and matching snapshots.
+
+    Re-verify evidence, metadata, resolved settings and observed runtime before
+    and after the existing synchronous runner. Failures propagate without a
+    completion value, file write or shared-state repair. Ordinary cache warming
+    is allowed. This detects persistent drift, not transient edits/replaced
+    callables or changes after import; callers must keep the environment stable.
+    No child process or durable receipt is involved, and no cached output is reused.
+    """
+    spec = prepared.spec()
+    before = prepare_bound_conversion(binding, spec, corpus=corpus)
+    if before != prepared:
+        raise ValueError("prepared article contract changed before conversion")
+    rows = convert(str(binding["path"]), spec)
+    data = "".join(line + "\n" for line in _serialize(cast(list[dict[str, Any]], rows))).encode(
+        "utf-8"
+    )
+    after = prepare_bound_conversion(binding, spec, corpus=corpus)
+    if after != prepared:
+        raise ValueError("prepared article contract changed during conversion")
+    return validate_article_output(
+        data, descriptor=prepared.descriptor, expected_sha256=hashlib.sha256(data).hexdigest()
+    )

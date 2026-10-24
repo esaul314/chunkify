@@ -6,6 +6,12 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `article_output_test.py`: Pure strict JSONL/hash/schema checks, complete-row
+  character limits, generated-field precedence, ordered identities, provenance
+  and exact Unicode reconstruction; detached results and partial application.
+  Guarded actual Markdown/EPUB execution with custom metadata keys and no writes;
+  stale preparation/specs and mid-run input/runtime/failure cases never return
+  completion. Real dictionary warming/intervening documents preserve output.
 - `article_readability_runtime_test.py`: Synthetic raw/loaded CMU and Pyphen
   resource changes, settings, mapping-order/input-preservation laws, optional CMU
   fallback and unreadable resources; cache warming leaves identity stable while
@@ -123,6 +129,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters
 
 ## AI Agent Guidance
+- For base output/execution changes, include `tests/article_output_test.py` with
+  preparation, readability, descriptor and ingress tests. Use synthetic approved
+  evidence and isolated runtime stubs to induce drift without changing installed
+  code/resources. Retained hashes must come from trusted completed runs; pure
+  validation alone does not prove approval or terminal completion. The guard
+  observes before/after state without a lock, state repair or durable receipt.
 - For resolved article preparation, include `tests/article_conversion_test.py`
   with the descriptor/ingress tests. Test implementation edits through temporary
   source roots and synthetic distribution metadata; never edit real package

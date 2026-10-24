@@ -24,6 +24,10 @@ shows `prepare_bound_conversion` for resolving the canonical base article spec
 and implementation/runtime fingerprints before using the existing runner.
 Readability fingerprints include dictionary bytes and loaded tables; inconsistent
 hyphenation caches refuse preparation without repair.
+`execute_bound_conversion(binding, prepared=prepared, corpus="technology")`
+checks that preparation still matches before and after the existing runner and
+returns immutable JSONL bytes only after hash, schema, provenance and exact
+source reconstruction checks. It writes no files or receipts.
 Cache execution and downstream writes remain separate work.
 
 ## Quickstart

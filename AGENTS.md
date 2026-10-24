@@ -168,8 +168,18 @@ only for workflows that use them.
   refuse without repair, while normal warming preserves identity. Inspect these
   pins with `collect_readability_runtime()` from
   `pdf_chunker.adapters.readability_runtime`. See
-  `docs/CONVERSION_DESCRIPTORS.md` for the allowed composition and remaining
-  execution/output qualification. No output or receipt is written by preparation.
+  `docs/CONVERSION_DESCRIPTORS.md` for the allowed composition. No output or
+  receipt is written by preparation. For guarded in-memory execution, use
+  `execute_bound_conversion(binding, prepared=prepared, corpus="technology")`
+  from the same adapter. It checks matching preparation before/after the existing
+  synchronous runner and validates JSONL hash, schema, provenance and exact text
+  reconstruction before returning immutable bytes. Pure data-first
+  `validate_article_output(data, descriptor=prepared.descriptor,
+  expected_sha256=retained_output_hash)` in `pdf_chunker.article_output` supports
+  partial application but grants no completion/proof authority. Retain hashes
+  independently of cached bytes. No files or receipts are written; persisted
+  completion/cache reuse remain open. Keep runtime stable: the guard detects
+  lasting drift, not concurrent/transient edits or replaced imported callables.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -409,7 +419,7 @@ pdf_chunker/
 │   ├── adapters/
 │   │   ├── __init__.py
 │   │   ├── ai_enrich.py           # LLM completion & tag config loading
-│   │   ├── article_conversion.py  # Verified base settings and runtime preparation
+│   │   ├── article_conversion.py  # Verified preparation and guarded in-memory execution
 │   │   ├── readability_runtime.py # Dictionary pins and non-repairing cache qualification
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
@@ -421,6 +431,7 @@ pdf_chunker/
 │   ├── contracts.py               # Typed page/block/chunk/run-report contracts
 │   ├── conversion_descriptor.py   # Pure immutable article identity and comparison
 │   ├── article_conversion.py      # Pure base article settings and detached prepared spec
+│   ├── article_output.py          # Pure output hash/schema/provenance/reconstruction checks
 │   ├── framework.py               # Generic artifacts and pass registry
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
@@ -507,6 +518,7 @@ pdf_chunker/
     ├── verified_markdown_ingress_test.py # Synthetic article evidence, parity and exact bytes
     ├── conversion_descriptor_test.py # Contract/association laws and verified identity
     ├── article_conversion_test.py  # Effective defaults, runtime pins and actual runner parity
+    ├── article_output_test.py      # Output integrity, execution drift and completion refusal
     ├── article_readability_runtime_test.py # Dictionary changes, cache integrity and stable identity
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py

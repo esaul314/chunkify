@@ -32,6 +32,7 @@ pdf_chunker/
 │   ├── contracts.py         # Typed page/block/chunk/run-report contracts
 │   ├── conversion_descriptor.py # Pure article identity snapshots and comparison
 │   ├── article_conversion.py # Pure base article settings and prepared spec snapshot
+│   ├── article_output.py    # Pure base-output integrity/provenance/reconstruction checks
 │   ├── cli.py               # Typer CLI: convert / inspect commands
 │   ├── config.py            # Pydantic Settings + YAML pipeline spec loader
 │   ├── framework.py         # Artifact/Pass registry + pipeline runner
@@ -42,7 +43,7 @@ pdf_chunker/
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
 │   │   ├── io_text.py
-│   │   ├── article_conversion.py # Verified base defaults/runtime preparation
+│   │   ├── article_conversion.py # Verified preparation and guarded synchronous execution
 │   │   ├── readability_runtime.py # Dictionary/state fingerprints and cache qualification
 │   │   ├── emit_jsonl.py
 │   │   └── ai_enrich.py
@@ -196,8 +197,14 @@ explicit defaults; its frozen result returns a fresh spec for the existing
 runner. Source proof and the active native metadata file must agree. The readability
 adapter pins raw dictionary bytes and effective loaded tables, independently of
 normal cache warming. It checks memoized hyphenation positions in an isolated
-cache and refuses inconsistent shared state without repairing it. Execution-state
-and output validation remain prerequisites for artifact reuse; see
+cache and refuses inconsistent shared state without repairing it. The execution
+adapter re-prepares before/after the existing synchronous runner; only normal
+completion and matching snapshots reach pure base-output validation. The pure
+validator checks retained hashes, strict JSONL, schema/generated-field precedence,
+complete-row character limits, provenance and contiguous source reconstruction.
+Frozen results retain immutable bytes and return detached row containers. This
+does not attest transient mutations or imported code, write files/receipts, or
+authorize cached-output reuse. Persisted completion/readback remain open; see
 `docs/CONVERSION_DESCRIPTORS.md`.
 
 ## 4.1) Corpus-quality evaluation

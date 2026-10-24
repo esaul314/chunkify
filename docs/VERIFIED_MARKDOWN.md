@@ -105,9 +105,12 @@ independent note associations, with fresh evidence verification and pure
 new/changed/unchanged comparison. Base article preparation now resolves the
 bounded canonical runner settings and fingerprints package sources/runtime versions
 plus raw and loaded readability dictionaries. Inconsistent hyphenation caches
-refuse preparation; normal warming preserves identity. Execution/output validation
-and cache reuse remain open,
-alongside document-text/HTML/supplied-text input,
+refuse preparation; normal warming preserves identity. The opt-in
+`execute_bound_conversion(binding, prepared=prepared, corpus="technology")`
+checks matching snapshots before/after synchronous conversion and validates base
+JSONL hash, schema, provenance and complete reconstruction without writing files.
+It returns only after normal completion; persisted completion and cache reuse
+remain open, alongside document-text/HTML/supplied-text input,
 complete byte preflight and downstream integration qualification. P2-D receipts
 and cleanup follow those contracts. Existing EPUB sources, releases and vector-store
 contents are unchanged.
