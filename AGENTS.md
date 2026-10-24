@@ -163,9 +163,13 @@ only for workflows that use them.
   `convert(binding["path"], prepared.spec())`. Preparation resolves actual sizing
   and emission defaults, fingerprints package sources/runtime versions and checks
   the selected metadata file against verified evidence. Its pure resolver accepts
-  explicit defaults and supports `partial`; snapshots are detached. See
+  explicit defaults and supports `partial`; snapshots are detached. Readability
+  resource bytes and loaded tables are pinned; inconsistent Pyphen word caches
+  refuse without repair, while normal warming preserves identity. Inspect these
+  pins with `collect_readability_runtime()` from
+  `pdf_chunker.adapters.readability_runtime`. See
   `docs/CONVERSION_DESCRIPTORS.md` for the allowed composition and remaining
-  resource/cache qualification. No output or receipt is written by preparation.
+  execution/output qualification. No output or receipt is written by preparation.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -406,6 +410,7 @@ pdf_chunker/
 │   │   ├── __init__.py
 │   │   ├── ai_enrich.py           # LLM completion & tag config loading
 │   │   ├── article_conversion.py  # Verified base settings and runtime preparation
+│   │   ├── readability_runtime.py # Dictionary pins and non-repairing cache qualification
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
 │   │   ├── io_joplin_epub.py    # Shared verified EPUB/Markdown article evidence
@@ -502,6 +507,7 @@ pdf_chunker/
     ├── verified_markdown_ingress_test.py # Synthetic article evidence, parity and exact bytes
     ├── conversion_descriptor_test.py # Contract/association laws and verified identity
     ├── article_conversion_test.py  # Effective defaults, runtime pins and actual runner parity
+    ├── article_readability_runtime_test.py # Dictionary changes, cache integrity and stable identity
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py

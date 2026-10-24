@@ -103,8 +103,10 @@ no model service or upstream source admission is exercised.
 The opt-in [conversion descriptors](CONVERSION_DESCRIPTORS.md) add
 independent note associations, with fresh evidence verification and pure
 new/changed/unchanged comparison. Base article preparation now resolves the
-bounded canonical runner settings and fingerprints package sources/runtime versions.
-External resource qualification and validated cache reuse remain open,
+bounded canonical runner settings and fingerprints package sources/runtime versions
+plus raw and loaded readability dictionaries. Inconsistent hyphenation caches
+refuse preparation; normal warming preserves identity. Execution/output validation
+and cache reuse remain open,
 alongside document-text/HTML/supplied-text input,
 complete byte preflight and downstream integration qualification. P2-D receipts
 and cleanup follow those contracts. Existing EPUB sources, releases and vector-store

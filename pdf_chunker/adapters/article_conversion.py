@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from pdf_chunker.adapters.io_joplin_epub import describe_bound_article
+from pdf_chunker.adapters.readability_runtime import collect_readability_runtime
 from pdf_chunker.article_conversion import PreparedArticleConversion, resolve_article_spec
 from pdf_chunker.config import PipelineSpec
 from pdf_chunker.conversion_descriptor import _snapshot
@@ -26,12 +27,13 @@ from pdf_chunker.passes.split_semantic import _SplitSemanticPass
 def collect_article_runtime() -> dict[str, object]:
     """Fingerprint installed Python sources and distribution versions afresh.
 
-    Include the whole package and environment conservatively: helper edits or
-    optional readability dictionaries must not hide behind the package version.
+    Include the whole package and environment conservatively: helper edits and
+    readability resource/table changes must not hide behind the package version.
     Only package-relative names and version labels are recorded, never credentials,
     host paths, Git messages or imported client representations. Missing/unreadable
     source files fail rather than silently omit a known implementation input.
-    This is not an attestation of in-memory patches or external resource bytes.
+    Readability pins include resource bytes and loaded tables; inconsistent word
+    caches refuse. This is not an attestation of imported code or concurrent edits.
     """
     root = Path(__file__).resolve().parents[1]
     sources = {
@@ -49,6 +51,7 @@ def collect_article_runtime() -> dict[str, object]:
         },
         "distributions": versions,
         "package_sources": sources,
+        "readability": collect_readability_runtime(),
     }
 
 

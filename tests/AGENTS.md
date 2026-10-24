@@ -6,6 +6,12 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `article_readability_runtime_test.py`: Synthetic raw/loaded CMU and Pyphen
+  resource changes, settings, mapping-order/input-preservation laws, optional CMU
+  fallback and unreadable resources; cache warming leaves identity stable while
+  inconsistent positions refuse without clearing/repairing shared state. Actual
+  preparation invalidates changed readability while retaining logical notes;
+  real dictionary/runner tests compare ordered JSONL after an intervening source.
 - `article_conversion_test.py`: Pure explicit-default resolution, derived sizing,
   idempotence, partial application and input preservation; unsupported/effectful
   settings refuse. Synthetic bound Markdown/EPUB exercise actual runner/JSONL

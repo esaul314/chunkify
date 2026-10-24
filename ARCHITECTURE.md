@@ -43,6 +43,7 @@ pdf_chunker/
 │   │   ├── io_epub.py
 │   │   ├── io_text.py
 │   │   ├── article_conversion.py # Verified base defaults/runtime preparation
+│   │   ├── readability_runtime.py # Dictionary/state fingerprints and cache qualification
 │   │   ├── emit_jsonl.py
 │   │   └── ai_enrich.py
 │   ├── passes/              # Pure transformation passes (no I/O)
@@ -192,9 +193,12 @@ physical chunk IDs/payloads. The opt-in article preparation adapter now resolves
 splitter/emission defaults and collects package-source/runtime fingerprints for
 the bounded canonical base composition. Its pure settings resolver consumes
 explicit defaults; its frozen result returns a fresh spec for the existing
-runner. Source proof and the active native metadata file must agree. External
-resource-byte/runtime-state qualification and validated artifact reuse remain
-pending; see `docs/CONVERSION_DESCRIPTORS.md`.
+runner. Source proof and the active native metadata file must agree. The readability
+adapter pins raw dictionary bytes and effective loaded tables, independently of
+normal cache warming. It checks memoized hyphenation positions in an isolated
+cache and refuses inconsistent shared state without repairing it. Execution-state
+and output validation remain prerequisites for artifact reuse; see
+`docs/CONVERSION_DESCRIPTORS.md`.
 
 ## 4.1) Corpus-quality evaluation
 

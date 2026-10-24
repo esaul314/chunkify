@@ -31,8 +31,18 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   versions, and verifies source proof plus the active native metadata file.
   Execute `convert(binding["path"], prepared.spec())` with its detached spec.
   Only the canonical base article composition is qualified; enrichment, custom
-  pipelines and interactions refuse. External dictionary bytes/loaded state and
-  validated cache reuse remain open. Preparation writes no artifacts or receipts.
+  pipelines and interactions refuse. Dictionary resource/state pins are included;
+  execution/output validation and cache reuse remain open. Preparation writes no
+  artifacts or receipts.
+- `adapters/readability_runtime.py`: Use `collect_readability_runtime()` to inspect
+  raw CMU/Pyphen resource hashes and effective loaded-table hashes. Canonical
+  hashing is pure and data-first; discovery stays in this adapter. Optional CMU
+  fallback is explicit, and unreadable declared resources fail. Hyphenation word
+  caches are recomputed in a separate cache using the existing algorithm;
+  inconsistency refuses without repair, normal warming does not change identity.
+  The first inspection may load lazy dictionaries. No resource paths/contents or
+  cached words enter snapshots. Keep runtime state stable during conversion;
+  this is not an execution guard or imported-code attestation.
 - `framework.py`: Generic artifact carrier, collision-safe pass registry, and legacy runner.
 - `parsing.py`: Structural block extraction.
 - `text_cleaning.py`: Ligature repair, quote normalization, control-character removal.

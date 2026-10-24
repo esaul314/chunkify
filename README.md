@@ -22,6 +22,8 @@ Library integrations can also compare verified article inputs using opt-in
 note associations from content revisions and physical sources. The same guide
 shows `prepare_bound_conversion` for resolving the canonical base article spec
 and implementation/runtime fingerprints before using the existing runner.
+Readability fingerprints include dictionary bytes and loaded tables; inconsistent
+hyphenation caches refuse preparation without repair.
 Cache execution and downstream writes remain separate work.
 
 ## Quickstart

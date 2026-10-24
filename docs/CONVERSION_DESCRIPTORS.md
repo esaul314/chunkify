@@ -62,8 +62,9 @@ written to the process environment or registered passes.
 
 The automatic implementation pin hashes the runtime snapshot: SHA-256 of every
 package Python source (including shared helpers), Python implementation/version
-and Unicode version, and sorted installed distribution names/versions. Source
-reads fail explicitly if unavailable. No Git command, network request, dependency
+and Unicode version, sorted installed distribution names/versions, and the
+readability resource/state snapshot described below. Source reads fail explicitly
+if unavailable. No Git command, network request, dependency
 installation or model loading occurs. Including all installed distributions is
 conservative: even an unrelated dependency upgrade invalidates the full key.
 Defaults, source edits or dependency upgrades affect conversion identity while
@@ -71,13 +72,57 @@ independent logical note associations remain unchanged. Equivalent omitted and
 explicit effective settings produce the same snapshot when other supplied
 options agree.
 
-This is an input snapshot, not a hermetic runtime attestation: source changes
-after import, in-memory monkeypatches, and modified external resource bytes are
-not certified. Readability currently uses optional CMU/pyphen dictionary data and
-process caches. Before enabling artifact reuse, qualify those resource bytes and
-runtime-state assumptions as well as output integrity and completion. Retain the
-existing output validation requirement even for an unchanged prepared descriptor.
-There is no cache executor or enrichment reuse in this increment.
+### Readability resources and cache qualification
+
+Preparation now includes `runtime.readability` automatically. To inspect just
+this part without preparing a source:
+
+```python
+from pdf_chunker.adapters.readability_runtime import collect_readability_runtime
+
+readability = collect_readability_runtime()
+```
+
+The snapshot records its schema and the runner's readability language (`en_US`).
+It separately hashes raw CMU pronunciation dictionary bytes and the effective
+loaded pronunciation table. CMU is optional: an absent loader records no resource
+hash, while a loader returning `None` records that effective fallback even if
+resource bytes are available. These states differ from an available dictionary.
+Raw resource read failures propagate; declared resources are never silently omitted.
+
+For Pyphen it hashes the selected dictionary bytes and the effective loaded
+patterns, maximum pattern length and left/right limits. Loaded tables can differ
+from current on-disk resources after an edit; both hashes are retained rather
+than silently reloading the runner's dictionaries. A subsequent cold process
+loading different tables therefore receives a different identity.
+
+Pyphen memoizes word positions. Qualification recomputes each existing entry
+using its loaded patterns and a separate temporary cache. A mismatch refuses
+preparation with `ValueError`; inspection does not clear or repair shared caches.
+Correct cache warming, discovery order and intervening documents do not affect
+the fingerprint. Only numeric positions matter for readability, which counts
+filtered positions; alternative replacement text is not a readability input.
+The adapter uses Pyphen's existing computation rather than duplicating its
+algorithm. Unsupported hyphenator implementations refuse this bounded profile.
+
+The first inspection may initialize the runner's lazy dictionaries. No files,
+environment settings or loaded table values are changed. Stored snapshots contain
+hashes and state labels, without dictionary contents, cached words or resource
+paths. Canonical JSON hashing is pure, data-first and independent of mapping order;
+resource reads and cache observation remain in the adapter.
+
+Each inspection hashes the full loaded tables and checks every existing word-cache
+entry. Cost grows with dictionary/cache size; fingerprints are not memoized, so
+resource and table mutations remain observable.
+
+This remains an input snapshot, not a hermetic runtime attestation. Keep code,
+dictionaries and runtime state stable between preparation and conversion. Source
+changes after import, replacement callables and concurrent mutation are outside
+this contract; execution is still the existing `convert` API, without a guard
+around the whole run. Fresh source verification remains mandatory. Before enabling
+artifact reuse, add output hash/schema/reconstruction checks, terminal completion
+and execution-state validation. An unchanged prepared descriptor alone cannot
+certify any of these. There is no cache executor or enrichment reuse yet.
 
 ## Verified adapter usage
 
@@ -169,7 +214,8 @@ gate applies before sharing them; do not put credentials into configuration.
 ## Verification and remaining work
 
 ```bash
-pytest tests/article_conversion_test.py tests/conversion_descriptor_test.py \
+pytest tests/article_readability_runtime_test.py tests/article_conversion_test.py \
+  tests/conversion_descriptor_test.py \
   tests/verified_markdown_ingress_test.py \
   tests/joplin_markdown_preservation_test.py tests/text_adapter_test.py
 nox -s lint typecheck tests
@@ -180,11 +226,15 @@ and dependency invalidation, actual prepared runner/JSONL parity, no writes,
 Markdown/EPUB identity, a verified two-note metadata update,
 actual conversion retaining both references, tampered evidence, exact Unicode,
 mapping-order laws, detached immutable snapshots, partial application and an
-unchanged rerun after another article. No source admission or model call occurs.
+unchanged rerun after another article. Readability cases cover raw/loaded dictionary
+changes independently, optional CMU fallback, unreadable resources, inconsistent
+cache refusal without repair, normal warming and real ordered JSONL byte parity.
+No source admission or model call occurs.
 
 Base article preparation connects effective runner settings/version resolution
-for the qualified composition above. Next qualify resource/runtime assumptions and
-validated base artifacts, then resolve and validate the separate enrichment contract.
+for the qualified composition above, including readability resource/state pins.
+Next validate base artifacts and execution/completion assumptions, then resolve
+and validate the separate enrichment contract.
 A persisted descriptor reader, batch execution, receipts, UTF-8 row preflight,
 document-text/HTML inputs and the
 downstream idempotency pilot remain open. P0-A and P2-D remain open as recorded in

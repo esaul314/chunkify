@@ -10,7 +10,7 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-**Status:** P0-A remains open; P1-E verified Markdown, descriptors and bounded base-settings resolution implemented (2026-10-24), qualification below
+**Status:** P0-A remains open; P1-E verified Markdown, descriptors, bounded base settings and readability resource qualification implemented (2026-10-24), reuse boundaries below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -531,9 +531,10 @@ configuration accepts too many invalid states.
 ### P1-E — Support recurring article ingestion without EPUB wrappers
 
 **Status: IN PROGRESS (2026-10-24).** Direct proof-bound `.md` ingress is the first
-implemented increment. Opt-in descriptors, independent note associations and
-effective settings/runtime snapshots for the canonical base article composition
-are implemented; resource qualification, reuse and remaining inputs are open.
+implemented increment. Opt-in descriptors, independent note associations,
+effective settings/runtime snapshots and readability resource/state pins for the
+canonical base article composition are implemented; validated reuse and remaining
+inputs are open.
 Deliver explicit document-text and HTML inputs in small increments under
 P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
 
@@ -637,15 +638,48 @@ skips, return-value warnings and the PyMuPDF deprecation warning remain. Final
 review found no further actionable issues; dependencies, goldens and existing
 conversion code are unchanged.
 
-**Next boundaries:** Qualify external resource bytes/runtime state and validate
-base artifacts before reuse, then resolve and validate the separate enrichment
-contract. Inspection found that base rows include readability computed with
-optional CMU/pyphen dictionaries and process caches; distribution versions alone
-do not certify modified data or loaded state. The bounded profile does not claim
+**Readability resource increment:** Preparation now records both raw dictionary
+bytes and effective loaded state. CMU pronunciation tables, optional loader
+fallback, Pyphen patterns/maximum length and left/right settings receive separate
+canonical hashes. A small adapter observes these inputs and reuses pure canonical
+JSON hashing; no new dependency or alternative readability algorithm is added.
+Existing Pyphen word-cache entries are recomputed against the same loaded patterns
+in an isolated cache. Inconsistent entries refuse preparation without repair;
+normal warming and intervening documents leave identity unchanged. The first
+inspection may load lazy dictionaries, but it writes no files and replaces no
+loaded table/cache. Returned snapshots contain hashes rather than dictionary
+contents, cached words or resource paths.
+
+**Selection rationale:** This closes the concrete dictionary/state gap discovered
+in the preceding increment before a cache executor can rely on input identity.
+The change stays in the already gated P1-E adapter boundary; P0-A's broader debt
+and P2-D's receipts remain open. Raw bytes and loaded tables are pinned separately
+because a warm process can retain earlier data after an on-disk edit. Do not
+silently reload or repair those dependencies to make fingerprints agree.
+
+**Readability verification:** The failing-first run confirmed the adapter was
+absent. Nineteen new synthetic/real regression and property cases now pass; the
+focused readability, preparation, descriptor, ingress, preservation, transcript,
+documentation and scope run passes 272 cases. Collection finds 1,488 tests without
+errors. All three nox sessions pass on Python 3.11.17 with the documented OCR
+language-data setting, 43 production type targets and 71 lint/format files.
+Tests cover independent resource/table changes, actual readability and descriptor
+invalidation with stable logical associations, optional CMU fallback, unreadable
+resources, refusal without cache repair, normal warming and real ordered JSONL
+byte parity after another document. Generated merge docs and diff checks pass.
+Existing optional skips, return-value warnings and the PyMuPDF deprecation warning
+remain. Final review found no further actionable issues. No dependencies, goldens
+or existing conversion/readability algorithms changed.
+
+**Next boundaries:** Validate base output hash, schema, source reconstruction and
+terminal completion before reuse, including runtime stability during execution,
+then resolve and validate the separate enrichment contract. Resource snapshots
+do not guard concurrent mutations, replaced callables or source changes after
+import; keep the execution environment stable. The bounded profile does not claim
 hermetic execution. The lower-level descriptor API still checks declared
 structure rather than completeness of caller-supplied pins/settings. An unchanged
-input key alone
-cannot prove cached-output integrity, successful completion or source approval.
+input key alone cannot prove cached-output integrity, successful completion or
+source approval.
 Cross-format chunk identity and downstream idempotency are not established.
 Current admission measures its existing `max_chars` contract, not a new UTF-8 byte
 preflight. Document-mode `.txt`, HTML, supplied text and integration qualification
@@ -940,7 +974,7 @@ Use separate coherent commits, in this order:
 9. `test: add corpus quality evaluation` — complete
 10. `docs: reconcile roadmap and supported input formats` — complete
 11. `docs: reconcile active documentation and dependency policy` — complete
-12. Direct verified Markdown, descriptors and bounded base-settings resolution implemented; runtime resource qualification, validated base/enrichment reuse, document text and HTML remain open under P1-E.
+12. Direct verified Markdown, descriptors, bounded base settings and readability resource qualification implemented; execution/output validation, base/enrichment reuse, document text and HTML remain open under P1-E.
 13. Bounded artifacts and resumable completion receipts — proposed P2-D.
 
 If a package is too large for one review, split it by boundary, not by arbitrary
