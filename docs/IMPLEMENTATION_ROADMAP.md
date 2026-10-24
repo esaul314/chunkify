@@ -1,5 +1,15 @@
 # pdf-chunker Implementation Roadmap
 
+## Publication gate: private information must stay out of public history
+
+**Do not push current local work until the complete publication privacy review
+passes.** Review all outgoing commits and intermediate blobs/messages, inherited
+content, encoded fixtures and complete exported patches. A clean latest commit
+or passing tests do not clear older history. Keep processed-material details and
+private operational findings outside the public tree; use synthetic fixtures.
+Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
+pull request, tag or release. Unresolved findings keep publication blocked.
+
 **Status:** P0-A in progress (2026-10-11); Python 3.11 verified, repository-wide coverage remains open
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
@@ -515,6 +525,96 @@ configuration accepts too many invalid states.
 - `--teach` has an end-to-end test: prompt decision → persisted pattern → automatic reuse.
 - CLI tests do not depend on import-order tricks.
 
+### P1-E — Support recurring article ingestion without EPUB wrappers
+
+**Status: PROPOSED (2026-10-24).** This package records Joplin batch lessons; it
+has not been implemented or activated by this roadmap update. Deliver direct
+verified Markdown first, then explicit document-text and HTML inputs in small
+increments under P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
+
+**Reuse before adding:** The current Joplin EPUB adapter verifies the article
+proof and supplies `verified_joplin_markdown`; the shared Markdown passes retain
+exact source slices. EPUB currently provides a compatibility/provenance envelope,
+not a necessary text representation. Extend those boundaries rather than adding
+a second chunking engine. Reuse the accepted section-structure work where
+applicable; its isolated candidate acceptance does not select a new release.
+The serialized-row admission mechanisms recorded below already provide lossless
+size splitting; extend their qualification to these inputs rather than inventing
+another splitter.
+
+**Do:**
+
+1. Add first-class `.md`, `.html`/`.htm`, and explicit document-mode `.txt` input
+   to the canonical adapter/runner boundary. Also support supplied text through
+   that same boundary. Keep fetching, signed-in browser capture, Joplin writes,
+   synchronization and candidate eligibility in the upstream coordinator.
+2. Preserve original Markdown/document-text bytes and expose the declared
+   decoding/normalization policy. Preserve heading hierarchy, fenced/indented
+   code, tables, links, Unicode, indentation and meaningful line breaks. Do not
+   route document text through transcript cue stripping or paragraph joining;
+   retain the existing transcript mode/default compatibility and its fixtures.
+   HTML conversion must retain the raw source and an explicit semantic
+   normalization/provenance record; byte reconstruction applies to the retained
+   original and exact Markdown slices, not to equivalence between HTML tags and
+   rendered text. Keep media as links for the Joplin article use case.
+3. Accept a format-neutral verified article sidecar through the existing proof
+   boundary in `adapters/io_joplin_epub.py` and `passes/joplin_markdown.py`.
+   Validate source hashes and approval/capture provenance with the current
+   verifier; a caller-supplied boolean is not proof. Carry title, notebook, tags,
+   original/canonical URLs, capture time and archive/snapshot provenance without
+   overwriting generated location/identity fields. Preserve separately labeled
+   linked-article and Hacker News discussion sources when supplied upstream.
+4. Distinguish logical note references (for example `joplin:<note-id>`), content
+   revisions and physical paths/formats. Changing an EPUB envelope or file
+   extension must not silently create a new logical article. Content deduplication
+   must retain every associated note reference and provenance record. Metadata
+   or corpus-routing changes require explicit association updates, not stale
+   cache reuse or removal of another note's references.
+5. Expose a deterministic conversion descriptor covering source bytes,
+   normalization, options, implementation/schema versions, chunking and
+   serialization. Plan new/changed/unchanged sources and reuse validated conversion
+   artifacts only when this contract matches. Validate enrichment results against
+   their own contract; do not silently reuse them after model/prompt changes.
+   Stable ordering, chunk identities and base JSONL must not depend on input
+   discovery order or an earlier run's mutable state.
+6. Offer a bounded preflight using complete serialized UTF-8 rows, including
+   metadata and enrichment headroom, through the existing size-admission path.
+   Losslessly split oversized records with stable part identities and exact
+   reconstruction, or return an explicit review/error outcome; never truncate
+   source text or discard provenance to fit a budget. Report projected bytes,
+   records and the declared downstream limit before expensive enrichment.
+
+**Acceptance criteria:**
+
+- A reviewed Markdown fixture produces equivalent article text/provenance through
+  direct verified input and the existing EPUB envelope. Exact source slices
+  reconstruct the original Markdown; code, tables, links, Unicode and headings
+  survive. Document-text and HTML fixtures demonstrate their declared policies;
+  existing transcript/WebVTT behavior remains covered independently.
+- Repeating the same conversion contract produces identical ordered chunk IDs,
+  text and base JSONL bytes. Changing source, normalization, metadata, options or
+  schema invalidates only the affected artifact/association. Include an unchanged
+  rerun after another document has been processed, not just a fresh-process test.
+- Full serialized-row fixtures cover large metadata, UTF-8, links, long code/table
+  blocks, reserved-field collisions and enriched overflow. Every split preserves
+  source order and exact text; unsupported budgets fail before expensive work.
+- A downstream integration pilot adds new notes, updates a changed note and then
+  adds zero points on an unchanged rerun while preserving existing payloads,
+  vectors, note references and citations. Converter determinism is necessary but
+  does not by itself establish vector-store idempotency.
+
+**Integration dependencies:** the downstream retrieval coordinator owns physical-source admission, manifest
+and hydration compatibility, preferred generations, embedding/tokenizer contract,
+managed CUDA and vector-store writes. Qualify actual tokenizer serialization,
+semantic/vocabulary state, contract and expected point IDs before/after embedding;
+state changes must be restored through the supported API and verified, never
+masked by a forged hash. The converter supplies stable text/chunk/provenance
+contracts and keeps those runtime concerns outside pure passes. Coordinate a
+verified identity mapping and rebuild/citation checks before retiring existing
+manifest-referenced Joplin EPUBs; their current source proofs still depend on the
+wrappers. This package does not authorize release selection, corpus migration,
+old-wrapper deletion or automatic retry of held/uncertain sources.
+
 ### P2-A — Build a result-quality evaluation layer
 
 **Status: COMPLETE (2026-09-06)**
@@ -611,6 +711,51 @@ has moved on. This makes future agents repeat old investigations.
 - Supported formats, commands, pass names, and dependency requirements agree across docs.
 - Historical plans are not presented as current work.
 
+### P2-D — Bound article artifacts and make completion receipts resumable
+
+**Status: PROPOSED (2026-10-24).** Follow P1-E and reuse P2-C's separation of
+generated diagnostics from durable project documentation. Keep the implementation
+small: a caller-selected run/cache directory and explicit receipts, not a new
+workflow framework.
+
+**Do:**
+
+- Keep reproducible conversion scratch, traces and qualification copies in a
+  private caller-selected staging/cache root outside the synchronized reading
+  library. Do not require EPUB materialization or scatter intermediate copies
+  into shared storage for direct text conversion. Never cache browser credentials.
+- Record artifact roles, hashes, bytes, dependencies and retention decisions:
+  original source/approval proof, verified sidecar, accepted native JSONL and
+  certification versus reproducible scratch/cache. Reuse exact-contract artifacts
+  from P1-E; distinguish enrichment outputs from base conversion artifacts.
+- Write atomic per-source stage receipts containing input/output contracts,
+  verified artifact hashes, terminal status and actual child exit status. Resume
+  only from validated completion; distinguish not-started, running, failed and
+  unknown outcomes. A filename or partial log is insufficient evidence, and an
+  uncertain write/enrichment must be read back before retrying.
+- Keep routine receipts compact: reference one immutable verified preservation
+  baseline and record changed-source/point deltas and actual check results.
+  Retain full baselines/failed receipts until their consumers and recovery needs
+  permit retirement; counts alone cannot prove preservation.
+- Provide a cleanup preview that reports measured scratch bytes/file counts and
+  refuses referenced sources, backups, accepted outputs or proof baselines.
+  Execute cleanup only within an explicitly owned scratch scope with a recoverable
+  manifest. Global capture and note storage limits and vector/artifact retention
+  remain the upstream coordinator's and the downstream retrieval coordinator's responsibilities.
+
+**Acceptance criteria:**
+
+- A second unchanged batch reuses conversion artifacts and creates only bounded
+  receipts; one changed/new note invalidates only its affected work. Report actual
+  bytes/file counts and avoid repeated full-corpus inventory copies.
+- An interrupted fixture resumes completed stages without reprocessing and holds
+  ambiguous stages for readback. Terminal stage status agrees with child exit
+  status; failed receipts remain inspectable.
+- Cleanup preview/execution fixtures preserve canonical files, referenced EPUBs,
+  proof sidecars, native JSONL and backups; recovery restores owned removed
+  scratch. Compact receipts still resolve to the full immutable baseline and
+  demonstrate actual preservation and citation checks.
+
 ## 6. Required correctness invariants
 
 Every implementation package that changes processing behavior should test the relevant
@@ -676,6 +821,8 @@ Use separate coherent commits, in this order:
 9. `test: add corpus quality evaluation` — complete
 10. `docs: reconcile roadmap and supported input formats` — complete
 11. `docs: reconcile active documentation and dependency policy` — complete
+12. Direct verified Markdown, document text and HTML article inputs — proposed P1-E, in small boundary-specific increments.
+13. Bounded artifacts and resumable completion receipts — proposed P2-D.
 
 If a package is too large for one review, split it by boundary, not by arbitrary
 file count. Each commit must leave the repository in a testable state.

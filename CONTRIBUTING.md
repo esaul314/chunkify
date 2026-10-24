@@ -168,6 +168,15 @@ Prefer this sequence:
 
 Keep boundaries crisp; keep side effects out of the core.
 
+## Publication privacy (required before sharing)
+
+Before any public push, pull request, tag, release or patch export, complete the
+[publication privacy gate](docs/PUBLICATION_PRIVACY.md). Review the entire outgoing
+history and inherited content, including intermediate/deleted blobs, commit
+metadata and encoded fixtures. Keep actual processed materials and private
+operational details outside tracked source. Passing tests or a clean newest commit
+do not clear older commits; unresolved or unreviewed content blocks publication.
+
 ## 7) Security and dependency hygiene
 
 - Avoid adding dependencies unless necessary.
