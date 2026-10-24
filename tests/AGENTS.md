@@ -6,6 +6,11 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `article_conversion_test.py`: Pure explicit-default resolution, derived sizing,
+  idempotence, partial application and input preservation; unsupported/effectful
+  settings refuse. Synthetic bound Markdown/EPUB exercise actual runner/JSONL
+  parity, environment precedence, intervening-document reruns, detached snapshots,
+  metadata/source refusal, runtime/source/dependency invalidation and no writes.
 - `conversion_descriptor_test.py`: Pure descriptor/association identity, scoped
   content/settings/metadata invalidation, mapping-order and input-preservation
   laws, immutable snapshots, partial application, strict JSON/version contracts,
@@ -112,6 +117,12 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters
 
 ## AI Agent Guidance
+- For resolved article preparation, include `tests/article_conversion_test.py`
+  with the descriptor/ingress tests. Test implementation edits through temporary
+  source roots and synthetic distribution metadata; never edit real package
+  source or installed dependencies just to simulate a changed fingerprint.
+  Preparation is not completion or cache admission; resource-byte qualification
+  remains separate from Python-source and distribution-version identity.
 - For conversion identity changes, add `tests/conversion_descriptor_test.py` to
   the direct article ingress regression run below. Use only synthetic approved
   captures in temporary roots. Comparison does not establish cache completion,

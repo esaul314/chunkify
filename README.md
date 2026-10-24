@@ -19,8 +19,10 @@ For corpus-ingestion workflows, skip unsupported formats such as `.mobi`, `.azw3
 
 Library integrations can also compare verified article inputs using opt-in
 [conversion descriptors](docs/CONVERSION_DESCRIPTORS.md), which distinguish logical
-note associations from content revisions and physical sources. Cache execution and
-downstream writes remain separate work.
+note associations from content revisions and physical sources. The same guide
+shows `prepare_bound_conversion` for resolving the canonical base article spec
+and implementation/runtime fingerprints before using the existing runner.
+Cache execution and downstream writes remain separate work.
 
 ## Quickstart
 

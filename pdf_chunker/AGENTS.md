@@ -19,8 +19,20 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   separate content/routing/provenance associations. Physical source and complete
   metadata remain in the conversion key because current row IDs/payloads depend
   on them. No cache execution or reference deletion. Caller-resolved settings and
-  pinned implementation/schema/serialization versions are mandatory; automatic
-  effective-runner resolution is still pending. See `docs/CONVERSION_DESCRIPTORS.md`.
+  pinned implementation/schema/serialization versions are mandatory for this
+  lower-level API. See `docs/CONVERSION_DESCRIPTORS.md` for automatic base preparation.
+- `article_conversion.py`: Pure data-first `resolve_article_spec(spec, suffix=...,
+  emit_defaults=..., split_defaults=...)` and frozen `PreparedArticleConversion`.
+  Resolve sizing with `SplitOptions`, retain supplied JSON settings and fill
+  emission defaults without reading the environment or changing inputs.
+- `adapters/article_conversion.py`: Read-only
+  `prepare_bound_conversion(binding, spec, corpus="technology")` resolves actual
+  runner defaults, fingerprints package Python sources and installed runtime
+  versions, and verifies source proof plus the active native metadata file.
+  Execute `convert(binding["path"], prepared.spec())` with its detached spec.
+  Only the canonical base article composition is qualified; enrichment, custom
+  pipelines and interactions refuse. External dictionary bytes/loaded state and
+  validated cache reuse remain open. Preparation writes no artifacts or receipts.
 - `framework.py`: Generic artifact carrier, collision-safe pass registry, and legacy runner.
 - `parsing.py`: Structural block extraction.
 - `text_cleaning.py`: Ligature repair, quote normalization, control-character removal.

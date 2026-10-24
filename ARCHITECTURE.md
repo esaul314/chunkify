@@ -31,6 +31,7 @@ pdf_chunker/
 │   ├── core.py              # Frozen process_document compatibility API
 │   ├── contracts.py         # Typed page/block/chunk/run-report contracts
 │   ├── conversion_descriptor.py # Pure article identity snapshots and comparison
+│   ├── article_conversion.py # Pure base article settings and prepared spec snapshot
 │   ├── cli.py               # Typer CLI: convert / inspect commands
 │   ├── config.py            # Pydantic Settings + YAML pipeline spec loader
 │   ├── framework.py         # Artifact/Pass registry + pipeline runner
@@ -41,6 +42,7 @@ pdf_chunker/
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
 │   │   ├── io_text.py
+│   │   ├── article_conversion.py # Verified base defaults/runtime preparation
 │   │   ├── emit_jsonl.py
 │   │   └── ai_enrich.py
 │   ├── passes/              # Pure transformation passes (no I/O)
@@ -186,8 +188,13 @@ physical source, content revision, declared conversion contract, full metadata
 and sorted independent note associations. `compare_conversion` reports changed
 fields without executing work or deleting references. This preserves logical
 identity across Markdown/EPUB while retaining distinct complete keys for today's
-physical chunk IDs/payloads. Effective runner configuration/version resolution and
-validated artifact reuse remain pending; see `docs/CONVERSION_DESCRIPTORS.md`.
+physical chunk IDs/payloads. The opt-in article preparation adapter now resolves
+splitter/emission defaults and collects package-source/runtime fingerprints for
+the bounded canonical base composition. Its pure settings resolver consumes
+explicit defaults; its frozen result returns a fresh spec for the existing
+runner. Source proof and the active native metadata file must agree. External
+resource-byte/runtime-state qualification and validated artifact reuse remain
+pending; see `docs/CONVERSION_DESCRIPTORS.md`.
 
 ## 4.1) Corpus-quality evaluation
 

@@ -156,7 +156,16 @@ only for workflows that use them.
   `compare_conversion(current, previous=previous_descriptor)` from
   `pdf_chunker.conversion_descriptor`. The adapter re-verifies evidence; the pure
   comparison writes nothing. See `docs/CONVERSION_DESCRIPTORS.md` for version pins,
-  independent note associations and the remaining runner/cache qualification.
+  independent note associations and the remaining cache qualification.
+- For the bounded canonical base article pipeline, use
+  `prepare_bound_conversion(binding, spec, corpus="technology")` from
+  `pdf_chunker.adapters.article_conversion`, then
+  `convert(binding["path"], prepared.spec())`. Preparation resolves actual sizing
+  and emission defaults, fingerprints package sources/runtime versions and checks
+  the selected metadata file against verified evidence. Its pure resolver accepts
+  explicit defaults and supports `partial`; snapshots are detached. See
+  `docs/CONVERSION_DESCRIPTORS.md` for the allowed composition and remaining
+  resource/cache qualification. No output or receipt is written by preparation.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -396,6 +405,7 @@ pdf_chunker/
 │   ├── adapters/
 │   │   ├── __init__.py
 │   │   ├── ai_enrich.py           # LLM completion & tag config loading
+│   │   ├── article_conversion.py  # Verified base settings and runtime preparation
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
 │   │   ├── io_joplin_epub.py    # Shared verified EPUB/Markdown article evidence
@@ -405,6 +415,7 @@ pdf_chunker/
 │   ├── core.py                    # Frozen legacy process_document compatibility API
 │   ├── contracts.py               # Typed page/block/chunk/run-report contracts
 │   ├── conversion_descriptor.py   # Pure immutable article identity and comparison
+│   ├── article_conversion.py      # Pure base article settings and detached prepared spec
 │   ├── framework.py               # Generic artifacts and pass registry
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
@@ -490,6 +501,7 @@ pdf_chunker/
     ├── geometry_contract_test.py     # Pure zone scoring, strict margins, bounded previews
     ├── verified_markdown_ingress_test.py # Synthetic article evidence, parity and exact bytes
     ├── conversion_descriptor_test.py # Contract/association laws and verified identity
+    ├── article_conversion_test.py  # Effective defaults, runtime pins and actual runner parity
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py

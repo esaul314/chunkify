@@ -100,10 +100,12 @@ exact reconstruction, unchanged reruns after another document, Unicode metadata,
 tampering and refusal before enrichment. They use an injected in-process client;
 no model service or upstream source admission is exercised.
 
-The next increment adds opt-in [conversion descriptors](CONVERSION_DESCRIPTORS.md)
-and independent note associations, with fresh evidence verification and pure
-new/changed/unchanged comparison. Effective runner settings/version resolution and
-validated cache reuse remain open, alongside document-text/HTML/supplied-text input,
+The opt-in [conversion descriptors](CONVERSION_DESCRIPTORS.md) add
+independent note associations, with fresh evidence verification and pure
+new/changed/unchanged comparison. Base article preparation now resolves the
+bounded canonical runner settings and fingerprints package sources/runtime versions.
+External resource qualification and validated cache reuse remain open,
+alongside document-text/HTML/supplied-text input,
 complete byte preflight and downstream integration qualification. P2-D receipts
 and cleanup follow those contracts. Existing EPUB sources, releases and vector-store
 contents are unchanged.
