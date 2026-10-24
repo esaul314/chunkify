@@ -36,7 +36,7 @@ _PARSER_MAP: Final[Mapping[str, str]] = {
     for name, exts in {
         "pdf_parse": (".pdf",),
         "epub_parse": (".epub",),
-        "text_parse": (".txt",),
+        "text_parse": (".txt", ".md"),
     }.items()
     for ext in exts
 }
@@ -92,13 +92,13 @@ def _ensure_pdf_epub_separation(steps: Sequence[str], ext: str) -> list[str]:
 
 
 def _ensure_text_separation(steps: Sequence[str], ext: str) -> None:
-    """Reject PDF page-artifact passes when the input is plain text."""
-    if ext != ".txt":
+    """Reject PDF page-artifact passes for transcript and Markdown input."""
+    if ext not in {".txt", ".md"}:
         return
     unsupported = sorted(set(steps) & _TEXT_UNSUPPORTED_PASSES)
     if unsupported:
         raise ValueError(
-            "PDF artifact passes are not supported for .txt input: " + ", ".join(unsupported)
+            f"PDF artifact passes are not supported for {ext} input: " + ", ".join(unsupported)
         )
 
 
@@ -321,7 +321,13 @@ def _load_document_metadata(path: str | None) -> dict[str, Any] | None:
             return value
         return str(value)
 
-    data = import_module("yaml").safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    metadata_path = Path(path)
+    raw = metadata_path.read_text(encoding="utf-8")
+    data = (
+        json.loads(raw)
+        if metadata_path.suffix.lower() == ".json"
+        else import_module("yaml").safe_load(raw)
+    ) or {}
     if not isinstance(data, Mapping):
         raise TypeError("metadata file must contain a top-level mapping")
     return _json_safe(data)

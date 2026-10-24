@@ -10,7 +10,7 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-**Status:** P0-A in progress (2026-10-11); Python 3.11 verified, repository-wide coverage remains open
+**Status:** P0-A remains open; first P1-E verified Markdown increment implemented (2026-10-24), qualification below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -127,7 +127,9 @@ The audit was performed against the current worktree on 2026-09-03.
 ## 5. Prioritized implementation plan
 
 Work packages are ordered. Do not start a later package while an earlier package has
-an unresolved correctness decision.
+an unresolved correctness decision that affects it. Bounded additions may proceed
+through already tested canonical boundaries while unrelated P0-A coverage grows;
+record the selection rationale and keep the unfinished package explicitly open.
 
 ### P0-A — Establish a truthful green baseline
 
@@ -527,10 +529,57 @@ configuration accepts too many invalid states.
 
 ### P1-E — Support recurring article ingestion without EPUB wrappers
 
-**Status: PROPOSED (2026-10-24).** This package records Joplin batch lessons; it
-has not been implemented or activated by this roadmap update. Deliver direct
-verified Markdown first, then explicit document-text and HTML inputs in small
-increments under P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
+**Status: IN PROGRESS (2026-10-24).** Direct proof-bound `.md` ingress is the first
+implemented increment; the remaining contract and input work below is open.
+Deliver explicit document-text and HTML inputs in small increments under
+P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
+
+**Selection rationale:** The new article-ingestion requirement can reuse the
+already gated verifier, canonical runner and contiguous Markdown path. Removing
+the EPUB envelope is a small adapter-boundary change with synthetic parity tests;
+it does not require settling unrelated package-wide style/type debt. P0-A remains
+open. P2-D receipts depend on conversion contracts and follow this work.
+
+**First increment:** See [VERIFIED_MARKDOWN.md](VERIFIED_MARKDOWN.md). `.md`
+selects shared `text_parse` envelope normalization after proof verification,
+without calling transcript ingestion. The existing sidecar schema, original
+capture records and final approvals remain mandatory. A pure data-first byte
+validator, usable with `partial`, checks direct UTF-8 equality or existing EPUB
+embedded content/provenance. Text and metadata return from the same verified
+read; the EPUB is no longer reopened just to recover text. Existing semantic
+and emission code is reused without changing its slicing/context rules.
+
+Failing-first checks reproduced five missing-ingress behaviors. Subsequent
+Unicode parity exposed JSON escaped surrogate pairs being decoded through YAML;
+`.json` metadata now uses JSON decoding, while YAML date handling is retained.
+The new synthetic tests cover exact EPUB/direct text and provenance parity,
+code/table/Unicode/cue-like text, generated-field precedence, approved capture
+normalization, evidence/metadata tampering, unapproved receipts, actual CLI output,
+and unchanged JSONL bytes after processing another document. PDF artifact passes
+are rejected for Markdown, and existing admission is exercised before an injected
+in-process enrichment client. No real capture, source admission or model service
+is part of this increment.
+
+**Verification:** 33 new cases are lint/format gated; the focused ingress,
+preservation, transcript, documentation and scope run passes 181 cases. Collection
+finds 1,397 tests without errors, generated merge documentation is current, and
+all three nox sessions pass on Python 3.11.17 (39 production type targets and
+64 lint/format files). The full suite requires the documented `TESSDATA_PREFIX`
+setting on hosts whose installed OCR language data is not discovered automatically;
+two optional OCR checks initially failed without it and pass with it. No OCR code
+or test exclusion changed. Ten synthetic before/after EPUB verifier/artifact cases
+match exactly, all seven corpus cases pass, and the canonical PDF smoke retains its
+sentinel. Existing test/corpus warnings and repository-wide P0-A debt remain.
+Diff review found no further actionable issues; no dependencies or goldens changed.
+
+**Next boundaries:** Define the format-neutral conversion descriptor and logical
+note/content/physical-source association contract before cache reuse or receipts.
+Current note references survive format changes, but chunk IDs still include the
+physical filename; cross-format chunk identity and downstream idempotency are not
+established. Current admission measures its existing `max_chars` contract, not a
+new UTF-8 byte preflight. Document-mode `.txt`, HTML, supplied text, deterministic
+invalidation and integration qualification remain open. Existing wrappers are not
+retired, and no release or corpus migration is selected.
 
 **Reuse before adding:** The current Joplin EPUB adapter verifies the article
 proof and supplies `verified_joplin_markdown`; the shared Markdown passes retain
@@ -821,7 +870,7 @@ Use separate coherent commits, in this order:
 9. `test: add corpus quality evaluation` — complete
 10. `docs: reconcile roadmap and supported input formats` — complete
 11. `docs: reconcile active documentation and dependency policy` — complete
-12. Direct verified Markdown, document text and HTML article inputs — proposed P1-E, in small boundary-specific increments.
+12. Direct verified Markdown implemented; document text, HTML and conversion contracts remain open under P1-E.
 13. Bounded artifacts and resumable completion receipts — proposed P2-D.
 
 If a package is too large for one review, split it by boundary, not by arbitrary

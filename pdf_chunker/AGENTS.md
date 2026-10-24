@@ -61,6 +61,17 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   windows must succeed; stable weighted classification/tag-union aggregation
   changes only enrichment fields, not canonical parent bytes/IDs/provenance.
 - `adapters/io_text.py`: Plain-text transcript ingestion into canonical `page_blocks`.
+- `adapters/io_joplin_epub.py`: Shared hash-bound article evidence for `.epub`
+  and direct `.md`. Pure `_source_text(raw, suffix=".md", row=sidecar)` validates
+  exact UTF-8 bytes and supports partial application; file reads remain in the
+  adapter. `metadata(binding, corpus)` retains its existing API. The reader
+  returns text and metadata from one verified read; unverified Markdown refuses.
+  Example: `pdf_chunker convert ./article.md --spec pipeline.yaml
+  --metadata-file ./native-metadata.json --out ./article.jsonl --no-enrich`.
+  See `docs/VERIFIED_MARKDOWN.md` for approval and normalization requirements.
+- `passes/joplin_markdown.py`: Existing contiguous source slices for verified
+  articles from either format; no new Markdown engine or transcript cue stripping.
+  Logical note references remain intact; chunk IDs retain physical filenames.
 - `adapters/io_pdf.py`: Existing native/fallback PDF extraction plus optional
   `PDF_CHUNKER_OCR_LANGUAGE` recovery of text-empty pages using installed OCR.
   `PDF_CHUNKER_OCR_CPUS` optionally selects two/three CPU-bound spawn workers;
@@ -99,8 +110,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - Transcript timing is provenance, not semantic text: `io_text` emits
   `timestamp_start`/`timestamp_end` source fields, and the shared splitter
   carries first/last available cue bounds into chunk metadata.
-- `.txt` pipelines must not include PDF artifact passes; the canonical runner
-  rejects `merge_footers` and `detect_page_artifacts` for text input.
+- `.txt` and `.md` pipelines must not include PDF artifact passes; the canonical
+  runner rejects `merge_footers` and `detect_page_artifacts` for both. Direct `.md`
+  uses the `text_parse` parser slot with already verified page blocks; it does not
+  call `io_text`. JSON metadata is decoded as JSON to preserve escaped emoji;
+  YAML keeps its existing date normalization.
 
 ## Current boundary notes
 - Active implementation status and remaining risks are tracked in

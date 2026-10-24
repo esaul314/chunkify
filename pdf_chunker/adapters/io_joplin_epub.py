@@ -1,10 +1,13 @@
-"""Bounded Joplin sidecars for native conversion; no enrichment or source admission."""
+"""Verify bounded Joplin Markdown/EPUB evidence; no source admission or enrichment."""
 
 import hashlib
+import io
 import json
 import re
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 CORPORA = {
@@ -63,11 +66,45 @@ def file_bytes(name, expected):
     return raw
 
 
-def metadata(binding, corpus):
-    """Read exact EPUB/sidecar/final approval; preserve nested references unaltered."""
+def _source_text(raw: bytes, *, suffix: str, row: Mapping[str, Any]) -> str:
+    """Validate physical bytes against the article sidecar without normalizing.
+
+    Direct Markdown is exactly the UTF-8 sidecar text. EPUB additionally binds
+    its embedded provenance. This in-memory check supports partial application;
+    evidence reads and hash verification remain in the calling adapter.
+    """
+    text: str = row["text"]
+    if suffix == ".md":
+        if raw != text.encode("utf-8"):
+            raise ValueError("direct Markdown bytes differ from verified sidecar")
+        return text
+    if suffix != ".epub":
+        raise ValueError("verified article source must be .md or .epub")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        names = archive.namelist()
+        if len(names) != len(set(names)) or any(
+            i.file_size > MAX_FILE_BYTES for i in archive.infolist()
+        ):
+            raise ValueError("ambiguous or oversized EPUB member")
+        if archive.read("mimetype") != b"application/epub+zip":
+            raise ValueError("genuine EPUB packaging required")
+        embedded_metadata = json.loads(archive.read("OEBPS/provenance.json"))
+        embedded_text = archive.read("OEBPS/article.md")
+        if embedded_metadata != row["metadata"] or embedded_text != text.encode("utf-8"):
+            raise ValueError("embedded EPUB provenance/content differs from sidecar")
+    return text
+
+
+def metadata(binding: Mapping[str, Any], corpus: str | None) -> dict[str, Any]:
+    """Read exact source/sidecar/final approval; retain the existing metadata API."""
+    return _verified_article(binding, corpus)[1]
+
+
+def _verified_article(binding: Mapping[str, Any], corpus: str | None) -> tuple[str, dict[str, Any]]:
+    """Return text and metadata from the same verified evidence snapshot."""
     if corpus not in CORPORA:
         raise ValueError("existing topic corpus required")
-    epub = file_bytes(binding["path"], binding["source_sha256"])
+    source = file_bytes(binding["path"], binding["source_sha256"])
     sidecar = file_bytes(binding["sidecar_path"], binding["sidecar_sha256"])
     quality = json.loads(file_bytes(binding["quality_path"], binding["quality_sha256"]))
     lines = [json.loads(line) for line in sidecar.decode("utf-8").splitlines() if line.strip()]
@@ -88,21 +125,7 @@ def metadata(binding, corpus):
         or not meta["title"].strip()
     ):
         raise ValueError("adapter article/source/content identity mismatch")
-    import io
-
-    with zipfile.ZipFile(io.BytesIO(epub)) as archive:
-        names = archive.namelist()
-        if len(names) != len(set(names)) or any(
-            i.file_size > MAX_FILE_BYTES for i in archive.infolist()
-        ):
-            raise ValueError("ambiguous or oversized EPUB member")
-        if archive.read("mimetype") != b"application/epub+zip":
-            raise ValueError("genuine EPUB packaging required")
-        if (
-            json.loads(archive.read("OEBPS/provenance.json")) != meta
-            or archive.read("OEBPS/article.md") != row["text"].encode()
-        ):
-            raise ValueError("embedded EPUB provenance/content differs from sidecar")
+    source_text = _source_text(source, suffix=Path(binding["path"]).suffix.lower(), row=row)
     refs = meta.get("joplin_references")
     if not isinstance(refs, list) or not refs or quality.get("final") is not True:
         raise ValueError("final hash-bound article quality approval required")
@@ -217,9 +240,10 @@ def metadata(binding, corpus):
         )
         if not urls or ref.get("urls") != urls:
             raise ValueError("original article URLs differ from sidecar")
-        tags = sorted(
-            {t.get("title") if isinstance(t, dict) else t for t in original.get("tags", [])}
-        )
+        tag_titles: set[Any] = {
+            t.get("title") if isinstance(t, dict) else t for t in original.get("tags", [])
+        }
+        tags = sorted(tag_titles)
         if ref.get("tags") != tags or any(
             ref.get(k) != note.get(k) for k in ("created_time", "user_created_time") if k in note
         ):
@@ -238,7 +262,7 @@ def metadata(binding, corpus):
         meta["title"],
     )[:500]
     # Native enrichment owns tags/status/utterance/source/chunk/page fields.
-    return {
+    verified_metadata = {
         k: meta[k]
         for k in ("title", "joplin_references", "urls", "content_generation", "content_sha256")
     } | {
@@ -247,18 +271,24 @@ def metadata(binding, corpus):
         "article_title": article_title,
         "joplin_binding": {**binding, "schema": 1, "corpus": corpus},
     }
+    return source_text, verified_metadata
 
 
-def read_bound_article(source_path, document_metadata):
-    """Return verified Markdown only for an explicitly bound Joplin EPUB.
+def read_bound_article(
+    source_path: str | Path, document_metadata: Mapping[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Return verified Markdown for an explicitly bound Joplin .md or EPUB.
 
     Ordinary EPUBs use the existing reader. A partial/invalid marker fails closed;
-    callers cannot enable preservation merely by passing a pipeline option.
+    direct Markdown requires the full proof. Callers cannot enable preservation
+    merely by passing a boolean or pipeline option.
     """
     marked = any(k in document_metadata for k in ("joplin_binding", "source_kind"))
     if not marked or document_metadata.get("source_kind") != "joplin_article":
         if "joplin_binding" in document_metadata:
             raise ValueError("invalid Joplin source marker")
+        if Path(source_path).suffix.lower() == ".md":
+            raise ValueError("verified article evidence required for direct Markdown input")
         return None
     binding = document_metadata.get("joplin_binding")
     if (
@@ -268,15 +298,9 @@ def read_bound_article(source_path, document_metadata):
         or document_metadata.get("source_system") != "joplin"
     ):
         raise ValueError("exact native Joplin source binding required")
-    expected = metadata(binding, binding.get("corpus"))
+    text, expected = _verified_article(binding, binding.get("corpus"))
     if expected != document_metadata:
         raise ValueError("native metadata differs from verified article evidence")
-    import io
-
-    with zipfile.ZipFile(
-        io.BytesIO(file_bytes(binding["path"], binding["source_sha256"]))
-    ) as archive:
-        text = archive.read("OEBPS/article.md").decode("utf-8")
     return (
         {
             "type": "page_blocks",

@@ -6,6 +6,11 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `verified_markdown_ingress_test.py`: Synthetic proof-bound `.md`/EPUB parity,
+  exact UTF-8 reconstruction including cue-like content, unchanged JSONL bytes
+  after an intervening document, actual CLI output, Unicode JSON/YAML metadata,
+  source/evidence/approval tampering, generated-field precedence, partially
+  applied pure byte validation and refusal before injected enrichment.
 - `bootstrap/test_quality_gate_scope.py`: Declared lint/typecheck paths, explicit
   supported-Python sessions, missing-interpreter failure policy, CI agreement,
   and syntax parsing of all production modules on the session interpreter;
@@ -102,6 +107,10 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters
 
 ## AI Agent Guidance
+- For direct article ingress, run `pytest tests/verified_markdown_ingress_test.py
+  tests/joplin_markdown_preservation_test.py tests/text_adapter_test.py`, then
+  `nox -s lint typecheck tests`. Generate synthetic evidence in temporary roots;
+  keep actual captures and publication-review findings outside tracked source.
 - Use clear input/output examples
 - Avoid asserting on intermediate state unless necessary
 - Shell and Python tests must pass independently

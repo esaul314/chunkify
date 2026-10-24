@@ -173,7 +173,11 @@ bounds; missing timing is left missing rather than inferred.
 
 The `pdf_parse` entry in the checked-in pipeline specs is the parser slot: the
 canonical runner replaces it with `epub_parse` or `text_parse` for `.epub` and
-`.txt` inputs. A spec must not mix parser-family steps.
+`.txt` inputs. Verified article `.md` also uses `text_parse` normalization after
+the shared Joplin adapter verifies its exact raw UTF-8 bytes, sidecar and approval.
+It bypasses transcript ingestion and reuses the existing contiguous Markdown
+passes. See `docs/VERIFIED_MARKDOWN.md`; ordinary unverified Markdown is refused.
+A spec must not mix parser-family steps.
 
 ## 4.1) Corpus-quality evaluation
 

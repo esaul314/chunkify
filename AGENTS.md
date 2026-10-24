@@ -143,7 +143,13 @@ only for workflows that use them.
 - `apt-get install -y poppler-utils`  # provides `pdftotext`
 
 ### Quick Usage
-- Supported source formats in this repository are `.pdf`, `.epub`, and `.txt`.
+- Supported source formats are `.pdf`, `.epub`, `.txt`, and proof-bound article `.md`.
+  Direct Markdown requires the existing verified Joplin sidecar, capture records
+  and final approval; an unverified `.md` is refused. For example:
+  `pdf_chunker convert ./article.md --spec pipeline.yaml --metadata-file ./native-metadata.json --out ./article.jsonl --no-enrich`.
+  See `docs/VERIFIED_MARKDOWN.md` for evidence preparation, exact UTF-8 policy
+  and remaining P1-E work. Markdown uses shared `text_parse` normalization but
+  never the transcript reader; its cue-like lines, code and tables stay exact.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -385,6 +391,7 @@ pdf_chunker/
 │   │   ├── ai_enrich.py           # LLM completion & tag config loading
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
+│   │   ├── io_joplin_epub.py    # Shared verified EPUB/Markdown article evidence
 │   │   └── io_text.py             # Plain-text transcript ingestion
 │   ├── ai_enrichment.py           # Shim delegating to ai_enrich pass and adapter
 │   ├── core_new.py                # Canonical CLI/library runner and invariants
@@ -425,6 +432,7 @@ pdf_chunker/
 │   │   ├── heading_detect.py
 │   │   ├── list_detect.py
 │   │   ├── pdf_parse.py
+│   │   ├── joplin_markdown.py   # Pure exact slicing of verified article Markdown
 │   │   ├── text_parse.py          # Plain-text parser normalization
 │   │   ├── split_semantic.py      # Main pass (771 lines) - orchestration
 │   │   ├── semantic_dedupe.py     # Sentence-bearing duplicate removal
@@ -472,6 +480,7 @@ pdf_chunker/
     ├── page_artifact_pass_test.py    # Ordered cleanup and option-precedence laws
     ├── text_clean_purity_test.py     # Ordered text/style cleanup and metadata preservation
     ├── geometry_contract_test.py     # Pure zone scoring, strict margins, bounded previews
+    ├── verified_markdown_ingress_test.py # Synthetic article evidence, parity and exact bytes
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py
     ├── corpus_evaluation_test.py

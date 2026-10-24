@@ -386,6 +386,7 @@ def _cli_overrides(
     parser_option_key = {
         ".epub": "epub_parse",
         ".txt": "text_parse",
+        ".md": "text_parse",
     }.get(suffix, "pdf_parse")
     # Resolve interactive flags: --interactive enables all, specific flags override
     effective_interactive_footers = interactive or interactive_footers

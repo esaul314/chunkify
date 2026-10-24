@@ -1,7 +1,7 @@
 # pdf-chunker
 
-CLI pipeline to convert PDFs, EPUBs, and plain-text transcripts into JSONL chunks
-for RAG workflows.
+CLI pipeline to convert PDFs, EPUBs, verified Markdown articles, and plain-text
+transcripts into JSONL chunks for RAG workflows.
 
 The CLI and library share one canonical runner. Library callers can use
 ``pdf_chunker.convert(path, PipelineSpec(...))``; the older
@@ -13,6 +13,7 @@ Supported input formats for this project are:
 - `.pdf`
 - `.epub`
 - `.txt`
+- `.md` for proof-bound articles (see [verified Markdown](docs/VERIFIED_MARKDOWN.md))
 
 For corpus-ingestion workflows, skip unsupported formats such as `.mobi`, `.azw3`, `.djvu`, and `.chm` unless they have first been converted into a supported format outside this project.
 
@@ -42,6 +43,14 @@ EPUB example:
 ```bash
 pdf_chunker convert "sample.epub" --out out.jsonl --chunk-size 400 --overlap 50
 ```
+
+Verified Markdown article (requires its existing sidecar/capture/approval evidence):
+```bash
+pdf_chunker convert "article.md" --spec pipeline.yaml --metadata-file native-metadata.json --out article.jsonl --no-enrich
+```
+This path preserves exact UTF-8 article text through the existing Markdown
+splitter. Unverified Markdown is refused; see [evidence preparation and remaining
+article-input work](docs/VERIFIED_MARKDOWN.md).
 
 Plain-text or WebVTT-style transcript example:
 ```bash

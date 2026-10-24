@@ -1,5 +1,5 @@
 # `pdf_parse` is the parser slot. The canonical runner replaces it with
-# `epub_parse` or `text_parse` when the input suffix is `.epub` or `.txt`.
+# `epub_parse` or `text_parse` for `.epub`, `.txt`, or verified article `.md`.
 pipeline:
   - pdf_parse
   - text_clean

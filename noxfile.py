@@ -58,6 +58,7 @@ LINT_EXTRA_PATHS: Final = (
     "tests/bootstrap",
     "tests/io_epub_adapter_test.py",
     "tests/joplin_markdown_preservation_test.py",
+    "tests/verified_markdown_ingress_test.py",
     "tests/epub_body_markup_test.py",
     "tests/pdf_parse_pass_test.py",
     "tests/utils_test.py",
