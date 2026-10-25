@@ -6,6 +6,14 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `article_completion_test.py`: Exact schema-1 descriptor/completion round trips,
+  canonical JSON, nested snapshot and association invariants, Unicode properties,
+  pinned record hashes and output counts. Malformed public facts refuse; replacing
+  both output and record cannot replace a separately retained anchor. Actual
+  Markdown/EPUB read-only reuse with custom metadata keys re-verifies source,
+  native metadata, proof, corpus, settings and runtime; no reconversion, writes or
+  repair. Mid-read drift refuses; real dictionary warming/intervening articles
+  preserve bytes. All evidence/cache files are synthetic in temporary roots.
 - `article_output_test.py`: Pure strict JSONL/hash/schema checks, complete-row
   character limits, generated-field precedence, ordered identities, provenance
   and exact Unicode reconstruction; detached results and partial application.
@@ -129,6 +137,13 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `truncation_regression_test.py`: Ensures split_semantic preserves text beyond 25k characters
 
 ## AI Agent Guidance
+- For completion/readback changes, run `pytest tests/article_completion_test.py
+  tests/article_output_test.py tests/conversion_descriptor_test.py`, the broader
+  article regressions and all three nox sessions. Preserve the distinction between
+  immutable output facts, guarded synchronous completion, the independently
+  retained hash anchor and future atomic stage receipts. Never derive a trust
+  anchor from the same arbitrary cache files being tested or reuse cached source
+  approval. Pure validators support `partial`; adapters own all file reads.
 - For base output/execution changes, include `tests/article_output_test.py` with
   preparation, readability, descriptor and ingress tests. Use synthetic approved
   evidence and isolated runtime stubs to induce drift without changing installed

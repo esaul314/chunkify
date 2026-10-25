@@ -109,8 +109,12 @@ refuse preparation; normal warming preserves identity. The opt-in
 `execute_bound_conversion(binding, prepared=prepared, corpus="technology")`
 checks matching snapshots before/after synchronous conversion and validates base
 JSONL hash, schema, provenance and complete reconstruction without writing files.
-It returns only after normal completion; persisted completion and cache reuse
-remain open, alongside document-text/HTML/supplied-text input,
-complete byte preflight and downstream integration qualification. P2-D receipts
+It returns only after normal completion. `complete_bound_conversion` also returns
+canonical completion facts. Read-only `read_bound_conversion` re-verifies proof,
+settings/runtime and persisted record/output bytes against an independently
+retained completion hash; it never falls back to conversion or repairs files.
+Atomic receipt writing and interrupted-batch recovery remain P2-D work.
+Separate enrichment reuse remains open, alongside document-text/HTML/supplied-text
+input, complete byte preflight and downstream integration qualification. P2-D receipts
 and cleanup follow those contracts. Existing EPUB sources, releases and vector-store
 contents are unchanged.

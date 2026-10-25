@@ -33,6 +33,7 @@ pdf_chunker/
 │   ├── conversion_descriptor.py # Pure article identity snapshots and comparison
 │   ├── article_conversion.py # Pure base article settings and prepared spec snapshot
 │   ├── article_output.py    # Pure base-output integrity/provenance/reconstruction checks
+│   ├── article_completion.py # Pure canonical completion records and pinned readback checks
 │   ├── cli.py               # Typer CLI: convert / inspect commands
 │   ├── config.py            # Pydantic Settings + YAML pipeline spec loader
 │   ├── framework.py         # Artifact/Pass registry + pipeline runner
@@ -43,7 +44,7 @@ pdf_chunker/
 │   │   ├── io_pdf.py
 │   │   ├── io_epub.py
 │   │   ├── io_text.py
-│   │   ├── article_conversion.py # Verified preparation and guarded synchronous execution
+│   │   ├── article_conversion.py # Verified preparation, synchronous completion and cache reads
 │   │   ├── readability_runtime.py # Dictionary/state fingerprints and cache qualification
 │   │   ├── emit_jsonl.py
 │   │   └── ai_enrich.py
@@ -203,9 +204,16 @@ completion and matching snapshots reach pure base-output validation. The pure
 validator checks retained hashes, strict JSONL, schema/generated-field precedence,
 complete-row character limits, provenance and contiguous source reconstruction.
 Frozen results retain immutable bytes and return detached row containers. This
-does not attest transient mutations or imported code, write files/receipts, or
-authorize cached-output reuse. Persisted completion/readback remain open; see
-`docs/CONVERSION_DESCRIPTORS.md`.
+does not attest transient mutations or imported code or write files/receipts.
+`complete_bound_conversion` returns canonical completion facts only after guarded
+execution. Pure `read_conversion_descriptor` restores strict schema-1 snapshots;
+`read_article_completion` checks an independently retained record hash and matching
+fresh descriptor. `validate_completed_article` reuses the output validator and
+checks actual bytes/row counts. The read-only `read_bound_conversion` adapter
+performs fresh preparation before/after file reads and never falls back to
+conversion or repair. Caller-owned persistence and the trusted completion-hash
+anchor remain external; atomic publication, child-process receipts and batch
+recovery remain P2-D work. See `docs/CONVERSION_DESCRIPTORS.md`.
 
 ## 4.1) Corpus-quality evaluation
 

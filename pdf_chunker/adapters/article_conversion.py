@@ -15,6 +15,12 @@ from typing import Any, cast
 from pdf_chunker.adapters.emit_jsonl import _serialize
 from pdf_chunker.adapters.io_joplin_epub import describe_bound_article
 from pdf_chunker.adapters.readability_runtime import collect_readability_runtime
+from pdf_chunker.article_completion import (
+    ArticleCompletion,
+    describe_article_completion,
+    read_article_completion,
+    validate_completed_article,
+)
 from pdf_chunker.article_conversion import PreparedArticleConversion, resolve_article_spec
 from pdf_chunker.article_output import ValidatedArticleOutput, validate_article_output
 from pdf_chunker.config import PipelineSpec
@@ -127,3 +133,46 @@ def execute_bound_conversion(
     return validate_article_output(
         data, descriptor=prepared.descriptor, expected_sha256=hashlib.sha256(data).hexdigest()
     )
+
+
+def complete_bound_conversion(
+    binding: Mapping[str, Any], *, prepared: PreparedArticleConversion, corpus: str
+) -> tuple[ArticleCompletion, ValidatedArticleOutput]:
+    """Return completion facts/output after guarded execution, without persistence.
+
+    The caller owns storing these artifacts and independently retaining the
+    completion hash. Exceptions return neither completion nor partial output.
+    This synchronous record has no child exit code or resumable stage lifecycle.
+    """
+    output = execute_bound_conversion(binding, prepared=prepared, corpus=corpus)
+    return describe_article_completion(output, descriptor=prepared.descriptor), output
+
+
+def read_bound_conversion(
+    binding: Mapping[str, Any],
+    spec: PipelineSpec,
+    *,
+    corpus: str,
+    completion_path: str | Path,
+    output_path: str | Path,
+    expected_completion_sha256: str,
+) -> ValidatedArticleOutput:
+    """Read existing completed artifacts with fresh preparation and strict checks.
+
+    Require a hash independently retained from trusted completed execution, never
+    freshly derived from arbitrary cached records. Re-verify source/settings and
+    observed runtime before/after reads. Invalid/missing/stale artifacts raise;
+    there is no implicit conversion, repair, write or path-based authority.
+    Keep runtime stable as for guarded execution; only lasting drift is observed.
+    """
+    before = prepare_bound_conversion(binding, spec, corpus=corpus)
+    completion = read_article_completion(
+        Path(completion_path).read_bytes(),
+        descriptor=before.descriptor,
+        expected_sha256=expected_completion_sha256,
+    )
+    output = validate_completed_article(Path(output_path).read_bytes(), completion=completion)
+    after = prepare_bound_conversion(binding, spec, corpus=corpus)
+    if after != before:
+        raise ValueError("prepared article contract changed during readback")
+    return output

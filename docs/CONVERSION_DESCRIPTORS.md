@@ -4,8 +4,9 @@ P1-E now exposes an opt-in library contract for comparing article conversion
 inputs. It separates logical note references, content revisions, physical sources
 and conversion settings. Base article preparation also resolves runner defaults
 and fingerprints the installed implementation/runtime. Guarded in-memory execution
-also validates completed base output. These opt-in APIs do not change
-`convert()`, emitted chunk IDs or JSONL, and do not execute a cache, write
+also validates completed base output. Canonical completion records and read-only
+reuse validate caller-persisted artifacts against an independently retained hash.
+These opt-in APIs do not change `convert()`, emitted chunk IDs or JSONL, write
 receipts or update a vector store.
 
 ## Resolved base article preparation
@@ -122,7 +123,8 @@ changes after import, replacement callables and concurrent mutation are outside
 this contract. For before/after drift detection and completed output validation,
 use the opt-in execution adapter below. Fresh source verification remains mandatory;
 an unchanged prepared descriptor alone cannot certify completion or output integrity.
-There is no cache executor or enrichment reuse yet.
+The read-only base reuse adapter below adds fresh evidence/runtime checks;
+enrichment reuse remains separate work.
 
 ## Guarded execution and output validation
 
@@ -189,8 +191,8 @@ update.
 Pure validation does not verify evidence or terminal execution. Retain output
 hashes independently from a trusted completed run; hashing arbitrary cached bytes
 and supplying that same hash does not establish integrity. Neither public record
-construction nor the validator grants approval authority. Persisted completion
-records and validated cache reads remain future work under P1-E/P2-D.
+construction nor the validator grants approval authority. The completion/readback
+API below connects these facts to caller-retained records and fresh preparation.
 
 Before/after snapshots detect lasting observable changes, not temporary changes
 that are undone, concurrent execution, replaced callables or source edits after
@@ -199,6 +201,108 @@ There is no lock or hermetic runtime attestation. Each guard repeats full source
 dictionary and cache inspection; the cost described above applies twice per
 execution. Rows and serialized bytes are held in memory; there is no new streaming
 or resource-limit guarantee.
+
+## Completion records and read-only base reuse
+
+```python
+from pdf_chunker.adapters.article_conversion import (
+    complete_bound_conversion, read_bound_conversion,
+)
+
+completion, output = complete_bound_conversion(
+    binding, prepared=prepared, corpus="technology",
+)
+record_bytes = completion.to_json().encode("utf-8")
+trusted_hash = completion.sha256
+
+# The caller stores record_bytes and output.jsonl in its private artifact scope,
+# and retains trusted_hash independently through its trusted run-record boundary.
+# This API does not publish either file or supply that durable storage boundary.
+
+reused = read_bound_conversion(
+    binding, prepared.spec(), corpus="technology",
+    completion_path=stored_completion_path, output_path=stored_jsonl_path,
+    expected_completion_sha256=trusted_hash,
+)
+assert reused == output
+```
+
+`complete_bound_conversion` composes the existing guarded executor with a pure
+completion factory. It returns a frozen `ArticleCompletion` and the validated
+output; any execution, post-check or validation exception returns neither.
+It writes nothing, including configured output paths. The record includes:
+
+- Schema version `1`, status `succeeded`, and execution kind
+  `guarded-synchronous-v1`. This means normal return from the guarded in-process
+  runner, not a child process or an inferred exit status.
+- The full conversion descriptor, including settings/runtime, metadata and
+  independent note associations. Descriptor schema 1 remains unchanged.
+- The output SHA-256, measured UTF-8 byte count and actual row count.
+
+Record JSON is compact, sorted, literal Unicode and has no terminal newline.
+`sha256` hashes these exact UTF-8 bytes. Output JSONL retains its existing distinct
+serialization, including a terminal newline. Keep records private: they retain
+the descriptor's full local evidence paths and provenance. There are no credentials
+or new timestamps/run IDs added to the record.
+
+The pure data-first functions support partial application:
+
+```python
+from functools import partial
+
+from pdf_chunker.article_completion import (
+    read_article_completion, validate_completed_article,
+)
+from pdf_chunker.conversion_descriptor import read_conversion_descriptor
+
+restored_descriptor = read_conversion_descriptor(prepared.descriptor.to_json())
+read_record = partial(read_article_completion, descriptor=restored_descriptor,
+                      expected_sha256=trusted_hash)
+restored = read_record(record_bytes)
+check_output = partial(validate_completed_article, completion=restored)
+checked = check_output(output.jsonl)
+```
+
+`read_conversion_descriptor` requires exact canonical schema-1 JSON and validates
+every nested JSON snapshot, version/configuration shape, labels, hashes and
+nonempty sorted unique associations sharing a content revision and corpus.
+Duplicate/unknown/missing keys, alternate JSON framing, invalid Unicode,
+nonfinite numbers and inconsistent associations refuse. It restores declared data;
+it does not discover effective configuration or grant source approval.
+
+`read_article_completion` checks the independently retained record hash **before
+parsing**, validates the exact schema/success kind, restores the descriptor and
+requires equality with current preparation. Output hashes must be lowercase
+SHA-256; counts must be positive integers, excluding booleans/floats.
+`validate_completed_article` then checks actual output bytes using the existing
+schema/provenance/reconstruction validator and compares byte/row counts.
+`describe_article_completion` revalidates the descriptor and output facts and
+retains the reader's detached immutable descriptor. Being pure, it cannot prove
+that execution occurred. Public construction of any of
+these records likewise grants no authority.
+
+`read_bound_conversion` prepares the binding/spec afresh, checks the saved record
+before opening output, validates output bytes, and prepares again. Both observed
+snapshots must match. Missing/corrupt files, stale configuration/corpus/runtime,
+changed source, native metadata or proof, and lasting mid-read drift raise; there
+is no implicit reconversion, repair or output write. The returned immutable bytes
+are the validated read snapshot, not a guarantee that files stay unchanged later.
+The same stable-runtime assumption and inspection cost as guarded execution apply.
+Full records/output are held in memory; no streaming, capacity bound or cleanup
+policy is introduced.
+
+Trust must come from the completed run: retain the completion hash through an
+independent trusted boundary. A hash file alongside replaceable cache artifacts,
+or a new hash computed from those artifacts, does not establish successful
+execution. Hashes are integrity anchors, not signatures. Record parsing and output
+validation cannot authenticate an arbitrary caller's execution claim. Coordinated
+replacement of record and output still fails against the original retained hash.
+
+This increment reads caller-persisted completion facts. Atomic artifact/receipt
+writing, durable hash-anchor storage, running/failed/unknown stage records, actual
+child exit status, interrupted-batch recovery and cleanup remain P2-D work.
+Enrichment artifacts require their own contract and validation; they are refused
+by this bounded base profile. No CLI cache selection or default behavior changes.
 
 ## Verified adapter usage
 
@@ -279,7 +383,7 @@ is modified. Pairing descriptors from unrelated sources remains a caller error.
 
 An unchanged descriptor identifies equal declared inputs; it is not proof that a
 cached artifact exists, reconstructs the source, fits a budget or finished
-successfully. Evidence must still be checked, and any future reuse must validate
+successfully. Evidence must still be checked, and reuse must validate
 the output's own hash, schema, reconstruction and terminal completion. Enrichment
 needs its own model/prompt/vocabulary/serving contract and output validation.
 
@@ -290,7 +394,8 @@ gate applies before sharing them; do not put credentials into configuration.
 ## Verification and remaining work
 
 ```bash
-pytest tests/article_output_test.py tests/article_readability_runtime_test.py \
+pytest tests/article_completion_test.py tests/article_output_test.py \
+  tests/article_readability_runtime_test.py \
   tests/article_conversion_test.py \
   tests/conversion_descriptor_test.py \
   tests/verified_markdown_ingress_test.py \
@@ -312,13 +417,18 @@ provenance reconstruction, generated-field precedence, Unicode partition laws,
 detached results, actual custom-key Markdown/EPUB execution, no writes on success
 or failure, pre-execution refusal, mid-run source/proof/metadata/runtime changes,
 normal real dictionary warming and identical output after an intervening source.
+Completion cases exercise canonical descriptor/record restoration, nested
+invariants, independent record/output integrity, counts, public-fact refusal,
+actual Markdown/EPUB reuse without conversion/writes, changed inputs/proof/runtime,
+mid-read drift and real runtime warming after another article.
 
 Base article preparation connects effective runner settings/version resolution
 for the qualified composition above, including readability resource/state pins.
 Guarded in-memory execution and pure base-output validation now qualify normal
-synchronous completion and lasting observable drift. Next add persisted descriptor
-and completion validation before cache reuse, then resolve and validate the
-separate enrichment contract. Batch execution, receipts, UTF-8 row preflight,
-document-text/HTML inputs and the
-downstream idempotency pilot remain open. P0-A and P2-D remain open as recorded in
+synchronous completion and lasting observable drift. Canonical completion records
+and read-only base reuse now validate persisted bytes against a retained hash and
+fresh preparation. Next resolve and validate the separate enrichment contract.
+Atomic persistence, durable trust anchors, batch execution, stage receipts,
+UTF-8 row preflight, document-text/HTML inputs and the downstream idempotency
+pilot remain open. P0-A and P2-D remain open as recorded in
 the [implementation roadmap](IMPLEMENTATION_ROADMAP.md).

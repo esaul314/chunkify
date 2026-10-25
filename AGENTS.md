@@ -177,8 +177,18 @@ only for workflows that use them.
   `validate_article_output(data, descriptor=prepared.descriptor,
   expected_sha256=retained_output_hash)` in `pdf_chunker.article_output` supports
   partial application but grants no completion/proof authority. Retain hashes
-  independently of cached bytes. No files or receipts are written; persisted
-  completion/cache reuse remain open. Keep runtime stable: the guard detects
+  independently of cached bytes. No files or receipts are written. For reusable
+  base output, `completion, output = complete_bound_conversion(binding,
+  prepared=prepared, corpus="technology")` returns canonical completion facts.
+  After caller-owned persistence, use `read_bound_conversion(binding, spec,
+  corpus="technology", completion_path=record_path, output_path=jsonl_path,
+  expected_completion_sha256=trusted_hash)`; retain `completion.sha256`
+  independently from the stored files. Readback checks fresh preparation before/
+  after reads and refuses stale/missing/corrupt artifacts without reconversion or
+  writes. Pure `read_conversion_descriptor(data)` restores strict schema-1
+  snapshots; completion/output validators live in `pdf_chunker.article_completion`
+  and support `partial`. Atomic publication and interrupted-batch recovery remain
+  P2-D work. Keep runtime stable: the guard detects
   lasting drift, not concurrent/transient edits or replaced imported callables.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
@@ -429,6 +439,7 @@ pdf_chunker/
 │   ├── core_new.py                # Canonical CLI/library runner and invariants
 │   ├── core.py                    # Frozen legacy process_document compatibility API
 │   ├── contracts.py               # Typed page/block/chunk/run-report contracts
+│   ├── article_completion.py      # Pure completion snapshots and pinned readback checks
 │   ├── conversion_descriptor.py   # Pure immutable article identity and comparison
 │   ├── article_conversion.py      # Pure base article settings and detached prepared spec
 │   ├── article_output.py          # Pure output hash/schema/provenance/reconstruction checks
@@ -519,6 +530,7 @@ pdf_chunker/
     ├── conversion_descriptor_test.py # Contract/association laws and verified identity
     ├── article_conversion_test.py  # Effective defaults, runtime pins and actual runner parity
     ├── article_output_test.py      # Output integrity, execution drift and completion refusal
+    ├── article_completion_test.py  # Strict completion/descriptor reads and validated cache reuse
     ├── article_readability_runtime_test.py # Dictionary changes, cache integrity and stable identity
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests
     ├── convert_returns_rows_test.py

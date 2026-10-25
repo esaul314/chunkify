@@ -13,7 +13,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
-from typing import Literal
+from typing import Any, Literal
 
 
 def _json_value(value: object) -> object:
@@ -61,6 +61,21 @@ def _contract_snapshot(contract: Mapping[str, object]) -> str:
     return _snapshot(contract)
 
 
+def _read_mapping_snapshot(data: str) -> dict[str, Any]:
+    """Read exact canonical JSON, refusing duplicates, coercions and invalid Unicode."""
+    if not isinstance(data, str):
+        raise ValueError("canonical JSON string required")
+    value = json.loads(data)
+    if not isinstance(value, dict) or _snapshot(value) != data:
+        raise ValueError("canonical JSON object required")
+    return value
+
+
+def _require_sha256(value: object) -> None:
+    if not isinstance(value, str) or re.fullmatch("[0-9a-f]{64}", value) is None:
+        raise ValueError("lowercase SHA-256 required")
+
+
 @dataclass(frozen=True)
 class NoteAssociation:
     """One logical reference and its content revision, routing and full provenance."""
@@ -101,6 +116,53 @@ class ConversionDescriptor:
     def key(self) -> str:
         """Fingerprint every input represented by this versioned descriptor."""
         return _digest(self.to_json())
+
+
+def _read_association(value: object, *, content_sha256: str) -> NoteAssociation:
+    if not isinstance(value, dict) or set(value) != {f.name for f in fields(NoteAssociation)}:
+        raise ValueError("complete note association required")
+    for name in ("reference", "corpus"):
+        _label(value[name], f"association {name}")
+    if value["content_sha256"] != content_sha256:
+        raise ValueError("association content differs from descriptor")
+    _read_mapping_snapshot(value["provenance_json"])
+    return NoteAssociation(**value)
+
+
+def read_conversion_descriptor(data: str) -> ConversionDescriptor:
+    """Restore schema-1 canonical snapshots, without granting proof or completion.
+
+    Exact round trips reject duplicate/extra keys, alternate serialization and
+    malformed nested snapshots. Associations must be nonempty, unique and sorted,
+    sharing the descriptor's content revision and a single corpus. No files or
+    effective runtime settings are discovered; fresh preparation remains necessary.
+    """
+    value = _read_mapping_snapshot(data)
+    if (
+        set(value) != {"schema", *(f.name for f in fields(ConversionDescriptor))}
+        or type(value["schema"]) is not int
+        or value["schema"] != 1
+    ):
+        raise ValueError("complete conversion descriptor schema 1 required")
+    for name in ("source_path", "source_format"):
+        _label(value[name], name)
+    for name in ("source_sha256", "content_sha256"):
+        _require_sha256(value[name])
+    _contract_snapshot(_read_mapping_snapshot(value["contract_json"]))
+    _read_mapping_snapshot(value["metadata_json"])
+    items = value["associations"]
+    if not isinstance(items, list) or not items:
+        raise ValueError("nonempty descriptor associations required")
+    associations = tuple(
+        _read_association(item, content_sha256=value["content_sha256"]) for item in items
+    )
+    references = [item.reference for item in associations]
+    if references != sorted(set(references)) or len({item.corpus for item in associations}) != 1:
+        raise ValueError("unique sorted associations with one corpus required")
+    return ConversionDescriptor(
+        **{key: item for key, item in value.items() if key not in {"schema", "associations"}},
+        associations=associations,
+    )
 
 
 def describe_conversion(

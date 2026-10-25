@@ -21,6 +21,8 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   on them. No cache execution or reference deletion. Caller-resolved settings and
   pinned implementation/schema/serialization versions are mandatory for this
   lower-level API. See `docs/CONVERSION_DESCRIPTORS.md` for automatic base preparation.
+  `read_conversion_descriptor(data)` restores exact canonical schema-1 snapshots,
+  validating nested objects and association invariants without granting approval.
 - `article_conversion.py`: Pure data-first `resolve_article_spec(spec, suffix=...,
   emit_defaults=..., split_defaults=...)` and frozen `PreparedArticleConversion`.
   Resolve sizing with `SplitOptions`, retain supplied JSON settings and fill
@@ -32,6 +34,15 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   Use `partial` for repeated checks. Frozen `ValidatedArticleOutput` stores bytes;
   `rows()` returns detached containers. No evidence/terminal authority or I/O;
   retain hashes independently from cached bytes.
+- `article_completion.py`: Frozen `ArticleCompletion` holds the full descriptor
+  and output hash/bytes/row counts under schema 1 and `guarded-synchronous-v1`.
+  Pure data-first `describe_article_completion(output, descriptor=...)`
+  revalidates facts; it cannot establish execution. `read_article_completion(data,
+  descriptor=current, expected_sha256=trusted_hash)` restores strict canonical
+  bytes and matching input identity; `validate_completed_article(data,
+  completion=completion)` validates actual output/counts. All support `partial`.
+  Retain the completion hash independently from cached files; public construction
+  or freshly hashing an arbitrary record grants no approval/completion authority.
 - `adapters/article_conversion.py`: Read-only
   `prepare_bound_conversion(binding, spec, corpus="technology")` resolves actual
   runner defaults, fingerprints package Python sources and installed runtime
@@ -45,7 +56,14 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   including a configured `output_path`. Exceptions propagate without completion
   or runtime repair. Persistent observable drift refuses; concurrent/transient
   mutation and imported-code attestation remain outside this bounded contract.
-  Persisted completion and cache reuse remain open.
+  `completion, output = complete_bound_conversion(binding, prepared=prepared,
+  corpus="technology")` returns persistable facts only after guarded execution.
+  Read caller-persisted artifacts with `read_bound_conversion(binding, spec,
+  corpus="technology", completion_path=record_path, output_path=jsonl_path,
+  expected_completion_sha256=trusted_hash)`. It re-prepares before/after reads,
+  validates completion before reading output, and never converts/repairs/writes
+  on missing, stale or corrupt artifacts. Atomic writing, child-process receipts
+  and interrupted-batch recovery remain P2-D work.
 - `adapters/readability_runtime.py`: Use `collect_readability_runtime()` to inspect
   raw CMU/Pyphen resource hashes and effective loaded-table hashes. Canonical
   hashing is pure and data-first; discovery stays in this adapter. Optional CMU

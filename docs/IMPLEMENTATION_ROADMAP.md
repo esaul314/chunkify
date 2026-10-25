@@ -10,7 +10,7 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-**Status:** P0-A remains open; P1-E verified Markdown, descriptors, qualified preparation and guarded in-memory output validation implemented (2026-10-24), persisted reuse boundaries below
+**Status:** P0-A remains open; P1-E verified Markdown, descriptors, qualified preparation, guarded output validation and pinned completion readback implemented (2026-10-24); enrichment/persistence boundaries below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -533,8 +533,9 @@ configuration accepts too many invalid states.
 **Status: IN PROGRESS (2026-10-24).** Direct proof-bound `.md` ingress is the first
 implemented increment. Opt-in descriptors, independent note associations,
 effective settings/runtime snapshots, readability resource/state pins and guarded
-in-memory output validation for the canonical base article composition are
-implemented; persisted validated reuse and remaining inputs are open.
+in-memory output validation, canonical completion records and read-only validated
+reuse for the canonical base article composition are implemented. Atomic
+persistence, separate enrichment reuse and remaining inputs are open.
 Deliver explicit document-text and HTML inputs in small increments under
 P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
 
@@ -712,12 +713,58 @@ optional skips, return-value warnings and the PyMuPDF deprecation warning remain
 Final review found no further actionable issues; existing conversion algorithms,
 dependencies, goldens and unrelated files are unchanged.
 
-**Next boundaries:** Add persisted descriptor/completion validation and output
-readback before cache reuse, then resolve and validate the separate enrichment
-contract. Retain output hashes independently from trusted completed runs; a hash
-computed from arbitrary cached bytes does not establish integrity. In-memory
-guarded return is not a durable receipt or child exit-status record. Before/after
-snapshots detect lasting observable drift, not temporary/concurrent mutations,
+**Completion/readback increment:** A pure data-first schema-1 descriptor reader
+restores exact canonical snapshots and checks nested JSON, contract shape,
+hashes/labels and sorted unique associations with matching content/corpus.
+Frozen completion facts bind the full descriptor to output hash, byte/row counts,
+explicit success and `guarded-synchronous-v1` execution kind. The completion
+factory revalidates public descriptor/output facts. Canonical record parsing
+requires an independently retained hash and equality with fresh preparation;
+actual output readback reuses the existing validator and checks measured counts.
+All pure interfaces support partial application and leave inputs untouched.
+
+`complete_bound_conversion` returns record/output only after the existing guarded
+runner succeeds. `read_bound_conversion` re-prepares before/after reading
+caller-persisted artifacts, checks the completion before reading output, and
+never reconverts, repairs or writes files on stale, missing or corrupt state.
+The caller owns persistence and independently retaining the trusted completion
+hash; a replaceable hash file beside arbitrary cache bytes is insufficient.
+The record is a bounded synchronous claim, not a signed attestation or child
+exit-status receipt. See [CONVERSION_DESCRIPTORS.md](CONVERSION_DESCRIPTORS.md).
+
+**Selection rationale:** This is the next explicit P1-E dependency following
+in-memory output validation. Reusing existing preparation, runner and output
+checks qualifies saved base bytes without adding a storage framework. Strict
+descriptor restoration also closes the malformed-public-record round-trip gap.
+Atomic receipt publication and interrupted-stage recovery remain P2-D work;
+P0-A's unrelated broad quality debt remains open.
+
+**Completion/readback verification:** The failing-first run confirmed the new
+adapter API was absent. Seventy-four new synthetic/real regression and property
+cases now pass; the focused completion, output, readability, preparation,
+descriptor, ingress, preservation, transcript, documentation and quality-scope
+run passes 405 cases. Collection finds 1,621 tests without errors. All three nox
+sessions pass on Python 3.11.17 with the documented OCR language-data setting,
+45 production type targets and 75 lint/format files. Review reproduced and fixed
+the factory's acceptance of an inconsistent publicly constructed descriptor and
+its retention of a caller-supplied mutable association container; completion
+now holds the reader's detached immutable snapshot.
+Tests cover strict record/nested schemas, Unicode round trips, retained hash
+anchors despite coordinated record/output replacement, actual measured counts,
+real Markdown/EPUB read-only reuse, stale/missing/corrupt files, fresh evidence
+and settings, persistent mid-read drift and real runtime warming after another
+article. Generated merge documentation and diff checks pass. Existing optional
+skips, return-value warnings and the PyMuPDF deprecation warning remain. Final
+review found no further actionable issues. Dependencies, goldens, existing
+conversion algorithms and unrelated files are unchanged.
+
+**Next boundaries:** Resolve and validate the separate enrichment contract;
+atomic artifact/receipt writing and durable trusted-hash storage follow under
+P2-D. Retain hashes independently from trusted completed runs; a hash computed
+from arbitrary cached bytes/records does not establish integrity or completion.
+In-memory guarded return and caller-persisted synchronous facts are not a durable
+stage lifecycle or child exit-status record. Before/after snapshots detect
+lasting observable drift, not temporary/concurrent mutations,
 replaced callables or source changes after import; keep the execution environment
 stable. The bounded profile does not claim hermetic execution. The lower-level
 descriptor API still checks declared
@@ -1018,7 +1065,7 @@ Use separate coherent commits, in this order:
 9. `test: add corpus quality evaluation` — complete
 10. `docs: reconcile roadmap and supported input formats` — complete
 11. `docs: reconcile active documentation and dependency policy` — complete
-12. Direct verified Markdown, descriptors, qualified preparation and guarded in-memory output validation implemented; persisted completion, base/enrichment reuse, document text and HTML remain open under P1-E.
+12. Direct verified Markdown, descriptors, qualified preparation, guarded output validation and pinned completion/base readback implemented; separate enrichment reuse, document text and HTML remain open under P1-E. Atomic persistence/recovery follow under P2-D.
 13. Bounded artifacts and resumable completion receipts — proposed P2-D.
 
 If a package is too large for one review, split it by boundary, not by arbitrary

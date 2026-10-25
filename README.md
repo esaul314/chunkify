@@ -28,7 +28,12 @@ hyphenation caches refuse preparation without repair.
 checks that preparation still matches before and after the existing runner and
 returns immutable JSONL bytes only after hash, schema, provenance and exact
 source reconstruction checks. It writes no files or receipts.
-Cache execution and downstream writes remain separate work.
+For saved base output, `complete_bound_conversion` returns a canonical completion
+record with those bytes. `read_bound_conversion` re-verifies source/runtime and
+validates the saved record/output against an independently retained completion
+hash, without reconverting or writing files. See the same guide for data-first
+pure validators and storage responsibilities. Atomic receipt writing, batch
+recovery, enrichment reuse and downstream writes remain separate work.
 
 ## Quickstart
 
