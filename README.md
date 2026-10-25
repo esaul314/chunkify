@@ -34,6 +34,11 @@ validates the saved record/output against an independently retained completion
 hash, without reconverting or writing files. See the same guide for data-first
 pure validators and storage responsibilities. Atomic receipt writing, batch
 recovery, enrichment reuse and downstream writes remain separate work.
+For a downstream byte limit, the same guide shows pure
+`preflight_article_output`: it measures complete UTF-8 JSON rows, reserves declared
+enrichment headroom, and reports every oversized row for review. Check its `fits`
+result before enrichment; it preserves base bytes and does not predict actual
+enrichment growth.
 
 ## Quickstart
 

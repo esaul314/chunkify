@@ -190,6 +190,15 @@ only for workflows that use them.
   and support `partial`. Atomic publication and interrupted-batch recovery remain
   P2-D work. Keep runtime stable: the guard detects
   lasting drift, not concurrent/transient edits or replaced imported callables.
+- For a downstream article byte budget, use pure
+  `preflight_article_output(data, descriptor=prepared.descriptor,
+  expected_sha256=retained_hash, max_row_bytes=8192,
+  enrichment_headroom_bytes=512)` from `pdf_chunker.article_output`.
+  Check `report.fits` before enrichment; `oversized_rows` gives all one-based
+  review rows without changing bytes, IDs or provenance. Complete JSON-object
+  sizes exclude LF; projected file bytes include LF and the per-row reserve.
+  Headroom is caller-declared, so actual enriched rows still need validation.
+  This is opt-in and separate from `max_chars`; see `docs/CONVERSION_DESCRIPTORS.md`.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -442,7 +451,7 @@ pdf_chunker/
 │   ├── article_completion.py      # Pure completion snapshots and pinned readback checks
 │   ├── conversion_descriptor.py   # Pure immutable article identity and comparison
 │   ├── article_conversion.py      # Pure base article settings and detached prepared spec
-│   ├── article_output.py          # Pure output hash/schema/provenance/reconstruction checks
+│   ├── article_output.py          # Pure output validation and UTF-8 byte preflight
 │   ├── framework.py               # Generic artifacts and pass registry
 │   ├── env_utils.py               # Environment flag helpers
 │   ├── epub_parsing.py            # EPUB extraction with spine exclusion support
@@ -530,6 +539,7 @@ pdf_chunker/
     ├── conversion_descriptor_test.py # Contract/association laws and verified identity
     ├── article_conversion_test.py  # Effective defaults, runtime pins and actual runner parity
     ├── article_output_test.py      # Output integrity, execution drift and completion refusal
+    ├── article_preflight_test.py   # Complete UTF-8 row budgets and explicit review outcomes
     ├── article_completion_test.py  # Strict completion/descriptor reads and validated cache reuse
     ├── article_readability_runtime_test.py # Dictionary changes, cache integrity and stable identity
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests

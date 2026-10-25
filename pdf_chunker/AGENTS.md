@@ -34,6 +34,14 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   Use `partial` for repeated checks. Frozen `ValidatedArticleOutput` stores bytes;
   `rows()` returns detached containers. No evidence/terminal authority or I/O;
   retain hashes independently from cached bytes.
+- `article_output.py` also exposes pure data-first `preflight_article_output(data,
+  descriptor=..., expected_sha256=..., max_row_bytes=8192,
+  enrichment_headroom_bytes=512)`, usable with `partial`. It reuses validation
+  and measures complete UTF-8 JSON objects excluding LF. The frozen report holds
+  validated output, immutable row sizes, largest-row bytes and projected file
+  bytes including LF/reserve. Check `fits` before enrichment; `oversized_rows`
+  lists all one-based review rows. It preserves bytes/context/IDs/provenance;
+  actual enriched bytes still need checking. No CLI wiring, splitting or I/O.
 - `article_completion.py`: Frozen `ArticleCompletion` holds the full descriptor
   and output hash/bytes/row counts under schema 1 and `guarded-synchronous-v1`.
   Pure data-first `describe_article_completion(output, descriptor=...)`

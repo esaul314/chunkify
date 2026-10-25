@@ -169,7 +169,8 @@ SHA-256. It checks the hash before parsing, then requires:
 - Exactly text and the resolved metadata key per row, required base metadata and
   readability schema, generated chunk IDs in order, and the complete serialized
   row within the resolved `max_chars` limit. That limit remains characters;
-  `size_bytes` measures actual UTF-8 bytes and is not a downstream byte preflight.
+  `size_bytes` measures actual UTF-8 bytes. Use the separate preflight below for
+  a caller-declared downstream byte limit.
 - Native provenance fields with the current generated-field precedence, including
   all logical references and evidence bindings. Native null passthrough fields
   are omitted; native identity/readability/location collisions cannot override
@@ -201,6 +202,57 @@ There is no lock or hermetic runtime attestation. Each guard repeats full source
 dictionary and cache inspection; the cost described above applies twice per
 execution. Rows and serialized bytes are held in memory; there is no new streaming
 or resource-limit guarantee.
+
+## UTF-8 byte preflight before enrichment
+
+`preflight_article_output` in `pdf_chunker.article_output` is a pure, opt-in
+data-first function. It reuses base-output validation, then measures every complete
+serialized JSON object in its existing UTF-8 bytes. Text, custom metadata keys,
+all provenance, JSON escaping and Unicode count. Each row excludes its trailing
+LF delimiter; total output/projected file sizes include all LF delimiters. The
+function splits only on literal LF bytes, so Unicode line separators in strings
+remain part of their original JSON row.
+
+```python
+from functools import partial
+from pdf_chunker.article_output import preflight_article_output
+
+check_bytes = partial(
+    preflight_article_output,
+    descriptor=prepared.descriptor,
+    expected_sha256=output.sha256,  # Independently retained from trusted execution.
+    max_row_bytes=8192,             # Downstream JSON-object limit, excluding LF.
+    enrichment_headroom_bytes=512,  # Explicit net growth allowance per row.
+)
+report = check_bytes(output.jsonl)
+print(report.output.row_count, report.output.size_bytes)
+print(report.row_sizes_bytes, report.largest_row_bytes, report.projected_output_bytes)
+if not report.fits:
+    raise ValueError(f"Review oversized article rows: {report.oversized_rows}")
+# Only start expensive enrichment after this check succeeds.
+```
+
+The frozen `ArticleOutputPreflight` holds validated immutable output, a tuple of
+row sizes, the byte limit and the declared reserve. `oversized_rows` reports all
+one-based row numbers whose measured bytes plus reserve exceed the limit;
+equality fits. `projected_output_bytes` adds the reserve once per row to the
+actual JSONL file size. A positive integer limit and a nonnegative integer reserve
+are required; booleans, floats, strings and other coercions refuse. The reserve
+defaults to zero for base-only measurement.
+
+An over-budget article returns `fits=False` for explicit review. No text, IDs,
+Markdown context or provenance is split, truncated or dropped; existing code,
+table and reference-context safeguards stay in force. Invalid output raises
+through the existing validator instead of receiving an admission report.
+
+The caller must check `fits` before starting enrichment. This API does not wire
+itself into the CLI or run the enrichment client. Headroom is a caller-declared
+allowance, not a guarantee about model output: actual enriched rows still require
+byte validation against the same downstream limit. Separate enrichment contract
+resolution and that integration remain open. A changed downstream limit/reserve
+changes the report, not base conversion identity or bytes. Existing `max_chars`
+admission, source approval, completion trust and in-memory resource costs remain
+as documented above; no new storage or receipt framework is introduced.
 
 ## Completion records and read-only base reuse
 
@@ -394,7 +446,7 @@ gate applies before sharing them; do not put credentials into configuration.
 ## Verification and remaining work
 
 ```bash
-pytest tests/article_completion_test.py tests/article_output_test.py \
+pytest tests/article_preflight_test.py tests/article_completion_test.py tests/article_output_test.py \
   tests/article_readability_runtime_test.py \
   tests/article_conversion_test.py \
   tests/conversion_descriptor_test.py \
@@ -421,14 +473,21 @@ Completion cases exercise canonical descriptor/record restoration, nested
 invariants, independent record/output integrity, counts, public-fact refusal,
 actual Markdown/EPUB reuse without conversion/writes, changed inputs/proof/runtime,
 mid-read drift and real runtime warming after another article.
+Preflight cases cover complete UTF-8 row accounting, exact boundaries, reserves,
+strict budget types, invalid output, custom metadata keys, Unicode separators,
+large provenance, long code/table/link contexts, partial application, input
+preservation and no I/O or conversion.
 
 Base article preparation connects effective runner settings/version resolution
 for the qualified composition above, including readability resource/state pins.
 Guarded in-memory execution and pure base-output validation now qualify normal
 synchronous completion and lasting observable drift. Canonical completion records
 and read-only base reuse now validate persisted bytes against a retained hash and
-fresh preparation. Next resolve and validate the separate enrichment contract.
+fresh preparation. The opt-in byte preflight measures complete base rows with
+explicit enrichment headroom and returns review outcomes without changing them.
+Next resolve and validate the separate enrichment contract and wire byte admission
+plus actual enriched-row checks into that boundary.
 Atomic persistence, durable trust anchors, batch execution, stage receipts,
-UTF-8 row preflight, document-text/HTML inputs and the downstream idempotency
+document-text/HTML inputs and the downstream idempotency
 pilot remain open. P0-A and P2-D remain open as recorded in
 the [implementation roadmap](IMPLEMENTATION_ROADMAP.md).

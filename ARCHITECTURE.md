@@ -215,6 +215,14 @@ conversion or repair. Caller-owned persistence and the trusted completion-hash
 anchor remain external; atomic publication, child-process receipts and batch
 recovery remain P2-D work. See `docs/CONVERSION_DESCRIPTORS.md`.
 
+Pure `preflight_article_output` composes the same base validator with complete
+UTF-8 row measurement and an explicit per-row enrichment reserve. Its frozen
+report carries validated output and all oversized row numbers for review; it
+never modifies source slices, identities or provenance. The caller checks `fits`
+before enrichment and must validate actual enriched rows later. This keeps byte
+accounting separate from the existing character limit, without another splitter,
+runner, transport client or persistence layer.
+
 ## 4.1) Corpus-quality evaluation
 
 `docs/corpus_manifest.yaml` defines representative tracked fixtures and the

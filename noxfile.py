@@ -68,6 +68,7 @@ LINT_EXTRA_PATHS: Final = (
     "tests/conversion_descriptor_test.py",
     "tests/article_conversion_test.py",
     "tests/article_output_test.py",
+    "tests/article_preflight_test.py",
     "tests/article_completion_test.py",
     "tests/article_readability_runtime_test.py",
     "tests/epub_body_markup_test.py",

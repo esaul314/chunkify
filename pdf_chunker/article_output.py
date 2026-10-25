@@ -43,6 +43,73 @@ class ValidatedArticleOutput:
         return [json.loads(line) for line in self.jsonl.decode("utf-8").split("\n")[:-1]]
 
 
+@dataclass(frozen=True)
+class ArticleOutputPreflight:
+    """Byte-budget facts for validated base output, with caller-declared headroom.
+
+    Row sizes include the complete serialized JSON object, excluding its LF
+    delimiter. Projected file size includes every LF and reserves the same net
+    enrichment growth per row. Oversized row numbers are one-based. ``fits``
+    applies only to these bytes and reserve, not to future enrichment results.
+    """
+
+    output: ValidatedArticleOutput
+    row_sizes_bytes: tuple[int, ...]
+    max_row_bytes: int
+    enrichment_headroom_bytes: int
+
+    @property
+    def largest_row_bytes(self) -> int:
+        return max(self.row_sizes_bytes)
+
+    @property
+    def projected_output_bytes(self) -> int:
+        return self.output.size_bytes + self.enrichment_headroom_bytes * self.output.row_count
+
+    @property
+    def oversized_rows(self) -> tuple[int, ...]:
+        return tuple(
+            index
+            for index, size in enumerate(self.row_sizes_bytes, 1)
+            if size + self.enrichment_headroom_bytes > self.max_row_bytes
+        )
+
+    @property
+    def fits(self) -> bool:
+        return not self.oversized_rows
+
+
+def preflight_article_output(
+    data: bytes,
+    *,
+    descriptor: ConversionDescriptor,
+    expected_sha256: str,
+    max_row_bytes: int,
+    enrichment_headroom_bytes: int = 0,
+) -> ArticleOutputPreflight:
+    """Validate retained base output and report complete UTF-8 row admission.
+
+    Data-first and usable with ``partial``. Require a positive integer byte limit
+    and a nonnegative integer reserve; booleans/coercions refuse. Over-budget
+    output returns ``fits=False`` and all one-based ``oversized_rows`` for review,
+    without changing text, IDs, provenance or bytes. Invalid output still raises
+    through the existing validator. Callers must check the report before expensive
+    enrichment and validate actual enriched rows afterwards. No I/O, automatic
+    splitting, enrichment execution or new completion authority is introduced.
+    """
+    if type(max_row_bytes) is not int or max_row_bytes <= 0:
+        raise ValueError("max_row_bytes must be a positive integer number of bytes")
+    if type(enrichment_headroom_bytes) is not int or enrichment_headroom_bytes < 0:
+        raise ValueError("enrichment_headroom_bytes must be a nonnegative integer number of bytes")
+    output = validate_article_output(data, descriptor=descriptor, expected_sha256=expected_sha256)
+    return ArticleOutputPreflight(
+        output,
+        tuple(len(line) for line in output.jsonl.split(b"\n")[:-1]),
+        max_row_bytes,
+        enrichment_headroom_bytes,
+    )
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     if len({key for key, _ in pairs}) != len(pairs):
         raise ValueError("duplicate article JSON key")

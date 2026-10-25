@@ -6,6 +6,14 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `article_preflight_test.py`: Complete UTF-8 JSON-row measurement with custom
+  metadata keys, Unicode separators, exact byte boundaries, explicit reserves,
+  all oversized one-based rows and strict budget types. Markdown/EPUB, long
+  code/table/link context and large native metadata retain exact text/provenance;
+  partial application, frozen results, unchanged base identity, invalid-output
+  refusal and no I/O/conversion. Run with the article output/completion tests
+  and all three nox sessions. Enrichment reserves are declared allowances, not
+  proof of eventual result size or automatic CLI enforcement.
 - `article_completion_test.py`: Exact schema-1 descriptor/completion round trips,
   canonical JSON, nested snapshot and association invariants, Unicode properties,
   pinned record hashes and output counts. Malformed public facts refuse; replacing

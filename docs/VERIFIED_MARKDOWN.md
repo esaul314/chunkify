@@ -83,9 +83,14 @@ reruns produce identical rows and JSONL bytes even after another conversion.
 The existing complete serialized-record admission still runs before enrichment.
 Metadata that cannot fit is refused before calling the injected client. Existing
 Markdown context safeguards can also hold oversized articles rather than split a
-reference/list context incorrectly. This increment does not change that policy or
-establish a downstream UTF-8 byte budget; the current `max_chars` admission contract
-and the later P1-E preflight work must not be conflated.
+reference/list context incorrectly. The opt-in
+`preflight_article_output(data, descriptor=..., expected_sha256=...,
+max_row_bytes=..., enrichment_headroom_bytes=...)` now measures complete UTF-8
+base rows against a declared downstream byte budget. It returns an immutable
+report with all oversized rows for review, preserving context, text and provenance.
+Callers must check `fits` before enrichment and validate actual enriched bytes
+afterwards. This remains separate from the existing `max_chars` admission contract;
+see [conversion descriptors](CONVERSION_DESCRIPTORS.md#utf-8-byte-preflight-before-enrichment).
 
 ## Verification and remaining work
 
@@ -114,7 +119,7 @@ canonical completion facts. Read-only `read_bound_conversion` re-verifies proof,
 settings/runtime and persisted record/output bytes against an independently
 retained completion hash; it never falls back to conversion or repairs files.
 Atomic receipt writing and interrupted-batch recovery remain P2-D work.
-Separate enrichment reuse remains open, alongside document-text/HTML/supplied-text
-input, complete byte preflight and downstream integration qualification. P2-D receipts
+Separate enrichment reuse and integrated byte admission remain open, alongside
+document-text/HTML/supplied-text input and downstream integration qualification. P2-D receipts
 and cleanup follow those contracts. Existing EPUB sources, releases and vector-store
 contents are unchanged.

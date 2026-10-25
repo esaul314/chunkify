@@ -10,7 +10,7 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-**Status:** P0-A remains open; P1-E verified Markdown, descriptors, qualified preparation, guarded output validation and pinned completion readback implemented (2026-10-24); enrichment/persistence boundaries below
+**Status:** P0-A remains open; P1-E verified Markdown, descriptors, qualified preparation, guarded output validation, pinned completion readback and opt-in UTF-8 byte preflight implemented (2026-10-24); enrichment/persistence boundaries below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -535,7 +535,9 @@ implemented increment. Opt-in descriptors, independent note associations,
 effective settings/runtime snapshots, readability resource/state pins and guarded
 in-memory output validation, canonical completion records and read-only validated
 reuse for the canonical base article composition are implemented. Atomic
-persistence, separate enrichment reuse and remaining inputs are open.
+persistence, separate enrichment reuse and remaining inputs are open. Opt-in
+complete-row UTF-8 byte reporting now supports explicit enrichment reserves and
+review outcomes; automatic enrichment integration remains open.
 Deliver explicit document-text and HTML inputs in small increments under
 P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
 
@@ -758,7 +760,41 @@ skips, return-value warnings and the PyMuPDF deprecation warning remain. Final
 review found no further actionable issues. Dependencies, goldens, existing
 conversion algorithms and unrelated files are unchanged.
 
-**Next boundaries:** Resolve and validate the separate enrichment contract;
+**UTF-8 preflight increment:** Pure data-first `preflight_article_output` reuses
+the base validator, then measures complete serialized UTF-8 JSON objects and
+caller-declared per-row enrichment headroom. Its frozen report retains immutable
+base output, per-row/largest-row bytes, projected file bytes and all one-based
+oversized rows. Equality fits; invalid budget types and invalid output refuse.
+Over-budget output returns an explicit review outcome without splitting or
+dropping code, tables, links, source text, IDs or provenance. Row limits exclude
+LF; total/projected file bytes include LF. See
+[CONVERSION_DESCRIPTORS.md](CONVERSION_DESCRIPTORS.md#utf-8-byte-preflight-before-enrichment).
+
+**Sequencing rationale:** Select P1-E item 6's bounded reporting step before the
+broader enrichment-contract resolver. Existing admission counts characters;
+Unicode and large metadata can therefore exceed a downstream byte limit even
+when the character check passes. One function and one report in the existing
+output module close that concrete measurement gap without another splitter,
+runner, transport or artifact framework. Callers must check `fits` before
+enrichment and validate actual enriched bytes afterwards; declared headroom
+does not predict model output or qualify enrichment reuse. CLI wiring and the
+existing character admission are unchanged. P0-A and P2-D remain open.
+
+**Preflight verification:** The failing-first run confirmed the API was absent.
+All 37 new cases pass; the focused article, transcript, documentation and
+quality-scope run passes 442 cases. Collection finds 1,658 tests without errors.
+`TESSDATA_PREFIX=/usr/share/tesseract/tessdata nox -r -s lint typecheck tests`
+passes all three sessions on Python 3.11.17 (45 production type targets and 76
+lint/format files). Tests exercise actual synthetic Markdown/EPUB output, custom
+metadata keys, Unicode separators, exact boundaries, reserve-only invalidation,
+large provenance and long code/table/link context without byte changes or I/O.
+Generated merge documentation and diff checks pass. Review found no remaining
+actionable issues. Existing optional skips, return-value warnings and the PyMuPDF
+deprecation warning remain; dependencies, goldens and conversion algorithms are
+unchanged. The gates remain incremental rather than repository-wide P0-A closure.
+
+**Next boundaries:** Resolve and validate the separate enrichment contract and
+integrate byte admission plus actual enriched-row checks into that boundary;
 atomic artifact/receipt writing and durable trusted-hash storage follow under
 P2-D. Retain hashes independently from trusted completed runs; a hash computed
 from arbitrary cached bytes/records does not establish integrity or completion.
@@ -772,9 +808,10 @@ structure rather than completeness of caller-supplied pins/settings. An unchange
 input key alone cannot prove cached-output integrity, successful completion or
 source approval.
 Cross-format chunk identity and downstream idempotency are not established.
-Current admission measures its existing `max_chars` contract, not a new UTF-8 byte
-preflight. Document-mode `.txt`, HTML, supplied text and integration qualification
-remain open. Existing wrappers are not retired; no release or migration is selected.
+Existing integrated admission still measures `max_chars`; the new opt-in preflight
+reports a separate caller-declared byte limit. Document-mode `.txt`, HTML,
+supplied text and integration qualification remain open. Existing wrappers are
+not retired; no release or migration is selected.
 
 **Reuse before adding:** The current Joplin EPUB adapter verifies the article
 proof and supplies `verified_joplin_markdown`; the shared Markdown passes retain
