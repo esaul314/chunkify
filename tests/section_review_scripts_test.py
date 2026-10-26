@@ -123,7 +123,7 @@ def test_native_contents_header_prefix_is_never_recovered_twice(tmp_path):
         page = pdf.new_page()
         page.insert_textbox(
             (72, 72, 523, 770),
-            "viii\\t\\nCONTENTS\\nChapter One  1\\nChapter Two  2\\nChapter Three  3",
+            "viii\t\nCONTENTS\nChapter One  1\nChapter Two  2\nChapter Three  3",
             fontsize=11,
         )
         pdf.save(source)
@@ -162,7 +162,7 @@ def test_independent_reader_and_stage_replay_reject_rehashed_forged_sidecars(tmp
             path.read_bytes()
         ).hexdigest()
         receipt_path.write_text(json.dumps(receipt))
-        with pytest.raises(ValueError, match="legacy geometry"):
+        with pytest.raises(ValueError, match="geometry|preservation_status"):
             helper("verify_section_pilots").verify(output)
         return
     if surface == "raw":

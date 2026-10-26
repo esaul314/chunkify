@@ -801,6 +801,9 @@ class _SplitSemanticPass:
             self.chunk_size, self.overlap, self.min_chunk_size
         ).with_meta(a.meta)
         if doc.get("section_detection_enabled"):
+            preservation = (a.meta or {}).get("preservation")
+            if isinstance(preservation, Mapping) and preservation.get("native_slice_windows"):
+                return self._split_native_sections(a, options)
             return self._split_sections(a)
         from pdf_chunker.passes.joplin_markdown import PROOF_KEY, split_verified
 
@@ -857,6 +860,76 @@ class _SplitSemanticPass:
         meta["semantic_pipeline"] = "canonical-v1"
         if transform_log is not None:
             meta["transformation_log"] = transform_log.to_dict()
+        return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
+
+    def _split_native_sections(self, artifact: Artifact, options: SplitOptions) -> Artifact:
+        """Use semantic boundaries as exact native source slices, without deletion."""
+        from pdf_chunker.utils import _build_metadata
+
+        if options.chunk_size <= 0 or options.overlap < 0 or options.overlap >= options.chunk_size:
+            raise ValueError("native slices require 0 <= overlap < positive chunk_size")
+        if not self.generate_metadata:
+            raise ValueError("native source preservation requires generated metadata")
+        doc = artifact.payload
+        indexed = [
+            (page["page"], block)
+            for page in doc.get("pages", ())
+            for block in page.get("blocks", ())
+        ]
+        items: list[dict[str, Any]] = []
+        for _, members in groupby(indexed, key=lambda pair: pair[1]["section"]["section_id"]):
+            group = list(members)
+            section = group[0][1]["section"]
+            spans, pieces, at = [], [], 0
+            for page, block in group:
+                text = str(block.get("text", ""))
+                pieces.append(text)
+                spans.append((at, at + len(text), page, block))
+                at += len(text) + 2
+            text = "\n\n".join(pieces)
+            words = list(re.finditer(r"\S+", text))
+            start, cursor, previous_end = 0, 0, 0
+            while cursor < len(words):
+                stop = min(start + options.chunk_size, len(words))
+                if stop < len(words):
+                    minimum = max(cursor + 1, start + options.min_chunk_size)
+                    boundaries = [
+                        index
+                        for index in range(minimum, stop + 1)
+                        if _ENDS_SENTENCE.search(words[index - 1].group())
+                    ]
+                    if boundaries:
+                        stop = boundaries[-1]
+                begin = words[start].start() if start else 0
+                end = words[stop].start() if stop < len(words) else len(text)
+                contributors = [
+                    (page, block) for low, high, page, block in spans if high > begin and low < end
+                ]
+                page, first = contributors[0]
+                pages = [number for number, _ in contributors]
+                merged = {
+                    **first,
+                    "text": text[begin:end],
+                    "inline_styles": [],
+                    "source_blocks": tuple(block for _, block in contributors),
+                    "source": {
+                        **first.get("source", {}),
+                        "page": page,
+                        "page_range": [min(pages), max(pages)],
+                    },
+                }
+                metadata = {
+                    **_build_metadata(text[begin:end], merged, len(items), {}),
+                    **section,
+                    "preservation_source_window": [begin, end, previous_end],
+                }
+                metadata["chunk_id"] += "-" + section["section_id"][:8]
+                items.append({"id": str(len(items)), "text": text[begin:end], "meta": metadata})
+                previous_end, cursor = end, stop
+                start = max(0, stop - options.overlap)
+        meta = SplitMetrics(len(items), {"native_source_slices": True}).apply(artifact.meta)
+        meta["semantic_pipeline"] = "canonical-v1"
+        meta["section_boundaries_preserved"] = True
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
     def _split_sections(self, artifact: Artifact) -> Artifact:

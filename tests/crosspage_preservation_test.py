@@ -189,3 +189,73 @@ def test_explicit_alternative_reader_is_not_silently_replaced(tmp_path, monkeypa
     monkeypatch.setenv("PDF_CHUNKER_PDF_READER", "pdftotext")
     with pytest.raises(ValueError, match="native PDF reader"):
         _input_artifact(str(source), structural_spec())
+
+
+def test_repeated_title_paragraph_and_footer_are_bound_by_source_windows(tmp_path):
+    from pdf_chunker.core_new import _run_passes
+
+    fitz = pytest.importorskip("fitz")
+    source = tmp_path / "synthetic-repeated.pdf"
+    repeated = "An invented repeated sentence remains a separate source occurrence. " * 8
+    with fitz.open() as pdf:
+        for index in range(3):
+            page = pdf.new_page()
+            page.insert_text((72, 72), "A Synthetic Heading", fontsize=14)
+            page.insert_textbox((72, 120, 520, 350), repeated, fontsize=11)
+            page.insert_text((72, 760), f"Footer marker {index + 1}", fontsize=8)
+        pdf.save(source)
+    spec = structural_spec()
+    spec.options["split_semantic"] = {"chunk_size": 40, "overlap": 10, "min_chunk_size": 10}
+    result, _ = _run_passes(spec, _input_artifact(str(source), spec))
+    proof = result.meta["preservation"]
+    assert proof["accepted"], proof["pending"]
+    assert all("preservation_source_window" in row["metadata"] for row in result.payload)
+    assert {unit["source_id"] for unit in proof["source_units"]} == {
+        span["source_id"] for record in proof["records"] for span in record["spans"]
+    }
+
+
+def test_native_source_windows_admit_reserved_ai_metadata_before_stub_calls(tmp_path):
+    import json
+
+    from pdf_chunker.core_new import _run_passes
+
+    class Client:
+        def __init__(self):
+            self.inputs = []
+
+        def classify_chunk_utterance(self, text, *, tag_configs):
+            self.inputs.append(text)
+            return {"classification": "question", "tags": ["bounded-tag"]}
+
+    fitz = pytest.importorskip("fitz")
+    source = tmp_path / "synthetic-admission.pdf"
+    with fitz.open() as pdf:
+        page = pdf.new_page()
+        page.insert_text((72, 35), "Introduction", fontsize=12)
+        for index in range(24):
+            page.insert_text(
+                (72, 65 + index * 26),
+                f"Invented paragraph {index} retains its exact occurrence.",
+                fontsize=9,
+            )
+        pdf.save(source)
+    spec = structural_spec()
+    client = Client()
+    spec.pipeline.insert(spec.pipeline.index("emit_jsonl"), "ai_enrich")
+    spec.options["ai_enrich"] = {
+        "enabled": True,
+        "client": client,
+        "tag_configs": {"topic": ["bounded-tag"]},
+    }
+    spec.options["emit_jsonl"] = {"max_chars": 1800}
+    result, _ = _run_passes(spec, _input_artifact(str(source), spec))
+    assert len(client.inputs) > 1
+    assert result.meta["preservation"]["accepted"], result.meta["preservation"]["pending"]
+    assert all(len(json.dumps(row, ensure_ascii=False)) <= 1800 for row in result.payload)
+    assert all(
+        "raw_source" not in entry
+        for row in result.payload
+        for entry in row["metadata"]["block_provenance"]
+    )
+    assert all(row["metadata"]["preservation_status"] == "checked" for row in result.payload)

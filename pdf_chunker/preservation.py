@@ -13,7 +13,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple
 
-VERSION = "native-source-spans-v1"
+VERSION = "native-source-spans-v2"
 MAX_CHARACTERS = 8_000_000
 MAX_UNITS = 50_000
 MAX_UNIT_CHARACTERS = 256_000
@@ -40,6 +40,7 @@ def settings_identity(options: Mapping[str, Any], pipeline: Sequence[str], reade
         "answers_path",
         "questions_path",
         "callback",
+        "client",  # Runtime transport; model/request settings remain separately bound.
         "interactive",
         "output_path",
         "preservation_path",
@@ -236,6 +237,10 @@ def initialize(doc: Mapping[str, Any], settings: Mapping[str, Any]) -> dict[str,
         ),
         "source_filename": str(doc.get("source_path") or "").replace("\\", "/").rsplit("/", 1)[-1],
         "overlap_words": int((settings.get("split_semantic") or {}).get("overlap", 50)),
+        "native_slice_windows": bool(
+            (settings.get("section_detect") or {}).get("enabled")
+            and structure.get("reader", {}).get("identity_basis") == "native-block-tuples"
+        ),
         "scope": (
             "Native extracted glyph text; annotation objects and image-only "
             "surfaces require review."
@@ -362,13 +367,22 @@ def _match_output(
     raw = {unit["source_id"]: unit for unit in report["source_units"]}
     source_tokens = {key: tokens(report["texts"][value["text"]]) for key, value in raw.items()}
     offsets: dict[str, int] = defaultdict(int)
+    section_pieces: dict[Any, list[str]] = defaultdict(list)
+    section_atoms: dict[Any, list[tuple[Token, int]]] = defaultdict(list)
+    section_lengths: dict[Any, int] = defaultdict(int)
     expected: dict[Any, list[tuple[str, str, Token, str | None]]] = defaultdict(list)
     for unit in page_stage["units"]:
         key = unit["source_id"]
         if key not in raw:
             continue
-        unit_tokens = tokens(report["texts"][unit["text"]])
+        unit_text = report["texts"][unit["text"]]
+        unit_tokens = tokens(unit_text)
+        section = unit["section_id"]
+        base = section_lengths[section]
+        section_pieces[section].append(unit_text)
+        section_lengths[section] += len(unit_text) + 2
         for token in unit_tokens:
+            section_atoms[section].append((token, base))
             position = offsets[key]
             originals = source_tokens[key]
             if position >= len(originals) or originals[position].text != token.text:
@@ -388,6 +402,11 @@ def _match_output(
     roles_by_section = {
         unit["section_id"]: unit.get("section_role") for unit in page_stage["units"]
     }
+    section_texts = {key: "\n\n".join(parts) for key, parts in section_pieces.items()}
+    atom_starts = {
+        key: [token.start + base for token, base in values] for key, values in section_atoms.items()
+    }
+    character_cursors: dict[Any, int] = defaultdict(int)
     cursor: dict[Any, int] = defaultdict(int)
     records: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
@@ -415,6 +434,79 @@ def _match_output(
         pairs: list[tuple[str, int, int, int, int, str, str | None]] = []
         initial_cursor = cursor[section]
         context_words = 0
+        window = logical["metadata"].get("preservation_source_window")
+        if report.get("native_slice_windows") or window is not None:
+            from bisect import bisect_left
+
+            original_text = section_texts.get(section, "")
+            valid = (
+                isinstance(window, (list, tuple))
+                and len(window) == 3
+                and all(type(value) is int for value in window)
+                and 0 <= window[0] <= window[2] < window[1] <= len(original_text)
+                and window[2] == character_cursors[section]
+                and logical["text"] == original_text[window[0] : window[1]]
+                and len(original_text[window[0] : window[2]].split()) <= report["overlap_words"]
+            )
+            if not valid:
+                pending.append(
+                    {"reason": "native_source_window_mismatch", "chunk_id": logical["id"]}
+                )
+                at = len(output)
+            else:
+                low, high = (bisect_left(atom_starts[section], value) for value in window[:2])
+                for index in range(low, high):
+                    _, key, original, block_id = stream[index]
+                    current, base = section_atoms[section][index]
+                    for char in range(len(current.text)):
+                        raw_position = (
+                            original.positions[char]
+                            if original.positions
+                            else (original.start + char, original.start + char + 1)
+                        )
+                        derived_position = (
+                            current.positions[char]
+                            if current.positions
+                            else (current.start + char, current.start + char + 1)
+                        )
+                        kind = (
+                            "overlap_or_context"
+                            if base + derived_position[0] < window[2]
+                            else "source"
+                        )
+                        pairs.append(
+                            (
+                                key,
+                                raw_position[0],
+                                raw_position[1],
+                                base + derived_position[0] - window[0],
+                                base + derived_position[1] - window[0],
+                                kind,
+                                block_id,
+                            )
+                        )
+                cursor[section] = high
+                character_cursors[section] = window[1]
+                declared = [
+                    entry
+                    for part in logical["parts"]
+                    for entry in _metadata(part).get("block_provenance", ())
+                ]
+                wanted = {pair[6] for pair in pairs if pair[6]}
+                if {entry.get("id") for entry in declared} != wanted:
+                    pending.append(
+                        {"reason": "native_window_contributors_mismatch", "chunk_id": logical["id"]}
+                    )
+                for entry in declared:
+                    bound = report.get("block_identities", {}).get(entry.get("id"))
+                    if bound is None or any(
+                        entry.get(key) != bound.get(key)
+                        for key in ("page", "block_index", "bbox", "text_sha256")
+                    ):
+                        pending.append(
+                            {"reason": "native_window_geometry_mismatch", "chunk_id": logical["id"]}
+                        )
+                at = len(output)
         while at < len(output):
             transitions += 1
             if transitions > MAX_ROW_TRANSITIONS:
@@ -554,6 +646,7 @@ def _match_output(
                 ),
                 "logical_text_sha256": sha(logical["text"]),
                 "logical_span": [begin, end],
+                "source_window": window,
                 "chunk_id": logical["id"],
                 "chunk_part": meta.get("chunk_part"),
                 "section_id": section,
@@ -636,7 +729,11 @@ def record_stage(report: Mapping[str, Any], name: str, payload: Any) -> dict[str
 
 def bind_source_metadata(report: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
     """Attach only actual contributors before serialized-size admission."""
-    records, _ = _match_output(dict(report), payload)
+    records, pending = _match_output(dict(report), payload)
+    if report.get("native_slice_windows") and pending:
+        raise ValueError(
+            "native source slice/contributor mismatch; preservation remains unresolved"
+        )
     items = list(payload.get("items", ()))
     if len(records) != len(items):
         raise ValueError("source contributor binding requires logical chunks")
@@ -824,6 +921,7 @@ def verify_preservation(
         "source_units",
         "exclusions",
         "overlap_words",
+        "native_slice_windows",
     ):
         if report.get(key) != expected.get(key):
             raise ValueError(f"source accounting raw/settings mismatch: {key}")
@@ -846,6 +944,9 @@ def verify_preservation(
     ]
     if [stage.get("name") for stage in stages] != wanted_names:
         raise ValueError("source accounting stage order mismatch")
+    # This map is compared against freshly reconstructed classified identities
+    # below; make it available while recomputing intermediate witnesses.
+    expected["block_identities"] = report.get("block_identities", {})
     for stage in stages:
         if "units" in stage:
             units = stage["units"]
@@ -874,6 +975,16 @@ def verify_preservation(
                             "chunk_id": record.get("chunk_id"),
                             "chunk_part": record.get("chunk_part"),
                             "section_id": record.get("section_id"),
+                            "preservation_source_window": record.get("source_window"),
+                            "block_provenance": [
+                                {
+                                    key: value
+                                    for key, value in report["block_identities"][block_id].items()
+                                    if key in {"page", "block_index", "bbox", "text_sha256"}
+                                }
+                                | {"id": block_id}
+                                for block_id in record.get("block_ids", ())
+                            ],
                         },
                     }
                 )
