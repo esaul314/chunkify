@@ -34,8 +34,14 @@ An obsolete references outline cannot confidently override a supported new
 introduction. Position or a prose mention of a role word alone establishes
 nothing.
 
-Exact internal heading spans split independently. Merging and overlap stay
-inside a section. Native blocks already retain original text; recovery does not
+Exact internal heading spans split independently. Native proof mode forms
+sentence-friendly exact slices of each section's ordered text using the configured
+chunk_size, overlap and min_chunk_size. Compact source windows bind the actual
+character offsets and contributing units before matching, including repeated
+titles or paragraphs. It skips legacy footer removal, semantic deduplication and
+heuristic context insertion. Ordinary and unbound extraction keep those existing
+heuristics. Chunk boundaries can therefore change in native proof mode; old
+chunk text/IDs are not promised to stay identical. Overlap stays inside a section. Native blocks already retain original text; recovery does not
 replace a heading slice with its complete parent block. Historical extraction
 without native identities can still request hash-bound original contents text
 with `recover_structural_text: true`. A source coverage conflict preserves

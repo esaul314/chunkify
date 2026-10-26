@@ -259,3 +259,40 @@ def test_native_source_windows_admit_reserved_ai_metadata_before_stub_calls(tmp_
         for entry in row["metadata"]["block_provenance"]
     )
     assert all(row["metadata"]["preservation_status"] == "checked" for row in result.payload)
+
+
+@pytest.mark.parametrize("mutation", ["window", "contributor", "page", "geometry"])
+def test_known_native_slice_identity_cannot_be_silently_remapped(tmp_path, mutation):
+    from copy import deepcopy
+
+    from pdf_chunker.core_new import _run_passes
+    from pdf_chunker.preservation import bind_source_metadata, finalize_rows
+
+    source = original_crosspage_source(tmp_path)
+    spec = structural_spec()
+    result, _ = _run_passes(spec, _input_artifact(str(source), spec))
+    rows = deepcopy(result.payload)
+    metadata = rows[-1]["metadata"]
+    if mutation == "window":
+        metadata["preservation_source_window"][2] += 1
+    elif mutation == "contributor":
+        metadata["block_provenance"] = rows[0]["metadata"]["block_provenance"]
+    elif mutation == "page":
+        metadata.update(page=99, page_range="99")
+    else:
+        metadata["block_provenance"][0]["bbox"][0] += 5
+    checked, _ = finalize_rows(result.meta["preservation"], rows)
+    assert not checked["accepted"]
+    with pytest.raises(ValueError, match="source slice/contributor"):
+        bind_source_metadata(result.meta["preservation"], {"type": "chunks", "items": rows})
+
+
+def test_ordinary_ingress_does_not_enable_native_proof(tmp_path):
+    source = original_crosspage_source(tmp_path)
+    ordinary = _input_artifact(str(source), PipelineSpec())
+    assert "preservation" not in ordinary.meta
+    assert not any(
+        block.get("source", {}).get("raw_source")
+        for page in ordinary.payload["pages"]
+        for block in page["blocks"]
+    )

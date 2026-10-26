@@ -1308,7 +1308,10 @@ normal runtime admission gates pass; no failed source has been retried.
 
 Version 0.1.18 adds opt-in physical PDF ingress before lossy paragraph/footer
 merging, section-v3 reader/source-bound decisions and ordered raw-to-serialized
-occurrence accounting. Unknown structure remains reviewable; obsolete reference
+occurrence accounting. Native proof mode uses exact section source windows with
+sentence-friendly boundaries and unchanged configured word/overlap/minimum and
+serialized limits; ordinary/unbound semantic heuristics stay unchanged. Unknown
+structure remains reviewable; obsolete reference
 navigation conflicting with substantive body headings stays eligible. Native
 contents slices retain their exact contributing units. Shared terminal/agent
 answers and externally supplied CPU review arrays use deterministic validation.
