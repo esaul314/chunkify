@@ -10,32 +10,39 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-## Current milestone: article preservation and opt-in document structure
+## Current milestone: native source preservation and document structure
 
-Version 0.1.17 combines the verified article/UTF-8 contracts with document-bound section detection and review while retaining
-existing extraction, chunk-size, overlap and enrichment defaults. The public
-interfaces and validation examples are documented in [SECTION_REVIEW.md](SECTION_REVIEW.md).
+Version 0.1.18 retains the verified article/UTF-8 contracts and adds opt-in native
+PDF source accounting. Ordinary extraction, chunk-size, overlap and enrichment
+defaults remain unchanged. Native proof mode captures physical units before
+lossy merging and constructs sentence-friendly exact section slices with the
+configured budgets; its chunk boundaries can differ from legacy output.
+See [SECTION_REVIEW.md](SECTION_REVIEW.md) for APIs, scope and verification.
 
 Implemented and regression-tested:
 
-- Canonical page-block heading support with legacy list-input compatibility.
-- Independent structural signals from navigation, original layout, typography,
-  exact headings and section continuity.
-- Body, contents, acknowledgments, permissions, references, index and unknown roles.
-- Exact internal boundaries, section-safe splitting and ordered-text preservation.
-- Shared callback, terminal and JSON decisions with source/settings/block identities,
-  deterministic replay, stale-answer rejection and nonblocking pending questions.
-- CPU-only manifest-bound preparation and independent coverage verification.
+- Canonical page-block headings with legacy list-input compatibility.
+- Native physical page/block/character identities before footer/paragraph cleanup.
+- Ordered occurrence accounting from original native glyphs through serialization,
+  including repeated passages, bounded overlap and fragment-specific contributors.
+- Compatible geometry dictionaries plus compact source-window/map references.
+- Structural roles from independent navigation, layout, typography, heading and
+  continuity signals; conflicts stay unknown and eligible for review.
+- Shared terminal/callback/JSON review, source/reader/settings-bound deterministic
+  replay and stale-answer rejection.
+- Immutable CPU preparation, external reviewed answers, independent fresh-source
+  witness replay and explicitly non-accepting inspection of pending artifacts.
 
 Remaining result-quality work:
 
-1. Repair crosspage block extents in extraction and independently verify original-text
-   coverage before classification. Recovery currently retains conflicting merged blocks
-   as unknown with pending review instead of replacing them with physical-page text.
-2. Expand synthetic positive and negative fixtures for ambiguous and mixed sections.
-3. Evaluate role/boundary precision and recall separately from text preservation.
-4. Improve evidence-conflict explanations and review ergonomics using those results.
-5. Qualify additional extraction formats only when concrete failures justify it.
+1. Address demonstrated unsupported extraction surfaces such as annotation objects,
+   image-only body text and diagrams with bounded reader/OCR controls and explicit
+   provenance. Native glyph accounting never certifies these surfaces as covered.
+2. Expand synthetic positive/negative controls for ambiguous and mixed sections.
+3. Measure role/boundary precision and recall separately from text preservation,
+   then compare explanation/navigation/bibliography/quotation retrieval and citations.
+4. Improve conflict explanations and review ergonomics from measured failures.
+5. Qualify additional formats/readers only when concrete evidence justifies them.
 
 Document text, source manifests, local paths, generated review questions/answers,
 rendered pages, operational receipts and private evaluation results belong outside
