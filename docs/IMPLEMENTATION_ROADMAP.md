@@ -1302,3 +1302,32 @@ the reserved chunk_part field, it refuses rather than overwriting that identity.
 Inputs carrying both internal meta and emitted metadata retain both mappings.
 The candidate is source-only until its tests, provenance, project review and
 normal runtime admission gates pass; no failed source has been retried.
+
+
+## Native structural preservation milestone
+
+Version 0.1.18 adds opt-in physical PDF ingress before lossy paragraph/footer
+merging, section-v3 reader/source-bound decisions and ordered raw-to-serialized
+occurrence accounting. Unknown structure remains reviewable; obsolete reference
+navigation conflicting with substantive body headings stays eligible. Native
+contents slices retain their exact contributing units. Shared terminal/agent
+answers and externally supplied CPU review arrays use deterministic validation.
+
+Complete identities/text, normalization witnesses and gaps stay in a private
+ledger; bounded rows retain compatible geometry plus compact hash-bound
+references. Native annotation objects and image-only surfaces remain explicit
+unresolved gaps. Alternative readers retain their ordinary contract and do not
+silently acquire native proof. No model, service or collection changes follow.
+
+Acceptance requires focused generated regression controls, declared lint/type/
+test gates, independent fresh-source span/review replay, privacy review of every
+introduced blob/message/export and separately measured retrieval/citation
+benefit. The CPU helpers stage immutable artifacts and never choose a preferred
+generation or authorize publication.
+
+Next work remains evidence-driven: expand source-span controls for unsupported
+reader/annotation surfaces; measure false role exclusions and missed non-body
+sections across a small frozen matrix; improve only demonstrated failures; then
+compare explanation, navigation, bibliography and quotation retrieval with
+source-bound citations. Preserve defaults, original artifacts and rollback
+through each qualified increment. See SECTION_REVIEW.md for exact procedures.

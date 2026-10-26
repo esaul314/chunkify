@@ -139,7 +139,7 @@ def test_native_contents_header_prefix_is_never_recovered_twice(tmp_path):
     assert helper("verify_section_pilots").verify(output)["accepted"]
 
 
-@pytest.mark.parametrize("surface", ["raw", "stage", "exclusion", "role"])
+@pytest.mark.parametrize("surface", ["raw", "stage", "exclusion", "role", "geometry"])
 def test_independent_reader_and_stage_replay_reject_rehashed_forged_sidecars(tmp_path, surface):
     source = synthetic_source(tmp_path)
     output = tmp_path / "forged-run"
@@ -151,9 +151,20 @@ def test_independent_reader_and_stage_replay_reject_rehashed_forged_sidecars(tmp
         "stage": "example-preservation.json",
         "exclusion": "settings.json",
         "role": "example-classified-blocks.json",
+        "geometry": "example-cpu.jsonl",
     }[surface]
     path = output / name
     value = json.loads(path.read_text())
+    if surface == "geometry":
+        value["metadata"]["block_provenance"][0]["bbox"][0] += 20
+        path.write_text(json.dumps(value) + "\n")
+        receipt["books"]["example"]["artifact_sha256"] = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        receipt_path.write_text(json.dumps(receipt))
+        with pytest.raises(ValueError, match="legacy geometry"):
+            helper("verify_section_pilots").verify(output)
+        return
     if surface == "raw":
         value["pages"][0]["blocks"][0]["raw_text"] += " Invented forged glyphs."
     elif surface == "stage":

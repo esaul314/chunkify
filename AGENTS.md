@@ -1035,3 +1035,18 @@ terminal prompts and JSON questions/answers share source/settings/block-bound re
 Unknown conflicts remain pending without deleting text or teaching global patterns.
 Original-structure recovery checks extracted text coverage before replacing blocks.
 See docs/SECTION_REVIEW.md and docs/PUBLICATION_PRIVACY.md.
+
+
+## Native structural source accounting
+
+Opt-in structural PDF mode captures physical native block identities before
+legacy cross-page merging and footer cleanup. Keep raw occurrence accounting
+separate from semantic section decisions and AI categories. Source changes must
+preserve page/block/span identities or explicitly make prior answers stale.
+Full raw text/maps belong in private exclusive sidecars; retain the existing
+block_provenance dictionary shape in bounded rows. Never replace ordered
+occurrence tests with word-set coverage or raise record/enrichment budgets.
+See docs/SECTION_REVIEW.md for proof scope, reader compatibility, pending gaps,
+review exchange and independent verification. Generated controls must cover
+cross-page sections, repeated occurrences, citation digits, Unicode, lists,
+footnotes, annotations, metadata ranges and pre-enrichment admission.

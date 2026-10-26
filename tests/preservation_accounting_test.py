@@ -354,3 +354,18 @@ def test_actual_stub_enrichment_uses_source_partition_and_same_limits():
     assert "".join(client.inputs) == chunks[0]["text"]
     assert result.meta["preservation"]["accepted"]
     assert all(output["metadata"]["preservation_status"] == "checked" for output in result.payload)
+
+
+def test_section_parent_span_cannot_claim_unrelated_offsets():
+    report, doc = report_for(["An intact source passage."])
+    block = doc["pages"][0]["blocks"][0]
+    block["_section_parent_sha256"] = sha(block["text"])
+    block["_section_span"] = [0, 1]
+    assert not record_stage(report, "section_detect", doc)["accepted"]
+
+
+def test_boolean_page_is_not_a_truthful_integer_citation():
+    report, _ = report_for(["One page."])
+    output = row("One page.")
+    output["metadata"]["page"] = True
+    assert not finalize_rows(report, [output])[0]["accepted"]
