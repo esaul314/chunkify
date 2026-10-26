@@ -119,6 +119,19 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 - AI enrichment payload adaptation preserves original order when one input
   expands into multiple JSONL-sized chunks; non-chunk payload items stay in place.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.
+- `enrichment_config.py`: Pure data-first `resolve_primary_settings(options,
+  environment=...)` and `resolve_fallback_settings(options, environment=...)`
+  return frozen `CompletionSettings`. Use `partial` to bind explicit environment
+  mappings; no ambient reads or API keys enter the result. Fallback options use
+  adapter-local names (`model`, `api_base`, `max_tokens`). Both existing clients
+  use `completion_request(prompt, settings=...)` for fresh request containers;
+  tokenizer admission counts the same messages. Explicit malformed limits and
+  primary string booleans refuse. For example,
+  `completion_request("Full text", settings=resolve_primary_settings({}, environment={}))`.
+  Dotenv/credentials, tokenizer loading and transport remain adapter-owned;
+  fallback without a key still returns `None`. These values do not qualify
+  prompt/vocabulary/model identity, completion or enriched-output reuse. See
+  `docs/ENRICHMENT_REQUEST_BUDGET.md`.
 - `adapters/request_budget.py`: Optional cached-tokenizer/template admission
   for the explicit RAG Qwen8B serving contract; no downloads or model loading.
   The enrichment adapter counts the complete wire message plus output/margin

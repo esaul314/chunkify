@@ -112,6 +112,11 @@ If AI enrichment is enabled but no completion client can be created (e.g., `lite
 the CLI now raises an error instead of silently producing empty tags.
 The default metadata-enrichment path now targets a local OpenAI-compatible router using
 `qwen3-8b-local` at `http://localhost:8100/v1` with the dummy key `sk-local`.
+Primary and fallback clients now share pure, immutable serving-settings resolution
+and request construction. Explicit token limits must be positive integers and
+`no_think` must be a boolean or `None`; malformed values fail instead of selecting defaults
+or becoming truthy. See [resolved serving settings](docs/ENRICHMENT_REQUEST_BUDGET.md#resolved-serving-settings)
+for the library API, precedence and environment behavior.
 If grounded tags come back empty, `pdf_chunker` can optionally retry tagging with a cheap OpenAI fallback model. The default fallback model is `gpt-4.1-nano` and it only runs when `OPENAI_API_KEY` or `PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY` is available.
 Override it when needed with `PDF_CHUNKER_AI_ENRICH_MODEL`, `PDF_CHUNKER_AI_ENRICH_API_BASE`, or `PDF_CHUNKER_AI_ENRICH_API_KEY`:
 ```bash

@@ -34,6 +34,7 @@ pdf_chunker/
 │   ├── article_conversion.py # Pure base article settings and prepared spec snapshot
 │   ├── article_output.py    # Pure base-output integrity/provenance/reconstruction checks
 │   ├── article_completion.py # Pure canonical completion records and pinned readback checks
+│   ├── enrichment_config.py # Pure primary/fallback serving settings and request construction
 │   ├── cli.py               # Typer CLI: convert / inspect commands
 │   ├── config.py            # Pydantic Settings + YAML pipeline spec loader
 │   ├── framework.py         # Artifact/Pass registry + pipeline runner
@@ -102,6 +103,16 @@ the optional learned-pattern wrapper). Report assembly receives environment
 metadata collected by the runner rather than inspecting files itself.
 
 This split makes testing cheap and refactoring safe. Passes can be unit-tested with in-memory fixtures; adapters are tested with integration/golden tests.
+
+Both existing enrichment clients use `enrichment_config` for frozen serving
+settings and fresh request construction. Data-first resolvers take explicit
+options and environment mappings; partial application can bind the environment.
+The adapter loads dotenv/credentials and the optional tokenizer, then captures
+resolved values once. Budget counting and transport use the same message builder.
+This removes duplicate request/configuration logic while preserving normal wire
+behavior and lazy fallback availability. Strict invalid-setting refusal is
+documented in `docs/ENRICHMENT_REQUEST_BUDGET.md`. Prompt/vocabulary/model-revision
+identity and enriched-result reuse remain separate work.
 
 ## 3) Three-phase pipeline architecture
 

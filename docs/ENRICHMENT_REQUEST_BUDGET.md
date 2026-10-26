@@ -6,6 +6,63 @@ Parsing, post-response grounding and lexical/optional-provider fallback still us
 the full effective vocabulary. Prompt changes may change model choices; identical
 classification outputs are not promised.
 
+## Resolved serving settings
+
+`pdf_chunker.enrichment_config` is the shared pure boundary used by both existing
+completion adapters. `resolve_primary_settings(options, environment=...)` and
+`resolve_fallback_settings(options, environment=...)` return frozen
+`CompletionSettings(model, api_base, max_tokens, no_think)` values. They read only
+the supplied mappings, preserve inputs, and support partial application:
+
+```python
+from dataclasses import asdict
+from functools import partial
+
+from pdf_chunker.enrichment_config import completion_request, resolve_primary_settings
+
+resolve = partial(resolve_primary_settings, environment={})
+settings = resolve({"model": "qwen3-8b-local", "max_tokens": 256})
+request = completion_request("Full source text: 界🧭", settings=settings)
+assert request["messages"][0]["content"] == "/no_think\nFull source text: 界🧭"
+assert asdict(settings)["max_tokens"] == request["max_tokens"]
+```
+
+Primary precedence is explicit options, `PDF_CHUNKER_AI_ENRICH_*`, supported
+OpenAI aliases, then existing local defaults. `api_base` precedes the `base_url`
+option alias; environment base aliases retain their existing order: `API_BASE`,
+`BASE_URL`, then `OPENAI_API_BASE_URL`. The fallback resolver accepts its own
+adapter-local `model`, `api_base` and `max_tokens` options, uses only fallback
+environment keys, and retains the provider's default route when no base is set.
+It never adds the primary Qwen directive. Both request builders retain temperature
+0.0 and exact prompt text, apart from that existing primary directive.
+
+Explicit token limits must be positive integers; zero, booleans, floats and
+strings raise `ValueError`. Environment token strings are parsed as integers and
+must also be positive. Previously zero/False could silently select a default,
+and fallback invalid limits could reach transport. Explicit primary `no_think`
+must be a boolean or `None`; strings such as `"false"` now refuse instead of
+becoming truthy. Environment spelling is unchanged: missing means true;
+`1/true/yes/on` (ignoring case/outer whitespace) mean true and other strings mean
+false. Supplied model/base labels must resolve to nonblank strings; existing
+empty-value fallback precedence is retained.
+
+`completion_request(prompt, settings=...)` returns fresh nested request containers
+without API-key fields. The adapter adds the key only at transport. The adapter
+still loads dotenv first, resolves credentials, loads an optional pinned tokenizer,
+and captures settings once per callback; later environment changes do not alter
+that callback. Without credentials the optional fallback still returns `None`
+before validating unused settings or importing a provider. Explicitly disabled
+fallback remains disabled.
+
+These settings describe outgoing requests. They do not establish model revision,
+running-server configuration, prompt/vocabulary identity, successful completion
+or permission to reuse enriched output. Binding those inputs to validated base
+bytes and validating actual enriched rows remain the next P1-E boundary. The
+existing [article byte preflight](CONVERSION_DESCRIPTORS.md#utf-8-byte-preflight-before-enrichment)
+remains opt-in. No new client, runner, cache schema or dependency is introduced.
+
+## Offline request admission
+
 `pipeline_rag.yaml` sets an opt-in `ai_enrich.request_budget` mapping:
 
 ```yaml
@@ -61,7 +118,7 @@ primary or repair request still repeats admission before provider transport.
 
 Tests:
 ```bash
-pytest tests/ai_enrich_request_budget_test.py tests/ai_enrichment_test.py tests/ai_enrich_pass_test.py
+pytest tests/enrichment_config_test.py tests/ai_enrich_request_budget_test.py tests/ai_enrichment_test.py tests/ai_enrich_pass_test.py
 pytest -s tests/ai_enrich_context_fixtures_test.py
 nox -s lint typecheck tests
 ```

@@ -6,6 +6,13 @@
 Test modules validating behavior of parsing, chunking, and enrichment layers.
 
 ## Coverage
+- `enrichment_config_test.py`: Pure primary/fallback defaults and alias precedence,
+  explicit mapping/input preservation, partial application, frozen values and
+  detached Unicode requests. Exact existing adapter requests under provider
+  stubs, post-dotenv resolution, stable callback settings after environment drift,
+  API-key separation, strict invalid settings, and lazy/disabled fallback refusal
+  before provider import. Run with request-budget, enrichment and admission tests,
+  scope checks and all three nox sessions; no real provider or model access.
 - `article_preflight_test.py`: Complete UTF-8 JSON-row measurement with custom
   metadata keys, Unicode separators, exact byte boundaries, explicit reserves,
   all oversized one-based rows and strict budget types. Markdown/EPUB, long

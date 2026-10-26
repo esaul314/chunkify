@@ -9,15 +9,28 @@ from pathlib import Path
 from typing import Any, cast
 
 from pdf_chunker.adapters.request_budget import prepare_request_counter
+from pdf_chunker.enrichment_config import (
+    DEFAULT_AI_ENRICH_API_BASE as DEFAULT_AI_ENRICH_API_BASE,
+)
+from pdf_chunker.enrichment_config import (
+    DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS as DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS,
+)
+from pdf_chunker.enrichment_config import (
+    DEFAULT_AI_ENRICH_FALLBACK_MODEL as DEFAULT_AI_ENRICH_FALLBACK_MODEL,
+)
+from pdf_chunker.enrichment_config import (
+    DEFAULT_AI_ENRICH_MAX_TOKENS as DEFAULT_AI_ENRICH_MAX_TOKENS,
+)
+from pdf_chunker.enrichment_config import DEFAULT_AI_ENRICH_MODEL as DEFAULT_AI_ENRICH_MODEL
+from pdf_chunker.enrichment_config import (
+    completion_request,
+    resolve_fallback_settings,
+    resolve_primary_settings,
+)
 from pdf_chunker.passes.ai_enrich import classify_chunk_utterance
 
 yaml = cast(Any, import_module("yaml"))
-DEFAULT_AI_ENRICH_MODEL = "qwen3-8b-local"
-DEFAULT_AI_ENRICH_API_BASE = "http://localhost:8100/v1"
 DEFAULT_AI_ENRICH_API_KEY = "sk-local"
-DEFAULT_AI_ENRICH_MAX_TOKENS = 256
-DEFAULT_AI_ENRICH_FALLBACK_MODEL = "gpt-4.1-nano"
-DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS = 128
 logger = logging.getLogger(__name__)
 
 
@@ -226,23 +239,15 @@ def init_llm(
     from dotenv import load_dotenv  # lazy import
 
     load_dotenv()
-    resolved_model = (
-        model
-        or os.environ.get("PDF_CHUNKER_AI_ENRICH_MODEL")
-        or os.environ.get("OPENAI_MODEL")
-        or DEFAULT_AI_ENRICH_MODEL
+    settings = resolve_primary_settings(
+        {"model": model, "api_base": api_base, "max_tokens": max_tokens, "no_think": no_think},
+        environment=os.environ,
     )
-    resolved_api_base = (
-        api_base
-        or os.environ.get("PDF_CHUNKER_AI_ENRICH_API_BASE")
-        or os.environ.get("PDF_CHUNKER_AI_ENRICH_BASE_URL")
-        or os.environ.get("OPENAI_API_BASE_URL")
-        or DEFAULT_AI_ENRICH_API_BASE
-    )
+    assert settings.api_base is not None  # Primary resolution always supplies a base.
     prefers_local_key = (
-        "localhost:8100" in resolved_api_base
-        or "127.0.0.1:8100" in resolved_api_base
-        or "host.docker.internal:8100" in resolved_api_base
+        "localhost:8100" in settings.api_base
+        or "127.0.0.1:8100" in settings.api_base
+        or "host.docker.internal:8100" in settings.api_base
     )
     key = (
         api_key
@@ -250,29 +255,16 @@ def init_llm(
         or (DEFAULT_AI_ENRICH_API_KEY if prefers_local_key else None)
         or os.environ.get("OPENAI_API_KEY")
     )
-    resolved_max_tokens = max_tokens or int(
-        os.environ.get("PDF_CHUNKER_AI_ENRICH_MAX_TOKENS", DEFAULT_AI_ENRICH_MAX_TOKENS)
-    )
-    if no_think is None:
-        raw_no_think = os.environ.get("PDF_CHUNKER_AI_ENRICH_NO_THINK")
-        if raw_no_think is None:
-            resolved_no_think = True
-        else:
-            resolved_no_think = raw_no_think.strip().lower() in {"1", "true", "yes", "on"}
-    else:
-        resolved_no_think = bool(no_think)
     if not key:
         raise ValueError(
             "No API key found for AI enrichment. "
             "Set PDF_CHUNKER_AI_ENRICH_API_KEY or OPENAI_API_KEY."
         )
-    if type(resolved_max_tokens) is not int or resolved_max_tokens < 1:
-        raise ValueError("AI max_tokens must be a positive integer")
     if request_budget is not None and not isinstance(request_budget, Mapping):
         raise ValueError("request_budget must be a mapping")
     budget_contract = dict(request_budget) if request_budget is not None else None
     request_counter = (
-        prepare_request_counter(budget_contract, model=resolved_model)
+        prepare_request_counter(budget_contract, model=settings.model)
         if budget_contract is not None
         else None
     )
@@ -281,55 +273,35 @@ def init_llm(
     except ImportError as exc:  # pragma: no cover
         raise ImportError("litellm is required for init_llm") from exc
 
-    def messages_for(prompt: str) -> list[dict[str, str]]:
-        if resolved_no_think and resolved_model in {
-            "qwen3-8b-local",
-            "Qwen/Qwen3-8B-AWQ",
-            "qwen3-14b-local",
-            "Qwen/Qwen3-14B-AWQ",
-        }:
-            prompt = f"/no_think\n{prompt}"
-        return [{"role": "user", "content": prompt}]
-
     def request_fits(prompt: str) -> bool:
         if request_counter is None or budget_contract is None:
             return True
         return (
-            request_counter(messages_for(prompt))
-            + resolved_max_tokens
+            request_counter(completion_request(prompt, settings=settings)["messages"])
+            + settings.max_tokens
             + budget_contract.get("margin_tokens", 64)
             <= budget_contract["context_tokens"]
         )
 
     def completion(prompt: str) -> str:
-        messages = messages_for(prompt)
-        kwargs = {
-            "model": resolved_model,
-            "messages": messages,
-            "temperature": 0.0,
-            "max_tokens": resolved_max_tokens,
-            "api_key": key,
-        }
+        kwargs = {**completion_request(prompt, settings=settings), "api_key": key}
         if request_counter is not None and budget_contract is not None:
-            input_tokens = request_counter(messages)
+            input_tokens = request_counter(kwargs["messages"])
             context = budget_contract["context_tokens"]
             margin = budget_contract.get("margin_tokens", 64)
-            if input_tokens + resolved_max_tokens + margin > context:
+            if input_tokens + settings.max_tokens + margin > context:
                 logger.warning(
                     "ai_enrich request budget refused: input=%d output=%d margin=%d context=%d",
                     input_tokens,
-                    resolved_max_tokens,
+                    settings.max_tokens,
                     margin,
                     context,
                 )
                 raise CompletionError(
                     "AI request exceeds verified context budget: "
-                    f"input={input_tokens}, output={resolved_max_tokens}, "
+                    f"input={input_tokens}, output={settings.max_tokens}, "
                     f"margin={margin}, context={context}"
                 )
-        if resolved_api_base:
-            kwargs["api_base"] = resolved_api_base
-            kwargs["custom_llm_provider"] = "openai"
         try:
             response = litellm.completion(**kwargs)
         except Exception as exc:
@@ -361,19 +333,8 @@ def init_fallback_llm(
     if not resolved_key:
         return None
 
-    resolved_model = (
-        model
-        or os.environ.get("PDF_CHUNKER_AI_ENRICH_FALLBACK_MODEL")
-        or DEFAULT_AI_ENRICH_FALLBACK_MODEL
-    )
-    resolved_api_base = (
-        api_base or os.environ.get("PDF_CHUNKER_AI_ENRICH_FALLBACK_API_BASE") or None
-    )
-    resolved_max_tokens = max_tokens or int(
-        os.environ.get(
-            "PDF_CHUNKER_AI_ENRICH_FALLBACK_MAX_TOKENS",
-            DEFAULT_AI_ENRICH_FALLBACK_MAX_TOKENS,
-        )
+    settings = resolve_fallback_settings(
+        {"model": model, "api_base": api_base, "max_tokens": max_tokens}, environment=os.environ
     )
     try:
         import litellm
@@ -381,16 +342,7 @@ def init_fallback_llm(
         raise ImportError("litellm is required for init_fallback_llm") from exc
 
     def completion(prompt: str) -> str:
-        kwargs = {
-            "model": resolved_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.0,
-            "max_tokens": resolved_max_tokens,
-            "api_key": resolved_key,
-        }
-        if resolved_api_base:
-            kwargs["api_base"] = resolved_api_base
-            kwargs["custom_llm_provider"] = "openai"
+        kwargs = {**completion_request(prompt, settings=settings), "api_key": resolved_key}
         try:
             response = litellm.completion(**kwargs)
         except Exception as exc:

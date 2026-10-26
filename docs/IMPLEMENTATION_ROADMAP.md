@@ -10,7 +10,7 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-**Status:** P0-A remains open; P1-E verified Markdown, descriptors, qualified preparation, guarded output validation, pinned completion readback and opt-in UTF-8 byte preflight implemented (2026-10-24); enrichment/persistence boundaries below
+**Status:** P0-A remains open; P1-E base identity/output/readback and UTF-8 preflight implemented; shared pure enrichment serving settings implemented (2026-10-26); full enrichment/persistence boundaries below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -530,7 +530,7 @@ configuration accepts too many invalid states.
 
 ### P1-E — Support recurring article ingestion without EPUB wrappers
 
-**Status: IN PROGRESS (2026-10-24).** Direct proof-bound `.md` ingress is the first
+**Status: IN PROGRESS (2026-10-26).** Direct proof-bound `.md` ingress is the first
 implemented increment. Opt-in descriptors, independent note associations,
 effective settings/runtime snapshots, readability resource/state pins and guarded
 in-memory output validation, canonical completion records and read-only validated
@@ -538,6 +538,9 @@ reuse for the canonical base article composition are implemented. Atomic
 persistence, separate enrichment reuse and remaining inputs are open. Opt-in
 complete-row UTF-8 byte reporting now supports explicit enrichment reserves and
 review outcomes; automatic enrichment integration remains open.
+Primary/fallback serving settings and request construction now share a pure
+resolver; prompt/vocabulary/model-revision binding and enriched-result validation
+remain open.
 Deliver explicit document-text and HTML inputs in small increments under
 P1-A/P1-B/P1-D. Preserve P2-B's supported transcript behavior.
 
@@ -793,8 +796,54 @@ actionable issues. Existing optional skips, return-value warnings and the PyMuPD
 deprecation warning remain; dependencies, goldens and conversion algorithms are
 unchanged. The gates remain incremental rather than repository-wide P0-A closure.
 
-**Next boundaries:** Resolve and validate the separate enrichment contract and
-integrate byte admission plus actual enriched-row checks into that boundary;
+**Shared enrichment-settings increment (2026-10-26):** The pure data-first
+`resolve_primary_settings(options, environment=...)` and
+`resolve_fallback_settings(options, environment=...)` return frozen serving
+values used directly by both existing completion adapters. One pure
+`completion_request(prompt, settings=...)` now builds both request forms;
+primary request planning and transport count/use the same exact messages.
+Resolvers and request construction support partial application and preserve
+inputs. Dotenv, API keys, tokenizer discovery and transport stay in the adapter.
+
+Normal model/base/environment precedence, wire fields, temperature, Qwen directive
+and lazy fallback availability are preserved. Explicit zero/False token limits
+now refuse instead of selecting defaults; malformed fallback limits and explicit
+primary string booleans also refuse before provider import. Environment integer
+and boolean spelling remains documented. See
+[ENRICHMENT_REQUEST_BUDGET.md](ENRICHMENT_REQUEST_BUDGET.md#resolved-serving-settings).
+
+**Sequencing rationale:** Establish one executable source of serving settings
+before recording a separate enrichment identity. Duplicating the adapter's
+environment/default logic in a new descriptor would let recorded and actual
+requests drift. This increment removes that duplication with one small pure
+module and a shorter existing adapter; no new runner, client, descriptor schema,
+cache storage or dependencies. Settings alone do not prove model revision,
+prompt/vocabulary identity, server configuration or successful enriched output.
+P0-A scope expands to include the new module and the touched adapter; broader
+repository debt remains open. Stewardship instructions now explicitly require
+Voice to express the imagined codebase's feelings in first person.
+
+**Serving-settings verification:** The failing-first run confirmed the pure API
+was absent. Fifty new regression/property cases now pass; the focused serving,
+enrichment/request-budget, serialized admission, article preflight, documentation
+and scope run passes 287 cases. Collection finds 1,709 tests without errors.
+`TESSDATA_PREFIX=/usr/share/tesseract/tessdata nox -r -s lint typecheck tests`
+passes all three sessions on Python 3.11.17 (47 production type targets and 79
+lint/format files). Tests cover exact primary/fallback request fields under
+offline provider stubs, Unicode prompt preservation, alias precedence, partial
+application, immutable settings, detached request containers, post-dotenv capture,
+environment drift, strict invalid-setting refusal and disabled/unconfigured
+fallback. Existing request-budget boundary/repair/window checks pass. Generated
+merge documentation and diff checks pass; review found no remaining actionable
+issues. Existing optional skips, return-value warnings and the PyMuPDF warning
+remain. No real provider, model service, dependencies, goldens or conversion
+algorithms changed. These remain incremental gates, not repository-wide P0-A
+closure.
+
+**Next boundaries:** Bind these resolved serving settings, prompt/vocabulary,
+model revision and request-budget pins into the separate enrichment contract;
+validate enriched results and integrate byte admission plus actual enriched-row
+checks;
 atomic artifact/receipt writing and durable trusted-hash storage follow under
 P2-D. Retain hashes independently from trusted completed runs; a hash computed
 from arbitrary cached bytes/records does not establish integrity or completion.
