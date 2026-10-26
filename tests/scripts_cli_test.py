@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+
+import pytest
 
 from pdf_chunker.cli import ConvertOptions, run_conversion
 from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
@@ -85,10 +88,30 @@ def test_root_help_lists_commands() -> None:
     assert all(cmd in result.stdout for cmd in ("convert", "inspect"))
 
 
-def test_convert_help_lists_expected_flags() -> None:
+@pytest.mark.parametrize(
+    "terminal",
+    [
+        pytest.param({}, id="plain"),
+        pytest.param({"CI": "true", "GITHUB_ACTIONS": "true"}, id="github"),
+        pytest.param(
+            {"CI": "true", "GITHUB_ACTIONS": "true", "FORCE_COLOR": "1"},
+            id="forced-color",
+        ),
+    ],
+)
+def test_convert_help_lists_expected_flags(
+    monkeypatch: pytest.MonkeyPatch, terminal: dict[str, str]
+) -> None:
+    for key in ("CI", "GITHUB_ACTIONS", "FORCE_COLOR", "NO_COLOR", "CLICOLOR_FORCE"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", "80")
+    for key, value in terminal.items():
+        monkeypatch.setenv(key, value)
     result = _run_cli("convert", "--help")
     assert result.returncode == 0
-    out = result.stdout
+    # Rich styles can split an option token into several ANSI-colored spans.
+    out = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.stdout)
     flags = (
         "--metadata-file",
         "--enrich",
