@@ -1317,7 +1317,11 @@ class _EmitJsonlPass:
                 config = replace(config, **updates)
         rows = (
             _canonical_rows(
-                doc, config=config, preserve_text="verified_joplin_markdown" in (a.meta or {})
+                doc,
+                config=config,
+                preserve_text=(
+                    "verified_joplin_markdown" in (a.meta or {}) or "preservation" in (a.meta or {})
+                ),
             )
             if canonical and doc.get("type") == "chunks"
             else (

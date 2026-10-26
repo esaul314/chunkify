@@ -24,6 +24,7 @@ from pdf_chunker.adapters.ai_enrich import _load_tag_configs
 from pdf_chunker.core_new import _input_artifact, _run_passes
 from pdf_chunker.passes.ai_enrich import _admit_chunks_for_jsonl, _grounded_tags
 from pdf_chunker.passes.emit_jsonl import _canonical_rows
+from pdf_chunker.preservation import finalize_rows
 from pdf_chunker.sections import digest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -134,7 +135,9 @@ def prepare(manifest_path, output):
                 tag_configs={k: _grounded_tags(v, chunk["text"]) for k, v in vocabulary.items()},
             )
         ]
-        rows = _canonical_rows({"type": "chunks", "items": admitted})
+        rows = _canonical_rows({"type": "chunks", "items": admitted}, preserve_text=True)
+        preservation, rows = finalize_rows(result.meta["preservation"], rows)
+        write(out / f"{key}-preservation.json", preservation)
         assert before == "".join(row["text"] for row in rows), "admission changed text"
         artifact = out / f"{key}-cpu.jsonl"
         write(artifact, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows))
@@ -158,6 +161,8 @@ def prepare(manifest_path, output):
             "section_roles": dict(roles),
             "pending_questions": len(result.meta.get("section_questions", [])),
             "unique_normalized_words_missing_after_cleanup": missing,
+            "ordered_source_preservation": preservation["accepted"],
+            "preservation_pending": len(preservation["pending"]),
             "extraction_blocks": len(blocks),
             "pages": coverage,
             "enrichment_status": "pending",
@@ -172,7 +177,7 @@ def prepare(manifest_path, output):
             ],
         }
     report["offline_accepted"] = all(
-        not b["unique_normalized_words_missing_after_cleanup"] and not b["pending_questions"]
+        b["ordered_source_preservation"] and not b["pending_questions"]
         for b in report["books"].values()
     )
     write(out / "cpu-acceptance.json", report)

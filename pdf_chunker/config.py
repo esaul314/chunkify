@@ -45,6 +45,7 @@ _KNOWN_OPTIONS: dict[str, frozenset[str]] = {
             "callback",
             "answers_path",
             "questions_path",
+            "preservation_path",
             "interactive",
             "recover_structural_text",
         }

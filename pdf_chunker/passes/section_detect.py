@@ -25,7 +25,15 @@ class _SectionDetectPass:
         settings = {
             k: v
             for k, v in options.items()
-            if k not in {"answers", "callback", "answers_path", "questions_path", "interactive"}
+            if k
+            not in {
+                "answers",
+                "callback",
+                "answers_path",
+                "questions_path",
+                "interactive",
+                "preservation_path",
+            }
         }
         result, pending, decisions = classify_document(
             doc,

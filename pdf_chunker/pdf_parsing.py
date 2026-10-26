@@ -77,6 +77,7 @@ def _block_pipeline(
     footer_margin: float | None = None,
     header_margin: float | None = None,
     quality_report: dict[str, Any] | None = None,
+    preserve_source_pages: bool = False,
 ) -> list[Block]:
     """Return merged blocks for ``filepath`` respecting ``excluded`` pages.
 
@@ -88,6 +89,21 @@ def _block_pipeline(
         footer_margin: Points from bottom to exclude as footer zone
         header_margin: Points from top to exclude as header zone
     """
+    if preserve_source_pages:
+        # Structural classification needs physical source units before legacy
+        # footer stripping and cross-page continuation can erase their boundaries.
+        return [
+            block
+            for page in read_pages(
+                filepath,
+                excluded,
+                footer_margin=footer_margin,
+                header_margin=header_margin,
+                preserve_source_ids=True,
+            )
+            for block in page.blocks
+        ]
+
     # Collect page heights for footer zone detection during merge
     page_heights = _get_page_heights(filepath) if footer_margin else None
 
@@ -130,6 +146,7 @@ def extract_text_blocks_from_pdf(
     footer_margin: float | None = None,
     header_margin: float | None = None,
     quality_report: dict[str, Any] | None = None,
+    preserve_source_pages: bool = False,
 ) -> Iterable[Block]:
     """Yield ``Block`` objects from ``filepath`` respecting ``exclude_pages``.
 
@@ -155,6 +172,7 @@ def extract_text_blocks_from_pdf(
             footer_margin=footer_margin,
             header_margin=header_margin,
             quality_report=quality_report,
+            preserve_source_pages=preserve_source_pages,
         )
     )
 

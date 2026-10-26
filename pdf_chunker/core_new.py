@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import platform
 import re
 import sys
@@ -280,12 +281,53 @@ def _run_passes(
         artifact, timings = acc
         p, overrides = config
         _validate_payload_shape(artifact.payload, p.name, phase="input")
+        preservation_before = (artifact.meta or {}).get("preservation")
+        if (
+            p.name == "ai_enrich"
+            and overrides.get("enabled")
+            and isinstance(preservation_before, Mapping)
+            and preservation_before.get("pending")
+        ):
+            raise ValueError("unresolved source preservation must be reviewed before enrichment")
         seeded = Artifact(
             payload=artifact.payload,
             meta=_with_pass_options(artifact.meta, p.name, overrides),
         )
         result, updated_timings = _time_step((seeded, timings), p)
         _validate_payload_shape(result.payload, p.name, phase="output")
+        if (seeded.meta or {}).get("preservation"):
+            from pdf_chunker.preservation import finalize_rows, record_stage
+
+            report = cast(dict[str, Any], (seeded.meta or {})["preservation"])
+            payload = result.payload
+            if p.name == "split_semantic" and isinstance(payload, dict):
+                items = []
+                for item in payload.get("items", ()):
+                    item = dict(item)
+                    key = "meta" if "meta" in item else "metadata"
+                    item[key] = {
+                        **(item.get(key) or {}),
+                        "preservation_record_id": "0" * 24,
+                        "preservation_status": "pending",
+                    }
+                    items.append(item)
+                payload = {**payload, "items": items}
+            if p.name == "emit_jsonl":
+                if not isinstance(payload, list):
+                    raise TypeError("preservation emission requires serialized rows")
+                from pdf_chunker.passes.emit_jsonl import EmitConfig
+
+                defaults = EmitConfig.from_env()
+                emission = spec.options.get("emit_jsonl") or {}
+                report, payload = finalize_rows(
+                    report,
+                    payload,
+                    max_chars=emission.get("max_chars", defaults.max_chars),
+                    max_row_bytes=emission.get("max_row_bytes", defaults.max_row_bytes),
+                )
+            else:
+                report = record_stage(report, p.name, payload)
+            result = Artifact(payload=payload, meta={**(result.meta or {}), "preservation": report})
         if p.name == "section_detect" and overrides.get("questions_path"):
             from pdf_chunker.adapters.section_review import write_questions
 
@@ -296,7 +338,15 @@ def _run_passes(
         return result, updated_timings
 
     initial: tuple[Artifact[object], dict[str, float]] = (a, {})
-    return reduce(_apply, configs, initial)
+    result, timings = reduce(_apply, configs, initial)
+    report_path = (spec.options.get("section_detect") or {}).get("preservation_path")
+    if report_path and "emit_jsonl" in spec.pipeline and (result.meta or {}).get("preservation"):
+        from pdf_chunker.adapters.section_review import write_preservation
+
+        write_preservation(
+            str(report_path), cast(dict[str, Any], (result.meta or {})["preservation"])
+        )
+    return result, timings
 
 
 def _adapter_for(path: str):
@@ -382,6 +432,15 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[obj
             meta={"metrics": {}, "input": abs_path, "verified_joplin_markdown": proof},
         )
     adapter = _adapter_for(path)
+    structure = None
+    structural_input = bool((spec_opts.get("section_detect") or {}).get("enabled", False))
+    if is_pdf and structural_input:
+        if os.getenv("PDF_CHUNKER_PDF_READER") is not None:
+            raise ValueError("structural source preservation requires the native PDF reader")
+        from pdf_chunker.adapters.section_review import source_structure
+
+        # Freeze physical source text before any extractor normalization.
+        structure = source_structure(abs_path, {})
 
     # For EPUB, use exclude_spine if provided, otherwise fall back to exclude_pages
     epub_exclude = exclude_spine or exclude if is_epub else None
@@ -397,9 +456,12 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[obj
                 interactive=interactive,
                 footer_margin=footer_margin,
                 header_margin=header_margin,
+                **({"preserve_source_pages": True} if is_pdf and structural_input else {}),
             )
         )
     except TypeError:
+        if is_pdf and structural_input:
+            raise  # Never retry an unsupported/failed source-preservation reader.
         # Adapter doesn't support interactive/zone parameters (e.g., EPUB)
         payload = (
             {"type": "page_blocks", "source_path": abs_path, "pages": []}
@@ -412,7 +474,11 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[obj
         from pdf_chunker.adapters.section_review import source_structure
         from pdf_chunker.sections import digest
 
-        structure = source_structure(abs_path, payload)
+        structure = structure or source_structure(abs_path, payload)
+        import hashlib
+
+        if hashlib.sha256(Path(abs_path).read_bytes()).hexdigest() != structure["source_sha256"]:
+            raise ValueError("source changed during structural extraction")
         bound_settings = {
             step: {
                 key: value
@@ -425,13 +491,25 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[obj
                     "callback",
                     "interactive",
                     "output_path",
+                    "preservation_path",
                 }
             }
             for step, options in spec_opts.items()
         }
-        structure["pipeline_settings_sha256"] = digest(bound_settings)
+        structure["pipeline_settings_sha256"] = digest(
+            {
+                "pipeline": bound_settings,
+                "source_reader": "native-physical-blocks-v1",
+                "accounting": "native-source-spans-v1",
+            }
+        )
         payload = {**payload, "source_structure": structure}
-    return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
+    meta: dict[str, Any] = {"metrics": {}, "input": abs_path}
+    if structure is not None:
+        from pdf_chunker.preservation import initialize
+
+        meta["preservation"] = initialize(payload, spec_opts)
+    return Artifact(payload=payload, meta=meta)
 
 
 def _rows_from_payload(payload: Any) -> list[Chunk]:
@@ -480,6 +558,13 @@ def convert(path: str, spec: PipelineSpec) -> list[Chunk]:
     steps = _enforce_invariants(spec, input_path=input_path)
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
     artifact, _ = _run_passes(run_spec, artifact)
+    preservation = (artifact.meta or {}).get("preservation")
+    if isinstance(preservation, Mapping) and preservation.get("pending"):
+        report_destination = (run_spec.options.get("section_detect") or {}).get("preservation_path")
+        if not report_destination or "emit_jsonl" not in run_spec.pipeline:
+            raise ValueError(
+                "unresolved source preservation; inspect a private preservation_path sidecar"
+            )
     return _rows_from_payload(artifact.payload)
 
 

@@ -80,7 +80,7 @@ def test_independent_verification_refuses_changed_output(tmp_path):
         helper("verify_section_pilots").verify(output)
 
 
-def test_generated_crosspage_contents_conflict_stays_pending_and_preserves_body(tmp_path):
+def test_original_generated_crosspage_source_preserves_physical_body(tmp_path):
     fitz = pytest.importorskip("fitz")
     source = tmp_path / "synthetic-crosspage.pdf"
     body = "The following page contains substantive explanatory text. " * 8
@@ -97,16 +97,20 @@ def test_generated_crosspage_contents_conflict_stays_pending_and_preserves_body(
     helper("prepare_section_pilots").prepare(manifest_for(source, tmp_path), output)
 
     extraction = json.loads((output / "example-extraction-blocks.json").read_text())
-    assert extraction[0]["source"]["page_range"] == [1, 2]
-    assert "substantive explanatory text" in extraction[0]["text"]
+    assert [block["page"] for block in extraction] == [1, 2]
+    assert "substantive explanatory text" not in extraction[0]["text"]
+    assert "substantive explanatory text" in extraction[1]["text"]
     classified = json.loads((output / "example-classified-blocks.json").read_text())
-    assert classified[0]["blocks"][0]["text"] == extraction[0]["text"]
-    assert classified[0]["blocks"][0]["section"]["section_role"] == "unknown"
+    assert classified[0]["blocks"][0]["section"]["section_role"] == "contents"
+    assert classified[1]["blocks"][0]["section"]["section_role"] == "body"
+    assert "substantive explanatory text" in classified[1]["blocks"][0]["text"]
     pending = json.loads((output / "example-questions.json").read_text())
-    assert len(pending) == 2
-    assert all("substantive explanatory text" in q["extracted_text"] for q in pending)
+    assert not pending
     receipt = json.loads((output / "cpu-acceptance.json").read_text())
-    assert not receipt["offline_accepted"]
-    assert receipt["books"]["example"]["pending_questions"] == 2
+    assert receipt["offline_accepted"]
+    assert receipt["books"]["example"]["pending_questions"] == 0
+    preservation = json.loads((output / "example-preservation.json").read_text())
+    assert preservation["accepted"]
+    assert not preservation["pending"]
     assert not receipt["books"]["example"]["unique_normalized_words_missing_after_cleanup"]
     assert source.read_bytes() == original

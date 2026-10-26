@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from collections import Counter
@@ -90,10 +91,15 @@ def _spans_indicate_heading(spans: list[dict], text: str) -> bool:
 
 
 def _structured_block(
-    page, block_tuple, page_num, filename, page_font_size: float | None = None
+    page,
+    block_tuple,
+    page_num,
+    filename,
+    page_font_size: float | None = None,
+    preserve_source_ids: bool = False,
 ) -> Block | None:
     raw_text = block_tuple[4]
-    cleaned = clean_text(raw_text)
+    cleaned = raw_text.strip() if preserve_source_ids else clean_text(raw_text)
     if not cleaned:
         return None
 
@@ -106,15 +112,30 @@ def _structured_block(
         except (KeyError, IndexError, TypeError):
             is_heading = _detect_heading_fallback(cleaned)
 
-    inline_styles = _extract_block_inline_styles(
-        page, block_tuple, cleaned, page_font_size
-    )
+    inline_styles = _extract_block_inline_styles(page, block_tuple, cleaned, page_font_size)
 
     return Block(
         type="heading" if is_heading else "paragraph",
         text=cleaned,
         language=default_language(),
-        source={"filename": filename, "page": page_num, "location": None},
+        source={
+            "filename": filename,
+            "page": page_num,
+            "location": None,
+            **(
+                {
+                    "raw_source": {
+                        "page": page_num,
+                        "block_index": block_tuple[5],
+                        "bbox": list(block_tuple[:4]),
+                        "text_sha256": hashlib.sha256(raw_text.encode()).hexdigest(),
+                        "span": [0, len(raw_text)],
+                    }
+                }
+                if preserve_source_ids
+                else {}
+            ),
+        },
         bbox=block_tuple[:4],
         inline_styles=inline_styles,
     )
@@ -141,8 +162,7 @@ def _extract_block_inline_styles(
 
     offsets = tuple(_span_offsets(raw_spans))
     styles_per_span = tuple(
-        tuple(_collect_styles(span, baseline, page_font_size))
-        for span, baseline in raw_spans
+        tuple(_collect_styles(span, baseline, page_font_size)) for span, baseline in raw_spans
     )
     spans = tuple(
         InlineStyleSpan(
@@ -222,11 +242,7 @@ def _collect_styles(
 
     # Detect large font (heading by size)
     span_size = span.get("size") if hasattr(span, "get") else None
-    if (
-        page_font_size
-        and isinstance(span_size, (int, float))
-        and span_size > page_font_size * 1.3
-    ):
+    if page_font_size and isinstance(span_size, (int, float)) and span_size > page_font_size * 1.3:
         yield ("large", None)
 
     baseline_style = _baseline_style(span, line_baseline)
@@ -363,6 +379,7 @@ def _extract_page_blocks(
     filename: str,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    preserve_source_ids: bool = False,
 ) -> list[Block]:
     page_height = page.rect.height
     raw_blocks = page.get_text("blocks")
@@ -371,11 +388,19 @@ def _extract_page_blocks(
     # First apply zone margin filtering (geometric)
     zone_filtered = _filter_by_zone_margins(raw_blocks, page_height, footer_margin, header_margin)
     # Then apply existing heuristic filtering
-    filtered = _filter_margin_artifacts(zone_filtered, page_height)
+    filtered = (
+        zone_filtered
+        if preserve_source_ids
+        else _filter_margin_artifacts(zone_filtered, page_height)
+    )
     return [
         b
         for block in filtered
-        if (b := _structured_block(page, block, page_num, filename, page_font_size))
+        if (
+            b := _structured_block(
+                page, block, page_num, filename, page_font_size, preserve_source_ids
+            )
+        )
         is not None
     ]
 
@@ -387,6 +412,7 @@ def read_pages(
     *,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    preserve_source_ids: bool = False,
 ) -> Iterable[PagePayload]:
     """Yield ``PagePayload`` objects for each non-excluded page.
 
@@ -411,6 +437,7 @@ def read_pages(
                     os.path.basename(filepath),
                     footer_margin=footer_margin,
                     header_margin=header_margin,
+                    **({"preserve_source_ids": True} if preserve_source_ids else {}),
                 )
             yield PagePayload(number=page_num, blocks=blocks)
     finally:
@@ -1011,9 +1038,7 @@ def _should_merge_blocks(
     return False, "no_merge"
 
 
-_HEADING_STYLE_TAGS = frozenset(
-    {"bold", "italic", "small_caps", "caps", "uppercase", "large"}
-)
+_HEADING_STYLE_TAGS = frozenset({"bold", "italic", "small_caps", "caps", "uppercase", "large"})
 
 
 def _is_standalone_styled_heading(block: Block) -> bool:

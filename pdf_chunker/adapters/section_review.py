@@ -30,9 +30,11 @@ def source_structure(path: str, doc: dict[str, Any]) -> dict[str, Any]:
             ]
             for number, page in enumerate(pdf, 1):
                 layout = page.get_text("dict")
+                physical = {block[5]: block for block in page.get_text("blocks") if block[6] == 0}
                 blocks = [
                     {
-                        "index": index,
+                        "index": block.get("number", index),
+                        "raw_text": physical.get(block.get("number", index), [None] * 5)[4],
                         "bbox": list(block["bbox"]),
                         "text": "\n".join(
                             "".join(s["text"] for s in line.get("spans", ()))
@@ -49,7 +51,25 @@ def source_structure(path: str, doc: dict[str, Any]) -> dict[str, Any]:
                     for index, block in enumerate(layout.get("blocks", ()))
                     if block.get("type") == 0
                 ]
-                proof["pages"].append({"page": number, "text": page.get_text(), "blocks": blocks})
+                annotations = [
+                    {
+                        "xref": annotation.xref,
+                        "type": annotation.type[1],
+                        "bbox": list(annotation.rect),
+                        "text": str(annotation.info.get("content") or ""),
+                    }
+                    for annotation in page.annots() or ()
+                ]
+                proof["pages"].append(
+                    {
+                        "page": number,
+                        "height": page.rect.height,
+                        "text": page.get_text(),
+                        "blocks": blocks,
+                        "annotations": annotations,
+                        "image_count": len(page.get_images()),
+                    }
+                )
     else:
         # ponytail: existing EPUB navigation is already carried by extraction;
         # do not introduce a second EPUB reader or text normalization.
@@ -113,5 +133,16 @@ def write_questions(path: str, questions: list[dict[str, Any]]) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as stream:
         json.dump(questions, stream, ensure_ascii=False, indent=2)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def write_preservation(path: str, report: dict[str, Any]) -> None:
+    """Exclusive private accounting sidecar, never an implicit approval."""
+    import os
+
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        json.dump(report, stream, ensure_ascii=False)
         stream.flush()
         os.fsync(stream.fileno())

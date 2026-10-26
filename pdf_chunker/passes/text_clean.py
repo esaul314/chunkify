@@ -241,7 +241,12 @@ def _clean_block(
             # Entire block is a footer
             return {**block, "text": "", "inline_styles": None}, stripped_footers
 
-    cleaned_text = text_cleaning.clean_text(text)
+    if (block.get("source") or {}).get("raw_source"):
+        from pdf_chunker.preservation import normalize_source_text
+
+        cleaned_text = normalize_source_text(text)
+    else:
+        cleaned_text = text_cleaning.clean_text(text)
 
     original_styles = block.get("inline_styles")
     remapped_styles = original_styles

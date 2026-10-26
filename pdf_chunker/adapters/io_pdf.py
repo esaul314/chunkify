@@ -172,6 +172,7 @@ def _primary_blocks(
     footer_margin: float | None = None,
     header_margin: float | None = None,
     quality_report: dict[str, Any] | None = None,
+    preserve_source_pages: bool = False,
 ) -> list[dict[str, Any]]:
     """Extract blocks using the legacy parser with optional enhancement."""
 
@@ -188,6 +189,7 @@ def _primary_blocks(
                 footer_margin=footer_margin,
                 header_margin=header_margin,
                 quality_report=quality_report,
+                **({"preserve_source_pages": True} if preserve_source_pages else {}),
             )
         ]
 
@@ -240,6 +242,7 @@ def _all_blocks(
     footer_margin: float | None = None,
     header_margin: float | None = None,
     quality_report: dict[str, Any] | None = None,
+    preserve_source_pages: bool = False,
 ) -> list[dict[str, Any]]:
     """Return primary blocks, falling back to second extractor for gaps."""
 
@@ -251,6 +254,7 @@ def _all_blocks(
         footer_margin=footer_margin,
         header_margin=header_margin,
         quality_report=quality_report,
+        **({"preserve_source_pages": True} if preserve_source_pages else {}),
     )
     existing: set[int] = set()
     for block in primary:
@@ -470,6 +474,7 @@ def read(
     interactive: bool = False,
     footer_margin: float | None = None,
     header_margin: float | None = None,
+    preserve_source_pages: bool = False,
 ) -> dict[str, Any]:
     """Return a ``page_blocks`` document for the given PDF.
 
@@ -525,6 +530,7 @@ def read(
         footer_margin=footer_margin,
         header_margin=header_margin,
         quality_report=quality_report,
+        **({"preserve_source_pages": True} if preserve_source_pages else {}),
     )
     ocr_language = os.getenv("PDF_CHUNKER_OCR_LANGUAGE", "").strip()
     if ocr_language:

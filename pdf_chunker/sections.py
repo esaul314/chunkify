@@ -17,7 +17,7 @@ from typing import Any
 from pdf_chunker.inline_styles import normalize_spans
 from pdf_chunker.interactive import Decision, DecisionContext, DecisionKind
 
-DETECTOR_VERSION = "section-v2"
+DETECTOR_VERSION = "section-v3"
 ROLES = frozenset(
     {"body", "contents", "acknowledgments", "permissions", "references", "index", "unknown"}
 )
@@ -56,6 +56,11 @@ def block_identity(page: Any, index: int, block: Mapping[str, Any]) -> dict[str,
         "block_index": block.get("_section_block_index", index),
         "text_sha256": hashlib.sha256(str(block.get("text", "")).encode()).hexdigest(),
         "bbox": list(block.get("bbox") or ()),
+        **(
+            {"raw_source": block["source"]["raw_source"]}
+            if (block.get("source") or {}).get("raw_source")
+            else {}
+        ),
         **(
             {"source_page_range": list(block["source"]["page_range"])}
             if (block.get("source") or {}).get("page_range") is not None
@@ -257,6 +262,14 @@ def page_evidence(
             },
         )
     }
+    body_heading = any(_BODY_TITLE.fullmatch(line) for line in lines[:4])
+    if body_heading and _prose(text) and nav_role and nav and nav["page"] < page.get("page", 0):
+        return {
+            "role": "unknown",
+            "signals": ["body_heading", "substantive_prose", "conflicting_outline_range"],
+            "status": "pending",
+            "candidate_roles": sorted({"body", nav_role}),
+        }
     detected: list[tuple[str, list[str]]] = []
     for role in sorted(candidates):
         signals = _support(role, text)
@@ -499,7 +512,38 @@ def classify_document(
                 }
             elif raw_text.strip():
                 first_source = blocks[0].get("source", {}) if blocks else {}
-                blocks = [
+                physical = (
+                    [
+                        {
+                            "text": str(original.get("raw_text") or original["text"]),
+                            "type": "paragraph",
+                            "bbox": original.get("bbox"),
+                            "source": {
+                                **first_source,
+                                "page": page.get("page"),
+                                "method": "original_structure_recovery",
+                                "raw_source": {
+                                    "page": page.get("page"),
+                                    "block_index": original["index"],
+                                    "bbox": original.get("bbox", []),
+                                    "text_sha256": hashlib.sha256(
+                                        str(original.get("raw_text") or original["text"]).encode()
+                                    ).hexdigest(),
+                                    "span": [
+                                        0,
+                                        len(str(original.get("raw_text") or original["text"])),
+                                    ],
+                                },
+                            },
+                            "_section_block_index": original["index"],
+                            "_section_kind": "original_physical_block",
+                        }
+                        for original in raw.get("blocks", ())
+                    ]
+                    if first_source.get("raw_source")
+                    else []
+                )
+                blocks = physical or [
                     {
                         "text": raw_text,
                         "type": "paragraph",
