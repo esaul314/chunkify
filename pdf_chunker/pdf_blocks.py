@@ -382,7 +382,11 @@ def _extract_page_blocks(
     preserve_source_ids: bool = False,
 ) -> list[Block]:
     page_height = page.rect.height
-    raw_blocks = page.get_text("blocks")
+    raw_blocks = (
+        page.get_text("blocks", flags=fitz.TEXTFLAGS_BLOCKS)
+        if preserve_source_ids
+        else page.get_text("blocks")
+    )
     # Calculate baseline font size for heading detection
     page_font_size = _compute_page_font_size(page)
     # First apply zone margin filtering (geometric)

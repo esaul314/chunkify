@@ -49,12 +49,8 @@ def words(text):
     return Counter(re.findall(r"\w+", text.casefold()))
 
 
-def prepare(manifest_path, output):
-    assert Path(pdf_chunker.__file__).resolve().parent.parent == ROOT, "wrong converter root"
-    manifest = json.loads(Path(manifest_path).read_text())
-    out = Path(output)
-    out.mkdir(mode=0o700, parents=True)
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+def pilot_settings():
+    """Resolve this reviewed CPU composition without source-specific controls."""
     settings = yaml.safe_load((ROOT / "pipeline_rag.yaml").read_text())
     settings["pipeline"] = [p for p in settings["pipeline"] if p not in {"ai_enrich", "emit_jsonl"}]
     settings["pipeline"].insert(settings["pipeline"].index("split_semantic"), "section_detect")
@@ -62,6 +58,16 @@ def prepare(manifest_path, output):
     settings["options"]["section_detect"] = {"enabled": True, "recover_structural_text": True}
     settings["options"].pop("ai_enrich", None)
     settings["options"].pop("emit_jsonl", None)
+    return settings
+
+
+def prepare(manifest_path, output):
+    assert Path(pdf_chunker.__file__).resolve().parent.parent == ROOT, "wrong converter root"
+    manifest = json.loads(Path(manifest_path).read_text())
+    out = Path(output)
+    out.mkdir(mode=0o700, parents=True)
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    settings = pilot_settings()
     settings_sha = digest(settings)
     script_sha = sha(__file__)
     write(out / "settings.json", settings)
@@ -81,6 +87,7 @@ def prepare(manifest_path, output):
             assert sha(old["path"]) == old["sha256"], "original artifact drift"
         a = _input_artifact(str(path), PipelineSpec(**settings))
         raw_structure = a.payload["source_structure"]
+        write(out / f"{key}-input-snapshot.json", a.payload)
         write(out / f"{key}-original-structure.json", raw_structure)
         blocks = []
         for page in a.payload["pages"]:
@@ -132,6 +139,7 @@ def prepare(manifest_path, output):
                 [chunk],
                 max_chars=7000,
                 metadata_key="metadata",
+                source_preservation=result.meta["preservation"],
                 tag_configs={k: _grounded_tags(v, chunk["text"]) for k, v in vocabulary.items()},
             )
         ]

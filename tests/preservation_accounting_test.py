@@ -209,3 +209,148 @@ def test_distinct_sections_cannot_be_reordered():
     outputs[0]["metadata"]["section_id"] = "s2"
     outputs[1]["metadata"]["section_id"] = "s1"
     assert not finalize_rows(report, outputs)[0]["accepted"]
+
+
+def test_parent_page_range_covers_union_and_siblings_keep_exact_spans():
+    doc = bound_document(["First page."])
+    second = bound_document(["Second page."])
+    page = second["pages"][0]
+    page["page"] = 2
+    page["blocks"][0]["source"]["page"] = 2
+    page["blocks"][0]["source"]["raw_source"]["page"] = 2
+    doc["pages"].append(page)
+    raw = second["source_structure"]["pages"][0]
+    raw["page"] = 2
+    doc["source_structure"]["pages"].append(raw)
+    report = record_stage(initialize(doc, {}), "section_detect", doc)
+    rows = [row("First page.", part=0), row("\nSecond page.", part=1)]
+    for output in rows:
+        output["metadata"].update(page=1, page_range="1-2")
+    accepted, _ = finalize_rows(report, rows)
+    assert accepted["accepted"]
+    assert [{span["source_id"] for span in record["spans"]} for record in accepted["records"]] == [
+        {unit["source_id"]} for unit in report["source_units"]
+    ]
+    forged = row("First page.\nSecond page.")
+    forged["metadata"].update(page=1, page_range="1")
+    assert not finalize_rows(report, [forged])[0]["accepted"]
+
+
+def synthetic_classified_chunks(count=24):
+    from pdf_chunker.preservation import bind_source_metadata
+    from pdf_chunker.sections import classify_document
+
+    doc = bound_document([f"Invented occurrence {n} remains in order." for n in range(count)])
+    report = initialize(doc, {})
+    classified, _, _ = classify_document(doc, settings={})
+    report = record_stage(report, "section_detect", classified)
+    blocks = classified["pages"][0]["blocks"]
+    payload = {
+        "type": "chunks",
+        "items": [
+            {
+                "text": "\n".join(block["text"] for block in blocks),
+                "meta": {
+                    "chunk_id": "synthetic",
+                    "section_id": blocks[0]["section"]["section_id"],
+                    "section_role": blocks[0]["section"]["section_role"],
+                    "block_provenance": [
+                        entry for block in blocks for entry in block["source"]["block_provenance"]
+                    ],
+                },
+            }
+        ],
+    }
+    payload = bind_source_metadata(report, payload)
+    report = record_stage(report, "split_semantic", payload)
+    assert report["accepted"]
+    return payload["items"], report
+
+
+def test_generated_metadata_and_reserved_enrichment_partition_together():
+    import json
+
+    from pdf_chunker.passes.ai_enrich import _admit_chunks_for_jsonl
+    from pdf_chunker.passes.emit_jsonl import _canonical_rows
+
+    chunks, report = synthetic_classified_chunks()
+    source = chunks[0]["text"]
+    limit = 1800
+    parts = _admit_chunks_for_jsonl(
+        chunks,
+        source_preservation=report,
+        max_chars=limit,
+        metadata_key="metadata",
+        tag_configs={"topic": ["bounded-tag"]},
+    )
+    assert len(parts) > 1
+    assert "".join(part["text"] for part in parts) == source
+    assert all(len(part["meta"]["block_provenance"]) < 24 for part in parts)
+    for part in parts:
+        part["meta"].update(
+            tags=["bounded-tag"], utterance_type="statement_of_fact", enrichment_status="complete"
+        )
+        assert (
+            len(json.dumps({"text": part["text"], "metadata": part["meta"]}, ensure_ascii=False))
+            <= limit
+        )
+    accepted, rows = finalize_rows(
+        report,
+        _canonical_rows({"type": "chunks", "items": parts}, preserve_text=True),
+        max_chars=limit,
+    )
+    assert accepted["accepted"], accepted["pending"]
+    assert "".join(output["text"] for output in rows) == source
+    assert all(
+        "raw_source" not in entry
+        for output in rows
+        for entry in output["metadata"]["block_provenance"]
+    )
+    changed = deepcopy(chunks)
+    changed[0]["meta"]["arbitrary"] = "x" * 5000
+    with pytest.raises(ValueError, match="metadata exceeds"):
+        _admit_chunks_for_jsonl(
+            changed,
+            source_preservation=report,
+            max_chars=limit,
+            metadata_key="metadata",
+            tag_configs={},
+        )
+
+
+def test_actual_stub_enrichment_uses_source_partition_and_same_limits():
+    from pdf_chunker.config import PipelineSpec
+    from pdf_chunker.core_new import _run_passes
+    from pdf_chunker.framework import Artifact
+
+    class Client:
+        def __init__(self):
+            self.inputs = []
+
+        def classify_chunk_utterance(self, text, *, tag_configs):
+            self.inputs.append(text)
+            return {"classification": "question", "tags": ["bounded-tag"]}
+
+    chunks, report = synthetic_classified_chunks()
+    client = Client()
+    result, _ = _run_passes(
+        PipelineSpec(
+            pipeline=["ai_enrich", "emit_jsonl"],
+            options={
+                "ai_enrich": {
+                    "enabled": True,
+                    "client": client,
+                    "tag_configs": {"topic": ["bounded-tag"]},
+                },
+                "emit_jsonl": {"max_chars": 1800},
+            },
+        ),
+        Artifact(
+            payload={"type": "chunks", "items": chunks},
+            meta={"preservation": report, "semantic_pipeline": "canonical-v1"},
+        ),
+    )
+    assert len(client.inputs) > 1
+    assert "".join(client.inputs) == chunks[0]["text"]
+    assert result.meta["preservation"]["accepted"]
+    assert all(output["metadata"]["preservation_status"] == "checked" for output in result.payload)

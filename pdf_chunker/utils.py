@@ -426,7 +426,7 @@ def _build_metadata(
     if provenance:
         base_metadata["block_provenance"] = list(
             {
-                (entry["page"], tuple(entry["bbox"]), entry["text_sha256"]): entry
+                (entry.get("id"), entry["page"], tuple(entry["bbox"]), entry["text_sha256"]): entry
                 for entry in provenance
             }.values()
         )
@@ -436,6 +436,7 @@ def _build_metadata(
         if key
         not in {
             "filename",
+            "raw_source",  # Retained in the bound private unit map, never duplicated into rows.
             "page",
             "location",
             "page_range",

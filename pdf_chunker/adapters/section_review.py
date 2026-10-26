@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import platform
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,22 @@ def source_structure(path: str, doc: dict[str, Any]) -> dict[str, Any]:
     if Path(path).suffix.lower() == ".pdf":
         import fitz
 
+        from pdf_chunker.preservation import identity
+
+        package = Path(__file__).resolve().parents[1]
+        implementation = [
+            (str(module.relative_to(package)), hashlib.sha256(module.read_bytes()).hexdigest())
+            for module in sorted(package.rglob("*.py"))
+        ]
+        proof["reader"] = {
+            "implementation_sha256": identity(implementation),
+            "mode": "native-physical-blocks-v1",
+            "python": platform.python_version(),
+            "pymupdf": str(getattr(fitz, "VersionBind", "unknown")),
+            "mupdf": str(getattr(fitz, "VersionFitz", "unknown")),
+            "text_flags": int(fitz.TEXTFLAGS_BLOCKS),
+            "identity_basis": "native-block-tuples",
+        }
         with fitz.open(stream=raw, filetype="pdf") as pdf:
             proof["outline"] = [
                 {"level": level, "title": title, "page": page}
@@ -29,28 +46,47 @@ def source_structure(path: str, doc: dict[str, Any]) -> dict[str, Any]:
                 if page > 0
             ]
             for number, page in enumerate(pdf, 1):
-                layout = page.get_text("dict")
-                physical = {block[5]: block for block in page.get_text("blocks") if block[6] == 0}
-                blocks = [
+                flags = fitz.TEXTFLAGS_BLOCKS
+                physical = [
+                    block for block in page.get_text("blocks", flags=flags) if block[6] == 0
+                ]
+                layout = page.get_text("dict", flags=flags)
+                layout_blocks = [
                     {
                         "index": block.get("number", index),
-                        "raw_text": physical.get(block.get("number", index), [None] * 5)[4],
                         "bbox": list(block["bbox"]),
                         "text": "\n".join(
-                            "".join(s["text"] for s in line.get("spans", ()))
+                            "".join(span["text"] for span in line.get("spans", ()))
                             for line in block.get("lines", ())
                         ),
                         "fonts": sorted(
                             {
-                                (s.get("font"), s.get("size"))
+                                (span.get("font"), span.get("size"))
                                 for line in block.get("lines", ())
-                                for s in line.get("spans", ())
+                                for span in line.get("spans", ())
                             }
                         ),
                     }
                     for index, block in enumerate(layout.get("blocks", ()))
                     if block.get("type") == 0
                 ]
+                by_index = {block["index"]: block for block in layout_blocks}
+                blocks = []
+                for native in physical:
+                    styled = by_index.get(native[5])
+                    # Raw tuple coordinates/text are authoritative. Typography
+                    # is a separate projection and never replaces source identity.
+                    blocks.append(
+                        {
+                            "index": native[5],
+                            "bbox": list(native[:4]),
+                            "raw_text": native[4],
+                            "text": native[4].rstrip("\n"),
+                            "layout_text": styled["text"] if styled else None,
+                            "layout_bbox": styled["bbox"] if styled else None,
+                            "fonts": styled["fonts"] if styled else [],
+                        }
+                    )
                 annotations = [
                     {
                         "xref": annotation.xref,
@@ -64,8 +100,9 @@ def source_structure(path: str, doc: dict[str, Any]) -> dict[str, Any]:
                     {
                         "page": number,
                         "height": page.rect.height,
-                        "text": page.get_text(),
+                        "text": page.get_text(flags=flags),
                         "blocks": blocks,
+                        "layout_blocks": layout_blocks,
                         "annotations": annotations,
                         "image_count": len(page.get_images()),
                     }

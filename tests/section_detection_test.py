@@ -377,3 +377,36 @@ def test_raw_contents_recovery_preserves_merged_following_body(crosspage_range):
         reviewed = [answer(question, role="unknown", boundary=True) for question in pending]
         with pytest.raises(ValueError, match="stale"):
             classify_document(changed, settings={"recover_structural_text": True}, answers=reviewed)
+
+
+def test_stale_reference_outline_cannot_confidently_exclude_new_introduction():
+    doc = document(
+        [
+            "References\nSample (2001). Example (2002). Invented (2003).",
+            "Introduction\n"
+            + (
+                "This explanation cites 2001, 2002 and 2003 "
+                "while developing a substantive argument. "
+            )
+            * 8,
+        ],
+        outline=[{"title": "References", "page": 1}],
+    )
+    result, pending, _ = classify_document(doc, settings={})
+    assert section_roles(result) == ["references", "unknown"]
+    assert pending
+    assert result["pages"][1]["blocks"][0]["text"] == doc["pages"][1]["blocks"][0]["text"]
+
+
+def test_reader_and_pipeline_profile_change_invalidates_replay():
+    doc = document(
+        ["Acknowledgements\nWe thank our friends.\n1\n20\n30"],
+        outline=[{"title": "Contents", "page": 1}],
+    )
+    doc["source_structure"]["pipeline_settings_sha256"] = "first-reader-and-pipeline"
+    _, pending, _ = classify_document(doc, settings={})
+    assert pending
+    responses = [answer(question, role="unknown", boundary=0) for question in pending]
+    doc["source_structure"]["pipeline_settings_sha256"] = "different-reader-or-source-units"
+    with pytest.raises(ValueError, match="stale|unmatched"):
+        classify_document(doc, settings={}, answers=responses)

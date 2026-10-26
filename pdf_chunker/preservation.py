@@ -10,7 +10,7 @@ import hashlib
 import re
 import unicodedata
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple
 
 VERSION = "native-source-spans-v1"
@@ -31,6 +31,26 @@ def identity(value: Any) -> str:
     import json
 
     return sha(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
+
+
+def settings_identity(options: Mapping[str, Any], pipeline: Sequence[str], reader: Any) -> str:
+    """Bind actual stage order, effective reader and accounting algorithm."""
+    ignored = {
+        "answers",
+        "answers_path",
+        "questions_path",
+        "callback",
+        "interactive",
+        "output_path",
+        "preservation_path",
+    }
+    bound = {
+        name: {key: value for key, value in values.items() if key not in ignored}
+        for name, values in options.items()
+    }
+    return identity(
+        {"options": bound, "pipeline": list(pipeline), "reader": reader, "accounting": VERSION}
+    )
 
 
 def normalize_source_text(text: str) -> str:
@@ -126,6 +146,9 @@ def _page_units(payload: Mapping[str, Any], texts: dict[str, str]) -> list[dict[
                     "section_id": (block.get("section") or {}).get("section_id"),
                     "section_role": (block.get("section") or {}).get("section_role"),
                     "section_span": block.get("_section_span"),
+                    "block_ids": [
+                        entry["id"] for entry in source.get("block_provenance", ()) if "id" in entry
+                    ],
                     "method": source.get("method", "native"),
                 }
             )
@@ -186,7 +209,8 @@ def initialize(doc: Mapping[str, Any], settings: Mapping[str, Any]) -> dict[str,
             )
             if excluded:
                 exclusions.append({"source_id": key, "reason": "configured_geometric_exclusion"})
-            if _values(text) != _values(str(block["text"])):
+            layout_text = block.get("layout_text")
+            if layout_text is not None and _values(text) != _values(str(layout_text)):
                 pending.append({"source_id": key, "reason": "reader_font_text_disagreement"})
         for annotation in page.get("annotations", ()):
             if annotation.get("text"):
@@ -204,8 +228,11 @@ def initialize(doc: Mapping[str, Any], settings: Mapping[str, Any]) -> dict[str,
     report = {
         "schema": VERSION,
         "source_sha256": structure.get("source_sha256"),
+        "raw_manifest_sha256": identity(structure),
         "settings_sha256": structure.get("pipeline_settings_sha256"),
-        "reader": "native-physical-blocks-v1",
+        "reader": structure.get(
+            "reader", {"mode": "native-physical-blocks-v1", "version": "unbound"}
+        ),
         "source_filename": str(doc.get("source_path") or "").replace("\\", "/").rsplit("/", 1)[-1],
         "overlap_words": int((settings.get("split_semantic") or {}).get("overlap", 50)),
         "scope": (
@@ -237,7 +264,12 @@ def _page_check(report: dict[str, Any], units: list[dict[str, Any]]) -> list[dic
         if key not in raw:
             pending.append({"reason": "unbound_source_identity", "page": unit["page"]})
             continue
-        if unit["page"] != raw[key]["origin"]["page"] or unit["source_page"] != unit["page"]:
+        if (
+            type(unit["page"]) is not int
+            or type(unit["source_page"]) is not int
+            or unit["page"] != raw[key]["origin"]["page"]
+            or unit["source_page"] != unit["page"]
+        ):
             pending.append({"reason": "source_page_identity_mismatch", "source_id": key})
         grouped[key].append(report["texts"][unit["text"]])
         if not actual_order or actual_order[-1] != key:
@@ -317,7 +349,7 @@ def _match_output(
     raw = {unit["source_id"]: unit for unit in report["source_units"]}
     source_tokens = {key: tokens(report["texts"][value["text"]]) for key, value in raw.items()}
     offsets: dict[str, int] = defaultdict(int)
-    expected: dict[Any, list[tuple[str, str, Token]]] = defaultdict(list)
+    expected: dict[Any, list[tuple[str, str, Token, str | None]]] = defaultdict(list)
     for unit in page_stage["units"]:
         key = unit["source_id"]
         if key not in raw:
@@ -328,10 +360,20 @@ def _match_output(
             originals = source_tokens[key]
             if position >= len(originals) or originals[position].text != token.text:
                 return [], [{"reason": "unaccounted_classified_source_tokens", "source_id": key}]
-            expected[unit["section_id"]].append((token.text, key, originals[position]))
+            expected[unit["section_id"]].append(
+                (
+                    token.text,
+                    key,
+                    originals[position],
+                    unit.get("block_ids", [None])[0] if unit.get("block_ids") else None,
+                )
+            )
             offsets[key] += 1
     values_by_section = {
         section: [value[0] for value in stream] for section, stream in expected.items()
+    }
+    roles_by_section = {
+        unit["section_id"]: unit.get("section_role") for unit in page_stage["units"]
     }
     cursor: dict[Any, int] = defaultdict(int)
     records: list[dict[str, Any]] = []
@@ -357,7 +399,7 @@ def _match_output(
         values = values_by_section.get(section, [])
         output = tokens(logical["text"])
         at, transitions = 0, 0
-        pairs: list[tuple[str, int, int, int, int, str]] = []
+        pairs: list[tuple[str, int, int, int, int, str, str | None]] = []
         initial_cursor = cursor[section]
         context_words = 0
         while at < len(output):
@@ -398,7 +440,7 @@ def _match_output(
                     pending.append({"reason": "overlap_budget_exceeded", "chunk_id": logical["id"]})
                     break
             for offset in range(count):
-                _, key, original = stream[start + offset]
+                _, key, original, block_id = stream[start + offset]
                 current = output[at + offset]
                 for char in range(len(current.text)):
                     raw_pair = (
@@ -412,7 +454,15 @@ def _match_output(
                         else (current.start + char, current.start + char + 1)
                     )
                     pairs.append(
-                        (key, raw_pair[0], raw_pair[1], output_pair[0], output_pair[1], kind)
+                        (
+                            key,
+                            raw_pair[0],
+                            raw_pair[1],
+                            output_pair[0],
+                            output_pair[1],
+                            kind,
+                            block_id,
+                        )
                     )
             at += count
             if kind == "source":
@@ -426,7 +476,7 @@ def _match_output(
         for part in logical["parts"]:
             end = begin + len(part["text"])
             spans: list[dict[str, Any]] = []
-            for key, before, before_end, after, after_end, kind in pairs:
+            for key, before, before_end, after, after_end, kind, block_id in pairs:
                 if after_end <= begin or after >= end:
                     continue
                 local = max(after, begin) - begin
@@ -435,6 +485,7 @@ def _match_output(
                     spans
                     and spans[-1]["source_id"] == key
                     and spans[-1]["kind"] == kind
+                    and spans[-1].get("block_id") == block_id
                     and before >= spans[-1]["source_span"][0]
                     and local >= spans[-1]["output_span"][0]
                 ):
@@ -444,6 +495,7 @@ def _match_output(
                     spans.append(
                         {
                             "source_id": key,
+                            "block_id": block_id,
                             "source_span": [before, before_end],
                             "output_span": [local, local_end],
                             "kind": kind,
@@ -451,12 +503,17 @@ def _match_output(
                     )
             meta = _metadata(part)
             pages = logical_pages
+            wanted_role = roles_by_section.get(section)
+            if wanted_role is not None and meta.get("section_role") not in (None, wanted_role):
+                pending.append(
+                    {"reason": "serialized_section_role_mismatch", "chunk_id": logical["id"]}
+                )
             filename = report.get("source_filename")
             if meta.get("source_file") is not None and meta["source_file"] != filename:
                 pending.append(
                     {"reason": "serialized_source_filename_mismatch", "chunk_id": logical["id"]}
                 )
-            if meta.get("page") is not None and pages and meta["page"] != min(pages):
+            if meta.get("page") is not None and pages and meta["page"] not in pages:
                 pending.append(
                     {"reason": "serialized_source_page_mismatch", "chunk_id": logical["id"]}
                 )
@@ -475,6 +532,11 @@ def _match_output(
                 "settings_sha256": report["settings_sha256"],
                 "contract": VERSION,
                 "metadata_scope": "logical_parent",
+                "block_ids": list(
+                    dict.fromkeys(span["block_id"] for span in spans if span.get("block_id"))
+                ),
+                "logical_text_sha256": sha(logical["text"]),
+                "logical_span": [begin, end],
                 "chunk_id": logical["id"],
                 "chunk_part": meta.get("chunk_part"),
                 "section_id": section,
@@ -504,6 +566,9 @@ def record_stage(report: Mapping[str, Any], name: str, payload: Any) -> dict[str
         "stages": list(report["stages"]),
     }
     if isinstance(payload, Mapping) and payload.get("type") == "page_blocks":
+        if payload.get("source_block_identities") is not None:
+            result["block_identities"] = dict(payload["source_block_identities"])
+            result["block_identities_sha256"] = identity(result["block_identities"])
         units = _page_units(payload, result["texts"])
         pending = _page_check(result, units)
         transformations = []
@@ -545,6 +610,109 @@ def record_stage(report: Mapping[str, Any], name: str, payload: Any) -> dict[str
     return result
 
 
+def bind_source_metadata(report: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Attach only actual contributors before serialized-size admission."""
+    records, _ = _match_output(dict(report), payload)
+    items = list(payload.get("items", ()))
+    if len(records) != len(items):
+        raise ValueError("source contributor binding requires logical chunks")
+    raw = {unit["source_id"]: unit for unit in report["source_units"]}
+    result = []
+    for item, record in zip(items, records, strict=True):
+        meta = _metadata(item)
+        actual = set(record.get("block_ids", ()))
+        if actual and isinstance(meta.get("block_provenance"), list):
+            meta["block_provenance"] = [
+                value for value in meta["block_provenance"] if value.get("id") in actual
+            ]
+        pages = {raw[span["source_id"]]["origin"]["page"] for span in record["spans"]}
+        if pages:
+            if meta.get("page") not in pages:
+                meta["page"] = min(pages)
+            meta["page_range"] = (
+                str(min(pages)) if len(pages) == 1 else f"{min(pages)}-{max(pages)}"
+            )
+        meta["preservation_record_id"] = "0" * 24
+        meta["preservation_status"] = "pending"
+        meta["preservation_manifest_sha256"] = report["raw_manifest_sha256"]
+        meta["preservation_unit_map_sha256"] = report.get("block_identities_sha256")
+        key = "meta" if "meta" in item else "metadata"
+        result.append({**item, key: meta})
+    return {**payload, "items": result}
+
+
+def admit_source_chunks(
+    chunks: Sequence[Mapping[str, Any]],
+    report: Mapping[str, Any],
+    *,
+    fits: Callable[[str, Mapping[str, Any]], bool],
+) -> list[dict[str, Any]]:
+    """Partition internally bound provenance together with exact text slices."""
+    bound = {
+        (record["chunk_id"], record["text_sha256"]): record
+        for record in report.get("records", ())
+        if record.get("chunk_part") is None
+    }
+    result = []
+    for chunk in chunks:
+        text = str(chunk["text"])
+        meta = _metadata(chunk)
+        record = bound.get((meta.get("chunk_id"), sha(text)))
+        if record is None or meta.get("preservation_unit_map_sha256") != report.get(
+            "block_identities_sha256"
+        ):
+            raise ValueError("unbound source metadata cannot use provenance partitioning")
+        if fits(text, meta):
+            result.append(dict(chunk))
+            continue
+        if "chunk_part" in meta:
+            raise ValueError("cannot split a chunk that already has chunk_part metadata")
+        begin, part = 0, 0
+
+        def portion(
+            end: int,
+            begin: int,
+            part: int,
+            record: Mapping[str, Any] = record,
+            meta: Mapping[str, Any] = meta,
+        ) -> dict[str, Any]:
+            ids = {
+                span["block_id"]
+                for span in record["spans"]
+                if span.get("block_id")
+                and span["output_span"][1] > begin
+                and span["output_span"][0] < end
+            }
+            return {
+                **meta,
+                "chunk_part": part,
+                "block_provenance": [
+                    entry for entry in meta.get("block_provenance", ()) if entry.get("id") in ids
+                ],
+            }
+
+        while begin < len(text):
+            low, high, best = begin + 1, len(text), begin
+            while low <= high:
+                middle = (low + high) // 2
+                if fits(text[begin:middle], portion(middle, begin, part)):
+                    best, low = middle, middle + 1
+                else:
+                    high = middle - 1
+            if best == begin:
+                raise ValueError("serialized metadata exceeds JSONL record limit before enrichment")
+            fields = portion(best, begin, part)
+            value = {**chunk, "text": text[begin:best]}
+            for key in ("meta", "metadata"):
+                if key in chunk:
+                    value[key] = dict(fields)
+            if "meta" not in value and "metadata" not in value:
+                value["meta"] = fields
+            result.append(value)
+            begin, part = best, part + 1
+    return result
+
+
 def finalize_rows(
     report: Mapping[str, Any],
     rows: Sequence[Mapping[str, Any]],
@@ -567,6 +735,11 @@ def finalize_rows(
     output = []
     for row, record in zip(rows, records, strict=True):
         meta = _metadata(row)
+        if record.get("block_ids") and isinstance(meta.get("block_provenance"), list):
+            actual_ids = set(record["block_ids"])
+            meta["block_provenance"] = [
+                entry for entry in meta["block_provenance"] if entry.get("id") in actual_ids
+            ]
         meta["preservation_record_id"] = record["record_id"]
         meta["preservation_status"] = "pending"
         key = next(
@@ -596,3 +769,122 @@ def finalize_rows(
         )
         row[key]["preservation_status"] = "checked" if result["accepted"] else "pending"
     return result, output
+
+
+def verify_preservation(
+    report: Mapping[str, Any],
+    *,
+    source_structure: Mapping[str, Any],
+    adapter_document: Mapping[str, Any],
+    classified_document: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Recompute witnesses from independently read raw facts, never producer flags."""
+    from pdf_chunker.sections import block_identity
+
+    options = settings.get("options") or {}
+    pipeline = settings.get("pipeline") or ()
+    expected_settings = settings_identity(options, pipeline, source_structure.get("reader"))
+    raw = {**source_structure, "pipeline_settings_sha256": expected_settings}
+    expected = initialize({**adapter_document, "source_structure": raw}, options)
+    if report.get("schema") != VERSION:
+        raise ValueError("source accounting version mismatch")
+    for key in (
+        "source_sha256",
+        "settings_sha256",
+        "raw_manifest_sha256",
+        "source_filename",
+        "reader",
+        "limits",
+        "source_units",
+        "exclusions",
+        "overlap_words",
+    ):
+        if report.get(key) != expected.get(key):
+            raise ValueError(f"source accounting raw/settings mismatch: {key}")
+    text_table = report.get("texts")
+    if not isinstance(text_table, Mapping):
+        raise ValueError("source accounting text table missing")
+    total = 0
+    for key, value in text_table.items():
+        if not isinstance(value, str) or sha(value) != key:
+            raise ValueError("source accounting text hash mismatch")
+        total += len(value)
+    if total > MAX_CHARACTERS * 8:
+        raise ValueError("source accounting retained-text limit exceeded")
+    expected["texts"] = dict(text_table)
+    stages = report.get("stages") or []
+    wanted_names = [
+        "adapter",
+        *(name for name in pipeline if name != "emit_jsonl"),
+        "serialized_rows",
+    ]
+    if [stage.get("name") for stage in stages] != wanted_names:
+        raise ValueError("source accounting stage order mismatch")
+    for stage in stages:
+        if "units" in stage:
+            units = stage["units"]
+            if not isinstance(units, list) or len(units) > MAX_UNITS:
+                raise ValueError("source accounting stage unit limit exceeded")
+            for unit in units:
+                if unit.get("text") not in text_table:
+                    raise ValueError("source accounting stage text is unbound")
+            pending = _page_check(expected, units)
+            expected["pending"].extend({"stage": stage["name"], **value} for value in pending)
+    actual_units = _page_units(classified_document, expected["texts"])
+    page_stages = [stage for stage in stages if "units" in stage]
+    if not page_stages or page_stages[-1]["units"] != actual_units:
+        raise ValueError("source accounting classified snapshot differs")
+    full_map = {}
+    for page in classified_document.get("pages", ()):
+        for index, block in enumerate(page.get("blocks", ())):
+            if not (block.get("source") or {}).get("raw_source"):
+                continue
+            entry = block_identity(page["page"], index, block)
+            key = identity(entry)[:24]
+            full_map[key] = entry
+            declared = (block.get("source") or {}).get("block_provenance") or []
+            if len(declared) != 1 or declared[0].get("id") != key:
+                raise ValueError("source accounting block reference mismatch")
+    if full_map != report.get("block_identities", {}):
+        raise ValueError("source accounting private unit map differs")
+    if identity(full_map) != report.get("block_identities_sha256"):
+        raise ValueError("source accounting private unit map hash differs")
+    expected["block_identities"] = full_map
+    expected["block_identities_sha256"] = identity(full_map)
+    expected["stages"] = page_stages
+    emission = options.get("emit_jsonl") or {}
+    verified, rebound = finalize_rows(
+        expected,
+        rows,
+        max_chars=emission.get("max_chars", 8000),
+        max_row_bytes=emission.get("max_row_bytes"),
+    )
+    if verified.get("records") != report.get("records"):
+        raise ValueError("source accounting serialized span witnesses differ")
+    for original, computed, record in zip(rows, rebound, verified["records"], strict=True):
+        before, after = _metadata(original), _metadata(computed)
+        for key in (
+            "preservation_record_id",
+            "preservation_manifest_sha256",
+            "preservation_unit_map_sha256",
+            "preservation_status",
+        ):
+            if before.get(key) != after.get(key):
+                raise ValueError(f"source accounting serialized reference differs: {key}")
+        actual = {
+            entry.get("id") for entry in before.get("block_provenance", ()) if entry.get("id")
+        }
+        if actual != set(record.get("block_ids", ())):
+            raise ValueError("source accounting serialized contributor set differs")
+    return {
+        "accepted": verified["accepted"],
+        "pending": verified["pending"],
+        "source_sha256": verified["source_sha256"],
+        "settings_sha256": verified["settings_sha256"],
+        "raw_manifest_sha256": verified["raw_manifest_sha256"],
+        "records": len(rows),
+        "source_units": len(expected["source_units"]),
+        "raw_and_serialized_witnesses_recomputed": True,
+    }

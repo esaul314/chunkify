@@ -248,10 +248,8 @@ def _with_pass_options(
     return base
 
 
-def _run_passes(
-    spec: PipelineSpec, a: Artifact[object]
-) -> tuple[Artifact[object], dict[str, float]]:
-    """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
+def _pass_configurations(spec: PipelineSpec) -> list[tuple[Pass, Mapping[str, Any]]]:
+    """Prepare the same callback/admission settings for library and CLI runners."""
     configs = []
     for name in spec.pipeline:
         overrides = dict(spec.options.get(name, {}))
@@ -273,6 +271,68 @@ def _run_passes(
             overrides["jsonl_max_row_bytes"] = emit_options.get("max_row_bytes")
             overrides["jsonl_metadata_key"] = metadata_key
         configs.append(_prepare_pass(registry()[name], overrides))
+    return configs
+
+
+def _finish_source_pass(
+    name: str,
+    seeded: Artifact[object],
+    result: Artifact[object],
+    overrides: Mapping[str, Any],
+    spec: PipelineSpec,
+) -> Artifact[object]:
+    """One source-accounting boundary for terminal and data-first execution."""
+    if (seeded.meta or {}).get("preservation"):
+        from pdf_chunker.preservation import finalize_rows, record_stage
+
+        report = cast(dict[str, Any], (seeded.meta or {})["preservation"])
+        payload = result.payload
+        if name == "split_semantic" and isinstance(payload, dict):
+            from pdf_chunker.preservation import bind_source_metadata
+
+            payload = bind_source_metadata(report, payload)
+        if name == "emit_jsonl":
+            if not isinstance(payload, list):
+                raise TypeError("preservation emission requires serialized rows")
+            from pdf_chunker.passes.emit_jsonl import EmitConfig
+
+            defaults = EmitConfig.from_env()
+            emission = spec.options.get("emit_jsonl") or {}
+            report, payload = finalize_rows(
+                report,
+                payload,
+                max_chars=emission.get("max_chars", defaults.max_chars),
+                max_row_bytes=emission.get("max_row_bytes", defaults.max_row_bytes),
+            )
+        else:
+            report = record_stage(report, name, payload)
+        result = Artifact(payload=payload, meta={**(result.meta or {}), "preservation": report})
+    if name == "section_detect" and overrides.get("questions_path"):
+        from pdf_chunker.adapters.section_review import write_questions
+
+        write_questions(
+            overrides["questions_path"],
+            cast(list[dict[str, Any]], (result.meta or {}).get("section_questions", [])),
+        )
+    return result
+
+
+def _guard_source_pass(name: str, artifact: Artifact[object], overrides: Mapping[str, Any]) -> None:
+    preservation_before = (artifact.meta or {}).get("preservation")
+    if (
+        name == "ai_enrich"
+        and overrides.get("enabled")
+        and isinstance(preservation_before, Mapping)
+        and preservation_before.get("pending")
+    ):
+        raise ValueError("unresolved source preservation must be reviewed before enrichment")
+
+
+def _run_passes(
+    spec: PipelineSpec, a: Artifact[object]
+) -> tuple[Artifact[object], dict[str, float]]:
+    """Run pipeline passes declared in ``spec`` capturing per-pass timings."""
+    configs = _pass_configurations(spec)
 
     def _apply(
         acc: tuple[Artifact[object], dict[str, float]],
@@ -281,60 +341,14 @@ def _run_passes(
         artifact, timings = acc
         p, overrides = config
         _validate_payload_shape(artifact.payload, p.name, phase="input")
-        preservation_before = (artifact.meta or {}).get("preservation")
-        if (
-            p.name == "ai_enrich"
-            and overrides.get("enabled")
-            and isinstance(preservation_before, Mapping)
-            and preservation_before.get("pending")
-        ):
-            raise ValueError("unresolved source preservation must be reviewed before enrichment")
+        _guard_source_pass(p.name, artifact, overrides)
         seeded = Artifact(
             payload=artifact.payload,
             meta=_with_pass_options(artifact.meta, p.name, overrides),
         )
         result, updated_timings = _time_step((seeded, timings), p)
         _validate_payload_shape(result.payload, p.name, phase="output")
-        if (seeded.meta or {}).get("preservation"):
-            from pdf_chunker.preservation import finalize_rows, record_stage
-
-            report = cast(dict[str, Any], (seeded.meta or {})["preservation"])
-            payload = result.payload
-            if p.name == "split_semantic" and isinstance(payload, dict):
-                items = []
-                for item in payload.get("items", ()):
-                    item = dict(item)
-                    key = "meta" if "meta" in item else "metadata"
-                    item[key] = {
-                        **(item.get(key) or {}),
-                        "preservation_record_id": "0" * 24,
-                        "preservation_status": "pending",
-                    }
-                    items.append(item)
-                payload = {**payload, "items": items}
-            if p.name == "emit_jsonl":
-                if not isinstance(payload, list):
-                    raise TypeError("preservation emission requires serialized rows")
-                from pdf_chunker.passes.emit_jsonl import EmitConfig
-
-                defaults = EmitConfig.from_env()
-                emission = spec.options.get("emit_jsonl") or {}
-                report, payload = finalize_rows(
-                    report,
-                    payload,
-                    max_chars=emission.get("max_chars", defaults.max_chars),
-                    max_row_bytes=emission.get("max_row_bytes", defaults.max_row_bytes),
-                )
-            else:
-                report = record_stage(report, p.name, payload)
-            result = Artifact(payload=payload, meta={**(result.meta or {}), "preservation": report})
-        if p.name == "section_detect" and overrides.get("questions_path"):
-            from pdf_chunker.adapters.section_review import write_questions
-
-            write_questions(
-                overrides["questions_path"],
-                cast(list[dict[str, Any]], (result.meta or {}).get("section_questions", [])),
-            )
+        result = _finish_source_pass(p.name, seeded, result, overrides, spec)
         return result, updated_timings
 
     initial: tuple[Artifact[object], dict[str, float]] = (a, {})
@@ -472,40 +486,20 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[obj
         payload = {**payload, "document_metadata": document_metadata}
     if (spec_opts.get("section_detect") or {}).get("enabled", False):
         from pdf_chunker.adapters.section_review import source_structure
-        from pdf_chunker.sections import digest
 
         structure = structure or source_structure(abs_path, payload)
         import hashlib
 
         if hashlib.sha256(Path(abs_path).read_bytes()).hexdigest() != structure["source_sha256"]:
             raise ValueError("source changed during structural extraction")
-        bound_settings = {
-            step: {
-                key: value
-                for key, value in options.items()
-                if key
-                not in {
-                    "answers",
-                    "answers_path",
-                    "questions_path",
-                    "callback",
-                    "interactive",
-                    "output_path",
-                    "preservation_path",
-                }
-            }
-            for step, options in spec_opts.items()
-        }
-        structure["pipeline_settings_sha256"] = digest(
-            {
-                "pipeline": bound_settings,
-                "source_reader": "native-physical-blocks-v1",
-                "accounting": "native-source-spans-v1",
-            }
+        from pdf_chunker.preservation import settings_identity
+
+        structure["pipeline_settings_sha256"] = settings_identity(
+            spec_opts, (spec or PipelineSpec()).pipeline, structure.get("reader")
         )
         payload = {**payload, "source_structure": structure}
     meta: dict[str, Any] = {"metrics": {}, "input": abs_path}
-    if structure is not None:
+    if structure is not None and is_pdf:
         from pdf_chunker.preservation import initialize
 
         meta["preservation"] = initialize(payload, spec_opts)
@@ -559,12 +553,18 @@ def convert(path: str, spec: PipelineSpec) -> list[Chunk]:
     run_spec = PipelineSpec(pipeline=steps, options=spec.options)
     artifact, _ = _run_passes(run_spec, artifact)
     preservation = (artifact.meta or {}).get("preservation")
-    if isinstance(preservation, Mapping) and preservation.get("pending"):
+    if isinstance(preservation, Mapping):
         report_destination = (run_spec.options.get("section_detect") or {}).get("preservation_path")
-        if not report_destination or "emit_jsonl" not in run_spec.pipeline:
-            raise ValueError(
-                "unresolved source preservation; inspect a private preservation_path sidecar"
-            )
+        retained = bool(report_destination and "emit_jsonl" in run_spec.pipeline)
+        if preservation.get("pending") and not retained:
+            raise ValueError("unresolved source preservation requires a private preservation_path")
+        if not retained:
+            payload = artifact.payload
+            if isinstance(payload, list):
+                for row in payload:
+                    for metadata in row.values():
+                        if isinstance(metadata, dict) and "preservation_status" in metadata:
+                            metadata["preservation_status"] = "preview"
     return _rows_from_payload(artifact.payload)
 
 
@@ -745,6 +745,9 @@ def _meta_with_warnings(
     """Return meta merged with options and warning indicators."""
     gen_meta = _generate_metadata_enabled(spec)
     warnings = _collect_warnings(a, spec, generate_metadata=gen_meta)
+    preservation = (a.meta or {}).get("preservation")
+    if isinstance(preservation, Mapping) and preservation.get("pending"):
+        warnings.append("source_preservation_pending")
     return {**(a.meta or {}), "options": opts, "warnings": warnings}
 
 
@@ -761,14 +764,13 @@ def run_convert(
     if trace:
         run_meta["trace_transformations"] = True
     a = Artifact(payload=a.payload, meta=run_meta)
-    pass_configs = [
-        _prepare_pass(registry()[name], spec.options.get(name, {})) for name in run_spec.pipeline
-    ]
+    pass_configs = _pass_configurations(run_spec)
     passes = [configured for configured, _ in pass_configs]
     environment = collect_environment(passes)
     timings: dict[str, float] = {}
     try:
         for p, pass_options in pass_configs:
+            _guard_source_pass(p.name, a, pass_options)
             seeded = Artifact(
                 payload=a.payload,
                 meta=_with_pass_options(a.meta, p.name, pass_options),
@@ -778,6 +780,7 @@ def run_convert(
                 emit_trace.record_call(p.name)
             a = _timed(p, seeded, timings)
             _validate_payload_shape(a.payload, p.name, phase="output")
+            a = _finish_source_pass(p.name, seeded, a, pass_options, run_spec)
             if trace:
                 emit_trace.write_snapshot(p.name, _trace_view(a.payload, trace))
                 emit_trace.write_dups(p.name, a.payload)
@@ -791,6 +794,26 @@ def run_convert(
         )
         write_run_report(spec, report)
         raise
+    if (a.meta or {}).get("preservation"):
+        from pdf_chunker.adapters.section_review import write_preservation
+
+        report_destination = (spec.options.get("section_detect") or {}).get("preservation_path")
+        if not report_destination:
+            output = (spec.options.get("emit_jsonl") or {}).get("output_path")
+            report_destination = (
+                str(output) + ".preservation.json"
+                if output
+                else str(
+                    (spec.options.get("run_report") or {}).get("output_path", "run_report.json")
+                )
+                + ".preservation.json"
+            )
+        write_preservation(
+            str(report_destination), cast(dict[str, Any], (a.meta or {})["preservation"])
+        )
+        a = Artifact(
+            payload=a.payload, meta={**(a.meta or {}), "preservation_path": str(report_destination)}
+        )
     _maybe_emit_jsonl(a, spec, timings)
     meta = _meta_with_warnings(a, spec, opts)
     report = assemble_report(timings, meta, passes, environment=environment)

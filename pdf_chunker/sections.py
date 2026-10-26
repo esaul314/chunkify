@@ -366,11 +366,13 @@ def _raw_covers_extracted(raw_text: str, blocks: Sequence[Mapping[str, Any]], pa
             return False
         if any(item.get("page") != page for item in (source.get("block_provenance") or ())):
             return False
-    tokens = iter(re.findall(r"\w+|[^\w\s]", raw_text.casefold()))
+    from pdf_chunker.preservation import tokens as source_tokens
+
+    original = iter(token.text for token in source_tokens(raw_text.casefold()))
     extracted = "\n".join(str(block.get("text", "")) for block in blocks)
     return all(
-        any(candidate == token for candidate in tokens)
-        for token in re.findall(r"\w+|[^\w\s]", extracted.casefold())
+        any(candidate == token.text for candidate in original)
+        for token in source_tokens(extracted.casefold())
     )
 
 
@@ -477,6 +479,7 @@ def classify_document(
     raw_pages = {p["page"]: p for p in structure.get("pages", ())}
     outline = structure.get("outline") or ()
     pages, pending, decisions, used = [], [], [], set()
+    source_identities: dict[str, dict[str, Any]] = {}
     previous, previous_text, section_id = None, "", ""
     parts = []
     for page in doc.get("pages", ()):
@@ -617,6 +620,19 @@ def classify_document(
             )[:20]
         annotated = []
         for block, identity in zip(blocks, identities, strict=True):
+            provenance = identity
+            if identity.get("raw_source"):
+                key = digest(identity)[:24]
+                if key in source_identities and source_identities[key] != identity:
+                    raise ValueError("source identity digest collision")
+                source_identities[key] = identity
+                provenance = {
+                    "id": key,
+                    "page": identity["page"],
+                    "block_index": identity["block_index"],
+                    "bbox": identity["bbox"],
+                    "text_sha256": identity["text_sha256"],
+                }
             section = {
                 "section_role": evidence["role"],
                 "section_id": section_id,
@@ -635,7 +651,7 @@ def classify_document(
                     "source": {
                         **(block.get("source") or {}),
                         **section,
-                        "block_provenance": [identity],
+                        "block_provenance": [provenance],
                     },
                 }
             )
@@ -643,4 +659,13 @@ def classify_document(
         previous, previous_text = evidence, text
     if set(answer_map) != used:
         raise ValueError("stale section answers do not match current source/questions")
-    return ({**doc, "pages": pages, "section_detection_enabled": True}, pending, decisions)
+    return (
+        {
+            **doc,
+            "pages": pages,
+            "section_detection_enabled": True,
+            "source_block_identities": source_identities,
+        },
+        pending,
+        decisions,
+    )

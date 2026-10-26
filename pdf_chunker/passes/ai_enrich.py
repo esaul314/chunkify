@@ -170,6 +170,7 @@ def _admit_chunks_for_jsonl(
     metadata_key: str,
     tag_configs: Mapping[str, Iterable[str]],
     max_row_bytes: int | None = None,
+    source_preservation: Mapping[str, Any] | None = None,
 ) -> Chunks:
     """Losslessly split against complete-row character and optional UTF-8 budgets.
 
@@ -180,6 +181,23 @@ def _admit_chunks_for_jsonl(
     if max_row_bytes is not None and (type(max_row_bytes) is not int or max_row_bytes <= 0):
         raise ValueError("max_row_bytes must be a positive integer or None")
     tags = sorted(_valid_tags(_effective_tag_configs(tag_configs)))
+    if source_preservation is not None:
+        from pdf_chunker.preservation import admit_source_chunks
+
+        def fits(text: str, metadata: Mapping[str, Any]) -> bool:
+            projected = {
+                **metadata,
+                "utterance_type": "statement_of_fact",
+                "tags": tags,
+                "enrichment_status": "complete",
+            }
+            return _record_fits(
+                _serialized_record(text, projected, metadata_key),
+                max_chars=max_chars,
+                max_row_bytes=max_row_bytes,
+            )
+
+        return admit_source_chunks(chunks, source_preservation, fits=fits)
     result: Chunks = []
     for chunk in chunks:
         text = chunk.get("text", "")
@@ -889,12 +907,16 @@ class _AiEnrichPass:
         max_row_bytes = options.get("jsonl_max_row_bytes")
         metadata_key = options.get("jsonl_metadata_key", "metadata")
         if isinstance(max_chars, int) and max_chars > 0:
+            source_preservation = (a.meta or {}).get("preservation")
             admitted = _admit_chunks_for_jsonl(
                 chunks,
                 max_chars=max_chars,
                 metadata_key=str(metadata_key),
                 tag_configs=tag_configs,
                 max_row_bytes=max_row_bytes,
+                source_preservation=(
+                    source_preservation if isinstance(source_preservation, Mapping) else None
+                ),
             )
             if "verified_joplin_markdown" in (a.meta or {}) and len(admitted) != len(chunks):
                 raise ValueError(

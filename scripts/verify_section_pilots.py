@@ -38,6 +38,11 @@ def verify(directory):
     directory = Path(directory)
     receipt = load(directory / "cpu-acceptance.json")
     manifest = load(directory / "frozen-inputs.json")
+    from scripts.prepare_section_pilots import pilot_settings
+
+    # Settings come from the reviewed converter composition, not invented exclusions
+    # in a producer-authored receipt.
+    assert load(directory / "settings.json") == pilot_settings(), "reviewed CPU settings differ"
     assert receipt["offline_accepted"] is True
     result = {"cpu_acceptance_sha256": sha(directory / "cpu-acceptance.json"), "books": {}}
     for key, book in receipt["books"].items():
@@ -53,6 +58,25 @@ def verify(directory):
         classified = load(directory / f"{key}-classified-blocks.json")
         raw = load(directory / f"{key}-original-structure.json")
         raw_pages = {page["page"]: page for page in raw["pages"]}
+        from pdf_chunker.adapters.section_review import source_structure
+        from pdf_chunker.preservation import verify_preservation
+
+        # Re-read the original bytes with the recorded effective native reader.
+        # Saved sidecars and producer acceptance booleans are never the raw authority.
+        fresh = source_structure(book["source"], {})
+        expected_raw = {
+            key: value for key, value in raw.items() if key != "pipeline_settings_sha256"
+        }
+        assert json.loads(json.dumps(fresh)) == expected_raw, "original raw reader facts differ"
+        preserved = verify_preservation(
+            load(directory / f"{key}-preservation.json"),
+            source_structure=fresh,
+            adapter_document=load(directory / f"{key}-input-snapshot.json"),
+            classified_document={"type": "page_blocks", "pages": classified},
+            rows=rows,
+            settings=load(directory / "settings.json"),
+        )
+        assert preserved["accepted"], "unresolved raw-to-serialized preservation"
         origins = {
             identity(entry): block
             for page in classified
@@ -100,6 +124,7 @@ def verify(directory):
                 recovered.append(origin["page"])
         result["books"][key] = {
             "records": len(rows),
+            "ordered_source_preservation": preserved,
             "logical_chunks": len(logical),
             "bound_block_identities": len(origins),
             "ordered_block_token_coverage_missing": missing,
@@ -109,7 +134,9 @@ def verify(directory):
             "all_source_and_historical_artifact_hashes_unchanged": True,
         }
     result["accepted"] = all(
-        not b["ordered_block_token_coverage_missing"] for b in result["books"].values()
+        b["ordered_source_preservation"]["accepted"]
+        and not b["ordered_block_token_coverage_missing"]
+        for b in result["books"].values()
     )
     return result
 
