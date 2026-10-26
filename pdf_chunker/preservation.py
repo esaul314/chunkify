@@ -146,6 +146,7 @@ def _page_units(payload: Mapping[str, Any], texts: dict[str, str]) -> list[dict[
                     "section_id": (block.get("section") or {}).get("section_id"),
                     "section_role": (block.get("section") or {}).get("section_role"),
                     "section_span": block.get("_section_span"),
+                    "parent_text": block.get("_section_parent_sha256"),
                     "block_ids": [
                         entry["id"] for entry in source.get("block_provenance", ()) if "id" in entry
                     ],
@@ -271,6 +272,18 @@ def _page_check(report: dict[str, Any], units: list[dict[str, Any]]) -> list[dic
             or unit["source_page"] != unit["page"]
         ):
             pending.append({"reason": "source_page_identity_mismatch", "source_id": key})
+        span = unit.get("section_span")
+        if span is not None:
+            parent = report["texts"].get(unit.get("parent_text"))
+            if (
+                not isinstance(span, (list, tuple))
+                or len(span) != 2
+                or any(type(value) is not int for value in span)
+                or not isinstance(parent, str)
+                or not 0 <= span[0] <= span[1] <= len(parent)
+                or parent[span[0] : span[1]] != report["texts"][unit["text"]]
+            ):
+                pending.append({"reason": "section_parent_span_mismatch", "source_id": key})
         grouped[key].append(report["texts"][unit["text"]])
         if not actual_order or actual_order[-1] != key:
             actual_order.append(key)
@@ -513,7 +526,11 @@ def _match_output(
                 pending.append(
                     {"reason": "serialized_source_filename_mismatch", "chunk_id": logical["id"]}
                 )
-            if meta.get("page") is not None and pages and meta["page"] not in pages:
+            if (
+                meta.get("page") is not None
+                and pages
+                and (type(meta["page"]) is not int or meta["page"] not in pages)
+            ):
                 pending.append(
                     {"reason": "serialized_source_page_mismatch", "chunk_id": logical["id"]}
                 )
@@ -540,7 +557,7 @@ def _match_output(
                 "chunk_id": logical["id"],
                 "chunk_part": meta.get("chunk_part"),
                 "section_id": section,
-                "text_sha256": sha(part["text"]),
+                "text_sha256": _put(report["texts"], part["text"]),
                 "spans": spans,
             }
             records.append({"record_id": identity(record)[:24], **record})
@@ -557,6 +574,39 @@ def _match_output(
     return records, pending
 
 
+def _normalization_witnesses(
+    report: dict[str, Any], units: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    transformations = []
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for unit in units:
+        if unit["source_id"]:
+            grouped[unit["source_id"]].append(report["texts"][unit["text"]])
+    for origin in report["source_units"]:
+        key = origin["source_id"]
+        before = report["texts"][origin["text"]]
+        after = "\n".join(grouped.get(key, ()))
+        if before != after and _values(before) == _values(after):
+            operations = ["whitespace"]
+            if unicodedata.normalize("NFKC", before) != before:
+                operations.append("unicode_nfkc")
+            if _LETTER_HYPHEN.search(before):
+                operations.append("letter_only_line_hyphenation")
+            if before.translate(_QUOTES) != before:
+                operations.append("curly_quotes")
+            transformations.append(
+                {
+                    "source_id": key,
+                    "source_span": [0, len(before)],
+                    "before": origin["text"],
+                    "after": _put(report["texts"], after),
+                    "reason": "declared_normalization",
+                    "operations": operations,
+                }
+            )
+    return transformations
+
+
 def record_stage(report: Mapping[str, Any], name: str, payload: Any) -> dict[str, Any]:
     """Append detached witnesses; no stage name by itself approves a text edit."""
     result = {
@@ -571,33 +621,7 @@ def record_stage(report: Mapping[str, Any], name: str, payload: Any) -> dict[str
             result["block_identities_sha256"] = identity(result["block_identities"])
         units = _page_units(payload, result["texts"])
         pending = _page_check(result, units)
-        transformations = []
-        grouped: dict[str, list[str]] = defaultdict(list)
-        for unit in units:
-            if unit["source_id"]:
-                grouped[unit["source_id"]].append(result["texts"][unit["text"]])
-        for origin in result["source_units"]:
-            key = origin["source_id"]
-            before = result["texts"][origin["text"]]
-            after = "\n".join(grouped.get(key, ()))
-            if before != after and _values(before) == _values(after):
-                operations = ["whitespace"]
-                if unicodedata.normalize("NFKC", before) != before:
-                    operations.append("unicode_nfkc")
-                if _LETTER_HYPHEN.search(before):
-                    operations.append("letter_only_line_hyphenation")
-                if before.translate(_QUOTES) != before:
-                    operations.append("curly_quotes")
-                transformations.append(
-                    {
-                        "source_id": key,
-                        "source_span": [0, len(before)],
-                        "before": origin["text"],
-                        "after": _put(result["texts"], after),
-                        "reason": "declared_normalization",
-                        "operations": operations,
-                    }
-                )
+        transformations = _normalization_witnesses(result, units)
         result["stages"].append(
             {"name": name, "units": units, "pending": pending, "transformations": transformations}
         )
@@ -831,7 +855,35 @@ def verify_preservation(
                 if unit.get("text") not in text_table:
                     raise ValueError("source accounting stage text is unbound")
             pending = _page_check(expected, units)
+            if pending != stage.get("pending"):
+                raise ValueError("source accounting page-stage pending witnesses differ")
+            if _normalization_witnesses(expected, units) != stage.get("transformations"):
+                raise ValueError("source accounting normalization witnesses differ")
             expected["pending"].extend({"stage": stage["name"], **value} for value in pending)
+            expected["stages"].append(stage)
+        elif "records" in stage:
+            intermediate = []
+            for record in stage["records"]:
+                key = record.get("text_sha256")
+                if key not in text_table:
+                    raise ValueError("source accounting derived text is unbound")
+                intermediate.append(
+                    {
+                        "text": text_table[key],
+                        "metadata": {
+                            "chunk_id": record.get("chunk_id"),
+                            "chunk_part": record.get("chunk_part"),
+                            "section_id": record.get("section_id"),
+                        },
+                    }
+                )
+            computed, pending = _match_output(expected, intermediate)
+            if computed != stage["records"] or pending != stage.get("pending"):
+                raise ValueError("source accounting intermediate span witnesses differ")
+            expected["pending"].extend({"stage": stage["name"], **value} for value in pending)
+            expected["stages"].append(stage)
+        else:
+            raise ValueError("source accounting unsupported stage witness")
     actual_units = _page_units(classified_document, expected["texts"])
     page_stages = [stage for stage in stages if "units" in stage]
     if not page_stages or page_stages[-1]["units"] != actual_units:
@@ -863,8 +915,8 @@ def verify_preservation(
     )
     if verified.get("records") != report.get("records"):
         raise ValueError("source accounting serialized span witnesses differ")
-    for original, computed, record in zip(rows, rebound, verified["records"], strict=True):
-        before, after = _metadata(original), _metadata(computed)
+    for original, computed_row, record in zip(rows, rebound, verified["records"], strict=True):
+        before, after = _metadata(original), _metadata(computed_row)
         for key in (
             "preservation_record_id",
             "preservation_manifest_sha256",
@@ -878,6 +930,13 @@ def verify_preservation(
         }
         if actual != set(record.get("block_ids", ())):
             raise ValueError("source accounting serialized contributor set differs")
+        for entry in before.get("block_provenance", ()):
+            bound = full_map.get(entry.get("id"))
+            if bound is None or any(
+                entry.get(key) != bound.get(key)
+                for key in ("page", "block_index", "bbox", "text_sha256")
+            ):
+                raise ValueError("source accounting serialized legacy geometry differs")
     return {
         "accepted": verified["accepted"],
         "pending": verified["pending"],

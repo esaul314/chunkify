@@ -68,6 +68,31 @@ def verify(directory):
             key: value for key, value in raw.items() if key != "pipeline_settings_sha256"
         }
         assert json.loads(json.dumps(fresh)) == expected_raw, "original raw reader facts differ"
+        from pdf_chunker.config import PipelineSpec
+        from pdf_chunker.core_new import _run_passes
+        from pdf_chunker.framework import Artifact
+
+        input_document = load(directory / f"{key}-input-snapshot.json")
+        assert input_document["source_path"] == book["source"], "source path differs"
+        settings = load(directory / "settings.json")
+        review_options = {name: dict(values) for name, values in settings["options"].items()}
+        review_options["section_detect"]["answers"] = load(directory / f"{key}-review-answers.json")
+        recomputed, _ = _run_passes(
+            PipelineSpec(
+                pipeline=settings["pipeline"][:-1],
+                options=review_options,
+            ),
+            Artifact(payload=input_document),
+        )
+        assert (
+            json.loads(json.dumps(recomputed.payload["pages"], default=str)) == classified
+        ), "classified detection/review replay differs"
+        assert (recomputed.meta or {}).get("section_questions") == load(
+            directory / f"{key}-questions.json"
+        ), "pending review questions differ"
+        assert (recomputed.meta or {}).get("section_decisions") == load(
+            directory / f"{key}-decisions.json"
+        ), "review decisions differ"
         preserved = verify_preservation(
             load(directory / f"{key}-preservation.json"),
             source_structure=fresh,

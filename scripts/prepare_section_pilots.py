@@ -61,9 +61,14 @@ def pilot_settings():
     return settings
 
 
-def prepare(manifest_path, output):
+def prepare(manifest_path, output, *, answers_manifest_path=None):
     assert Path(pdf_chunker.__file__).resolve().parent.parent == ROOT, "wrong converter root"
     manifest = json.loads(Path(manifest_path).read_text())
+    answer_manifest = (
+        json.loads(Path(answers_manifest_path).read_text()) if answers_manifest_path else {}
+    )
+    if not isinstance(answer_manifest, dict) or set(answer_manifest) - set(manifest):
+        raise ValueError("review answer manifest contains unknown source keys")
     out = Path(output)
     out.mkdir(mode=0o700, parents=True)
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -85,7 +90,23 @@ def prepare(manifest_path, output):
         assert sha(path) == source["source_sha256"], "source drift"
         for old in source["artifacts"]:
             assert sha(old["path"]) == old["sha256"], "original artifact drift"
-        a = _input_artifact(str(path), PipelineSpec(**settings))
+        book_settings = {
+            **settings,
+            "options": {name: dict(values) for name, values in settings["options"].items()},
+        }
+        answers = []
+        if key in answer_manifest:
+            entry = answer_manifest[key]
+            if not isinstance(entry, dict) or set(entry) != {"path", "sha256"}:
+                raise ValueError("review answer entry requires path and sha256")
+            if sha(entry["path"]) != entry["sha256"]:
+                raise ValueError("review answer file drift")
+            answers = json.loads(Path(entry["path"]).read_text())
+            if not isinstance(answers, list):
+                raise ValueError("review answers must be an array")
+            book_settings["options"]["section_detect"]["answers"] = answers
+        write(out / f"{key}-review-answers.json", answers)
+        a = _input_artifact(str(path), PipelineSpec(**book_settings))
         raw_structure = a.payload["source_structure"]
         write(out / f"{key}-input-snapshot.json", a.payload)
         write(out / f"{key}-original-structure.json", raw_structure)
@@ -105,13 +126,13 @@ def prepare(manifest_path, output):
         write(out / f"{key}-extraction-blocks.json", blocks)
         # Freeze cleanup's exact text before structural detection and splitting.
         cleaned, _ = _run_passes(
-            PipelineSpec(pipeline=["pdf_parse", "text_clean"], options=settings["options"]), a
+            PipelineSpec(pipeline=["pdf_parse", "text_clean"], options=book_settings["options"]), a
         )
         cleaned_text = "\n".join(b["text"] for p in cleaned.payload["pages"] for b in p["blocks"])
-        prefix = {**settings, "pipeline": settings["pipeline"][:-1]}
+        prefix = {**book_settings, "pipeline": settings["pipeline"][:-1]}
         classified, _ = _run_passes(PipelineSpec(**prefix), a)
         write(out / f"{key}-classified-blocks.json", classified.payload["pages"])
-        result, timings = _run_passes(PipelineSpec(**settings), a)
+        result, timings = _run_passes(PipelineSpec(**book_settings), a)
         write(out / f"{key}-questions.json", result.meta.get("section_questions", []))
         write(out / f"{key}-decisions.json", result.meta.get("section_decisions", []))
         write(
@@ -211,8 +232,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--answers-manifest")
     args = parser.parse_args()
-    prepare(args.manifest, args.output)
+    prepare(args.manifest, args.output, answers_manifest_path=args.answers_manifest)
 
 
 if __name__ == "__main__":

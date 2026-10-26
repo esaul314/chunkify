@@ -513,40 +513,15 @@ def classify_document(
                     "status": "pending",
                     "candidate_roles": ["contents", "unknown"],
                 }
-            elif raw_text.strip():
+            elif raw_text.strip() and not any(
+                (block.get("source") or {}).get("raw_source") for block in blocks
+            ):
+                # Historical unbound extraction can recover one page unit.
+                # Native physical units already retain original glyph text:
+                # replacing an internal heading slice with its whole raw block
+                # would duplicate the prefix and invalidate exact occurrences.
                 first_source = blocks[0].get("source", {}) if blocks else {}
-                physical = (
-                    [
-                        {
-                            "text": str(original.get("raw_text") or original["text"]),
-                            "type": "paragraph",
-                            "bbox": original.get("bbox"),
-                            "source": {
-                                **first_source,
-                                "page": page.get("page"),
-                                "method": "original_structure_recovery",
-                                "raw_source": {
-                                    "page": page.get("page"),
-                                    "block_index": original["index"],
-                                    "bbox": original.get("bbox", []),
-                                    "text_sha256": hashlib.sha256(
-                                        str(original.get("raw_text") or original["text"]).encode()
-                                    ).hexdigest(),
-                                    "span": [
-                                        0,
-                                        len(str(original.get("raw_text") or original["text"])),
-                                    ],
-                                },
-                            },
-                            "_section_block_index": original["index"],
-                            "_section_kind": "original_physical_block",
-                        }
-                        for original in raw.get("blocks", ())
-                    ]
-                    if first_source.get("raw_source")
-                    else []
-                )
-                blocks = physical or [
+                blocks = [
                     {
                         "text": raw_text,
                         "type": "paragraph",

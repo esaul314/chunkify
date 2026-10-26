@@ -131,3 +131,61 @@ def test_multiblock_contents_recovery_retains_all_physical_identities(tmp_path):
     emitted_ids = {span["source_id"] for record in proof["records"] for span in record["spans"]}
     assert emitted_ids == raw_ids
     assert all(row["metadata"]["section_role"] == "contents" for row in result.payload)
+
+
+def test_native_crosspage_lists_footnotes_citation_digits_and_unicode_keep_occurrences(tmp_path):
+    from pdf_chunker.core_new import _run_passes
+
+    fitz = pytest.importorskip("fitz")
+    source = tmp_path / "synthetic-native-controls.pdf"
+    with fitz.open() as pdf:
+        page = pdf.new_page()
+        page.insert_textbox(
+            (72, 72, 520, 220), "Introduction\n" + BODY + "\nA line ends with preser-", fontsize=11
+        )
+        page.insert_text((72, 310), "1. Keep the first list item.", fontsize=11)
+        page.insert_text((72, 820), "1", fontsize=7)
+        page.insert_text((84, 750), "An invented footnote stays on its source page.", fontsize=8)
+        page = pdf.new_page()
+        page.insert_font(fontname="synthetic", fontbuffer=fitz.Font("helv").buffer)
+        page.insert_textbox(
+            (72, 72, 520, 200),
+            "vation continues without losing its source boundaries.\n"
+            "2. Keep the second list item.\n"
+            "A café passage cites 3682–3694 and remains short but useful.",
+            fontsize=11,
+            fontname="synthetic",
+        )
+        pdf.save(source)
+    spec = structural_spec()
+    initial = _input_artifact(str(source), spec)
+    raw_texts = [
+        initial.meta["preservation"]["texts"][unit["text"]]
+        for unit in initial.meta["preservation"]["source_units"]
+    ]
+    assert any("3682–3694" in text for text in raw_texts)
+    assert any(text.strip() == "1" for text in raw_texts)
+    result, _ = _run_passes(spec, initial)
+    proof = result.meta["preservation"]
+    assert proof["accepted"], proof["pending"]
+    joined = " ".join(row["text"] for row in result.payload)
+    for marker in (
+        "preser-",
+        "vation",
+        "3682–3694",
+        "café",
+        "first list",
+        "second list",
+        "footnote",
+    ):
+        assert marker in joined
+    assert {unit["source_id"] for unit in proof["source_units"]} == {
+        span["source_id"] for record in proof["records"] for span in record["spans"]
+    }
+
+
+def test_explicit_alternative_reader_is_not_silently_replaced(tmp_path, monkeypatch):
+    source = original_crosspage_source(tmp_path)
+    monkeypatch.setenv("PDF_CHUNKER_PDF_READER", "pdftotext")
+    with pytest.raises(ValueError, match="native PDF reader"):
+        _input_artifact(str(source), structural_spec())
