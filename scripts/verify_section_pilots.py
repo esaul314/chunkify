@@ -34,7 +34,7 @@ def ordered_subset(needle, haystack):
     return index == len(needle)
 
 
-def verify(directory):
+def verify(directory, *, inspect_pending=False):
     directory = Path(directory)
     receipt = load(directory / "cpu-acceptance.json")
     manifest = load(directory / "frozen-inputs.json")
@@ -43,8 +43,13 @@ def verify(directory):
     # Settings come from the reviewed converter composition, not invented exclusions
     # in a producer-authored receipt.
     assert load(directory / "settings.json") == pilot_settings(), "reviewed CPU settings differ"
-    assert receipt["offline_accepted"] is True
-    result = {"cpu_acceptance_sha256": sha(directory / "cpu-acceptance.json"), "books": {}}
+    if not inspect_pending:
+        assert receipt["offline_accepted"] is True
+    result = {
+        "cpu_acceptance_sha256": sha(directory / "cpu-acceptance.json"),
+        "inspection_only": inspect_pending,
+        "books": {},
+    }
     for key, book in receipt["books"].items():
         assert sha(book["source"]) == book["source_sha256"]
         for old in manifest[key]["artifacts"]:
@@ -101,7 +106,8 @@ def verify(directory):
             rows=rows,
             settings=load(directory / "settings.json"),
         )
-        assert preserved["accepted"], "unresolved raw-to-serialized preservation"
+        if not inspect_pending:
+            assert preserved["accepted"], "unresolved raw-to-serialized preservation"
         origins = {
             identity(entry): block
             for page in classified
@@ -149,6 +155,7 @@ def verify(directory):
                 recovered.append(origin["page"])
         result["books"][key] = {
             "records": len(rows),
+            "pending_section_questions": len(load(directory / f"{key}-questions.json")),
             "ordered_source_preservation": preserved,
             "logical_chunks": len(logical),
             "bound_block_identities": len(origins),
@@ -158,8 +165,9 @@ def verify(directory):
             "max_serialized_chars": max(len(json.dumps(row, ensure_ascii=False)) for row in rows),
             "all_source_and_historical_artifact_hashes_unchanged": True,
         }
-    result["accepted"] = all(
+    result["accepted"] = not inspect_pending and all(
         b["ordered_source_preservation"]["accepted"]
+        and not b["pending_section_questions"]
         and not b["ordered_block_token_coverage_missing"]
         for b in result["books"].values()
     )
@@ -170,8 +178,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", required=True)
     parser.add_argument("--report", required=True)
+    parser.add_argument(
+        "--inspect-pending",
+        action="store_true",
+        help="Recompute pending artifacts without granting CPU acceptance",
+    )
     args = parser.parse_args()
-    result = verify(args.directory)
+    result = verify(args.directory, inspect_pending=args.inspect_pending)
     descriptor = os.open(args.report, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(descriptor, "w") as stream:
         json.dump(result, stream, ensure_ascii=False, indent=2)

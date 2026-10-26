@@ -129,6 +129,9 @@ reader, compares raw units/layout, replays canonical detection and supplied
 review, and recomputes each normalization, intermediate and serialized span
 witness. Updating a producer receipt or acceptance boolean does not bypass this
 comparison. Reader/implementation changes require new evidence and review.
+An explicit --inspect-pending run performs the same fresh-source and witness
+checks on pending artifacts, records unresolved questions/surfaces and always
+leaves overall accepted=false. It provides diagnosis without waiving any gate.
 
 CPU acceptance establishes only the declared source-preservation scope and
 resolved section review. Enrichment remains pending. Compare purpose-specific

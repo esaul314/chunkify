@@ -195,6 +195,11 @@ def test_external_review_answers_use_exact_canonical_replay_and_stale_rejection(
     helper("prepare_section_pilots").prepare(manifest, draft)
     questions = json.loads((draft / "example-questions.json").read_text())
     assert questions
+    inspected = helper("verify_section_pilots").verify(draft, inspect_pending=True)
+    assert inspected["inspection_only"]
+    assert not inspected["accepted"]
+    assert inspected["books"]["example"]["pending_section_questions"] == len(questions)
+    assert inspected["books"]["example"]["ordered_source_preservation"]["accepted"]
     answers = [
         {
             **question,
