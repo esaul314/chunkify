@@ -88,6 +88,7 @@ _INTEGER_LIMITS: dict[tuple[str, str], tuple[int, int | None]] = {
     ("split_semantic", "target_tokens"): (1, None),
     ("emit_jsonl", "min_words"): (1, None),
     ("emit_jsonl", "max_chars"): (1, None),
+    ("emit_jsonl", "max_row_bytes"): (1, None),
     ("emit_jsonl", "target_chunk_chars"): (1, None),
     ("emit_jsonl", "very_short_words"): (1, None),
     ("emit_jsonl", "max_merge_chars"): (1, None),
@@ -103,6 +104,7 @@ _EMIT_CONFIG_OPTIONS = frozenset(
         "min_words",
         "metadata_key",
         "max_chars",
+        "max_row_bytes",
         "target_chunk_chars",
         "very_short_words",
         "max_merge_chars",
@@ -203,13 +205,13 @@ def _validate_known_options(opts: Mapping[str, Any]) -> None:
                 )
                 raise ValueError(f"{step}.{name[1]} must be {bound}")
 
-        for name in ("footer_margin", "header_margin"):
-            if name in config and config[name] is not None:
-                value = config[name]
+        for margin in ("footer_margin", "header_margin"):
+            if margin in config and config[margin] is not None:
+                value = config[margin]
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ValueError(f"{step}.{name} must be a number")
+                    raise ValueError(f"{step}.{margin} must be a number")
                 if value < 0:
-                    raise ValueError(f"{step}.{name} must not be negative")
+                    raise ValueError(f"{step}.{margin} must not be negative")
 
         if step == "split_semantic":
             chunk_size = config.get("chunk_size")

@@ -168,9 +168,10 @@ SHA-256. It checks the hash before parsing, then requires:
   alternate escaping/spacing, BOMs, blank rows and CRLF framing refuse.
 - Exactly text and the resolved metadata key per row, required base metadata and
   readability schema, generated chunk IDs in order, and the complete serialized
-  row within the resolved `max_chars` limit. That limit remains characters;
-  `size_bytes` measures actual UTF-8 bytes. Use the separate preflight below for
-  a caller-declared downstream byte limit.
+  row within the resolved `max_chars` and optional `max_row_bytes` limits.
+  Character and UTF-8 byte counts remain separate; the LF is excluded from each
+  row limit. Use the separate preflight below for caller-declared limit/reserve
+  reporting without changing the executable spec.
 - Native provenance fields with the current generated-field precedence, including
   all logical references and evidence bindings. Native null passthrough fields
   are omitted; native identity/readability/location collisions cannot override
@@ -248,11 +249,17 @@ through the existing validator instead of receiving an admission report.
 The caller must check `fits` before starting enrichment. This API does not wire
 itself into the CLI or run the enrichment client. Headroom is a caller-declared
 allowance, not a guarantee about model output: actual enriched rows still require
-byte validation against the same downstream limit. Separate enrichment contract
-resolution and that integration remain open. A changed downstream limit/reserve
-changes the report, not base conversion identity or bytes. Existing `max_chars`
-admission, source approval, completion trust and in-memory resource costs remain
-as documented above; no new storage or receipt framework is introduced.
+byte validation against the same downstream limit. For enforcement in the existing
+pipeline, set `options.emit_jsonl.max_row_bytes: 8192`; projected admission and
+actual enriched/final byte checks are described in
+[UTF-8 row admission](ENRICHMENT_REQUEST_BUDGET.md#utf-8-row-admission).
+Unlike this standalone report's arguments, that executable spec option is pinned
+in prepared article identity and enforced by execution and pure base readback.
+Separate enrichment contract resolution/result reuse remain open. A changed
+report-only downstream limit/reserve changes the report, not base conversion
+identity or bytes. Existing `max_chars` admission, source approval, completion
+trust and in-memory resource costs remain as documented above; no new storage
+or receipt framework is introduced.
 
 ## Completion records and read-only base reuse
 
@@ -447,6 +454,7 @@ gate applies before sharing them; do not put credentials into configuration.
 
 ```bash
 pytest tests/article_preflight_test.py tests/article_completion_test.py tests/article_output_test.py \
+  tests/utf8_admission_test.py \
   tests/article_readability_runtime_test.py \
   tests/article_conversion_test.py \
   tests/conversion_descriptor_test.py \
@@ -485,8 +493,9 @@ synchronous completion and lasting observable drift. Canonical completion record
 and read-only base reuse now validate persisted bytes against a retained hash and
 fresh preparation. The opt-in byte preflight measures complete base rows with
 explicit enrichment headroom and returns review outcomes without changing them.
-Next resolve and validate the separate enrichment contract and wire byte admission
-plus actual enriched-row checks into that boundary.
+Executable `emit_jsonl.max_row_bytes` now extends existing admission and actual
+enriched/final checks; base preparation and readback pin/enforce it. Next resolve
+and validate the separate enrichment identity before authorizing enriched reuse.
 Atomic persistence, durable trust anchors, batch execution, stage receipts,
 document-text/HTML inputs and the downstream idempotency
 pilot remain open. P0-A and P2-D remain open as recorded in

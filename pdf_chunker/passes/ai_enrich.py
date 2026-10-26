@@ -126,13 +126,15 @@ def _resolve_fallback_completion(
     return resolve_fallback_completion(options)
 
 
-def _serialized_record_size(text: str, metadata: Mapping[str, Any], metadata_key: str) -> int:
-    """Return the emitter-compatible JSON character count for one record."""
-    return len(
-        json.dumps(
-            {"text": text, metadata_key: dict(metadata)},
-            ensure_ascii=False,
-        )
+def _serialized_record(text: str, metadata: Mapping[str, Any], metadata_key: str) -> str:
+    """Serialize the complete record using the emitter's literal-Unicode policy."""
+    return json.dumps({"text": text, metadata_key: dict(metadata)}, ensure_ascii=False)
+
+
+def _record_fits(serialized: str, *, max_chars: int, max_row_bytes: int | None) -> bool:
+    """Require both independent limits; the optional byte count excludes LF."""
+    return len(serialized) <= max_chars and (
+        max_row_bytes is None or len(serialized.encode("utf-8")) <= max_row_bytes
     )
 
 
@@ -142,13 +144,18 @@ def _largest_fitting_prefix(
     metadata: Mapping[str, Any],
     metadata_key: str,
     max_chars: int,
+    max_row_bytes: int | None = None,
 ) -> int:
     """Find the longest exact text prefix whose serialized row fits."""
     low, high = 1, len(text)
     best = 0
     while low <= high:
         middle = (low + high) // 2
-        if _serialized_record_size(text[:middle], metadata, metadata_key) <= max_chars:
+        if _record_fits(
+            _serialized_record(text[:middle], metadata, metadata_key),
+            max_chars=max_chars,
+            max_row_bytes=max_row_bytes,
+        ):
             best = middle
             low = middle + 1
         else:
@@ -162,8 +169,16 @@ def _admit_chunks_for_jsonl(
     max_chars: int,
     metadata_key: str,
     tag_configs: Mapping[str, Iterable[str]],
+    max_row_bytes: int | None = None,
 ) -> Chunks:
-    """Losslessly split chunks against a conservative enriched JSONL budget."""
+    """Losslessly split against complete-row character and optional UTF-8 budgets.
+
+    Project all eligible tags and the longest classification before any client
+    call. Prefix search remains monotone under JSON escaping and UTF-8 sizing.
+    Data-first and usable with ``partial``; inputs and provenance stay intact.
+    """
+    if max_row_bytes is not None and (type(max_row_bytes) is not int or max_row_bytes <= 0):
+        raise ValueError("max_row_bytes must be a positive integer or None")
     tags = sorted(_valid_tags(_effective_tag_configs(tag_configs)))
     result: Chunks = []
     for chunk in chunks:
@@ -182,7 +197,11 @@ def _admit_chunks_for_jsonl(
             "tags": tags,
             "enrichment_status": "complete",
         }
-        if _serialized_record_size(text, projected, metadata_key) <= max_chars:
+        if _record_fits(
+            _serialized_record(text, projected, metadata_key),
+            max_chars=max_chars,
+            max_row_bytes=max_row_bytes,
+        ):
             result.append(chunk)
             continue
 
@@ -195,6 +214,7 @@ def _admit_chunks_for_jsonl(
                 metadata=part_meta,
                 metadata_key=metadata_key,
                 max_chars=max_chars,
+                max_row_bytes=max_row_bytes,
             )
             if size == 0:
                 raise ValueError("serialized metadata exceeds JSONL record limit before enrichment")
@@ -214,7 +234,9 @@ def _admit_chunks_for_jsonl(
     return result
 
 
-def _validate_enriched_jsonl_size(chunks: Chunks, *, max_chars: int, metadata_key: str) -> None:
+def _validate_enriched_jsonl_size(
+    chunks: Chunks, *, max_chars: int, metadata_key: str, max_row_bytes: int | None = None
+) -> None:
     """Refuse unexpected enrichment output that exceeds the admitted record size."""
     for index, chunk in enumerate(chunks):
         metadata = (
@@ -222,9 +244,14 @@ def _validate_enriched_jsonl_size(chunks: Chunks, *, max_chars: int, metadata_ke
             or _meta_payload(chunk, "metadata")
             or _meta_payload(chunk, "meta")
         )
-        if _serialized_record_size(chunk.get("text", ""), metadata, metadata_key) > max_chars:
+        serialized = _serialized_record(chunk.get("text", ""), metadata, metadata_key)
+        if len(serialized) > max_chars:
             raise ValueError(
                 f"enriched JSONL record {index} exceeds the admitted {max_chars}-character limit"
+            )
+        if max_row_bytes is not None and len(serialized.encode("utf-8")) > max_row_bytes:
+            raise ValueError(
+                f"enriched JSONL record {index} exceeds the admitted {max_row_bytes}-byte limit"
             )
 
 
@@ -859,6 +886,7 @@ class _AiEnrichPass:
                 logger.warning("ai_enrich debug: no chunks to enrich")
             return a
         max_chars = options.get("jsonl_max_chars")
+        max_row_bytes = options.get("jsonl_max_row_bytes")
         metadata_key = options.get("jsonl_metadata_key", "metadata")
         if isinstance(max_chars, int) and max_chars > 0:
             admitted = _admit_chunks_for_jsonl(
@@ -866,6 +894,7 @@ class _AiEnrichPass:
                 max_chars=max_chars,
                 metadata_key=str(metadata_key),
                 tag_configs=tag_configs,
+                max_row_bytes=max_row_bytes,
             )
             if "verified_joplin_markdown" in (a.meta or {}) and len(admitted) != len(chunks):
                 raise ValueError(
@@ -878,6 +907,7 @@ class _AiEnrichPass:
                 enriched,
                 max_chars=max_chars,
                 metadata_key=str(metadata_key),
+                max_row_bytes=max_row_bytes,
             )
         payload = rebuild_payload(enriched)
         meta = _update_meta(a.meta, len(enriched))

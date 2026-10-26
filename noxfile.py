@@ -15,6 +15,7 @@ TEST_SESSION_DEPENDENCIES: Final = ("-e", ".[dev,enrichment]")
 QUALITY_PATHS: Final = (
     "pdf_chunker/__init__.py",
     "pdf_chunker/contracts.py",
+    "pdf_chunker/config.py",
     "pdf_chunker/conversion_descriptor.py",
     "pdf_chunker/article_conversion.py",
     "pdf_chunker/article_output.py",
@@ -72,6 +73,7 @@ LINT_EXTRA_PATHS: Final = (
     "tests/article_output_test.py",
     "tests/article_preflight_test.py",
     "tests/enrichment_config_test.py",
+    "tests/utf8_admission_test.py",
     "tests/article_completion_test.py",
     "tests/article_readability_runtime_test.py",
     "tests/epub_body_markup_test.py",

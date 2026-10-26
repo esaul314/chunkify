@@ -204,12 +204,19 @@ use `scripts/eval_overlap.py` only after extraction and chunk integrity are stab
 | `split_semantic.generate_metadata` | `--no-metadata` (negates) | Include per-chunk metadata | `true` |
 | `split_semantic.interactive_lists` | `--interactive-lists` | Prompt for list continuation confirmation | `false` |
 | `emit_jsonl.output_path` | — | Path for resulting JSONL | `output.jsonl` |
+| `emit_jsonl.max_row_bytes` | — | Optional complete UTF-8 JSON-object limit, excluding LF; admission and final checks | `null` (disabled) |
 | `text_clean.footer_patterns` | `--footer-pattern` | Regex patterns to strip as footers | – |
 | `text_clean.interactive_footers` | `--interactive-footers` | Prompt for footer confirmation | `false` |
 | – | `--interactive` | Enable all interactive prompts (footers + lists) | `false` |
 | – | `--teach` | Learn from interactive decisions and persist for future runs | `false` |
 
 > Supply a custom spec via `--spec pipeline.yaml` to override defaults.
+
+For a downstream byte limit, set `options.emit_jsonl.max_row_bytes: 8192` in
+that spec. Both the existing character limit and the byte limit apply. The
+canonical enrichment pipeline admits complete projected rows before classification
+and checks actual results. Verified Markdown that would need repartitioning
+requires review. See [UTF-8 row admission](docs/ENRICHMENT_REQUEST_BUDGET.md#utf-8-row-admission).
 
 ## Footer Detection
 

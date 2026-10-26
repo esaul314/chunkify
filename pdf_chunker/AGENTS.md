@@ -111,11 +111,20 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
   serialized size; unmarked direct callers use the legacy compatibility path.
   Canonical enriched chunks marked with `chunk_part` retain their exact text
   boundaries and whitespace through final serialization.
+  Opt into `options.emit_jsonl.max_row_bytes: 8192` for complete UTF-8 object
+  limits excluding LF; `None`/omission disables bytes. All final rows, including
+  legacy emission, are checked. `EmitConfig(max_row_bytes=8192)` is strict about
+  positive integers. Prepared article identity and pure readback bind this option.
 - `passes/ai_enrich.py`: When `ai_enrich` and `emit_jsonl` share the canonical
   pipeline, exact serialized-record admission runs before classification using
   the configured JSONL limit. Oversized chunks are split losslessly with stable
   `chunk_part` and source metadata; non-fitting metadata or unexpected enrichment
   expansion fails explicitly instead of dropping or truncating text.
+  The same prefix search enforces both `max_chars` and optional `max_row_bytes`;
+  `_admit_chunks_for_jsonl(chunks, max_chars=8000, max_row_bytes=8192,
+  metadata_key="metadata", tag_configs=configs)` is pure and supports `partial`.
+  Verified Markdown that would need repartitioning refuses before classification.
+  Actual enriched rows are measured again; no automatic truncation or retry.
 - AI enrichment payload adaptation preserves original order when one input
   expands into multiple JSONL-sized chunks; non-chunk payload items stay in place.
 - `ai_enrichment.py`: Legacy shim delegating to pass/adapter.

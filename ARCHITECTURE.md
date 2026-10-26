@@ -114,6 +114,16 @@ behavior and lazy fallback availability. Strict invalid-setting refusal is
 documented in `docs/ENRICHMENT_REQUEST_BUDGET.md`. Prompt/vocabulary/model-revision
 identity and enriched-result reuse remain separate work.
 
+Opt-in `emit_jsonl.max_row_bytes` extends the existing complete-row admission
+without a second splitter. Pure prefix selection requires both character and
+UTF-8 byte budgets, including conservative enrichment metadata. Ordinary chunks
+retain exact ordered text, provenance and stable part identities; verified article
+Markdown requiring repartitioning refuses before classification. Actual enriched
+rows and every final emitted row are checked again. Byte counts exclude LF;
+omission/`None` retains existing behavior. Prepared base article settings and
+readback include this limit. The standalone article preflight remains a pure
+report with caller-declared reserve; it does not execute enrichment or prove reuse.
+
 ## 3) Three-phase pipeline architecture
 
 The pipeline implements a robust **three-phase** transformation (multiple configurable passes grouped into logical phases):

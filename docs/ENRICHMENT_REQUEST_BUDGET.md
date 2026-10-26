@@ -57,9 +57,51 @@ fallback remains disabled.
 These settings describe outgoing requests. They do not establish model revision,
 running-server configuration, prompt/vocabulary identity, successful completion
 or permission to reuse enriched output. Binding those inputs to validated base
-bytes and validating actual enriched rows remain the next P1-E boundary. The
+bytes and validating enriched results against that identity remain open. The
 existing [article byte preflight](CONVERSION_DESCRIPTORS.md#utf-8-byte-preflight-before-enrichment)
 remains opt-in. No new client, runner, cache schema or dependency is introduced.
+
+## UTF-8 row admission
+
+Opt into a downstream complete-row byte limit through the existing pipeline spec:
+
+```yaml
+options:
+  emit_jsonl:
+    max_chars: 8000
+    max_row_bytes: 8192
+```
+
+`max_row_bytes` must be a positive integer or `null` (disabled, the default).
+Booleans, strings, floats and nonpositive limits refuse. There is no new dedicated
+environment variable or CLI flag; the existing spec and `EMIT_JSONL__MAX_ROW_BYTES`
+override mechanism apply. Both limits are independent and must fit. Measure the
+entire literal-Unicode JSON object, including keys, escaped text and metadata,
+encoded as UTF-8; exclude its LF delimiter. Equality fits. File sizes include LF.
+
+When `ai_enrich` precedes `emit_jsonl` in the canonical pipeline, the runner passes
+both limits and the active metadata key to existing pre-classification admission.
+Projection includes the full eligible tag vocabulary, longest classification and
+completion status. The same monotone prefix search splits ordinary oversized
+chunks losslessly with stable `chunk_part`, preserving ordered text and provenance.
+Impossible metadata and existing part identities that would need resplitting
+refuse before any classification. All chunks are admitted before the first call.
+Verified Markdown requiring repartitioning refuses for explicit context review;
+code, tables and links are not cut apart by this feature.
+
+Actual enriched rows are checked again because projection cannot bound arbitrary
+injected client results. Every final emitted row is also byte-checked, including
+conversion without AI and legacy emission. Oversized results raise `ValueError`
+without truncation or automatic retry. The final emitter validates rather than
+introducing a new splitting path. Direct writer use remains a serialization-only
+API; these checks belong to the pipeline and validators.
+
+Prepared base article settings capture this option, so changing it changes
+conversion identity even when the existing bytes still fit. Execution and pure
+`validate_article_output` readback enforce the pinned byte limit. The separate
+`preflight_article_output` report still measures caller-declared downstream bytes
+and reserve without changing the descriptor or running enrichment. This feature
+does not establish model/prompt/vocabulary identity or enriched-output reuse.
 
 ## Offline request admission
 
@@ -118,7 +160,7 @@ primary or repair request still repeats admission before provider transport.
 
 Tests:
 ```bash
-pytest tests/enrichment_config_test.py tests/ai_enrich_request_budget_test.py tests/ai_enrichment_test.py tests/ai_enrich_pass_test.py
+pytest tests/enrichment_config_test.py tests/utf8_admission_test.py tests/serialized_admission_test.py tests/ai_enrich_request_budget_test.py tests/ai_enrichment_test.py tests/ai_enrich_pass_test.py
 pytest -s tests/ai_enrich_context_fixtures_test.py
 nox -s lint typecheck tests
 ```

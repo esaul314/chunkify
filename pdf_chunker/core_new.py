@@ -260,6 +260,7 @@ def _run_passes(
             max_chars = emit_options.get("max_chars", emit_config.max_chars)
             metadata_key = emit_options.get("metadata_key", emit_config.metadata_key)
             overrides["jsonl_max_chars"] = max_chars
+            overrides["jsonl_max_row_bytes"] = emit_options.get("max_row_bytes")
             overrides["jsonl_metadata_key"] = metadata_key
         configs.append(_prepare_pass(registry()[name], overrides))
 

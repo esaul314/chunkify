@@ -205,6 +205,14 @@ only for workflows that use them.
   sizes exclude LF; projected file bytes include LF and the per-row reserve.
   Headroom is caller-declared, so actual enriched rows still need validation.
   This is opt-in and separate from `max_chars`; see `docs/CONVERSION_DESCRIPTORS.md`.
+- To enforce downstream bytes during conversion, set
+  `options.emit_jsonl.max_row_bytes: 8192` in the pipeline spec. `None`/omission
+  keeps existing defaults. The canonical enrichment path admits projected complete
+  UTF-8 rows under both character and byte limits, with lossless ordinary-chunk
+  splitting and stable `chunk_part`. Verified Markdown requiring repartitioning
+  refuses before classification. Actual enriched rows and final emitted rows are
+  checked; LF is excluded. Prepared base article identity/readback also bind this
+  option. See `docs/ENRICHMENT_REQUEST_BUDGET.md` for the YAML example and limits.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
@@ -557,6 +565,7 @@ pdf_chunker/
     ├── article_output_test.py      # Output integrity, execution drift and completion refusal
     ├── article_preflight_test.py   # Complete UTF-8 row budgets and explicit review outcomes
     ├── enrichment_config_test.py   # Pure settings laws and exact adapter request parity
+    ├── utf8_admission_test.py      # Integrated byte admission, context refusal and readback
     ├── article_completion_test.py  # Strict completion/descriptor reads and validated cache reuse
     ├── article_readability_runtime_test.py # Dictionary changes, cache integrity and stable identity
     ├── confidence_patterns_test.py     # Phase 4: confidence-based heuristics tests

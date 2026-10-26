@@ -83,6 +83,14 @@ Test modules validating behavior of parsing, chunking, and enrichment layers.
 - `serialized_admission_test.py`: Pre-enrichment serialized JSONL budget,
   lossless escaped-Unicode splitting, metadata refusal, source identity, and
   canonical pipeline reconstruction/emission with bounded record sizes.
+- `utf8_admission_test.py`: Opt-in complete-row UTF-8/character admission,
+  Unicode/escaping reconstruction properties, partial application, stable part
+  identities and input preservation. Covers refusal before classification for
+  impossible native metadata and oversized verified code/table/link context;
+  actual enrichment overflow and canonical/legacy emission, custom keys and
+  exact boundaries excluding LF. Synthetic Markdown/EPUB preparation pins the
+  option and validates execution/readback without writing files. Run with the
+  article, enrichment/request-budget and admission tests plus all three nox gates.
 - `convert_returns_rows_test.py`: `convert` yields rows for chunk dict payloads
 - `semantic_chunking_test.py`: Boundary conditions and oversize protection
 - `chunk_pipeline_test.py`: Immutable option/metric updates, provenance precedence,

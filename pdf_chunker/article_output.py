@@ -149,6 +149,9 @@ def _emission_settings(descriptor: ConversionDescriptor) -> Mapping[str, Any]:
         or emit["max_chars"] <= 0
     ):
         raise ValueError("resolved article emission settings required")
+    byte_limit = emit.get("max_row_bytes")
+    if byte_limit is not None and (type(byte_limit) is not int or byte_limit <= 0):
+        raise ValueError("article max_row_bytes must be a positive integer or None")
     return emit
 
 
@@ -205,7 +208,7 @@ def validate_article_output(
     """Validate complete base JSONL, data-first and usable with ``partial``.
 
     Check the caller's retained output hash before parsing, strict literal-Unicode
-    JSONL, the declared complete-row character budget, ordered generated IDs and
+    JSONL, declared complete-row character/optional UTF-8 budgets, ordered IDs and
     metadata/provenance, contiguous character offsets and exact source hash.
     Nonfinite JSON values have already been rejected before schema checks.
     A matching hash supplied alongside corrupt bytes is not an integrity anchor;
@@ -240,8 +243,12 @@ def validate_article_output(
         if _snapshot(actual) != _snapshot(expected):
             raise ValueError(f"article metadata, order or source offsets differ: {index}")
         _validate_readability(meta.get("readability"))
-        if len(json.dumps(row, ensure_ascii=False)) > emit["max_chars"]:
+        serialized = json.dumps(row, ensure_ascii=False)
+        if len(serialized) > emit["max_chars"]:
             raise ValueError(f"article row exceeds JSONL size limit: {index}")
+        byte_limit = emit.get("max_row_bytes")
+        if byte_limit is not None and len(serialized.encode("utf-8")) > byte_limit:
+            raise ValueError(f"article row exceeds JSONL byte limit: {index}")
         start = end
     text_hash = hashlib.sha256("".join(row["text"] for row in rows).encode("utf-8")).hexdigest()
     if text_hash != descriptor.content_sha256:

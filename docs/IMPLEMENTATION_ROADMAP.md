@@ -10,7 +10,7 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
-**Status:** P0-A remains open; P1-E base identity/output/readback and UTF-8 preflight implemented; shared pure enrichment serving settings implemented (2026-10-26); full enrichment/persistence boundaries below
+**Status:** P0-A remains open; P1-E base identity/output/readback, UTF-8 preflight, shared enrichment settings and opt-in pipeline byte enforcement implemented (2026-10-26); enrichment identity/persistence boundaries below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
 
@@ -840,10 +840,45 @@ remain. No real provider, model service, dependencies, goldens or conversion
 algorithms changed. These remain incremental gates, not repository-wide P0-A
 closure.
 
-**Next boundaries:** Bind these resolved serving settings, prompt/vocabulary,
+**Pipeline byte-enforcement increment (2026-10-26):** Optional
+`emit_jsonl.max_row_bytes` now runs through existing pre-classification admission,
+actual enriched-row validation and final emission. The same pure, data-first
+prefix search requires both complete-row character and UTF-8 limits; ordinary
+chunks split losslessly with stable part identity and retained provenance.
+Impossible metadata or verified Markdown requiring repartitioning refuses before
+classification. Final checks also cover conversion without AI and legacy rows.
+Limits exclude LF, accept equality, and default to disabled. Strict positive
+integers/None only; prepared base article identity and readback pin/enforce the
+option. The standalone report's caller-declared reserve remains independent.
+
+**Sequencing rationale:** Close P1-E item 6's executable byte boundary now that
+reporting and conservative admission already exist. It is independently useful
+before the larger enrichment identity work: Unicode can fit a character budget
+while exceeding downstream bytes. Extend the existing splitter/validators instead
+of adding a budget framework, client or dependency. Serving defaults, transport,
+goldens and source text rules are unchanged. P0-A expands to the touched config
+validator; a pre-existing reused loop-variable type error is removed by a local rename.
+Broader P0-A debt, enriched identity/reuse and P2-D remain open.
+
+**Byte-enforcement verification:** The failing-first run reproduced 18 unsupported
+or ignored byte-budget cases. The final 23 regression/property cases and the
+broader article, serving/request-budget, config, documentation and quality-scope
+run pass 464 checks. Collection finds 1,732 tests without errors.
+`TESSDATA_PREFIX=/usr/share/tesseract/tessdata nox -r -s lint typecheck tests`
+passes all three sessions on Python 3.11.17 (48 production type targets and 81
+lint/format files). Tests cover exact UTF-8/escaping reconstruction, independent
+limits, stable parts, preserved inputs/provenance, partial application, equality
+excluding LF, custom metadata keys, impossible metadata and verified structural
+context refusing before classification, unexpected enriched overflow, final
+canonical/legacy emission and actual Markdown/EPUB preparation/execution/readback.
+Generated merge documentation and diff checks pass; review found no remaining
+actionable issues. Existing optional skips, return-value warnings and PyMuPDF
+deprecation remain. No provider service, dependency, golden or source admission
+changed; the gate remains incremental, not repository-wide P0-A closure.
+
+**Next boundaries:** Bind resolved serving settings, prompt/vocabulary,
 model revision and request-budget pins into the separate enrichment contract;
-validate enriched results and integrate byte admission plus actual enriched-row
-checks;
+validate enriched results against it before allowing reuse;
 atomic artifact/receipt writing and durable trusted-hash storage follow under
 P2-D. Retain hashes independently from trusted completed runs; a hash computed
 from arbitrary cached bytes/records does not establish integrity or completion.
@@ -857,10 +892,10 @@ structure rather than completeness of caller-supplied pins/settings. An unchange
 input key alone cannot prove cached-output integrity, successful completion or
 source approval.
 Cross-format chunk identity and downstream idempotency are not established.
-Existing integrated admission still measures `max_chars`; the new opt-in preflight
-reports a separate caller-declared byte limit. Document-mode `.txt`, HTML,
-supplied text and integration qualification remain open. Existing wrappers are
-not retired; no release or migration is selected.
+Integrated admission enforces `max_chars` and an optional `max_row_bytes`; the
+standalone preflight reports a separate caller-declared limit/reserve.
+Document-mode `.txt`, HTML, supplied text and integration qualification remain
+open. Existing wrappers are not retired; no release or migration is selected.
 
 **Reuse before adding:** The current Joplin EPUB adapter verifies the article
 proof and supplies `verified_joplin_markdown`; the shared Markdown passes retain

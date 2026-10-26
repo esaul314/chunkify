@@ -123,6 +123,15 @@ class EmitConfig:
     # Enable debug logging for deduplication
     dedup_debug: bool = False
 
+    # Optional complete UTF-8 JSON-object limit, excluding the LF delimiter.
+    max_row_bytes: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_row_bytes is not None and (
+            type(self.max_row_bytes) is not int or self.max_row_bytes <= 0
+        ):
+            raise ValueError("max_row_bytes must be a positive integer or None")
+
     @classmethod
     def from_env(cls) -> EmitConfig:
         """Create configuration from environment variables."""
@@ -1317,6 +1326,14 @@ class _EmitJsonlPass:
                 else []
             )
         )
+        if config.max_row_bytes is not None:
+            for index, row in enumerate(rows):
+                size = len(json.dumps(row, ensure_ascii=False).encode("utf-8"))
+                if size > config.max_row_bytes:
+                    raise ValueError(
+                        "JSONL row exceeds byte limit: "
+                        f"row={index}, size={size}, limit={config.max_row_bytes}"
+                    )
         if canonical and _config().dedup_debug:
             metrics = (a.meta or {}).get("metrics")
             split_metrics = (
