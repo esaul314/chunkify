@@ -8,6 +8,7 @@ _PASS_MODULES = [
     "emit_jsonl",
     "extraction_fallback",
     "heading_detect",
+    "section_detect",
     "list_detect",
     "detect_doc_end",
     "merge_footers",

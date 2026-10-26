@@ -54,6 +54,8 @@ class DecisionKind(Enum):
     LIST_CONTINUATION = "list_continuation"  # Does this continue a list item?
     PATTERN_MERGE = "pattern_merge"  # Should these texts be merged (pattern-based)?
     HEADING_BOUNDARY = "heading_boundary"  # Is this a heading boundary?
+    SECTION_ROLE = "section_role"
+    SECTION_BOUNDARY = "section_boundary"
 
 
 @dataclass(frozen=True)
@@ -95,9 +97,12 @@ class Decision:
         reason: Optional explanation of the decision
     """
 
-    action: Literal["merge", "split", "skip"]
+    action: Literal["merge", "split", "skip", "classify"]
     remember: Literal["once", "always", "never"] = "once"
     reason: str | None = None
+    section_role: str | None = None
+    section_boundary: bool | None = None
+    origin: Literal["agent", "user"] = "user"
 
 
 class InteractiveDecisionCallback(Protocol):

@@ -216,7 +216,7 @@ only for workflows that use them.
 - For library-to-RAG workflows, skip `.mobi`, `.azw3`, `.djvu`, `.chm`, and other unsupported formats unless they have already been converted into a supported format elsewhere.
 - Convert PDF via library CLI:
   ```bash
-  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
+  pdf_chunker convert ./synthetic-structure.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
   ```
 - Convert EPUB via library CLI:
   ```bash
@@ -236,7 +236,7 @@ only for workflows that use them.
   ```
 - RAG-optimized pipeline (100-word overlap, metadata on; tags apply when `OPENAI_API_KEY` is set):
   ```bash
-  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
+  pdf_chunker convert ./synthetic-structure.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
 - The default metadata-enrichment path uses a local OpenAI-compatible router with model alias `qwen3-8b-local`, base URL `http://localhost:8100/v1`, and dummy key `sk-local`.
 - Inspect serving settings with pure `resolve_primary_settings(options,
@@ -282,11 +282,11 @@ only for workflows that use them.
 - When grounded tags come back empty, `pdf_chunker` can optionally retry tagging with a cheap OpenAI fallback model. The default fallback model is `gpt-4.1-nano` and it only runs when `OPENAI_API_KEY` or `PDF_CHUNKER_AI_ENRICH_FALLBACK_API_KEY` is available.
 - Override it when needed with:
   ```bash
-  PDF_CHUNKER_AI_ENRICH_MODEL=qwen3-8b-local PDF_CHUNKER_AI_ENRICH_API_BASE=http://localhost:8100/v1 PDF_CHUNKER_AI_ENRICH_API_KEY=sk-local pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
+  PDF_CHUNKER_AI_ENRICH_MODEL=qwen3-8b-local PDF_CHUNKER_AI_ENRICH_API_BASE=http://localhost:8100/v1 PDF_CHUNKER_AI_ENRICH_API_KEY=sk-local pdf_chunker convert ./synthetic-structure.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
 - Optional empty-tag fallback via OpenAI:
   ```bash
-  OPENAI_API_KEY=... PDF_CHUNKER_AI_ENRICH_FALLBACK_MODEL=gpt-4.1-nano pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
+  OPENAI_API_KEY=... PDF_CHUNKER_AI_ENRICH_FALLBACK_MODEL=gpt-4.1-nano pdf_chunker convert ./synthetic-structure.pdf --spec pipeline_rag.yaml --out ./data/platform-eng.rag.jsonl
   ```
 - Strip custom footer patterns using regex (repeatable flag):
   ```bash
@@ -305,20 +305,20 @@ only for workflows that use them.
   pdf_chunker convert ./book.pdf --interactive-lists --out ./out.jsonl
   ```
 - After conversion, verify the output contains the sentinel phrase
-  "The marbled newt is listed as vulnerable by the IUCN due to habitat loss" to
+  "Synthetic cobalt markers remain visible throughout this generated document." to
   ensure pages near the end are not truncated.
-- Treat `platform-eng-excerpt.pdf` as the canonical smoke-test fixture:
-  - Run `python -m pdf_chunker.cli convert platform-eng-excerpt.pdf --spec pipeline.yaml --out platform-eng.jsonl --no-enrich`
+- Treat `synthetic-structure.pdf` as the canonical smoke-test fixture:
+  - Run `python -m pdf_chunker.cli convert synthetic-structure.pdf --spec pipeline.yaml --out platform-eng.jsonl --no-enrich`
     (or the equivalent `pdf_chunker convert ... --no-metadata`) before declaring multiline list fixes complete.
   - If the reproduction steps are unclear or the output disagrees with expectations, stop and request clarification
     rather than guessing.
 - Or use the script wrapper:
   ```bash
-  python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
+  python -m scripts.chunk_pdf --no-metadata ./synthetic-structure.pdf > data/platform-eng.jsonl
   ```
 - Trace a specific phrase through the pipeline to debug loss or duplication:
   ```bash
-    pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
+    pdf_chunker convert ./synthetic-structure.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich --trace "Most engineers"
     ```
     Snapshot JSON files for passes containing the phrase will be written under `artifacts/trace/<run_id>/`.
 
@@ -425,6 +425,7 @@ path and report only `metrics.normalized`, preserving existing document metrics.
 | `emit_jsonl` | `pdf_chunker.passes.emit_jsonl` | Normalize canonical chunks into JSONL-ready rows. |
 | `epub_parse` | `pdf_chunker.passes.epub_parse` | Normalize EPUB adapter output into canonical page blocks. |
 | `extraction_fallback` | `pdf_chunker.passes.extraction_fallback` | Select the best in-memory extraction candidate using quality metrics. |
+| `section_detect` | `pdf_chunker.passes.section_detect` | Pure opt-in section roles and bound review. |
 | `heading_detect` | `pdf_chunker.passes.heading_detect` | Annotate page blocks with heading metadata. |
 | `list_detect` | `pdf_chunker.passes.list_detect` | List detection pass. |
 | `merge_footers` | `pdf_chunker.passes.merge_footers` | Merge short trailing footer lines into a stable block. |
@@ -1024,3 +1025,13 @@ This section is non-persona and must contain explicit governance artifacts:
 If Voice and Ledger conflict, **Ledger wins**. Voice may be poetic; Ledger must be true.
 
 ---
+
+## Document-bound section review
+
+Version 0.1.17 retains ordinary defaults. Insert section_detect before
+split_semantic with enabled=true to carry conservative roles and exact boundaries;
+heading_detect.enabled=true enables canonical page-block headings. Agent callbacks,
+terminal prompts and JSON questions/answers share source/settings/block-bound replay.
+Unknown conflicts remain pending without deleting text or teaching global patterns.
+Original-structure recovery checks extracted text coverage before replacing blocks.
+See docs/SECTION_REVIEW.md and docs/PUBLICATION_PRIVACY.md.

@@ -3,8 +3,8 @@ version: 1
 # This manifest contains tracked fixtures only. Base64 entries are materialized in
 # a temporary directory so evaluation never writes generated documents into the repo.
 cases:
-  - name: platform_engineering_excerpt
-    path: platform-eng-excerpt.pdf
+  - name: synthetic_structure
+    path: synthetic-structure.pdf
     kind: pdf
     spec: pipeline.yaml
     expected_page_count: 55
@@ -15,12 +15,12 @@ cases:
       - captions
       - cross_page_sentences
     sentinels:
-      - The marbled newt is listed as vulnerable by the IUCN due to habitat loss
+      - Synthetic cobalt markers remain visible throughout this generated document.
     ordered_fragments:
       - "CHAPTER 1"
       - "Figure 1-1"
       - "Table 1-1"
-      - "The marbled newt is listed as vulnerable by the IUCN due to habitat loss"
+      - "Synthetic cobalt markers remain visible throughout this generated document."
 
   - name: structured_layout_pdf
     path: Sample PDF.pdf

@@ -55,6 +55,15 @@ def split_inline_heading(block: Block, text: str) -> tuple[Block, Block] | None:
     if candidate is None:
         return None
     _, end = candidate
+    if (
+        block.get("section")
+        and 0 < end < len(text)
+        and text[end - 1].isalnum()
+        and text[end].isalnum()
+    ):
+        # A font boundary inside a number/word is not a structural heading.
+        # Preserve historical unclassified behavior; section mode promises fidelity.
+        return None
     prefix = text[:end]
     suffix = text[end:]
     heading_text, heading_lead_trim = _trimmed_segment(prefix)

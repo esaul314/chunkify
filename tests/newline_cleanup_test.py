@@ -33,40 +33,35 @@ class TestNewlineCleanup(unittest.TestCase):
 
     def test_merge_break_in_quoted_title(self):
         text = (
-            '" Vulnerability sounds like truth": Brené Brown, '
-            "_Daring Greatly: How the Courage to Be Vulnerable_\n\n"
-            "_Transforms the Way We Live..."
+            '" A clear label describes a record": Sample Writer, '
+            "_Reading Carefully: Why Invented Examples Matter_\n\n"
+            "_Changes the Way We Review..."
         )
         expected = (
-            '" Vulnerability sounds like truth": Brené Brown, '
-            "_Daring Greatly: How the Courage to Be Vulnerable_ _Transforms the Way We Live..."
+            '" A clear label describes a record": Sample Writer, '
+            "_Reading Carefully: Why Invented Examples Matter_ _Changes the Way We Review..."
         )
         self.assertEqual(clean_text(text), expected)
 
     def test_merge_break_in_quoted_phrase(self):
         text = (
-            'Reese Witherspoon confessing: Reese Witherspoon, " Reese Witherspoon Shares Her Lean In Story," '
-            "Lean\n\nIn."
+            'Example Reader confessing: Example Reader, " Example Reader Shares Her Review Notes," '
+            "Review\n\nNotes."
         )
         expected = (
-            'Reese Witherspoon confessing: Reese Witherspoon, " Reese Witherspoon Shares Her Lean In Story," '
-            "Lean In."
+            'Example Reader confessing: Example Reader, " Example Reader Shares Her Review Notes," '
+            "Review Notes."
         )
         self.assertEqual(clean_text(text), expected)
 
     def test_merge_break_in_quoted_headline(self):
-        text = '" President Draws Planning Moral: Recalls Army Days to Show\n\nValue of Preparedness in Time of Crisis,"'
-        expected = '" President Draws Planning Moral: Recalls Army Days to Show Value of Preparedness in Time of Crisis,"'
+        text = '" Example Review Connects Separate Notes: Records Small Steps to Show\n\nValue of Clear Labels During a Workshop,"'
+        expected = '" Example Review Connects Separate Notes: Records Small Steps to Show Value of Clear Labels During a Workshop,"'
         self.assertEqual(clean_text(text), expected)
 
     def test_merge_break_in_fully_quoted_title_with_colon(self):
-        text = (
-            '"The Power of Words: Understanding Language"\n\n'
-            "continues the discussion."
-        )
-        expected = (
-            '"The Power of Words: Understanding Language" continues the discussion.'
-        )
+        text = '"The Power of Words: Understanding Language"\n\n' "continues the discussion."
+        expected = '"The Power of Words: Understanding Language" continues the discussion.'
         self.assertEqual(clean_text(text), expected)
 
     def test_merge_quote_with_author_line(self):
@@ -92,14 +87,14 @@ class TestNewlineCleanup(unittest.TestCase):
     def test_bullet_item_continuation_is_joined(self):
         text = (
             "Reminding you of the difference:\n"
-            "• With infrastructure as a service (IaaS), the vendor's APIs are used to provision a Virtualized computing environment with various other infrastructure primitives, which run an application more or less like it would be run on physical hosts.\n"
-            "• With platform as a service (PaaS), the vendor takes full ownership of operating\n"
-            "The application's infrastructure, which means rather than offering primitives, they offer higher-level abstractions so that the application runs in a scalable sandbox."
+            "• With a reusable review record (RR), the editor's tools retain complete notes describing invented examples and original locations without borrowing external passages.\n"
+            "• With an ordered review sheet (RS), the editor takes full responsibility for checking\n"
+            "The example's labels, which means every recorded location stays available while reviewers compare independent decisions and retain complete invented passages."
         )
         expected = (
             "Reminding you of the difference:\n"
-            "• With infrastructure as a service (IaaS), the vendor's APIs are used to provision a Virtualized computing environment with various other infrastructure primitives, which run an application more or less like it would be run on physical hosts.\n"
-            "• With platform as a service (PaaS), the vendor takes full ownership of operating the application's infrastructure, which means rather than offering primitives, they offer higher-level abstractions so that the application runs in a scalable sandbox."
+            "• With a reusable review record (RR), the editor's tools retain complete notes describing invented examples and original locations without borrowing external passages.\n"
+            "• With an ordered review sheet (RS), the editor takes full responsibility for checking the example's labels, which means every recorded location stays available while reviewers compare independent decisions and retain complete invented passages."
         )
         self.assertEqual(clean_text(text), expected)
 

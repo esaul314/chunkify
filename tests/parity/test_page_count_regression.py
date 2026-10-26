@@ -12,8 +12,8 @@ except Exception:  # pragma: no cover
     PdfReader = None  # type: ignore
 
 ROOT = Path(__file__).resolve().parents[2]
-PDF = ROOT / "platform-eng-excerpt.pdf"
-SENTINEL = "Alignment and trust are challenging"
+PDF = ROOT / "synthetic-structure.pdf"
+SENTINEL = "Independent checks compare the complete ordered output"
 
 
 def test_page_count_regression(tmp_path: Path) -> None:
@@ -48,7 +48,7 @@ def test_page_count_regression(tmp_path: Path) -> None:
     assert SENTINEL in text
 
     lines = [json.loads(line)["text"] for line in text.splitlines()]
-    toc = [t for t in lines if "Why Platform Engineering Is Becoming Essential" in t]
+    toc = [t for t in lines if "Why Example Systems Need Structure" in t]
     assert len(toc) == 1
     assert ". ." not in toc[0]
     assert not toc[0].rstrip().endswith("1")

@@ -251,3 +251,9 @@ Note: tests are not likely to get stuck, but they might take a long time to run.
 ```
 
 ---
+
+## Structural evidence regression
+section_detection_test.py covers independent signals, ordinary body mentions,
+outline continuation, typography, mixed-page spans, agent/terminal/machine replay,
+stale rejection, pending escalation, original TOC recovery and the overlap-masked
+short-tail truncation regression. Existing Joplin and heading tests remain gates.

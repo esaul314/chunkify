@@ -11,7 +11,7 @@ from pdf_chunker.pdf_parsing import extract_text_blocks_from_pdf
 
 
 def test_bullet_list_preservation():
-    stream = extract_text_blocks_from_pdf("sample_book3.pdf")
+    stream = extract_text_blocks_from_pdf("synthetic-bullets.pdf")
     assert not isinstance(stream, list)
     blocks = [asdict(b) for b in stream]
     report = validate_chunks(blocks)

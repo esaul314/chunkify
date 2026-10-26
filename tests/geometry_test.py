@@ -11,37 +11,28 @@ from pdf_chunker.geometry import (
 )
 
 
-def test_detect_footer_zone_real_pdf():
-    """Detect footer zone in a real PDF with consistent footers."""
+@pytest.fixture
+def document_with_repeated_footer():
     import fitz
 
-    # Use sample PDF if available
-    try:
-        doc = fitz.open("97things-manager-short.pdf")
-    except FileNotFoundError:
-        pytest.skip("97things-manager-short.pdf not found")
+    with fitz.open() as document:
+        for index in range(5):
+            page = document.new_page(width=612, height=792)
+            page.insert_text((72, 40), "SYNTHETIC REVIEW HEADER", fontsize=9)
+            page.insert_text((72, 160), f"Invented body paragraph {index}.", fontsize=12)
+            page.insert_text((72, 742), "SYNTHETIC REVIEW FOOTER", fontsize=9)
+        yield document
 
-    margin, confidence = detect_footer_zone(doc)
-    doc.close()
 
-    # Footer should be detected with high confidence
+def test_detect_footer_zone_generated_pdf(document_with_repeated_footer):
+    margin, confidence = detect_footer_zone(document_with_repeated_footer)
     assert margin is not None
-    assert margin > 30  # At least 30 points
-    assert confidence >= 0.8  # High confidence
+    assert margin > 30
+    assert confidence >= 0.8
 
 
-def test_detect_document_zones():
-    """Detect both header and footer zones."""
-    import fitz
-
-    try:
-        doc = fitz.open("97things-manager-short.pdf")
-    except FileNotFoundError:
-        pytest.skip("97things-manager-short.pdf not found")
-
-    zones = detect_document_zones(doc)
-    doc.close()
-
+def test_detect_document_zones(document_with_repeated_footer):
+    zones = detect_document_zones(document_with_repeated_footer)
     assert isinstance(zones, DocumentZones)
     assert zones.footer_margin is not None or zones.header_margin is not None
     assert zones.confidence >= 0

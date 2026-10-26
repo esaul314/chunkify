@@ -9,7 +9,7 @@ composable within the pipeline.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from pdf_chunker.framework import Artifact, register
@@ -115,12 +115,26 @@ class _HeadingDetectPass:
     output_type = list
 
     def __call__(self, a: Artifact[object]) -> Artifact[object]:
-        blocks = a.payload
-        if not isinstance(blocks, list):
+        payload = a.payload
+        enhanced: Any
+        if isinstance(payload, Mapping) and payload.get("type") == "page_blocks":
+            all_options = (a.meta or {}).get("options")
+            options = all_options.get(self.name, {}) if isinstance(all_options, Mapping) else {}
+            if not isinstance(options, Mapping) or not options.get("enabled", False):
+                return a
+            # ponytail: adapt the canonical envelope to the existing annotator.
+            pages = [
+                {**page, "blocks": annotate_headings(page.get("blocks", ()))}
+                for page in payload.get("pages", ())
+            ]
+            enhanced = {**payload, "pages": pages, "heading_detection_enabled": True}
+            blocks = [block for page in pages for block in page["blocks"]]
+        elif isinstance(payload, list):
+            enhanced = annotate_headings(payload)
+            blocks = enhanced
+        else:
             return a
-
-        enhanced = annotate_headings(blocks)
-        hierarchy = get_heading_hierarchy(enhanced)
+        hierarchy = get_heading_hierarchy(blocks)
 
         meta = {
             **with_metrics(a.meta, pass_name=self.name, updates={"headings": len(hierarchy)}),

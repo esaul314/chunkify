@@ -2,12 +2,11 @@ import os
 import subprocess
 from pathlib import Path
 
-
-TARGET = "Most engineers don't want to learn a whole new toolset for infrequent tasks."
+TARGET = "Most participants prefer familiar tools for occasional workshop tasks."
 
 
 def test_numbered_item_preserved(tmp_path: Path) -> None:
-    pdf = Path("platform-eng-excerpt.pdf").resolve()
+    pdf = Path("synthetic-structure.pdf").resolve()
     spec = Path("pipeline.yaml").resolve()
     out = tmp_path / "out.jsonl"
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}

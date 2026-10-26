@@ -158,7 +158,11 @@ def test_iterator_stages_compose_with_partial_application_without_mutating_block
     result = list(headings(merge(records)))
 
     assert result == [
-        (1, {**blocks[2], "has_heading_prefix": True}, "Chapter\nSection\nBody"),
+        (
+            1,
+            {**blocks[2], "has_heading_prefix": True, "source_blocks": tuple(blocks[:3])},
+            "Chapter\nSection\nBody",
+        ),
         (3, blocks[3], "Tail"),
     ]
     assert blocks == original
@@ -211,3 +215,25 @@ def test_chunk_ids_and_metadata_indices_follow_record_order() -> None:
             "meta": {"page": 9, "index": 1, "source": "sample.pdf", "kind": "paragraph"},
         },
     ]
+
+
+def test_page_boundary_and_end_preserve_unattached_headings() -> None:
+    labels = {"type": "heading", "source": {"page": 3, "index": 8}}
+    body = {"type": "paragraph", "source": {"page": 4, "index": 0}}
+    tail = {"type": "heading", "source": {"page": 4, "index": 1}}
+    records = [
+        (3, labels, "SAMPLE TERMINAL HEADING TEXT"),
+        (4, body, "Different page explanation."),
+        (4, tail, "FINAL LABEL"),
+    ]
+    assert (
+        list(
+            attach_headings(
+                records,
+                is_heading=lambda b: b["type"] == "heading",
+                merge_block_text=_join_heading_texts,
+                same_page_only=True,
+            )
+        )
+        == records
+    )

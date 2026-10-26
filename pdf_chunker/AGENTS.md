@@ -264,3 +264,11 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 ```
 
 ---
+
+## Section evidence (opt-in)
+sections.py classifies copied blocks with structural roles separate from AI
+categories. passes/section_detect.py returns pending questions/decisions through
+the extended DecisionContext SECTION_ROLE/SECTION_BOUNDARY protocol. Adapters own
+source/layout reads, answer/question files and terminal I/O. Semantic processing
+runs independently per contiguous section, with exact internal span boundaries,
+provenance/style remapping and an ordered-source coverage guard.

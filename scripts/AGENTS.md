@@ -36,15 +36,15 @@ Please, keep this file up-to-date with the latest code structure. If you notice 
 ## Usage
 - Convert a PDF via CLI:
   ```bash
-  pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
+  pdf_chunker convert ./synthetic-structure.pdf --spec pipeline.yaml --out ./data/platform-eng.jsonl --no-enrich
   ```
 - The deprecated compatibility frontend accepts the same conversion flags:
   ```bash
-  python -m scripts.chunk_pdf ./platform-eng-excerpt.pdf --out ./data/platform-eng.jsonl --no-metadata
+  python -m scripts.chunk_pdf ./synthetic-structure.pdf --out ./data/platform-eng.jsonl --no-metadata
   ```
 - Equivalent script invocation:
   ```bash
-  python -m scripts.chunk_pdf --no-metadata ./platform-eng-excerpt.pdf > data/platform-eng.jsonl
+  python -m scripts.chunk_pdf --no-metadata ./synthetic-structure.pdf > data/platform-eng.jsonl
   ```
 - Replay remaining passes from a snapshot and optionally check for duplicates:
   ```bash
@@ -97,3 +97,13 @@ path, but they must not introduce a second parser or chunking implementation.
 ```
 
 ---
+
+## Bounded CPU section pilots
+prepare_section_pilots.py --manifest INPUT.json --output NEW_DIRECTORY binds
+source/artifact hashes and delegates to canonical extraction, classification,
+splitting and admission. It writes private exclusive CPU artifacts/sidecars and
+acceptance; no enrichment, GPU, inference, indexing or service operations.
+
+verify_section_pilots.py independently validates all sidecar/source/artifact hashes,
+exact serialized-part reconstruction, bound block identities and ordered per-block
+token coverage; reports are exclusive private0600 and inspect no model/index state.

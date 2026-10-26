@@ -11,10 +11,10 @@ from pdf_chunker.passes.emit_jsonl import (
 )
 
 
-def _convert_platform_eng(
+def _convert_synthetic_structure(
     tmp_path: Path, *, extra_env: dict[str, str] | None = None
 ) -> tuple[Path, subprocess.CompletedProcess[str]]:
-    pdf = Path("platform-eng-excerpt.pdf").resolve()
+    pdf = Path("synthetic-structure.pdf").resolve()
     spec = Path("pipeline.yaml").resolve()
     out = tmp_path / "out.jsonl"
     base_env = {
@@ -101,15 +101,11 @@ def test_non_adjacent_duplicate_sentence_trimmed():
         "type": "chunks",
         "items": [
             {"text": "Intro."},
-            {
-                "text": (
-                    "Most engineers don't want to learn a whole new toolset for infrequent tasks."
-                )
-            },
+            {"text": ("Most participants prefer familiar tools for occasional workshop tasks.")},
             {"text": "Filler paragraph in between."},
             {
                 "text": (
-                    "Most engineers don't want to learn a whole new toolset for "
+                    "Most participants prefer familiar tools a whole new toolset for "
                     "infrequent tasks."
                     " Another sentence follows."
                 )
@@ -117,13 +113,13 @@ def test_non_adjacent_duplicate_sentence_trimmed():
         ],
     }
     rows = _rows(doc)
-    assert sum("Most engineers don't want to learn" in r["text"] for r in rows) == 1
+    assert sum("Most participants prefer familiar tools" in r["text"] for r in rows) == 1
 
 
 def test_prefix_overlap_trimmed():
     sent = " ".join(
         [
-            "Most engineers don't want to learn a whole new toolset for",
+            "Most participants prefer familiar tools a whole new toolset for",
             "infrequent tasks.",
         ]
     )
@@ -150,18 +146,18 @@ def test_flag_potential_duplicates():
 
 
 def test_split_does_not_duplicate(tmp_path: Path) -> None:
-    out, proc = _convert_platform_eng(tmp_path, extra_env={"PDF_CHUNKER_DEDUP_DEBUG": "1"})
+    out, proc = _convert_synthetic_structure(tmp_path, extra_env={"PDF_CHUNKER_DEDUP_DEBUG": "1"})
     text = out.read_text()
-    matches = text.count("Most engineers")
+    matches = text.count("Most participants")
     assert matches == 1, proc.stderr
-    assert "Infrastructure setup" in text
+    assert "Infrastructure examples" in text
     assert "dedupe dropped" in proc.stderr
 
 
-def test_platform_eng_sentence_boundary(tmp_path: Path) -> None:
-    out, _ = _convert_platform_eng(tmp_path)
+def test_synthetic_structure_sentence_boundary(tmp_path: Path) -> None:
+    out, _ = _convert_synthetic_structure(tmp_path)
     rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
-    phrase = "It only works because you have one person"
+    phrase = "It only works because every step retains context"
     chunk = next(row for row in rows if phrase in row["text"])
     position = chunk["text"].find(phrase)
     assert position > 0
@@ -176,17 +172,17 @@ def test_platform_eng_sentence_boundary(tmp_path: Path) -> None:
     assert ":" in intro["text"]
 
 
-def test_platform_eng_heading_preserved(tmp_path: Path) -> None:
-    out, _ = _convert_platform_eng(tmp_path)
+def test_synthetic_structure_heading_preserved(tmp_path: Path) -> None:
+    out, _ = _convert_synthetic_structure(tmp_path)
     rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
-    heading = "How Platform Engineering Clears the Swamp"
-    target = next(row for row in rows if "Clears the Swamp" in row["text"])
+    heading = "How Example Systems Keep Records Clear"
+    target = next(row for row in rows if "Keep Records Clear" in row["text"])
     assert heading in target["text"]
     assert target["text"].lstrip().startswith(heading)
 
 
-def test_platform_eng_conjunction_chunks_have_context(tmp_path: Path) -> None:
-    out, _ = _convert_platform_eng(tmp_path)
+def test_synthetic_structure_conjunction_chunks_have_context(tmp_path: Path) -> None:
+    out, _ = _convert_synthetic_structure(tmp_path)
     rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
 
     def _lead_token(text: str) -> str:
@@ -197,7 +193,7 @@ def test_platform_eng_conjunction_chunks_have_context(tmp_path: Path) -> None:
     leads = {_lead_token(row["text"]) for row in rows}
     assert blocked.isdisjoint(leads)
 
-    phrase = "But building platforms takes significant investment"
+    phrase = "But building examples takes careful review"
     chunk = next(row for row in rows if phrase in row["text"])
     assert not chunk["text"].lstrip().startswith(phrase)
 

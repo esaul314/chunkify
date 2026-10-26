@@ -57,3 +57,10 @@ Test configuration files are located in `config/`:
 - `config/test_environment.yaml` - Test environment settings
 
 These configurations are designed to work with the sample test files and provide comprehensive testing coverage.
+
+## Generated structure controls
+
+The root synthetic-structure.pdf (55 pages) and synthetic-bullets.pdf (one page)
+contain invented public-domain test content. Reproduce them with the standard-library
+scripts/generate_structure_fixtures.py helper into a new directory. They replace
+previous commercial excerpts; original public history is retained separately.

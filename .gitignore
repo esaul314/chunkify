@@ -267,3 +267,14 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 !test_data/sample_chunks.jsonl
+
+# Local document review inputs, answers and generated evidence are private.
+/.agents/
+/.candidates/
+/evidence/
+/local-section-reviews/
+/*.pdf
+/*.epub
+
+# Virtual environments may be reused through a local symlink.
+/.nox

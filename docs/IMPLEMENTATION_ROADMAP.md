@@ -10,6 +10,54 @@ private operational findings outside the public tree; use synthetic fixtures.
 Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
 pull request, tag or release. Unresolved findings keep publication blocked.
 
+## Current milestone: article preservation and opt-in document structure
+
+Version 0.1.17 combines the verified article/UTF-8 contracts with document-bound section detection and review while retaining
+existing extraction, chunk-size, overlap and enrichment defaults. The public
+interfaces and validation examples are documented in [SECTION_REVIEW.md](SECTION_REVIEW.md).
+
+Implemented and regression-tested:
+
+- Canonical page-block heading support with legacy list-input compatibility.
+- Independent structural signals from navigation, original layout, typography,
+  exact headings and section continuity.
+- Body, contents, acknowledgments, permissions, references, index and unknown roles.
+- Exact internal boundaries, section-safe splitting and ordered-text preservation.
+- Shared callback, terminal and JSON decisions with source/settings/block identities,
+  deterministic replay, stale-answer rejection and nonblocking pending questions.
+- CPU-only manifest-bound preparation and independent coverage verification.
+
+Remaining result-quality work:
+
+1. Repair crosspage block extents in extraction and independently verify original-text
+   coverage before classification. Recovery currently retains conflicting merged blocks
+   as unknown with pending review instead of replacing them with physical-page text.
+2. Expand synthetic positive and negative fixtures for ambiguous and mixed sections.
+3. Evaluate role/boundary precision and recall separately from text preservation.
+4. Improve evidence-conflict explanations and review ergonomics using those results.
+5. Qualify additional extraction formats only when concrete failures justify it.
+
+Document text, source manifests, local paths, generated review questions/answers,
+rendered pages, operational receipts and private evaluation results belong outside
+tracked source. Use the ignored local review directory for repeatable evaluations.
+No automatic text deletion or global pattern learning follows a section decision.
+
+## Historical implementation records and article milestones
+
+The records below retain the implemented article/UTF-8 work and prior sequencing.
+Current releases combine those contracts with the opt-in structure milestone above.
+
+
+## Publication gate: private information must stay out of public history
+
+**Do not push current local work until the complete publication privacy review
+passes.** Review all outgoing commits and intermediate blobs/messages, inherited
+content, encoded fixtures and complete exported patches. A clean latest commit
+or passing tests do not clear older history. Keep processed-material details and
+private operational findings outside the public tree; use synthetic fixtures.
+Follow [PUBLICATION_PRIVACY.md](PUBLICATION_PRIVACY.md) before any public push,
+pull request, tag or release. Unresolved findings keep publication blocked.
+
 **Status:** P0-A remains open; P1-E base identity/output/readback, UTF-8 preflight, shared enrichment settings and opt-in pipeline byte enforcement implemented (2026-10-26); enrichment identity/persistence boundaries below
 **Prepared:** 2026-09-03
 **Purpose:** Durable handoff for the next AI agent or maintainer
@@ -1158,7 +1206,7 @@ pytest tests/semantic_chunking_test.py \
   tests/passes/test_split_semantic_parity.py \
   tests/emit_jsonl_coalesce_test.py -q
 
-pdf_chunker convert platform-eng-excerpt.pdf \
+pdf_chunker convert synthetic-structure.pdf \
   --spec pipeline.yaml \
   --out /tmp/platform-eng.jsonl \
   --no-enrich
@@ -1166,7 +1214,7 @@ pdf_chunker convert platform-eng-excerpt.pdf \
 
 Verify the smoke output retains the sentinel phrase:
 
-> The marbled newt is listed as vulnerable by the IUCN due to habitat loss
+> Synthetic cobalt markers remain visible throughout this generated document.
 
 For any intentional output change, capture a before/after diff of text, metadata,
 metrics, and warnings. Do not compare only chunk counts.

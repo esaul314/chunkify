@@ -98,21 +98,16 @@ def test_lowercase_chapter_followed_by_next_number() -> None:
 
 def test_multiline_numbered_item_continuation() -> None:
     text = (
-        "2. The shortage, combined with people cobbling together their own\n"
-        "Terraform all over the company, often led leadership to centralize the work across multiple teams"
+        "2. Several reviewers independently assembled their own\n"
+        "ReviewForms across the workshop, so the editor aligned labels and ordered records before another review"
     )
     cleaned = insert_numbered_list_newlines(text)
     cleaned = collapse_single_newlines(cleaned)
-    assert "own\n\nTerraform" not in cleaned
-    assert "own Terraform" in cleaned
+    assert "own\n\nReviewForms" not in cleaned
+    assert "own ReviewForms" in cleaned
 
 
 def test_multiple_list_markers_keep_blank_lines() -> None:
-    text = (
-        "Intro paragraph.\n\n"
-        "- first item\n\n"
-        "- second item\n\n"
-        "- third item"
-    )
+    text = "Intro paragraph.\n\n" "- first item\n\n" "- second item\n\n" "- third item"
     cleaned = collapse_single_newlines(text)
     assert cleaned == text

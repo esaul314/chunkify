@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Run platform-eng excerpt through the pipeline and check for duplicates.
 
-This script runs ``pdf_chunker convert`` on ``platform-eng-excerpt.pdf`` with
+This script runs ``pdf_chunker convert`` on ``synthetic-structure.pdf`` with
 tracing enabled for the phrase "Most engineers". After the run, it inspects the
 trace directory and exits non-zero if any pass produced duplicate text or if a
 pass executed more than once.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,9 +34,7 @@ def _top_dups(run_dir: Path) -> list[tuple[str, Sequence[Mapping[str, object]]]]
         return p.name, d.get("dups", [])
 
     return [
-        (name, dups[:5])
-        for name, dups in (load(p) for p in run_dir.glob("*_dups.json"))
-        if dups
+        (name, dups[:5]) for name, dups in (load(p) for p in run_dir.glob("*_dups.json")) if dups
     ]
 
 
@@ -45,7 +44,7 @@ def _run_pipeline(out: Path) -> subprocess.CompletedProcess[bytes]:
         "-m",
         "pdf_chunker.cli",
         "convert",
-        "platform-eng-excerpt.pdf",
+        "synthetic-structure.pdf",
         "--spec",
         "pipeline.yaml",
         "--no-enrich",

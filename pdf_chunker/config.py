@@ -37,7 +37,18 @@ _KNOWN_OPTIONS: dict[str, frozenset[str]] = {
             "footer_callback",
         }
     ),
-    "heading_detect": frozenset(),
+    "heading_detect": frozenset({"enabled"}),
+    "section_detect": frozenset(
+        {
+            "enabled",
+            "answers",
+            "callback",
+            "answers_path",
+            "questions_path",
+            "interactive",
+            "recover_structural_text",
+        }
+    ),
     "list_detect": frozenset({"strategy"}),
     "merge_footers": frozenset(),
     "detect_doc_end": frozenset(),

@@ -3,7 +3,7 @@
 These tests exercise both the refactored chunk pipeline utilities and the
 existing :class:`_SplitSemanticPass`.  The goal is to demonstrate that the new
 functional pipeline preserves canonical chunk text and metadata for fixtures
-such as ``platform-eng-excerpt.pdf``.  Maintaining this invariance is a
+such as ``synthetic-structure.pdf``.  Maintaining this invariance is a
 prerequisite for rolling the modular pipeline out across the CLI.
 
 Invariants covered here:
@@ -184,12 +184,12 @@ def _pdf(path: str) -> dict:
 
 
 def test_merge_heading_texts_inserts_blank_line() -> None:
-    headings = ("CHAPTER 1", "Why Platform Engineering Is Becoming Essential")
+    headings = ("CHAPTER 1", "Why Example Systems Need Structure")
     body = "Platform teams accelerate delivery."
     merged = _merge_heading_texts(headings, body)
     assert (
         merged
-        == "CHAPTER 1\nWhy Platform Engineering Is Becoming Essential\nPlatform teams accelerate delivery."
+        == "CHAPTER 1\nWhy Example Systems Need Structure\nPlatform teams accelerate delivery."
     )
 
 
@@ -213,9 +213,14 @@ def test_split_inline_heading_records_promotes_styled_list() -> None:
 
 
 @pytest.mark.usefixtures("_nltk_data")
-def test_platform_eng_parity() -> None:
+def test_synthetic_structure_parity() -> None:
     pytest.importorskip("fitz")
-    doc = _pdf(str(Path("platform-eng-excerpt.pdf")))
+    doc = _pdf(str(Path("synthetic-structure.pdf")))
+    # Model the styled glossary metadata independently of PDF font heuristics.
+    for page in doc["pages"]:
+        for block in page["blocks"]:
+            if block["text"].splitlines()[0] == "Record":
+                block.update(type="list_item", list_kind="styled")
 
     legacy_items, legacy_metrics = _legacy_chunks(doc)
     refactored_items, refactored_metrics = _manual_pipeline(doc)
@@ -224,12 +229,12 @@ def test_platform_eng_parity() -> None:
     assert _metas(refactored_items) == _metas(legacy_items)
     assert refactored_metrics == legacy_metrics
 
-    continuation = "ownership of operating the application's infrastructure"
+    continuation = "ownership of maintaining the example's documents"
     assert any(continuation in chunk for chunk in _texts(legacy_items))
 
-    # Headings with has_heading_prefix now start new chunks, so "Wrapping Up"
+    # Headings with has_heading_prefix now start new chunks, so "Final Review"
     # appears at the start of its own chunk rather than merged after "Chapter 10."
-    wrapping_up_heading = "Wrapping Up\n"
+    wrapping_up_heading = "Final Review\n"
     assert any(chunk.startswith(wrapping_up_heading) for chunk in _texts(legacy_items))
     assert any(chunk.startswith(wrapping_up_heading) for chunk in _texts(refactored_items))
 
@@ -237,29 +242,29 @@ def test_platform_eng_parity() -> None:
     assert list_meta, "expected list metadata to be present"
     assert list_meta == [meta for meta in _metas(refactored_items) if meta.get("list_kind")]
 
-    leverage_chunk = _find_chunk(refactored_items, "Leverage", "Core to the value")
+    leverage_chunk = _find_chunk(refactored_items, "Reuse", "Core to the example")
     leverage_text = leverage_chunk["text"]
-    assert leverage_text == _find_chunk_text(legacy_items, "Leverage", "Core to the value")
-    assert "Leverage\nCore to the value" in leverage_text
-    assert "Leverage\n\nCore to the value" not in leverage_text
+    assert leverage_text == _find_chunk_text(legacy_items, "Reuse", "Core to the example")
+    assert "Reuse\nCore to the example" in leverage_text
+    assert "Reuse\n\nCore to the example" not in leverage_text
 
     platform_chunk = _find_chunk(
         refactored_items,
-        "Platform",
-        "We use Evan Bottcher's definition",
+        "Record",
+        "We use an invented definition",
     )
     assert platform_chunk["meta"].get("list_kind")
     platform_text = platform_chunk["text"]
-    assert "Platform\nWe use" in platform_text
-    assert "Platform\n\nWe use" not in platform_text
+    assert "Record\nWe use" in platform_text
+    assert "Record\n\nWe use" not in platform_text
 
     list_chunk = next(
         text
         for text in _texts(refactored_items)
-        if "Treat building blocks as foundational." in text
+        if "Treat records as independently useful." in text
     )
-    assert "Blocks are composable." in list_chunk
-    assert "\n\nBlocks are composable." in list_chunk
+    assert "Records stay composable." in list_chunk
+    assert "\n\nRecords stay composable." in list_chunk
 
 
 def test_sample_book_list_metadata() -> None:
@@ -319,22 +324,22 @@ def test_sample_book_bullet_fragments_respect_strategy() -> None:
 
 
 @pytest.mark.usefixtures("_nltk_data")
-def test_platform_eng_figure_caption_retains_label() -> None:
+def test_synthetic_structure_figure_caption_retains_label() -> None:
     pytest.importorskip("fitz")
-    doc = _pdf(str(Path("platform-eng-excerpt.pdf")))
+    doc = _pdf(str(Path("synthetic-structure.pdf")))
 
     items, _ = _legacy_chunks(doc)
     texts = [item.get("text", "") for item in items]
 
-    caption = "Figure 1-1. The over-general swamp, held together by glue"
+    caption = "Figure 1-1. A synthetic diagram showing ordered records"
     assert any(caption in text for text in texts)
 
-    truncated = "The over-general swamp, held together by glue"
+    truncated = "A synthetic diagram showing ordered records"
     offenders = [text for text in texts if text.startswith(truncated) and caption not in text]
     assert not offenders, "caption should retain its figure label"
     starters = [text for text in texts if text.lstrip().startswith("Figure 1-1.")]
     assert not starters, "caption should not start a fresh chunk"
-    combined = "seen in Figure 1-1.\n\nFigure 1-1. The over-general swamp"
+    combined = "seen in Figure 1-1.\n\nFigure 1-1. A synthetic diagram showing ordered records"
     assert any(combined in text for text in texts), "caption should follow its callout"
 
 

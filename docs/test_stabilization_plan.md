@@ -50,13 +50,13 @@
 
 7. **Perform an end-to-end verification sweep**
    • **Why**: Once the targeted fixes land, we must prove `nox -s lint`, `nox -s typecheck`, and `nox -s tests` all pass to close the stabilization effort.【61c927†L1-L8】【428704†L1-L4】【0c3fcc†L1-L420】
-   • **What**: Run the full nox matrix and spot-check CLI output on `platform-eng-excerpt.pdf` to ensure parity persists outside the unit suite.
+   • **What**: Run the full nox matrix and spot-check CLI output on `synthetic-structure.pdf` to ensure parity persists outside the unit suite.
    • **How**: Execute the mandated nox sessions plus a CLI dry run, capturing logs for the next agent and leaving the pipeline ready for final approval per guardrails.【F:pdf_chunker/passes/split_semantic.py†L819-L1040】
 
 ## Transition Plan for the Next Agent
 
 ### Objective Recap
-* Goal: deliver an entirely green stabilization sweep—`nox -s lint`, `nox -s typecheck`, and `nox -s tests`—plus a smoke CLI run on `platform-eng-excerpt.pdf`.
+* Goal: deliver an entirely green stabilization sweep—`nox -s lint`, `nox -s typecheck`, and `nox -s tests`—plus a smoke CLI run on `synthetic-structure.pdf`.
 * Current state: lint and full tests fail for known reasons outlined above, while typecheck is already green.
 
 ### Constraints and Guardrails

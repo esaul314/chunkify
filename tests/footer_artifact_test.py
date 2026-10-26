@@ -166,8 +166,8 @@ def test_trailing_bullet_footer_preserves_legitimate_list() -> None:
 def test_trailing_bullet_footer_preserves_colon_prompted_list() -> None:
     lines = [
         "There were two goals to this:",
-        "• To stress to his team that it was not acceptable to resist a new application team ask just because it wasn't in their earlier plans",
-        "• To remind his stakeholders that not telling his team early about their needs would result in higher costs, because the plan would have to change to accommodate the new work",
+        "• To remind the reviewers that a new example deserves careful inspection even when the first outline did not predict its unusual arrangement",
+        "• To give every participant enough context to compare complete records before the next review, because unclear labels can make otherwise useful examples difficult to follow",
     ]
     assert _drop_trailing_bullet_footers(lines) == lines
 

@@ -110,7 +110,7 @@ mypy pdf_chunker
 Quick smoke test:
 
 ```bash
-pdf_chunker convert ./platform-eng-excerpt.pdf --spec pipeline.yaml --out ./data/test.jsonl --no-enrich
+pdf_chunker convert ./synthetic-structure.pdf --spec pipeline.yaml --out ./data/test.jsonl --no-enrich
 ```
 
 ## 3) Branching and commits

@@ -81,19 +81,26 @@ def attach_headings(
     *,
     is_heading: Callable[[Block], bool],
     merge_block_text: Callable[[Sequence[str], str], str],
+    same_page_only: bool = False,
 ) -> Iterator[Record]:
     """Attach consecutive headings to the next body using a copied body block.
 
     The first pending heading supplies page provenance. Unheaded records pass
-    through unchanged; trailing headings without a body are not emitted.
+    through unchanged. Trailing headings retain their own blocks and provenance.
+    With same_page_only, page boundaries flush unresolved headings unchanged.
     """
 
     pending_page: int | None = None
     pending_texts: list[str] = []
+    pending_records: list[Record] = []
     for page, block, text in records:
+        if same_page_only and pending_records and pending_page != page:
+            yield from pending_records
+            pending_page, pending_texts, pending_records = None, [], []
         if is_heading(block):
             pending_page = pending_page or page
             pending_texts.append(text)
+            pending_records.append((page, block, text))
             continue
         if not pending_texts:
             yield page, block, text
@@ -102,8 +109,15 @@ def attach_headings(
         # Mark block as containing a heading at its start
         merged_block = dict(block)
         merged_block["has_heading_prefix"] = True
+        merged_block["source_blocks"] = tuple(
+            source
+            for _, contributor, _ in (*pending_records, (page, block, text))
+            for source in contributor.get("source_blocks", (contributor,))
+        )
         yield (pending_page or page), merged_block, heading_text
-        pending_page, pending_texts = None, []
+        pending_page, pending_texts, pending_records = None, [], []
+    if same_page_only:
+        yield from pending_records
 
 
 def chunk_records(

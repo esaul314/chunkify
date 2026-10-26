@@ -104,7 +104,7 @@ future PyMuPDF4LLM bridge).
 ## Working effectively with inline styles
 ### Inspecting spans locally
 ```bash
-pdf_chunker convert platform-eng-excerpt.pdf --spec pipeline.yaml --out /tmp/out.jsonl --no-enrich --trace "inline footnote"
+pdf_chunker convert synthetic-structure.pdf --spec pipeline.yaml --out /tmp/out.jsonl --no-enrich --trace "inline footnote"
 ```
 This produces `artifacts/trace/<run_id>/<step>_inline_styles.json`. Each entry lists block indices, snippets, and style metadata.
 

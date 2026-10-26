@@ -145,7 +145,7 @@ def stitch_block_continuations(
                 merged[:100],
                 details={"page": acc[-1][0], "next_page": page},
             )
-            return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
+            return [*acc[:-1], (acc[-1][0], merge_source_provenance(acc[-1][1], block), merged)]
 
         # Don't merge heading blocks with other content
         if _is_heading(block):
@@ -206,7 +206,7 @@ def stitch_block_continuations(
                 merged[:100],
                 details={"page": acc[-1][0], "context_words": len(context_words)},
             )
-            return [*acc[:-1], (acc[-1][0], acc[-1][1], merged)]
+            return [*acc[:-1], (acc[-1][0], merge_source_provenance(acc[-1][1], block), merged)]
         enriched = f"{context} {text}".strip()
         maybe_record(
             transform_log,
@@ -225,6 +225,21 @@ def stitch_block_continuations(
 # ---------------------------------------------------------------------------
 # Block merging
 # ---------------------------------------------------------------------------
+
+
+def merge_source_provenance(left: Block, right: Block) -> Block:
+    """Retain caller-supplied block origins when text continuation reuses a block."""
+    entries = [
+        *left.get("source", {}).get("block_provenance", ()),
+        *right.get("source", {}).get("block_provenance", ()),
+    ]
+    if not entries:
+        return left
+    pages = [entry["page"] for entry in entries if isinstance(entry.get("page"), int)]
+    source = {**left.get("source", {}), "block_provenance": entries}
+    if pages:
+        source["page_range"] = (min(pages), max(pages))
+    return {**left, "source": source}
 
 
 def merge_record_block(records: list[Record], text: str) -> Block:
@@ -254,17 +269,11 @@ def merge_record_block(records: list[Record], text: str) -> Block:
         base.pop("source_blocks", None)
         return base
 
-    existing_sources = (
-        tuple(
-            _snapshot(source)
-            for source in first.get("source_blocks", ())
-            if isinstance(first, Mapping) and isinstance(source, Mapping)
-        )
-        if isinstance(first, Mapping)
-        else tuple()
-    )
-    snapshots = existing_sources + tuple(
-        _snapshot(block) for block in blocks if isinstance(block, Mapping)
+    snapshots = tuple(
+        _snapshot(source)
+        for block in blocks
+        for source in block.get("source_blocks", (block,))
+        if isinstance(source, Mapping)
     )
     return {**merged, "source_blocks": snapshots} if snapshots else merged
 

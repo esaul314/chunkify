@@ -197,8 +197,8 @@ def test_emit_jsonl_preserves_caption_sentence_start(monkeypatch):
     intro = "Context around prior analysis leading into Figure"
     caption = (
         "Figure 1-3 shows a high-level comparison of the two approaches.\n\n"
-        "Figure 1-3. Comparison of IaaS and PaaS models in terms of vendor versus customer responsibility"
-        " Initially, it was hoped that application teams would embrace fully supported PaaS offerings."
+        "Figure 1-3. Comparison of invented review layouts by label position and original record order"
+        " Initially, the reviewers expected complete labels to stay beside the invented examples."
     )
     doc = {"type": "chunks", "items": [{"text": intro}, {"text": caption}]}
     rows = emit_jsonl(Artifact(payload=doc)).payload
@@ -208,7 +208,7 @@ def test_emit_jsonl_preserves_caption_sentence_start(monkeypatch):
     assert "\n1-3 shows" not in text
     first_alpha = next((ch for ch in text if ch.isalpha()), "")
     assert first_alpha.isupper()
-    assert "Initially, it was hoped" in text
+    assert "Initially, the reviewers expected" in text
 
 
 def test_caption_block_merges_after_reference_sentence():
@@ -220,8 +220,8 @@ def test_caption_block_merges_after_reference_sentence():
                 "You end up with an architecture more like Figure 1-3 "
                 "shows a high-level comparison of the two approaches."
             ),
-            "Figure 1-3. Comparison of IaaS and PaaS models in terms of vendor versus customer responsibility",
-            "Initially, it was hoped that application teams would embrace fully supported PaaS offerings.",
+            "Figure 1-3. Comparison of invented review layouts by label position and original record order",
+            "Initially, the reviewers expected complete labels to stay beside the invented examples.",
         )
     )
     merged = reduce(_merge_blocks, sequence, [])
@@ -232,23 +232,21 @@ def test_caption_block_merges_after_reference_sentence():
 
 
 @pytest.mark.usefixtures("_nltk_data")
-def test_platform_eng_caption_survives_emit_jsonl() -> None:
+def test_synthetic_structure_caption_survives_emit_jsonl() -> None:
     pytest.importorskip("fitz")
-    doc = read(str(Path("platform-eng-excerpt.pdf")))
+    doc = read(str(Path("synthetic-structure.pdf")))
     artifact = DEFAULT_SPLITTER(Artifact(payload=doc))
     items = artifact.payload.get("items", [])
     rows = emit_jsonl(Artifact(payload={"type": "chunks", "items": items})).payload
-    caption = "Figure 1-1. The over-general swamp, held together by glue"
+    caption = "Figure 1-1. A synthetic diagram showing ordered records"
     texts = [row["text"] for row in rows]
     assert any(caption in text for text in texts)
-    truncated = "The over-general swamp, held together by glue"
-    offenders = [
-        text for text in texts if text.startswith(truncated) and caption not in text
-    ]
+    truncated = "A synthetic diagram showing ordered records"
+    offenders = [text for text in texts if text.startswith(truncated) and caption not in text]
     assert not offenders, "caption should retain its figure label"
     starters = [text for text in texts if text.lstrip().startswith("Figure 1-1.")]
     assert not starters, "caption should not start a fresh chunk"
-    combined = "seen in Figure 1-1.\n\nFigure 1-1. The over-general swamp"
+    combined = "seen in Figure 1-1.\n\nFigure 1-1. A synthetic diagram showing ordered records"
     assert any(combined in text for text in texts), "caption should follow its callout"
 
 

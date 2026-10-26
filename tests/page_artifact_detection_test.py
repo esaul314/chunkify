@@ -88,7 +88,7 @@ class TestPageArtifactDetection(unittest.TestCase):
 
     def test_inline_footnote_sentence_relocated_when_anchor_present(self):
         text = (
-            "Whether or not they've called their teams1 We'll sometimes call these teams "
+            "Whether or not they've called their teams1 We'll sometimes call these records "
             'your "users" or "customers," if it makes more sense in the context.\n'
             "efforts platform engineering, they embody the mindset."
         )
@@ -96,21 +96,21 @@ class TestPageArtifactDetection(unittest.TestCase):
         expected = (
             "Whether or not they've called their teams1\n"
             "efforts platform engineering, they embody the mindset.\n"
-            'We\'ll sometimes call these teams your "users" or "customers," if it makes more sense in the context.'
+            'We\'ll sometimes call these records your "users" or "customers," if it makes more sense in the context.'
         )
         self.assertEqual(cleaned, expected)
 
     def test_inline_footnote_sentence_line_relocated(self):
         text = (
             "Whether or not they've called their\n"
-            "We\u2019ll sometimes call these teams your \"users\" or \"customers,\" if it makes more sense in the context.\n"
+            'We\u2019ll sometimes call these records your "users" or "customers," if it makes more sense in the context.\n'
             "efforts platform engineering, they embody the mindset."
         )
         cleaned = remove_page_artifact_lines(text, 9)
         expected = (
             "Whether or not they've called their\n"
             "efforts platform engineering, they embody the mindset.\n"
-            "We\u2019ll sometimes call these teams your \"users\" or \"customers,\" if it makes more sense in the context."
+            'We\u2019ll sometimes call these records your "users" or "customers," if it makes more sense in the context.'
         )
         self.assertEqual(cleaned, expected)
 
@@ -212,12 +212,13 @@ class TestPageArtifactDetection(unittest.TestCase):
         self.assertIn("Infrastructure setup", cleaned)
 
     def test_strip_artifacts_preserves_numbered_paragraph(self):
-        page = Path(__file__).resolve().parent.parent / "test_data/platform-eng-excerpt/page20.txt"
+        page = Path(__file__).resolve().parent.parent / "test_data/synthetic-structure/page20.txt"
         text = page.read_text()
+        self.assertIn("\n1.\n", text)
         blk = Block(text=text, source={"page": 20})
         cleaned = next(strip_artifacts([blk])).text
-        self.assertIn("Most engineers", cleaned)
-        self.assertIn("Infrastructure setup", cleaned)
+        self.assertIn("Most participants", cleaned)
+        self.assertIn("Infrastructure examples", cleaned)
         self.assertNotIn("\n1.\n", cleaned)
 
     def test_trailing_bullet_without_footer_context_preserved(self):

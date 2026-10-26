@@ -1,0 +1,3 @@
+1. Most participants prefer familiar tools for occasional workshop tasks.
+1.
+Infrastructure examples remain separate from numbered instructions.

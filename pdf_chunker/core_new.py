@@ -174,6 +174,7 @@ _EXPECTED_INPUT_SHAPES: Final[Mapping[str, str]] = {
     "text_clean": "page_blocks",
     "list_detect": "page_blocks",
     "heading_detect": "page_blocks",
+    "section_detect": "page_blocks",
     "merge_footers": "page_blocks",
     "detect_doc_end": "page_blocks",
     "detect_page_artifacts": "page_blocks",
@@ -188,6 +189,7 @@ _EXPECTED_OUTPUT_SHAPES: Final[Mapping[str, str]] = {
     "text_clean": "page_blocks",
     "list_detect": "page_blocks",
     "heading_detect": "page_blocks",
+    "section_detect": "page_blocks",
     "merge_footers": "page_blocks",
     "detect_doc_end": "page_blocks",
     "detect_page_artifacts": "page_blocks",
@@ -252,6 +254,13 @@ def _run_passes(
     configs = []
     for name in spec.pipeline:
         overrides = dict(spec.options.get(name, {}))
+        if name == "section_detect" and overrides.get("enabled"):
+            from pdf_chunker.adapters.section_review import read_answers, terminal_review
+
+            if overrides.get("answers_path"):
+                overrides["answers"] = read_answers(overrides["answers_path"])
+            if overrides.get("interactive"):
+                overrides["callback"] = terminal_review
         if name == "ai_enrich" and overrides.get("enabled") and "emit_jsonl" in spec.pipeline:
             from pdf_chunker.passes.emit_jsonl import EmitConfig
 
@@ -277,6 +286,13 @@ def _run_passes(
         )
         result, updated_timings = _time_step((seeded, timings), p)
         _validate_payload_shape(result.payload, p.name, phase="output")
+        if p.name == "section_detect" and overrides.get("questions_path"):
+            from pdf_chunker.adapters.section_review import write_questions
+
+            write_questions(
+                overrides["questions_path"],
+                cast(list[dict[str, Any]], (result.meta or {}).get("section_questions", [])),
+            )
         return result, updated_timings
 
     initial: tuple[Artifact[object], dict[str, float]] = (a, {})
@@ -392,6 +408,29 @@ def _input_artifact(path: str, spec: PipelineSpec | None = None) -> Artifact[obj
         )
     if document_metadata and isinstance(payload, Mapping):
         payload = {**payload, "document_metadata": document_metadata}
+    if (spec_opts.get("section_detect") or {}).get("enabled", False):
+        from pdf_chunker.adapters.section_review import source_structure
+        from pdf_chunker.sections import digest
+
+        structure = source_structure(abs_path, payload)
+        bound_settings = {
+            step: {
+                key: value
+                for key, value in options.items()
+                if key
+                not in {
+                    "answers",
+                    "answers_path",
+                    "questions_path",
+                    "callback",
+                    "interactive",
+                    "output_path",
+                }
+            }
+            for step, options in spec_opts.items()
+        }
+        structure["pipeline_settings_sha256"] = digest(bound_settings)
+        payload = {**payload, "source_structure": structure}
     return Artifact(payload=payload, meta={"metrics": {}, "input": abs_path})
 
 

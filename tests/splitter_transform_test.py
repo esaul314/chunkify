@@ -22,17 +22,17 @@ def test_splitter_size_and_overlap():
 def test_split_semantic_merges_bullet_heading_continuation():
     doc = {
         "type": "page_blocks",
-        "source_path": "platform-eng-excerpt.pdf",
+        "source_path": "synthetic-structure.pdf",
         "pages": [
             {
                 "page": 1,
                 "blocks": [
                     {
-                        "text": "• With platform as a service (PaaS), the vendor takes full ownership of operating",
+                        "text": "• With an ordered review sheet (RS), the editor takes full responsibility for checking",
                         "type": "heading",
                     },
                     {
-                        "text": "The application's infrastructure, which means rather than offering primitives, they offer higher-level abstractions so that the application runs in a scalable sandbox.",
+                        "text": "The example's labels, which means every recorded location stays available while reviewers compare independent decisions and retain complete invented passages.",
                         "type": "paragraph",
                     },
                 ],
@@ -47,5 +47,5 @@ def test_split_semantic_merges_bullet_heading_continuation():
     items = list(_chunk_items(doc, split_fn, split_pass.generate_metadata))
     text = items[0]["text"]
 
-    assert "operating the application's infrastructure" in text
-    assert "operating\nThe" not in text
+    assert "checking the example's labels" in text
+    assert "checking\nThe" not in text

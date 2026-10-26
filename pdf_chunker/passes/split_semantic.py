@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from functools import partial, reduce
-from itertools import accumulate, chain
+from itertools import accumulate, chain, groupby
 from math import ceil
 from typing import Any, TypedDict, cast
 
@@ -77,6 +77,9 @@ from pdf_chunker.passes.split_modules.segments import (
 )
 from pdf_chunker.passes.split_modules.stitching import (
     is_heading as _is_heading,
+)
+from pdf_chunker.passes.split_modules.stitching import (
+    merge_source_provenance as _merge_source_provenance,
 )
 from pdf_chunker.passes.split_modules.stitching import (
     stitch_block_continuations as _stitch_block_continuations,
@@ -373,10 +376,32 @@ class _OverrideOpts(TypedDict, total=False):
     generate_metadata: bool
 
 
+def _covers_source_in_order(text: str, pieces: list[str]) -> bool:
+    """Prove every original normalized character is covered by ordered spans.
+
+    Summed word counts include overlap and can conceal a unique missing tail.
+    This stricter guard accepts overlapping exact spans, never a gap.
+    """
+    source = re.sub(r"\s+", " ", text).strip()
+    end, previous_start = 0, 0
+    for piece in pieces:
+        fragment = re.sub(r"\s+", " ", piece).strip()
+        if not fragment:
+            continue
+        start = source.find(fragment, previous_start)
+        if start < 0 or source[end:start].strip():
+            return False
+        end = max(end, start + len(fragment))
+        previous_start = start
+    return end == len(source)
+
+
 def _get_split_fn(
     chunk_size: int,
     overlap: int,
     min_chunk_size: int,
+    *,
+    preserve_source: bool = False,
 ) -> tuple[SplitFn, MetricFn]:
     """Return a semantic splitter enforcing size limits and collecting metrics."""
 
@@ -398,7 +423,12 @@ def _get_split_fn(
 
             nonlocal soft_hits
             pieces = semantic(text)
-            merged = pieces if sum(len(p.split()) for p in pieces) >= len(text.split()) else [text]
+            complete = (
+                _covers_source_in_order(text, pieces)
+                if preserve_source
+                else sum(len(p.split()) for p in pieces) >= len(text.split())
+            )
+            merged = pieces if complete else [text]
 
             def _soften(segment: str) -> list[str]:
                 nonlocal soft_hits
@@ -509,7 +539,7 @@ def _merge_blocks(
             merged,
             details={"page": page},
         )
-        acc[-1] = (prev_page, prev_block, merged)
+        acc[-1] = (prev_page, _merge_source_provenance(prev_block, block), merged)
         return acc
     if _looks_like_caption(text):
         if _has_caption(prev_block) or _contains_caption_line(prev_text):
@@ -524,7 +554,7 @@ def _merge_blocks(
             merged,
             details={"page": page},
         )
-        acc[-1] = (prev_page, _mark_caption(prev_block), merged)
+        acc[-1] = (prev_page, _mark_caption(_merge_source_provenance(prev_block, block)), merged)
         return acc
     if _is_heading(prev_block) or _is_heading(block):
         return acc + [cur]
@@ -580,7 +610,7 @@ def _merge_blocks(
                 merged,
                 details={"page": page, "confidence": confidence},
             )
-            acc[-1] = (prev_page, prev_block, merged)
+            acc[-1] = (prev_page, _merge_source_provenance(prev_block, block), merged)
             return acc
 
     lead = text.lstrip()
@@ -600,7 +630,7 @@ def _merge_blocks(
             merged,
             details={"page": page},
         )
-        acc[-1] = (prev_page, prev_block, merged)
+        acc[-1] = (prev_page, _merge_source_provenance(prev_block, block), merged)
         return acc
     return acc + [cur]
 
@@ -655,6 +685,7 @@ def _chunk_items(
         partial(
             pipeline_attach_headings,
             is_heading=_is_heading,
+            same_page_only=bool(doc.get("heading_detection_enabled", False)),
             merge_block_text=partial(_merge_heading_texts, strategy=heuristics),
         ),
         _merge_styled_list_records,
@@ -769,12 +800,17 @@ class _SplitSemanticPass:
         options = SplitOptions.from_base(
             self.chunk_size, self.overlap, self.min_chunk_size
         ).with_meta(a.meta)
+        if doc.get("section_detection_enabled"):
+            return self._split_sections(a)
         from pdf_chunker.passes.joplin_markdown import PROOF_KEY, split_verified
 
         if PROOF_KEY in (a.meta or {}):
             return split_verified(a, options.chunk_size)
-        split_fn, metric_fn = _get_split_fn(
-            options.chunk_size, options.overlap, options.min_chunk_size
+        split_args = (options.chunk_size, options.overlap, options.min_chunk_size)
+        split_fn, metric_fn = (
+            _get_split_fn(*split_args, preserve_source=True)
+            if (a.meta or {}).get("preserve_source_text")
+            else _get_split_fn(*split_args)
         )
         limit = options.compute_limit()
         strategy = _resolve_bullet_strategy(self.bullet_strategy)
@@ -821,6 +857,43 @@ class _SplitSemanticPass:
         meta["semantic_pipeline"] = "canonical-v1"
         if transform_log is not None:
             meta["transformation_log"] = transform_log.to_dict()
+        return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
+
+    def _split_sections(self, artifact: Artifact) -> Artifact:
+        """Run all merge/overlap/dedupe stages independently inside each section.
+
+        The original document and blocks remain unchanged. No downstream stage
+        gets adjacent records from different structural sections.
+        """
+        doc = artifact.payload
+        indexed = [
+            (page, block) for page in doc.get("pages", ()) for block in page.get("blocks", ())
+        ]
+        items = []
+        for _, members in groupby(indexed, key=lambda pair: pair[1]["section"]["section_id"]):
+            group = list(members)
+            section = group[0][1]["section"]
+            pages = []
+            for _, same_page in groupby(group, key=lambda pair: pair[0].get("page")):
+                entries = list(same_page)
+                pages.append({**entries[0][0], "blocks": [b for _, b in entries]})
+            inner_doc = {**doc, "pages": pages}
+            inner_doc.pop("section_detection_enabled", None)
+            result = self(
+                Artifact(
+                    payload=inner_doc, meta={**(artifact.meta or {}), "preserve_source_text": True}
+                )
+            )
+            for item in result.payload["items"]:
+                metadata = {**_chunk_meta(item), **section}
+                # section suffix prevents IDs colliding after independent indexing.
+                metadata["chunk_id"] = (
+                    str(metadata.get("chunk_id", "chunk")) + "-" + section["section_id"][:8]
+                )
+                items.append({**item, "meta": metadata})
+        meta = SplitMetrics(len(items), {}).apply(artifact.meta)
+        meta["semantic_pipeline"] = "canonical-v1"
+        meta["section_boundaries_preserved"] = True
         return Artifact(payload={"type": "chunks", "items": items}, meta=meta)
 
 

@@ -160,9 +160,9 @@ This phase is **gated**: proceed only if users or maintainers report retrieval q
 - `scripts/eval_overlap.py` — TF-IDF-based retrieval evaluation (no external dependencies)
 - Generates synthetic boundary-spanning queries automatically
 - Measures recall@k across configurable overlap values
-- Runs in ~30 seconds on platform-eng-excerpt.pdf (86-99 chunks)
+- Runs in ~30 seconds on synthetic-structure.pdf (86-99 chunks)
 
-**Baseline metrics** (platform-eng-excerpt.pdf, k=3):
+**Baseline metrics** (synthetic-structure.pdf, k=3):
 | Overlap | Chunks | Recall@3 |
 |---------|--------|----------|
 | 0       | 86     | 84.7%    |

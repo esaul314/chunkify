@@ -122,9 +122,7 @@ def _is_acronym(word: str) -> bool:
     return len(letters) > 1 and all(char.isupper() for char in letters)
 
 
-def _syllables_from_cmudict(
-    word: str, cmu_dict: dict[str, list[list[str]]] | None
-) -> int | None:
+def _syllables_from_cmudict(word: str, cmu_dict: dict[str, list[list[str]]] | None) -> int | None:
     if not cmu_dict:
         return None
     pronunciations = cmu_dict.get(word.lower())
@@ -162,9 +160,7 @@ def _flesch_kincaid_grade(text: str, lang: str = _READABILITY_LANG) -> float:
     syllable_count = _count_syllables(text, lang=lang)
     if syllable_count == 0:
         return 0.0
-    return (0.39 * (word_count / sentence_count)) + (
-        11.8 * (syllable_count / word_count)
-    ) - 15.59
+    return (0.39 * (word_count / sentence_count)) + (11.8 * (syllable_count / word_count)) - 15.59
 
 
 @dataclass(frozen=True)
@@ -229,19 +225,11 @@ def _normalize_list_block(
         return payload
 
     sources = tuple(
-        candidate
-        for candidate in block.get("source_blocks", ())
-        if isinstance(candidate, Mapping)
+        candidate for candidate in block.get("source_blocks", ()) if isinstance(candidate, Mapping)
     )
-    source_kinds = tuple(
-        kind for kind in (_block_list_kind(source) for source in sources) if kind
-    )
+    source_kinds = tuple(kind for kind in (_block_list_kind(source) for source in sources) if kind)
     declared_kind = next(
-        (
-            kind
-            for kind in (list_kind, *source_kinds)
-            if isinstance(kind, str) and kind
-        ),
+        (kind for kind in (list_kind, *source_kinds) if isinstance(kind, str) and kind),
         None,
     )
     if declared_kind:
@@ -408,12 +396,7 @@ def _build_metadata(
     page_range_value = None
     if isinstance(page_range, (list, tuple)) and len(page_range) == 2:
         start, end = page_range
-        if (
-            isinstance(start, int)
-            and isinstance(end, int)
-            and start > 0
-            and end > 0
-        ):
+        if isinstance(start, int) and isinstance(end, int) and start > 0 and end > 0:
             page_range_value = f"{start}-{end}" if start != end else str(start)
     if page_range_value is None and page_value is not None:
         page_range_value = str(page_value)
@@ -434,6 +417,19 @@ def _build_metadata(
         "tags": tags,
         "importance": "medium",
     }
+    contributors = normalized.get("source_blocks", (normalized,))
+    provenance = [
+        entry
+        for block in contributors
+        for entry in block.get("source", {}).get("block_provenance", ())
+    ]
+    if provenance:
+        base_metadata["block_provenance"] = list(
+            {
+                (entry["page"], tuple(entry["bbox"]), entry["text_sha256"]): entry
+                for entry in provenance
+            }.values()
+        )
     passthrough = {
         key: value
         for key, value in source.items()
